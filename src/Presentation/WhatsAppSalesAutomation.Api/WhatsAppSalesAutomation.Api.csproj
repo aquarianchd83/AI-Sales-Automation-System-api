@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>WhatsAppSalesAutomation.Api</RootNamespace>
+    <UserSecretsId>a6f0a6d2-8f1b-4b7a-9e3a-8f7a2e6b8f10</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
+    <!-- Required for ReadFrom.Configuration(...) to parse the "Serilog" section in appsettings.json. -->
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <!-- Lets `dotnet ef` be invoked with this project as --startup-project. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Core/WhatsAppSalesAutomation.Application/WhatsAppSalesAutomation.Application.csproj" />
+    <ProjectReference Include="../../Infrastructure/WhatsAppSalesAutomation.Infrastructure/WhatsAppSalesAutomation.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

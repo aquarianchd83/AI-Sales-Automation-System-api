@@ -1,0 +1,23 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+## Logs
+logs/
+*.log
+
+## EF Core / secrets
+*.db
+appsettings.*.local.json
+
+## OS / editor
+.DS_Store
+.idea/
+*.swp
+
+## Node (future Angular admin panel, if added to this repo)
+node_modules/
+dist/
