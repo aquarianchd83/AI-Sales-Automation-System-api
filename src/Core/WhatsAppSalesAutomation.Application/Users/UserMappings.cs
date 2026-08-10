@@ -4,13 +4,15 @@ namespace WhatsAppSalesAutomation.Application.Users;
 
 public static class UserMappings
 {
-    public static UserDto ToDto(this ApplicationUser user, IReadOnlyList<string> roles) => new(
+    // IEnumerable rather than IReadOnlyList: UserManager.GetRolesAsync returns IList<string>,
+    // which does not implement IReadOnlyList<string>.
+    public static UserDto ToDto(this ApplicationUser user, IEnumerable<string> roles) => new(
         user.Id,
         user.FullName,
         user.Email ?? string.Empty,
         user.PhoneNumber,
         user.IsActive,
-        roles,
+        roles as IReadOnlyList<string> ?? roles.ToList(),
         user.CreatedAt,
         user.LastLoginAt);
 }

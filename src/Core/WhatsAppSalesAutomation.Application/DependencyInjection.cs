@@ -10,7 +10,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
-        services.AddValidatorsFromAssemblyContaining<DependencyInjection>();
+        // typeof(...) rather than the generic overload - a static type cannot be a type argument.
+        services.AddValidatorsFromAssemblyContaining(typeof(DependencyInjection));
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserService, UserService>();

@@ -52,6 +52,10 @@ try
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await db.Database.MigrateAsync();
         await IdentitySeeder.SeedAsync(scope.ServiceProvider);
+
+        // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
+        if (app.Environment.IsDevelopment())
+            await DevDataSeeder.SeedAsync(scope.ServiceProvider);
     }
 
     app.Run();
