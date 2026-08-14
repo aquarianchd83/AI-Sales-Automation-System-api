@@ -123,6 +123,7 @@ public static class DevDataSeeder
                 Source = "Website",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-45),
+                OptInSource = "WebForm",
                 PreferredLanguage = "en",
                 AssignedAgentId = aisha,
                 Tags = { tags["vip"], tags["enterprise"], tags["high-intent"] }
@@ -136,6 +137,7 @@ public static class DevDataSeeder
                 Source = "Import",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-30),
+                OptInSource = "Import",
                 PreferredLanguage = "en",
                 AssignedAgentId = aisha,
                 Tags = { tags["vip"], tags["newsletter"] }
@@ -149,6 +151,7 @@ public static class DevDataSeeder
                 Source = "Referral",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-12),
+                OptInSource = "Referral",
                 PreferredLanguage = "hi",
                 AssignedAgentId = diego,
                 Tags = { tags["high-intent"], tags["trial"] }
@@ -162,6 +165,7 @@ public static class DevDataSeeder
                 Source = "Webinar",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-8),
+                OptInSource = "Webinar",
                 PreferredLanguage = "de",
                 AssignedAgentId = diego,
                 Tags = { tags["webinar-2026"], tags["enterprise"] }
@@ -176,6 +180,7 @@ public static class DevDataSeeder
                 Source = "Website",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-3),
+                OptInSource = "WebForm",
                 PreferredLanguage = "pt",
                 AssignedAgentId = null,
                 Tags = { tags["newsletter"] }
@@ -222,6 +227,7 @@ public static class DevDataSeeder
                 Source = "Website",
                 OptInStatus = OptInStatus.OptedOut,
                 OptInTimestamp = now.AddDays(-60),
+                OptInSource = "WebForm",
                 OptOutTimestamp = now.AddDays(-20),
                 PreferredLanguage = "nl",
                 AssignedAgentId = diego,
@@ -235,6 +241,7 @@ public static class DevDataSeeder
                 Source = "Webinar",
                 OptInStatus = OptInStatus.OptedOut,
                 OptInTimestamp = now.AddDays(-25),
+                OptInSource = "Webinar",
                 OptOutTimestamp = now.AddDays(-2),
                 PreferredLanguage = "fr",
                 Tags = { tags["webinar-2026"] }
@@ -250,6 +257,7 @@ public static class DevDataSeeder
                 Source = "Import",
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-90),
+                OptInSource = "Import",
                 PreferredLanguage = "en",
                 IsDeleted = true,
                 DeletedAt = now.AddDays(-5)

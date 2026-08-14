@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Media;
+using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 
@@ -18,6 +21,20 @@ public interface IApplicationDbContext
     DbSet<CustomerTag> CustomerTags { get; }
 
     DbSet<RefreshToken> RefreshTokens { get; }
+
+    DbSet<MediaAsset> MediaAssets { get; }
+
+    DbSet<MessageTemplate> MessageTemplates { get; }
+
+    DbSet<Campaign> Campaigns { get; }
+
+    DbSet<CampaignStep> CampaignSteps { get; }
+
+    DbSet<CampaignStepMedia> CampaignStepMedia { get; }
+
+    DbSet<CampaignCustomer> CampaignCustomers { get; }
+
+    DbSet<Message> Messages { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

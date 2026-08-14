@@ -20,6 +20,13 @@ public class Customer : BaseEntity, ISoftDelete
 
     public DateTime? OptInTimestamp { get; set; }
 
+    /// <summary>
+    /// How consent was captured, e.g. "WebForm", "WhatsApp", "PaperForm", "Import". Together with
+    /// <see cref="OptInTimestamp"/> this is the evidence that the customer agreed to be messaged -
+    /// the status alone proves nothing after the fact.
+    /// </summary>
+    public string? OptInSource { get; set; }
+
     public DateTime? OptOutTimestamp { get; set; }
 
     public string? PreferredLanguage { get; set; }

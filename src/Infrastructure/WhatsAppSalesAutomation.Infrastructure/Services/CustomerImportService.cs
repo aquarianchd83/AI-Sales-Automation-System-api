@@ -8,7 +8,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Services;
 
 /// <summary>
 /// Parses customer import files. Expected columns (case/space-insensitive header matching):
-/// PhoneNumber (required, E.164), FirstName, LastName, Email, Tags (comma/semicolon separated).
+/// PhoneNumber (required), FirstName, LastName, Email, Tags (comma/semicolon separated),
+/// OptInStatus (aka Consent/OptIn), OptInDate (aka ConsentDate), OptInSource (aka ConsentSource).
 /// </summary>
 public class CustomerImportService : ICustomerImportService
 {
@@ -53,11 +54,22 @@ public class CustomerImportService : ICustomerImportService
                 GetField(csv, "firstname"),
                 GetField(csv, "lastname"),
                 GetField(csv, "email"),
-                GetField(csv, "tags")));
+                GetField(csv, "tags"),
+                FirstNonEmpty(GetField(csv, OptInStatusAliases[0]), GetField(csv, OptInStatusAliases[1]), GetField(csv, OptInStatusAliases[2])),
+                FirstNonEmpty(GetField(csv, OptInDateAliases[0]), GetField(csv, OptInDateAliases[1])),
+                FirstNonEmpty(GetField(csv, OptInSourceAliases[0]), GetField(csv, OptInSourceAliases[1]))));
         }
 
         return rows;
     }
+
+    /// <summary>Header spellings seen in the wild for the same column.</summary>
+    private static readonly string[] OptInStatusAliases = { "optinstatus", "consent", "optin" };
+    private static readonly string[] OptInDateAliases = { "optindate", "consentdate" };
+    private static readonly string[] OptInSourceAliases = { "optinsource", "consentsource" };
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
     private static string? GetField(CsvReader csv, string name) =>
         csv.TryGetField<string>(name, out var value) ? value : null;
@@ -86,18 +98,45 @@ public class CustomerImportService : ICustomerImportService
                 ? row.Cell(idx).GetString().Trim()
                 : null;
 
-            rows.Add(MapRow(r, Get("phonenumber"), Get("firstname"), Get("lastname"), Get("email"), Get("tags")));
+            rows.Add(MapRow(
+                r,
+                Get("phonenumber"),
+                Get("firstname"),
+                Get("lastname"),
+                Get("email"),
+                Get("tags"),
+                FirstNonEmpty(OptInStatusAliases.Select(Get).ToArray()),
+                FirstNonEmpty(OptInDateAliases.Select(Get).ToArray()),
+                FirstNonEmpty(OptInSourceAliases.Select(Get).ToArray())));
         }
 
         return rows;
     }
 
-    private static CustomerImportRow MapRow(int rowNumber, string? phone, string? firstName, string? lastName, string? email, string? tags)
+    private static CustomerImportRow MapRow(
+        int rowNumber,
+        string? phone,
+        string? firstName,
+        string? lastName,
+        string? email,
+        string? tags,
+        string? optInStatus = null,
+        string? optInDate = null,
+        string? optInSource = null)
     {
         var tagList = string.IsNullOrWhiteSpace(tags)
             ? Array.Empty<string>()
             : tags.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        return new CustomerImportRow(rowNumber, phone?.Trim() ?? string.Empty, firstName, lastName, email, tagList);
+        return new CustomerImportRow(
+            rowNumber,
+            phone?.Trim() ?? string.Empty,
+            firstName,
+            lastName,
+            email,
+            tagList,
+            optInStatus?.Trim(),
+            optInDate?.Trim(),
+            optInSource?.Trim());
     }
 }

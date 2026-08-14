@@ -13,6 +13,7 @@ public static class CustomerMappings
         customer.Source,
         customer.OptInStatus.ToString(),
         customer.OptInTimestamp,
+        customer.OptInSource,
         customer.OptOutTimestamp,
         customer.PreferredLanguage,
         customer.AssignedAgentId,

@@ -2,8 +2,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Media;
+using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -18,6 +21,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<CustomerTag> CustomerTags => Set<CustomerTag>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+
+    public DbSet<MessageTemplate> MessageTemplates => Set<MessageTemplate>();
+
+    public DbSet<Campaign> Campaigns => Set<Campaign>();
+
+    public DbSet<CampaignStep> CampaignSteps => Set<CampaignStep>();
+
+    public DbSet<CampaignStepMedia> CampaignStepMedia => Set<CampaignStepMedia>();
+
+    public DbSet<CampaignCustomer> CampaignCustomers => Set<CampaignCustomer>();
+
+    public DbSet<Message> Messages => Set<Message>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

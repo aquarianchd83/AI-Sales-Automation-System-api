@@ -44,9 +44,28 @@ public class CustomersController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Soft-deletes several customers at once. POST rather than DELETE-with-body: request bodies on
+    /// DELETE have no defined semantics in the HTTP spec and are dropped by some proxies and clients.
+    /// Returns 200 with a per-id breakdown, since a batch can partially succeed.
+    /// </summary>
+    [HttpPost("bulk-delete")]
+    public async Task<ActionResult<BulkDeleteCustomersResultDto>> BulkDelete(
+        [FromBody] BulkDeleteCustomersRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _customerService.BulkDeleteAsync(request, cancellationToken));
+
     [HttpPost("{id:guid}/tags")]
     public async Task<ActionResult<CustomerDto>> AddTags(Guid id, [FromBody] AddCustomerTagsRequest request, CancellationToken cancellationToken)
         => Ok(await _customerService.AddTagsAsync(id, request, cancellationToken));
+
+    /// <summary>
+    /// Records consent. Until this is called a customer stays PendingOptIn and, once Phase 3
+    /// enforces the send gate, cannot be messaged at all.
+    /// </summary>
+    [HttpPost("{id:guid}/opt-in")]
+    public async Task<ActionResult<CustomerDto>> OptIn(Guid id, [FromBody] OptInCustomerRequest request, CancellationToken cancellationToken)
+        => Ok(await _customerService.OptInAsync(id, request, cancellationToken));
 
     [HttpPost("{id:guid}/opt-out")]
     public async Task<ActionResult<CustomerDto>> OptOut(Guid id, CancellationToken cancellationToken)

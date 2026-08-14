@@ -15,7 +15,20 @@ public interface ICustomerService
     /// <summary>Soft-delete (IsDeleted = true) - preserves history for campaigns/messages built on top in later phases.</summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Soft-deletes many customers in one round trip. Partial success: ids that match nothing are
+    /// returned in the result rather than aborting the whole batch.
+    /// </summary>
+    Task<BulkDeleteCustomersResultDto> BulkDeleteAsync(BulkDeleteCustomersRequest request, CancellationToken cancellationToken = default);
+
     Task<CustomerDto> AddTagsAsync(Guid id, AddCustomerTagsRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records consent, which is what makes a customer messageable at all once Phase 3 enforces the
+    /// send gate. Idempotent: re-opting-in an already opted-in customer preserves the original
+    /// timestamp and source, since that first record is the evidence.
+    /// </summary>
+    Task<CustomerDto> OptInAsync(Guid id, OptInCustomerRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Marks the customer opted-out. Note: actually halting in-flight campaign follow-ups is wired up
