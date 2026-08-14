@@ -56,12 +56,16 @@ public class CampaignSendService : ICampaignSendService
     {
         var now = _dateTime.UtcNow;
 
+        // ScheduledStartAt is pinned to IST (see Campaign.ScheduledStartAt), so the "is it due yet"
+        // comparison uses IstNow; StartedAt is a true system timestamp and stays UTC (now).
+        var istNow = _dateTime.IstNow;
+
         // Plain load-and-save rather than ExecuteUpdateAsync: that extension lives in
         // Microsoft.EntityFrameworkCore.Relational, which Application deliberately does not
         // reference (the SQL Server/relational provider stays in Infrastructure). The number of
         // Scheduled campaigns due at any one tick is small, so this costs nothing in practice.
         var dueToStart = await _context.Campaigns
-            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= now)
+            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= istNow)
             .ToListAsync(cancellationToken);
 
         if (dueToStart.Count > 0)

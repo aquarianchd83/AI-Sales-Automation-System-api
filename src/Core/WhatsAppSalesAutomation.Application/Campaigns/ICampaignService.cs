@@ -10,7 +10,12 @@ public interface ICampaignService
 
     Task<CampaignDto> CreateAsync(CreateCampaignRequest request, Guid createdBy, CancellationToken cancellationToken = default);
 
-    /// <summary>Draft campaigns only - a live campaign's name/schedule should not shift under it.</summary>
+    /// <summary>
+    /// Draft, Scheduled or Paused - a Scheduled campaign has not sent anything yet, so its name,
+    /// description and start date are still safe to change. Running is excluded: a live campaign's
+    /// schedule should not shift under it (by then StartedAt is already fixed and ScheduledStartAt
+    /// is moot anyway).
+    /// </summary>
     Task<CampaignDto> UpdateAsync(Guid id, UpdateCampaignRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Draft campaigns only. Hard delete - nothing has been sent yet, so there is no history to preserve.</summary>
@@ -39,4 +44,9 @@ public interface ICampaignService
     Task<CampaignDto> StopAsync(Guid campaignId, CancellationToken cancellationToken = default);
 
     Task<CampaignProgressDto> GetProgressAsync(Guid campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>The roster SetAudienceAsync's counts don't expose - who is actually attached, and
+    /// their current status/step. Ordered by LastMessageSentAt desc (most recently active first),
+    /// nulls (never sent) last.</summary>
+    Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default);
 }

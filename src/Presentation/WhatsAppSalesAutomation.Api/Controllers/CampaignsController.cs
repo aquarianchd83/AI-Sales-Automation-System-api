@@ -61,6 +61,11 @@ public class CampaignsController : ControllerBase
     public async Task<ActionResult<SetCampaignAudienceResultDto>> SetAudience(Guid id, [FromBody] SetCampaignAudienceRequest request, CancellationToken cancellationToken)
         => Ok(await _campaignService.SetAudienceAsync(id, request, cancellationToken));
 
+    /// <summary>The roster behind SetAudience's counts - who is attached, and their status/step.</summary>
+    [HttpGet("{id:guid}/audience")]
+    public async Task<ActionResult<PagedResult<CampaignAudienceMemberDto>>> GetAudience(Guid id, [FromQuery] PagedRequest request, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetAudienceAsync(id, request, cancellationToken));
+
     [HttpPost("{id:guid}/start")]
     public async Task<ActionResult<CampaignDto>> Start(Guid id, CancellationToken cancellationToken)
         => Ok(await _campaignService.StartAsync(id, cancellationToken));

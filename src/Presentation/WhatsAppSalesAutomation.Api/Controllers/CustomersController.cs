@@ -59,6 +59,10 @@ public class CustomersController : ControllerBase
     public async Task<ActionResult<CustomerDto>> AddTags(Guid id, [FromBody] AddCustomerTagsRequest request, CancellationToken cancellationToken)
         => Ok(await _customerService.AddTagsAsync(id, request, cancellationToken));
 
+    [HttpDelete("{id:guid}/tags/{tagName}")]
+    public async Task<ActionResult<CustomerDto>> RemoveTag(Guid id, string tagName, CancellationToken cancellationToken)
+        => Ok(await _customerService.RemoveTagAsync(id, tagName, cancellationToken));
+
     /// <summary>
     /// Records consent. Until this is called a customer stays PendingOptIn and, once Phase 3
     /// enforces the send gate, cannot be messaged at all.

@@ -91,11 +91,17 @@ public class CampaignService : ICampaignService
         await _updateValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var campaign = await LoadCampaignAsync(id, cancellationToken);
-        RequireStatus(campaign, "edit", CampaignStatus.Draft);
+        RequireStatus(campaign, "edit", CampaignStatus.Draft, CampaignStatus.Scheduled, CampaignStatus.Paused);
 
         campaign.Name = request.Name.Trim();
         campaign.Description = request.Description;
         campaign.ScheduledStartAt = request.ScheduledStartAt;
+
+        // A Scheduled campaign with its date cleared would never be picked up again -
+        // ProcessInitialSendsAsync's promotion query only matches ScheduledStartAt != null - so fall
+        // back to Draft rather than leaving it stuck in Scheduled with nothing to promote it.
+        if (campaign.Status == CampaignStatus.Scheduled && campaign.ScheduledStartAt is null)
+            campaign.Status = CampaignStatus.Draft;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -254,15 +260,16 @@ public class CampaignService : ICampaignService
 
         await ValidateSendableAsync(campaign, cancellationToken);
 
-        var now = _dateTime.UtcNow;
-        if (campaign.ScheduledStartAt is { } scheduled && scheduled > now)
+        // ScheduledStartAt is pinned to IST (see Campaign.ScheduledStartAt) - compared against
+        // IstNow, not UtcNow. StartedAt is a true system timestamp and stays UTC.
+        if (campaign.ScheduledStartAt is { } scheduled && scheduled > _dateTime.IstNow)
         {
             campaign.Status = CampaignStatus.Scheduled;
         }
         else
         {
             campaign.Status = CampaignStatus.Running;
-            campaign.StartedAt ??= now;
+            campaign.StartedAt ??= _dateTime.UtcNow;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -325,6 +332,47 @@ public class CampaignService : ICampaignService
         var byStatus = counts.ToDictionary(c => c.Status.ToString(), c => c.Count);
 
         return new CampaignProgressDto(campaignId, counts.Sum(c => c.Count), byStatus);
+    }
+
+    public async Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default)
+    {
+        await LoadCampaignAsync(campaignId, cancellationToken); // throws NotFoundException if missing
+
+        var query =
+            from cc in _context.CampaignCustomers
+            join c in _context.Customers on cc.CustomerId equals c.Id
+            where cc.CampaignId == campaignId
+            select new { cc, c };
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var search = request.Search.Trim();
+            query = query.Where(x =>
+                x.c.PhoneNumberE164.Contains(search) ||
+                (x.c.FirstName != null && x.c.FirstName.Contains(search)) ||
+                (x.c.LastName != null && x.c.LastName.Contains(search)));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(x => x.cc.LastMessageSentAt ?? DateTime.MinValue)
+            .ThenBy(x => x.c.PhoneNumberE164)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Select(x => new CampaignAudienceMemberDto(
+                x.c.Id,
+                x.c.PhoneNumberE164,
+                x.c.FirstName,
+                x.c.LastName,
+                x.cc.Status.ToString(),
+                x.cc.CurrentStepNumber,
+                x.cc.LastMessageSentAt,
+                x.cc.NextFollowUpDueAt,
+                x.cc.StoppedReason))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<CampaignAudienceMemberDto>(items, totalCount, request.Page, request.PageSize);
     }
 
     private async Task ValidateSendableAsync(Campaign campaign, CancellationToken cancellationToken)

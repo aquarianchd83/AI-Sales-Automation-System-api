@@ -216,6 +216,25 @@ public class CustomerService : ICustomerService
         return customer.ToDto();
     }
 
+    public async Task<CustomerDto> RemoveTagAsync(Guid id, string tagName, CancellationToken cancellationToken = default)
+    {
+        var customer = await _context.Customers.Include(c => c.Tags)
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            ?? throw new NotFoundException(nameof(Customer), id);
+
+        // Only detaches the join row - the CustomerTag itself stays, since other customers may
+        // still reference it. A no-op (not an error) if the customer never had it, matching
+        // AddTagsAsync's own tolerance for redundant calls.
+        var tag = customer.Tags.FirstOrDefault(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
+        if (tag is not null)
+        {
+            customer.Tags.Remove(tag);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return customer.ToDto();
+    }
+
     public async Task<CustomerDto> OptInAsync(Guid id, OptInCustomerRequest request, CancellationToken cancellationToken = default)
     {
         await _optInValidator.ValidateAndThrowAsync(request, cancellationToken);

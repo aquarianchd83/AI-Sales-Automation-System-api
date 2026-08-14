@@ -24,6 +24,14 @@ public interface ICustomerService
     Task<CustomerDto> AddTagsAsync(Guid id, AddCustomerTagsRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Detaches the named tag from this customer. Case-insensitive, matching AddTagsAsync's own
+    /// lookup. Does not delete the CustomerTag entity itself - other customers may still reference
+    /// it - and is a no-op (not an error) if the customer never had it, so a double-click or a retry
+    /// after a dropped response can't fail.
+    /// </summary>
+    Task<CustomerDto> RemoveTagAsync(Guid id, string tagName, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Records consent, which is what makes a customer messageable at all once Phase 3 enforces the
     /// send gate. Idempotent: re-opting-in an already opted-in customer preserves the original
     /// timestamp and source, since that first record is the evidence.

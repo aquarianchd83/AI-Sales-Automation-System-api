@@ -11,6 +11,16 @@ public class Campaign : BaseEntity
 
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
 
+    /// <summary>
+    /// PINNED TO INDIA STANDARD TIME (UTC+5:30) - unlike every other timestamp on this entity, which
+    /// is a true UTC system timestamp. This is deliberate: the entire customer base is India-only, and
+    /// leaving a user-facing "which day should this start" field to whatever offset a client happens
+    /// to send caused a real bug - a client that computes UTC-of-local-midnight before sending (the
+    /// default behaviour of most JS date pickers) would land on the previous UTC calendar day, and a
+    /// server-side comparison against <c>DateTime.UtcNow</c> would then be off by up to 5:30.
+    /// Compare this value only against <c>IDateTimeProvider.IstNow</c>, never <c>UtcNow</c> - see
+    /// <c>CampaignService.StartAsync</c> and <c>CampaignSendService.ProcessInitialSendsAsync</c>.
+    /// </summary>
     public DateTime? ScheduledStartAt { get; set; }
 
     public Guid CreatedBy { get; set; }

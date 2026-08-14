@@ -1,28 +1,40 @@
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Common;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Campaigns;
 
 public class CreateCampaignRequestValidator : AbstractValidator<CreateCampaignRequest>
 {
-    public CreateCampaignRequestValidator()
+    public CreateCampaignRequestValidator(IDateTimeProvider dateTime)
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Description).MaximumLength(2000);
+
+        // Compared against IstNow, not UtcNow: ScheduledStartAt is pinned to IST (see
+        // Campaign.ScheduledStartAt) - comparing IST digits against a UTC clock would be wrong by
+        // up to 5:30 near midnight, which is exactly the bug this pinning exists to prevent.
         RuleFor(x => x.ScheduledStartAt)
-            .GreaterThan(_ => DateTime.UtcNow)
+            .GreaterThan(_ => dateTime.IstNow)
             .When(x => x.ScheduledStartAt.HasValue)
-            .WithMessage("Scheduled start must be in the future.");
+            .WithMessage("Scheduled start must be in the future (India Standard Time).");
     }
 }
 
 public class UpdateCampaignRequestValidator : AbstractValidator<UpdateCampaignRequest>
 {
-    public UpdateCampaignRequestValidator()
+    public UpdateCampaignRequestValidator(IDateTimeProvider dateTime)
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Description).MaximumLength(2000);
+
+        // A null ScheduledStartAt is fine (see CampaignService.UpdateAsync - it falls the campaign
+        // back to Draft), but a non-null one must still be in the future IST, same as on create.
+        RuleFor(x => x.ScheduledStartAt)
+            .GreaterThan(_ => dateTime.IstNow)
+            .When(x => x.ScheduledStartAt.HasValue)
+            .WithMessage("Scheduled start must be in the future (India Standard Time).");
     }
 }
 
