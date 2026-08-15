@@ -43,8 +43,8 @@ public class UpsertCampaignStepRequestValidator : AbstractValidator<UpsertCampai
     public UpsertCampaignStepRequestValidator()
     {
         RuleFor(x => x.StepType)
-            .Must(s => Enum.TryParse<CampaignStepType>(s, ignoreCase: true, out _))
-            .WithMessage($"StepType must be one of: {string.Join(", ", Enum.GetNames<CampaignStepType>())}.");
+            .Must(s => CampaignStepTypeName.TryParse(s, out _))
+            .WithMessage("StepType must be 'Initial' or 'FollowUp' followed by a positive number, e.g. 'FollowUp1'.");
 
         RuleFor(x => x.MessageText)
             .NotEmpty()
@@ -54,12 +54,12 @@ public class UpsertCampaignStepRequestValidator : AbstractValidator<UpsertCampai
 
         RuleFor(x => x.DelayDaysAfterPrevious)
             .GreaterThanOrEqualTo(0)
-            .When(x => Enum.TryParse<CampaignStepType>(x.StepType, true, out var t) && t != CampaignStepType.Initial)
+            .When(x => CampaignStepTypeName.TryParse(x.StepType, out var n) && n > 0)
             .WithMessage("Follow-up steps need a non-negative delay.");
 
         RuleFor(x => x.DelayDaysAfterPrevious)
             .Equal(0)
-            .When(x => Enum.TryParse<CampaignStepType>(x.StepType, true, out var t) && t == CampaignStepType.Initial)
+            .When(x => CampaignStepTypeName.TryParse(x.StepType, out var n) && n == 0)
             .WithMessage("The Initial step has no delay - it is sent when the campaign starts.");
     }
 }

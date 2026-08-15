@@ -6,7 +6,7 @@ public static class CampaignMappings
 {
     public static CampaignStepDto ToDto(this CampaignStep step, string? templateName) => new(
         step.Id,
-        step.StepType.ToString(),
+        step.StepType,
         step.StepNumber,
         step.DelayDaysAfterPrevious,
         step.MessageText,

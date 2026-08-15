@@ -124,8 +124,11 @@ public class CampaignService : ICampaignService
         var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
         RequireStatus(campaign, "edit steps on", CampaignStatus.Draft, CampaignStatus.Paused);
 
-        var stepType = Enum.Parse<CampaignStepType>(request.StepType, ignoreCase: true);
-        var stepNumber = (int)stepType;
+        // No upper bound on stepNumber - a campaign may carry any number of follow-ups. StepType
+        // is still validated syntax ("Initial" or "FollowUp{N}") by _stepValidator; parsing again
+        // here just recovers the number FluentValidation already confirmed is well-formed.
+        CampaignStepTypeName.TryParse(request.StepType, out var stepNumber);
+        var stepTypeName = CampaignStepTypeName.ForNumber(stepNumber);
 
         // A follow-up needs every earlier position already attached (Initial included) - otherwise
         // there is nothing wrong with the write itself, but the send pipeline walks the sequence one
@@ -137,11 +140,11 @@ public class CampaignService : ICampaignService
         {
             var missing = Enumerable.Range(0, stepNumber)
                 .Where(n => campaign.Steps.All(s => s.StepNumber != n))
-                .Select(n => ((CampaignStepType)n).ToString())
+                .Select(CampaignStepTypeName.ForNumber)
                 .ToList();
 
             if (missing.Count > 0)
-                throw Invalid("stepType", $"Attach {string.Join(", ", missing)} before {stepType} - steps must be added in sequence.");
+                throw Invalid("stepType", $"Attach {string.Join(", ", missing)} before {stepTypeName} - steps must be added in sequence.");
         }
 
         if (request.MediaAssetIds.Distinct().Count() != request.MediaAssetIds.Count)
@@ -164,7 +167,7 @@ public class CampaignService : ICampaignService
         var step = campaign.Steps.FirstOrDefault(s => s.StepNumber == stepNumber);
         if (step is null)
         {
-            step = new CampaignStep { CampaignId = campaign.Id, StepType = stepType, StepNumber = stepNumber };
+            step = new CampaignStep { CampaignId = campaign.Id, StepType = stepTypeName, StepNumber = stepNumber };
             campaign.Steps.Add(step);
             _context.CampaignSteps.Add(step);
         }
@@ -214,15 +217,15 @@ public class CampaignService : ICampaignService
         var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
         RequireStatus(campaign, "edit steps on", CampaignStatus.Draft, CampaignStatus.Paused);
 
-        if (!Enum.TryParse<CampaignStepType>(stepType, ignoreCase: true, out var parsed))
-            throw Invalid("stepType", $"StepType must be one of: {string.Join(", ", Enum.GetNames<CampaignStepType>())}.");
+        if (!CampaignStepTypeName.TryParse(stepType, out var parsedStepNumber))
+            throw Invalid("stepType", $"'{stepType}' is not a valid step type. Use 'Initial' or 'FollowUp' followed by a positive number, e.g. 'FollowUp1'.");
 
-        var step = campaign.Steps.FirstOrDefault(s => s.StepNumber == (int)parsed)
+        var step = campaign.Steps.FirstOrDefault(s => s.StepNumber == parsedStepNumber)
             ?? throw new NotFoundException("CampaignStep", stepType);
 
         // Mirrors the sequential-attach rule in UpsertStepAsync: removing a step out from under
         // later ones would open the same gap the send pipeline cannot fill on its own.
-        var laterSteps = campaign.Steps.Where(s => s.StepNumber > step.StepNumber).Select(s => s.StepType.ToString()).ToList();
+        var laterSteps = campaign.Steps.Where(s => s.StepNumber > step.StepNumber).Select(s => s.StepType).ToList();
         if (laterSteps.Count > 0)
             throw new ConflictException($"Remove {string.Join(", ", laterSteps)} first - steps must be removed from the end of the sequence.");
 

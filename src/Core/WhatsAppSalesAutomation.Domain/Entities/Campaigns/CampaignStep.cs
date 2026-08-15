@@ -3,15 +3,19 @@ using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 
-/// <summary>One message in a campaign sequence: the Initial send, or one of up to four follow-ups.</summary>
+/// <summary>One message in a campaign sequence: the Initial send, or one of any number of follow-ups.</summary>
 public class CampaignStep : BaseEntity
 {
     public Guid CampaignId { get; set; }
 
-    public CampaignStepType StepType { get; set; }
+    /// <summary>"Initial" or "FollowUp{N}" - see <see cref="CampaignStepTypeName"/>. Kept as a
+    /// plain string, not an enum: a fixed set of members cannot represent an unbounded number
+    /// of follow-ups. Always kept in sync with <see cref="StepNumber"/>.</summary>
+    public string StepType { get; set; } = CampaignStepTypeName.Initial;
 
-    /// <summary>Same value as <see cref="StepType"/>'s underlying int - kept as a plain column so
-    /// ordering/lookup queries do not need to cast the enum.</summary>
+    /// <summary>The real identifier - 0 is Initial, N above 0 is the Nth follow-up. StepType is
+    /// derived from this and stored alongside it only so ordering/lookup queries do not need to
+    /// re-parse a string.</summary>
     public int StepNumber { get; set; }
 
     /// <summary>0 for the Initial step; for a follow-up, days after the previous step went out.</summary>
