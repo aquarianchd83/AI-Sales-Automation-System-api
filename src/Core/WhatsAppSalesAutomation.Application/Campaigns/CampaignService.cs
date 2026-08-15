@@ -127,6 +127,23 @@ public class CampaignService : ICampaignService
         var stepType = Enum.Parse<CampaignStepType>(request.StepType, ignoreCase: true);
         var stepNumber = (int)stepType;
 
+        // A follow-up needs every earlier position already attached (Initial included) - otherwise
+        // there is nothing wrong with the write itself, but the send pipeline walks the sequence one
+        // step at a time and a gap it can never fill (no step exists there at all, active or not)
+        // makes it give up and mark the customer Completed, silently dropping every follow-up after
+        // the gap. Steps may still be deactivated later (CampaignStep.IsActive) without hitting this -
+        // ProcessOneAsync in CampaignSendService is deliberately gap-tolerant for that case.
+        if (stepNumber > 0)
+        {
+            var missing = Enumerable.Range(0, stepNumber)
+                .Where(n => campaign.Steps.All(s => s.StepNumber != n))
+                .Select(n => ((CampaignStepType)n).ToString())
+                .ToList();
+
+            if (missing.Count > 0)
+                throw Invalid("stepType", $"Attach {string.Join(", ", missing)} before {stepType} - steps must be added in sequence.");
+        }
+
         if (request.MediaAssetIds.Distinct().Count() != request.MediaAssetIds.Count)
             throw Invalid("mediaAssetIds", "Duplicate media asset ids.");
 
@@ -151,10 +168,16 @@ public class CampaignService : ICampaignService
             campaign.Steps.Add(step);
             _context.CampaignSteps.Add(step);
         }
-        else
+        else if (step.StepMedia.Count > 0)
         {
-            _context.CampaignStepMedia.RemoveRange(step.StepMedia);
+            // Flushed in its own SaveChanges before anything is re-added below (see the Add loop's
+            // comment for the actual bug this sidesteps): re-submitting the same media on an edit
+            // would otherwise pair a delete and an insert sharing the same (CampaignStepId,
+            // MediaAssetId) unique key in one SaveChanges call. ToList() snapshots the collection
+            // before RemoveRange/Clear both start mutating it.
+            _context.CampaignStepMedia.RemoveRange(step.StepMedia.ToList());
             step.StepMedia.Clear();
+            await _context.SaveChangesAsync(cancellationToken);
         }
 
         step.DelayDaysAfterPrevious = request.DelayDaysAfterPrevious;
@@ -164,7 +187,22 @@ public class CampaignService : ICampaignService
 
         var order = 0;
         foreach (var mediaId in request.MediaAssetIds)
-            step.StepMedia.Add(new CampaignStepMedia { CampaignStepId = step.Id, MediaAssetId = mediaId, DisplayOrder = order++ });
+        {
+            var stepMedia = new CampaignStepMedia { CampaignStepId = step.Id, MediaAssetId = mediaId, DisplayOrder = order++ };
+            step.StepMedia.Add(stepMedia);
+
+            // Explicit Add, not just the navigation-collection add above: CampaignStepMedia.Id is a
+            // client-generated Guid (set in BaseEntity's property initializer, before EF ever sees
+            // this object), so it is already non-default the moment it is constructed. When an entity
+            // like that reaches the change tracker only via fixup from an already-tracked parent's
+            // navigation (step here is Unchanged/Modified, not Added, on the edit path), EF Core reads
+            // "non-default key, not explicitly Added" as "this must already exist" and generates an
+            // UPDATE instead of an INSERT - which then fails with a 0-rows-affected concurrency
+            // exception, since no such row exists yet. This never showed up on step creation, because
+            // campaign.Steps.Add(step) a few lines up already puts the whole new-step graph in the
+            // Added state. Calling Add explicitly here removes the ambiguity outright.
+            _context.CampaignStepMedia.Add(stepMedia);
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -181,6 +219,12 @@ public class CampaignService : ICampaignService
 
         var step = campaign.Steps.FirstOrDefault(s => s.StepNumber == (int)parsed)
             ?? throw new NotFoundException("CampaignStep", stepType);
+
+        // Mirrors the sequential-attach rule in UpsertStepAsync: removing a step out from under
+        // later ones would open the same gap the send pipeline cannot fill on its own.
+        var laterSteps = campaign.Steps.Where(s => s.StepNumber > step.StepNumber).Select(s => s.StepType.ToString()).ToList();
+        if (laterSteps.Count > 0)
+            throw new ConflictException($"Remove {string.Join(", ", laterSteps)} first - steps must be removed from the end of the sequence.");
 
         _context.CampaignStepMedia.RemoveRange(step.StepMedia);
         _context.CampaignSteps.Remove(step);

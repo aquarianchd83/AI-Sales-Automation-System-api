@@ -90,7 +90,7 @@ public class CampaignSendService : ICampaignSendService
 
         var result = SendRunResult.Empty;
         foreach (var ccId in candidates)
-            result = Add(result, await ProcessOneAsync(ccId, stepNumber: 0, now, cancellationToken));
+            result = Add(result, await ProcessOneAsync(ccId, fromStepNumber: 0, now, cancellationToken));
 
         return result;
     }
@@ -135,9 +135,10 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
-    /// <summary>Loads one campaign customer fresh and attempts the given step - used for both
-    /// initial sends (stepNumber 0) and follow-ups (stepNumber = CurrentStepNumber + 1).</summary>
-    private async Task<SendRunResult> ProcessOneAsync(Guid campaignCustomerId, int stepNumber, DateTime now, CancellationToken cancellationToken)
+    /// <summary>Loads one campaign customer fresh and attempts the lowest active step at or after
+    /// <paramref name="fromStepNumber"/> - used for both initial sends (fromStepNumber 0) and
+    /// follow-ups (fromStepNumber = CurrentStepNumber + 1).</summary>
+    private async Task<SendRunResult> ProcessOneAsync(Guid campaignCustomerId, int fromStepNumber, DateTime now, CancellationToken cancellationToken)
     {
         var cc = await _context.CampaignCustomers.FirstOrDefaultAsync(x => x.Id == campaignCustomerId, cancellationToken);
         if (cc is null)
@@ -146,7 +147,16 @@ public class CampaignSendService : ICampaignSendService
         var campaign = await _context.Campaigns
             .Include(c => c.Steps).ThenInclude(s => s.StepMedia)
             .FirstOrDefaultAsync(c => c.Id == cc.CampaignId, cancellationToken);
-        var step = campaign?.Steps.FirstOrDefault(s => s.StepNumber == stepNumber && s.IsActive);
+
+        // The lowest active step at or after fromStepNumber, not exactly fromStepNumber - a step can
+        // be deactivated (CampaignStep.IsActive) without being removed, and CampaignService no longer
+        // allows removing/adding steps out of sequence, but it still allows deactivating one in place.
+        // Requiring an exact match here would treat that gap as "nothing left to send" and silently
+        // drop every follow-up after it instead of skipping over the disabled one.
+        var step = campaign?.Steps
+            .Where(s => s.StepNumber >= fromStepNumber && s.IsActive)
+            .OrderBy(s => s.StepNumber)
+            .FirstOrDefault();
 
         if (campaign is null || step is null)
         {
@@ -307,7 +317,13 @@ public class CampaignSendService : ICampaignSendService
             cc.CurrentStepNumber = step.StepNumber;
             cc.LastMessageSentAt = now;
 
-            var nextStep = campaign.Steps.FirstOrDefault(s => s.StepNumber == step.StepNumber + 1 && s.IsActive);
+            // Same gap-tolerance as the lookup in ProcessOneAsync, and for the same reason: the
+            // immediate next-numbered step may have been deactivated without being removed, and an
+            // exact match here would mark the customer Completed with active later steps still unsent.
+            var nextStep = campaign.Steps
+                .Where(s => s.StepNumber > step.StepNumber && s.IsActive)
+                .OrderBy(s => s.StepNumber)
+                .FirstOrDefault();
             if (nextStep is not null)
             {
                 cc.Status = CampaignCustomerStatus.AwaitingResponse;
