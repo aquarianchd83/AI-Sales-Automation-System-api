@@ -18,7 +18,12 @@ public interface ICampaignService
     /// </summary>
     Task<CampaignDto> UpdateAsync(Guid id, UpdateCampaignRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Draft campaigns only. Hard delete - nothing has been sent yet, so there is no history to preserve.</summary>
+    /// <summary>
+    /// Draft or Stopped only. Hard delete. A Draft campaign never has Messages (nothing sends before
+    /// Start), so there is nothing to lose; a Stopped one usually does, and those are deleted right
+    /// along with it - there is no way to keep a record of what was sent once the campaign itself is
+    /// gone. Anything else (Scheduled/Running/Paused) must be Stopped first.
+    /// </summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>Adds or replaces the step at this StepType's position. Draft or Paused campaigns only.</summary>
@@ -30,17 +35,29 @@ public interface ICampaignService
     Task<SetCampaignAudienceResultDto> SetAudienceAsync(Guid campaignId, SetCampaignAudienceRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Validates the campaign is sendable (an active Initial step referencing an Approved template,
-    /// every active step within the configured media count) and moves it to Running, or to Scheduled
-    /// if <c>ScheduledStartAt</c> is in the future.
+    /// Callable on Draft, Paused or Stopped. Validates the campaign is sendable (an active Initial
+    /// step referencing an Approved template, every active step within the configured media count)
+    /// and moves it to Running, or to Scheduled if <c>ScheduledStartAt</c> is in the future. Resuming
+    /// a Stopped campaign clears StoppedAt but does not revive the individual CampaignCustomers
+    /// StopAsync force-completed - see its remarks.
     /// </summary>
     Task<CampaignDto> StartAsync(Guid campaignId, CancellationToken cancellationToken = default);
 
     Task<CampaignDto> PauseAsync(Guid campaignId, CancellationToken cancellationToken = default);
 
+    /// <summary>Alias for <see cref="StartAsync"/> - also works on a Stopped campaign, not only Paused.</summary>
     Task<CampaignDto> ResumeAsync(Guid campaignId, CancellationToken cancellationToken = default);
 
-    /// <summary>Terminal - a stopped campaign cannot be resumed, only recreated.</summary>
+    /// <summary>
+    /// Not terminal: a Stopped campaign can be restarted via <see cref="StartAsync"/>/<see cref="ResumeAsync"/>.
+    /// Every customer who was AwaitingResponse at the moment of stopping is force-completed here
+    /// (StoppedReason = "Campaign stopped") rather than left to resume its follow-up sequence
+    /// automatically - resuming re-opens the campaign for sending, not those individual customers'
+    /// progress. There is currently no API to revert a specific CampaignCustomer back out of
+    /// Completed; SetAudienceAsync will not do it - re-attaching an already-attached customer is
+    /// explicitly a no-op there. A customer who should pick back up needs a new campaign, or a
+    /// dedicated "reopen" operation this API does not yet expose.
+    /// </summary>
     Task<CampaignDto> StopAsync(Guid campaignId, CancellationToken cancellationToken = default);
 
     Task<CampaignProgressDto> GetProgressAsync(Guid campaignId, CancellationToken cancellationToken = default);

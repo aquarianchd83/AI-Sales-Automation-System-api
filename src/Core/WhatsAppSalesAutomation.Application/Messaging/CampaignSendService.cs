@@ -148,6 +148,14 @@ public class CampaignSendService : ICampaignSendService
             .Include(c => c.Steps).ThenInclude(s => s.StepMedia)
             .FirstOrDefaultAsync(c => c.Id == cc.CampaignId, cancellationToken);
 
+        // ProcessInitialSendsAsync/ProcessFollowUpsAsync already select candidates only from Running
+        // campaigns, but that selection and this method's own campaign load are two separate queries -
+        // a Stop call landing in between them would otherwise still be able to slip a send through.
+        // Re-checking here, not just at selection time, closes that window. Left untouched rather than
+        // force-completed: StopAsync already decided what happens to this customer's status.
+        if (campaign is not null && campaign.Status != CampaignStatus.Running)
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+
         // The lowest active step at or after fromStepNumber, not exactly fromStepNumber - a step can
         // be deactivated (CampaignStep.IsActive) without being removed, and CampaignService no longer
         // allows removing/adding steps out of sequence, but it still allows deactivating one in place.
@@ -243,6 +251,21 @@ public class CampaignSendService : ICampaignSendService
             message.Status = MessageStatus.Failed;
             message.FailureReason = "Referenced campaign, step or customer no longer exists.";
             message.NextAttemptAt = null;
+            await _context.SaveChangesAsync(cancellationToken);
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        // A message can be queued for retry while its campaign is Running and then have that
+        // campaign Paused, Stopped or Completed before the retry actually runs - StopAsync only
+        // force-completes CampaignCustomers that were AwaitingResponse, it does not touch Messages
+        // still waiting on a retry, so without this check a stopped campaign could still have WhatsApp
+        // called on its behalf. See the equivalent check in ProcessOneAsync for fresh sends.
+        if (campaign.Status != CampaignStatus.Running)
+        {
+            message.Status = MessageStatus.Failed;
+            message.FailureReason = $"Campaign is {campaign.Status}, not Running - retry abandoned.";
+            message.NextAttemptAt = null;
+            message.AttemptCount = Math.Max(message.AttemptCount, _options.MaxRetryAttempts);
             await _context.SaveChangesAsync(cancellationToken);
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }

@@ -111,7 +111,28 @@ public class CampaignService : ICampaignService
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var campaign = await LoadCampaignAsync(id, cancellationToken);
-        RequireStatus(campaign, "delete", CampaignStatus.Draft);
+        RequireStatus(campaign, "delete", CampaignStatus.Draft, CampaignStatus.Stopped);
+
+        // Campaign -> CampaignCustomers cascades, but Message -> CampaignCustomer is deliberately
+        // Restrict, not Cascade - a guard against any path silently destroying send history. A Draft
+        // campaign never has Messages (nothing sends before Start), so this is a no-op there, but a
+        // Stopped campaign usually does. Deleting one is an explicit, one-time exception to that
+        // guard: the caller is choosing to discard the record of what was actually sent, not just the
+        // campaign configuration, so the Messages have to go first or the cascade hits the Restrict
+        // and fails with a raw DB foreign-key violation instead of completing.
+        var campaignCustomerIds = await _context.CampaignCustomers
+            .Where(cc => cc.CampaignId == id)
+            .Select(cc => cc.Id)
+            .ToListAsync(cancellationToken);
+
+        if (campaignCustomerIds.Count > 0)
+        {
+            var messages = await _context.Messages
+                .Where(m => m.CampaignCustomerId != null && campaignCustomerIds.Contains(m.CampaignCustomerId.Value))
+                .ToListAsync(cancellationToken);
+
+            _context.Messages.RemoveRange(messages);
+        }
 
         _context.Campaigns.Remove(campaign);
         await _context.SaveChangesAsync(cancellationToken);
@@ -303,7 +324,7 @@ public class CampaignService : ICampaignService
     public async Task<CampaignDto> StartAsync(Guid campaignId, CancellationToken cancellationToken = default)
     {
         var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
-        RequireStatus(campaign, "start", CampaignStatus.Draft, CampaignStatus.Paused);
+        RequireStatus(campaign, "start", CampaignStatus.Draft, CampaignStatus.Paused, CampaignStatus.Stopped);
 
         await ValidateSendableAsync(campaign, cancellationToken);
 
@@ -318,6 +339,14 @@ public class CampaignService : ICampaignService
             campaign.Status = CampaignStatus.Running;
             campaign.StartedAt ??= _dateTime.UtcNow;
         }
+
+        // A resumed-from-Stopped campaign is no longer stopped - a stale StoppedAt would read as
+        // "stopped at this timestamp" on a campaign that is, right now, Running/Scheduled again.
+        // Does NOT revive individual CampaignCustomers that StopAsync force-completed - those keep
+        // their Completed status and "Campaign stopped" reason as the historical record of what
+        // actually happened to them; resuming only re-opens the campaign to newly-attached or
+        // still-Pending customers, and to anyone re-attached to it after this call.
+        campaign.StoppedAt = null;
 
         await _context.SaveChangesAsync(cancellationToken);
 
