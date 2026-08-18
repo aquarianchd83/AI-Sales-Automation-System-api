@@ -8,11 +8,6 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Conversations;
 /// (Phase 4) share, per <c>Message.ConversationId</c>. One active (non-Closed) conversation per
 /// customer at a time; a closed one stays as history, and a new inbound message re-opens a fresh one
 /// rather than reusing the closed thread.
-///
-/// Deliberately does not yet carry AiConfidenceLast/LastDetectedIntent/LastLeadScore/Summary from the
-/// Phase 1 design - those are Phase 5 (AI/RAG) fields whose real shape depends on decisions not made
-/// yet (embedding format, confidence scale, summarisation approach); adding speculative columns for
-/// them now risks guessing wrong and needing to fix it anyway, unlike a plain enum value.
 /// </summary>
 public class Conversation : BaseEntity
 {
@@ -34,4 +29,19 @@ public class Conversation : BaseEntity
     public DateTime? LastInboundMessageAt { get; set; }
 
     public DateTime? ClosedAt { get; set; }
+
+    /// <summary>Confidence score (0.0-1.0) from the most recent AiInteraction on this conversation -
+    /// a quick-glance signal for the inbox list, not a substitute for reading the AiInteraction rows.</summary>
+    public double? AiConfidenceLast { get; set; }
+
+    public string? LastDetectedIntent { get; set; }
+
+    /// <summary>Denormalized copy of this conversation's Lead.Score, kept in sync by LeadService so the
+    /// inbox list can sort/filter by lead temperature without a join for every row.</summary>
+    public LeadScoreBand? LastLeadScore { get; set; }
+
+    /// <summary>AI-maintained running summary of the conversation so far, regenerated (not appended)
+    /// after each AI turn - gives an agent picking up a handoff the gist without reading the full
+    /// transcript.</summary>
+    public string? Summary { get; set; }
 }

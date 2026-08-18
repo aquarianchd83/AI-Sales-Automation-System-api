@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
+using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
@@ -43,6 +46,18 @@ public interface IApplicationDbContext
     DbSet<HumanHandoff> HumanHandoffs { get; }
 
     DbSet<WebhookEvent> WebhookEvents { get; }
+
+    DbSet<AiInteraction> AiInteractions { get; }
+
+    DbSet<AiInteractionSource> AiInteractionSources { get; }
+
+    DbSet<KnowledgeBaseArticle> KnowledgeBaseArticles { get; }
+
+    DbSet<KnowledgeBaseChunk> KnowledgeBaseChunks { get; }
+
+    DbSet<Lead> Leads { get; }
+
+    DbSet<LeadActivity> LeadActivities { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

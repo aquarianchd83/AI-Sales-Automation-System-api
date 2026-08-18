@@ -1,12 +1,15 @@
 using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Auth;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Application.Handoffs;
+using WhatsAppSalesAutomation.Application.KnowledgeBase;
+using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Media;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
@@ -26,6 +29,7 @@ public static class DependencyInjection
         services.Configure<CampaignOptions>(configuration.GetSection("Campaigns"));
         services.Configure<MessagingOptions>(configuration.GetSection("Messaging"));
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
+        services.Configure<AiOptions>(configuration.GetSection("Ai"));
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserService, UserService>();
@@ -38,6 +42,9 @@ public static class DependencyInjection
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IHandoffService, HandoffService>();
         services.AddScoped<IInboundWebhookProcessor, InboundWebhookProcessor>();
+        services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
+        services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
 
         return services;
     }

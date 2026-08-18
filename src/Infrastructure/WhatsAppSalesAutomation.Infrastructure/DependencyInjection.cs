@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -103,6 +104,7 @@ public static class DependencyInjection
         services.AddScoped<INotificationService, SignalRNotificationService>();
 
         AddWhatsAppClient(services, configuration);
+        AddAiClients(services, configuration);
         AddHangfire(services, configuration);
 
         return services;
@@ -122,6 +124,48 @@ public static class DependencyInjection
             services.AddHttpClient<IWhatsAppService, MetaWhatsAppCloudApiClient>();
         else
             services.AddScoped<IWhatsAppService, SimulatedWhatsAppClient>();
+    }
+
+    /// <summary>
+    /// Two independent provider selections read from the same AiProviderSettings - see its own doc
+    /// comment for why Provider (chat) and EmbeddingProvider are separate knobs. Both default to
+    /// "Simulated", same zero-credentials-needed reasoning as AddWhatsAppClient.
+    /// </summary>
+    private static void AddAiClients(IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<AiProviderSettings>(configuration.GetSection("AiProviders"));
+        var section = configuration.GetSection("AiProviders");
+        var provider = section["Provider"] ?? "Simulated";
+        var embeddingProvider = section["EmbeddingProvider"] ?? "Simulated";
+
+        switch (provider)
+        {
+            case var p when string.Equals(p, "Anthropic", StringComparison.OrdinalIgnoreCase):
+                services.AddHttpClient<IAiService, AnthropicAiClient>();
+                break;
+            case var p when string.Equals(p, "OpenAI", StringComparison.OrdinalIgnoreCase):
+                services.AddHttpClient<IAiService, OpenAiAiClient>();
+                break;
+            case var p when string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase):
+                services.AddHttpClient<IAiService, GoogleAiClient>();
+                break;
+            default:
+                services.AddScoped<IAiService, SimulatedAiClient>();
+                break;
+        }
+
+        switch (embeddingProvider)
+        {
+            case var p when string.Equals(p, "OpenAI", StringComparison.OrdinalIgnoreCase):
+                services.AddHttpClient<IEmbeddingService, OpenAiEmbeddingClient>();
+                break;
+            case var p when string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase):
+                services.AddHttpClient<IEmbeddingService, GoogleEmbeddingClient>();
+                break;
+            default:
+                services.AddScoped<IEmbeddingService, SimulatedEmbeddingClient>();
+                break;
+        }
     }
 
     private static void AddHangfire(IServiceCollection services, IConfiguration configuration)

@@ -14,6 +14,9 @@ public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
 
         builder.Property(c => c.Mode).HasConversion<string>().HasMaxLength(10);
         builder.Property(c => c.Status).HasConversion<string>().HasMaxLength(10);
+        builder.Property(c => c.LastDetectedIntent).HasMaxLength(100);
+        builder.Property(c => c.LastLeadScore).HasConversion<string>().HasMaxLength(10);
+        builder.Property(c => c.Summary).HasColumnType("nvarchar(max)");
 
         // Not unique: history is kept (a customer can have several Closed conversations over time),
         // just indexed for the "does this customer already have an active thread" lookup.

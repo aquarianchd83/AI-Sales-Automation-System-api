@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Conversations;
-using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
@@ -24,7 +24,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
     private readonly IDateTimeProvider _dateTime;
     private readonly IWhatsAppWebhookParser _parser;
     private readonly IConversationService _conversations;
-    private readonly IHandoffService _handoffs;
+    private readonly IConversationOrchestrator _orchestrator;
     private readonly INotificationService _notifications;
     private readonly ILogger<InboundWebhookProcessor> _logger;
 
@@ -33,7 +33,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         IDateTimeProvider dateTime,
         IWhatsAppWebhookParser parser,
         IConversationService conversations,
-        IHandoffService handoffs,
+        IConversationOrchestrator orchestrator,
         INotificationService notifications,
         ILogger<InboundWebhookProcessor> logger)
     {
@@ -41,7 +41,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         _dateTime = dateTime;
         _parser = parser;
         _conversations = conversations;
-        _handoffs = handoffs;
+        _orchestrator = orchestrator;
         _notifications = notifications;
         _logger = logger;
     }
@@ -226,29 +226,20 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             SentAt = inbound.Timestamp
         };
         _context.Messages.Add(message);
+        await _context.SaveChangesAsync(cancellationToken);
 
         if (isOptOut)
         {
             // Opting out is itself the resolution - Phase 1's rule is "stop all automation, log,
-            // notify agent (no AI reply)", not "escalate", so no Handoff is raised for a pure STOP.
-            await _context.SaveChangesAsync(cancellationToken);
+            // notify agent (no AI reply)", not "escalate", so no Handoff is raised for a pure STOP and
+            // the orchestrator (which would otherwise attempt an AI reply or escalate) is never called.
         }
         else
         {
-            conversation.Status = ConversationStatus.Escalated;
-            await _context.SaveChangesAsync(cancellationToken);
-
-            // No IAiService exists until Phase 5, so there is nothing that could even attempt a reply
-            // first - every non-opt-out inbound message needs a human, unconditionally, regardless of
-            // Conversation.Mode. GetOrCreateOpenHandoffAsync means a chatty customer's second and third
-            // message do not each spawn a new queue entry while the first is still open.
-            var handoff = await _handoffs.GetOrCreateOpenHandoffAsync(
-                conversationId,
-                nameof(HandoffTriggerReason.RuleTriggered),
-                "AI is not available until Phase 5 - every inbound message currently requires a human.",
-                cancellationToken);
-
-            await _notifications.NotifyNewHandoffAsync(handoff.Id, conversationId, handoff.TriggerReason, cancellationToken);
+            // The AI/Human/Hybrid decision - auto-reply, escalate to a HumanHandoff, or defer entirely
+            // to a human (Mode == Human) - is ConversationOrchestrator's job (architecture doc §8), not
+            // this processor's. `message.Id` is populated by the SaveChangesAsync just above.
+            await _orchestrator.HandleInboundMessageAsync(conversationId, customer.Id, message.Id, cancellationToken);
         }
 
         await _notifications.NotifyNewInboundMessageAsync(conversationId, customer.Id, inbound.TextBody, cancellationToken);
