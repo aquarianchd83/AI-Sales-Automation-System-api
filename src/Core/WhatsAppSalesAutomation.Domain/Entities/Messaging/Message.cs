@@ -4,13 +4,20 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Domain.Entities.Messaging;
 
 /// <summary>
-/// One outbound (Phase 3) or inbound (Phase 4) WhatsApp message. Deliberately has no
-/// <c>ConversationId</c> yet - <c>Conversations</c> does not exist until Phase 4, and this table is
-/// designed to be the transcript both phases share, so that FK is added then rather than guessed at now.
+/// One outbound (Phase 3) or inbound (Phase 4) WhatsApp message - the transcript
+/// <c>Conversation</c> is built from, via <see cref="ConversationId"/>.
 /// </summary>
 public class Message : BaseEntity
 {
     public Guid CustomerId { get; set; }
+
+    /// <summary>
+    /// Nullable rather than required: messages sent before this column existed have no conversation
+    /// to point at and were left as-is rather than backfilled against dev data, and it keeps the door
+    /// open for a future message type that genuinely has none. Every message from Phase 4 onward -
+    /// inbound or outbound, campaign or agent reply - sets this.
+    /// </summary>
+    public Guid? ConversationId { get; set; }
 
     /// <summary>Set for campaign-originated sends; null for anything sent outside a campaign (Phase 4/5).</summary>
     public Guid? CampaignCustomerId { get; set; }

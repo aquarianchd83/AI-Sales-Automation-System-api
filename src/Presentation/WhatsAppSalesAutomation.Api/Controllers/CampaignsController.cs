@@ -13,11 +13,13 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class CampaignsController : ControllerBase
 {
     private readonly ICampaignService _campaignService;
+    private readonly ICampaignSendService _sendService;
     private readonly ICurrentUserService _currentUser;
 
-    public CampaignsController(ICampaignService campaignService, ICurrentUserService currentUser)
+    public CampaignsController(ICampaignService campaignService, ICampaignSendService sendService, ICurrentUserService currentUser)
     {
         _campaignService = campaignService;
+        _sendService = sendService;
         _currentUser = currentUser;
     }
 
@@ -85,6 +87,27 @@ public class CampaignsController : ControllerBase
     [HttpGet("{id:guid}/progress")]
     public async Task<ActionResult<CampaignProgressDto>> GetProgress(Guid id, CancellationToken cancellationToken)
         => Ok(await _campaignService.GetProgressAsync(id, cancellationToken));
+
+    /// <summary>
+    /// Runs the send pipeline immediately, scoped to this one campaign only - unlike
+    /// <see cref="CampaignOpsController.RunJobs"/>, which runs across every eligible campaign at
+    /// once and is SuperAdmin-only. This is a narrower, per-campaign version of the same nudge (skip
+    /// waiting for Hangfire's next tick), so it carries the same open-to-any-authenticated-user
+    /// policy as the rest of this controller rather than that endpoint's SuperAdmin restriction.
+    /// A no-op (all-zero result) if the campaign isn't Scheduled/Running or has nothing due right
+    /// now - GetByIdAsync is the only thing here that 404s for a bad id.
+    /// </summary>
+    [HttpPost("{id:guid}/run-jobs")]
+    public async Task<ActionResult<RunJobsResultDto>> RunJobsForCampaign(Guid id, CancellationToken cancellationToken)
+    {
+        await _campaignService.GetByIdAsync(id, cancellationToken);
+
+        var initial = await _sendService.ProcessInitialSendsAsync(id, cancellationToken);
+        var followUps = await _sendService.ProcessFollowUpsAsync(id, cancellationToken);
+        var retries = await _sendService.RetryFailedSendsAsync(id, cancellationToken);
+
+        return Ok(new RunJobsResultDto(initial, followUps, retries));
+    }
 }
 
 /// <summary>
@@ -109,9 +132,9 @@ public class CampaignOpsController : ControllerBase
     [HttpPost("run-jobs")]
     public async Task<ActionResult<RunJobsResultDto>> RunJobs(CancellationToken cancellationToken)
     {
-        var initial = await _sendService.ProcessInitialSendsAsync(cancellationToken);
-        var followUps = await _sendService.ProcessFollowUpsAsync(cancellationToken);
-        var retries = await _sendService.RetryFailedSendsAsync(cancellationToken);
+        var initial = await _sendService.ProcessInitialSendsAsync(cancellationToken: cancellationToken);
+        var followUps = await _sendService.ProcessFollowUpsAsync(cancellationToken: cancellationToken);
+        var retries = await _sendService.RetryFailedSendsAsync(cancellationToken: cancellationToken);
 
         return Ok(new RunJobsResultDto(initial, followUps, retries));
     }

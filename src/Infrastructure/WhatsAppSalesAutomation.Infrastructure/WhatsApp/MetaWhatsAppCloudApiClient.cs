@@ -75,6 +75,24 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
             }
         };
 
+        return await PostMessageAsync(payload, toPhoneNumberE164, cancellationToken);
+    }
+
+    public async Task<WhatsAppSendResult> SendTextMessageAsync(string toPhoneNumberE164, string text, CancellationToken cancellationToken = default)
+    {
+        var payload = new
+        {
+            messaging_product = "whatsapp",
+            to = toPhoneNumberE164.TrimStart('+'),
+            type = "text",
+            text = new { body = text }
+        };
+
+        return await PostMessageAsync(payload, toPhoneNumberE164, cancellationToken);
+    }
+
+    private async Task<WhatsAppSendResult> PostMessageAsync(object payload, string toPhoneNumberE164, CancellationToken cancellationToken)
+    {
         try
         {
             using var response = await _httpClient.PostAsJsonAsync($"{_settings.PhoneNumberId}/messages", payload, JsonOptions, cancellationToken);

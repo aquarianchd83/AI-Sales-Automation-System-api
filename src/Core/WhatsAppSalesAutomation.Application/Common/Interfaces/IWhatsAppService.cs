@@ -21,6 +21,14 @@ public interface IWhatsAppService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sends free-form text - only valid within WhatsApp's 24-hour customer service window after the
+    /// customer's last inbound message (Phase 4's ConversationService is what actually enforces that
+    /// window; this method just performs the send). Never used by the campaign pipeline, which is
+    /// always business-initiated and so always requires a template regardless of any window.
+    /// </summary>
+    Task<WhatsAppSendResult> SendTextMessageAsync(string toPhoneNumberE164, string text, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Uploads a file to Meta so it can be referenced by a WhatsApp media handle in a send. The
     /// returned id is cached on <c>MediaAsset.WhatsAppMediaId</c> so repeat sends of the same file
     /// do not re-upload it.

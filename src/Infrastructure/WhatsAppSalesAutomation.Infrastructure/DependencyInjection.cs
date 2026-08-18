@@ -13,6 +13,7 @@ using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
+using WhatsAppSalesAutomation.Infrastructure.Realtime;
 using WhatsAppSalesAutomation.Infrastructure.Services;
 using WhatsAppSalesAutomation.Infrastructure.Storage;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
@@ -69,10 +70,26 @@ public static class DependencyInjection
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.FromSeconds(30)
                 };
+
+                // Browsers' native WebSocket API cannot attach an Authorization header, so SignalR's
+                // documented pattern is a "access_token" query string parameter instead - only honoured
+                // for the hub's own path, so this does not weaken bearer-header auth on every other route.
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                            context.Token = accessToken;
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         services.AddAuthorization();
         services.AddHttpContextAccessor();
+        services.AddSignalR();
 
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
@@ -80,6 +97,10 @@ public static class DependencyInjection
 
         services.Configure<LocalMediaStorageSettings>(configuration.GetSection("MediaStorage"));
         services.AddScoped<IMediaStorageService, LocalFileMediaStorageService>();
+
+        services.AddScoped<IWhatsAppWebhookParser, WhatsAppWebhookParser>();
+        services.AddScoped<IWebhookSignatureValidator, WebhookSignatureValidator>();
+        services.AddScoped<INotificationService, SignalRNotificationService>();
 
         AddWhatsAppClient(services, configuration);
         AddHangfire(services, configuration);
@@ -126,5 +147,6 @@ public static class DependencyInjection
         services.AddScoped<CampaignInitialSenderJob>();
         services.AddScoped<FollowUpSchedulerJob>();
         services.AddScoped<MessageStatusRetryJob>();
+        services.AddScoped<InboundWebhookProcessingJob>();
     }
 }

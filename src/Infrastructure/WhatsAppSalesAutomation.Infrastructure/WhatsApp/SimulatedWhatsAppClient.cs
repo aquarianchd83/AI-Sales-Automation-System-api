@@ -31,14 +31,8 @@ public class SimulatedWhatsAppClient : IWhatsAppService
         string? mediaUrl = null,
         CancellationToken cancellationToken = default)
     {
-        if (_settings.SimulatedFailureRatePercent > 0 && _random.Next(100) < _settings.SimulatedFailureRatePercent)
-        {
-            _logger.LogWarning(
-                "[Simulated WhatsApp] Send FAILED (injected) to {Phone}: template={Template} lang={Language} params=[{Params}]",
-                toPhoneNumberE164, templateName, languageCode, string.Join(", ", parameterValues));
-
-            return Task.FromResult(WhatsAppSendResult.Failed("Simulated transient failure"));
-        }
+        if (TryInjectFailure(toPhoneNumberE164, out var failure))
+            return Task.FromResult(failure);
 
         var messageId = $"sim.{Guid.NewGuid():N}";
 
@@ -47,6 +41,31 @@ public class SimulatedWhatsAppClient : IWhatsAppService
             messageId, toPhoneNumberE164, templateName, languageCode, string.Join(", ", parameterValues), mediaUrl ?? "(none)");
 
         return Task.FromResult(WhatsAppSendResult.Succeeded(messageId));
+    }
+
+    public Task<WhatsAppSendResult> SendTextMessageAsync(string toPhoneNumberE164, string text, CancellationToken cancellationToken = default)
+    {
+        if (TryInjectFailure(toPhoneNumberE164, out var failure))
+            return Task.FromResult(failure);
+
+        var messageId = $"sim.{Guid.NewGuid():N}";
+
+        _logger.LogInformation("[Simulated WhatsApp] Sent {MessageId} (text) to {Phone}: {Text}", messageId, toPhoneNumberE164, text);
+
+        return Task.FromResult(WhatsAppSendResult.Succeeded(messageId));
+    }
+
+    private bool TryInjectFailure(string toPhoneNumberE164, out WhatsAppSendResult failure)
+    {
+        if (_settings.SimulatedFailureRatePercent > 0 && _random.Next(100) < _settings.SimulatedFailureRatePercent)
+        {
+            _logger.LogWarning("[Simulated WhatsApp] Send FAILED (injected) to {Phone}", toPhoneNumberE164);
+            failure = WhatsAppSendResult.Failed("Simulated transient failure");
+            return true;
+        }
+
+        failure = null!;
+        return false;
     }
 
     public Task<string> UploadMediaAsync(Stream content, string contentType, CancellationToken cancellationToken = default)

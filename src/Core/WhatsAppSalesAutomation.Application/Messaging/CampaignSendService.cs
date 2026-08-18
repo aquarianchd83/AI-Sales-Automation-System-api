@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -35,6 +36,7 @@ public class CampaignSendService : ICampaignSendService
     private readonly IApplicationDbContext _context;
     private readonly IWhatsAppService _whatsApp;
     private readonly IDateTimeProvider _dateTime;
+    private readonly IConversationService _conversations;
     private readonly MessagingOptions _options;
     private readonly ILogger<CampaignSendService> _logger;
 
@@ -42,17 +44,19 @@ public class CampaignSendService : ICampaignSendService
         IApplicationDbContext context,
         IWhatsAppService whatsApp,
         IDateTimeProvider dateTime,
+        IConversationService conversations,
         IOptions<MessagingOptions> options,
         ILogger<CampaignSendService> logger)
     {
         _context = context;
         _whatsApp = whatsApp;
         _dateTime = dateTime;
+        _conversations = conversations;
         _options = options.Value;
         _logger = logger;
     }
 
-    public async Task<SendRunResult> ProcessInitialSendsAsync(CancellationToken cancellationToken = default)
+    public async Task<SendRunResult> ProcessInitialSendsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default)
     {
         var now = _dateTime.UtcNow;
 
@@ -60,13 +64,16 @@ public class CampaignSendService : ICampaignSendService
         // comparison uses IstNow; StartedAt is a true system timestamp and stays UTC (now).
         var istNow = _dateTime.IstNow;
 
+        var dueToStartQuery = _context.Campaigns
+            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= istNow);
+        if (campaignId is { } scopeToStart)
+            dueToStartQuery = dueToStartQuery.Where(c => c.Id == scopeToStart);
+
         // Plain load-and-save rather than ExecuteUpdateAsync: that extension lives in
         // Microsoft.EntityFrameworkCore.Relational, which Application deliberately does not
         // reference (the SQL Server/relational provider stays in Infrastructure). The number of
         // Scheduled campaigns due at any one tick is small, so this costs nothing in practice.
-        var dueToStart = await _context.Campaigns
-            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= istNow)
-            .ToListAsync(cancellationToken);
+        var dueToStart = await dueToStartQuery.ToListAsync(cancellationToken);
 
         if (dueToStart.Count > 0)
         {
@@ -80,9 +87,13 @@ public class CampaignSendService : ICampaignSendService
             _logger.LogInformation("Promoted {Count} scheduled campaign(s) to Running", dueToStart.Count);
         }
 
+        var runningCampaigns = _context.Campaigns.Where(c => c.Status == CampaignStatus.Running);
+        if (campaignId is { } scopeToSend)
+            runningCampaigns = runningCampaigns.Where(c => c.Id == scopeToSend);
+
         var candidates = await _context.CampaignCustomers
             .Where(cc => cc.Status == CampaignCustomerStatus.Pending)
-            .Join(_context.Campaigns.Where(c => c.Status == CampaignStatus.Running), cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
+            .Join(runningCampaigns, cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
             .OrderBy(cc => cc.CreatedAt)
             .Take(_options.MaxSendsPerRun)
             .Select(cc => cc.Id)
@@ -95,13 +106,17 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
-    public async Task<SendRunResult> ProcessFollowUpsAsync(CancellationToken cancellationToken = default)
+    public async Task<SendRunResult> ProcessFollowUpsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default)
     {
         var now = _dateTime.UtcNow;
 
+        var runningCampaigns = _context.Campaigns.Where(c => c.Status == CampaignStatus.Running);
+        if (campaignId is { } scopeTo)
+            runningCampaigns = runningCampaigns.Where(c => c.Id == scopeTo);
+
         var due = await _context.CampaignCustomers
             .Where(cc => cc.Status == CampaignCustomerStatus.AwaitingResponse && cc.NextFollowUpDueAt != null && cc.NextFollowUpDueAt <= now)
-            .Join(_context.Campaigns.Where(c => c.Status == CampaignStatus.Running), cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
+            .Join(runningCampaigns, cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
             .OrderBy(cc => cc.NextFollowUpDueAt)
             .Take(_options.MaxSendsPerRun)
             .Select(cc => new { cc.Id, cc.CurrentStepNumber })
@@ -114,15 +129,26 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
-    public async Task<SendRunResult> RetryFailedSendsAsync(CancellationToken cancellationToken = default)
+    public async Task<SendRunResult> RetryFailedSendsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default)
     {
         var now = _dateTime.UtcNow;
         var staleBefore = now - StaleQueuedThreshold;
 
-        var messageIds = await _context.Messages
+        var query = _context.Messages
             .Where(m =>
                 (m.Status == MessageStatus.Failed && m.AttemptCount < _options.MaxRetryAttempts && (m.NextAttemptAt == null || m.NextAttemptAt <= now)) ||
-                (m.Status == MessageStatus.Queued && m.CreatedAt <= staleBefore))
+                (m.Status == MessageStatus.Queued && m.CreatedAt <= staleBefore));
+
+        if (campaignId is { } id)
+        {
+            // Message has no CampaignId of its own, only CampaignCustomerId (see the class remarks
+            // on why) - scoping to a campaign means going through CampaignCustomers instead of a
+            // direct column comparison.
+            var campaignCustomerIds = _context.CampaignCustomers.Where(cc => cc.CampaignId == id).Select(cc => cc.Id);
+            query = query.Where(m => m.CampaignCustomerId != null && campaignCustomerIds.Contains(m.CampaignCustomerId.Value));
+        }
+
+        var messageIds = await query
             .OrderBy(m => m.CreatedAt)
             .Take(_options.MaxSendsPerRun)
             .Select(m => m.Id)
@@ -213,9 +239,15 @@ public class CampaignSendService : ICampaignSendService
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
+        // Every message belongs to a conversation thread (Phase 4's Messages/Conversations
+        // unification), campaign-originated ones included - a customer's transcript is one thread
+        // regardless of whether a message came from a campaign or an inbound reply.
+        var conversationId = await _conversations.GetOrCreateActiveConversationIdAsync(customer.Id, cancellationToken);
+
         var message = new Message
         {
             CustomerId = customer.Id,
+            ConversationId = conversationId,
             CampaignCustomerId = cc.Id,
             CampaignStepNumber = step.StepNumber,
             Direction = MessageDirection.Outbound,
@@ -336,6 +368,13 @@ public class CampaignSendService : ICampaignSendService
             message.SentAt = now;
             message.FailureReason = null;
             message.NextAttemptAt = null;
+
+            if (message.ConversationId is { } conversationId)
+            {
+                var conversation = await _context.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+                if (conversation is not null)
+                    conversation.LastMessageAt = now;
+            }
 
             cc.CurrentStepNumber = step.StepNumber;
             cc.LastMessageSentAt = now;

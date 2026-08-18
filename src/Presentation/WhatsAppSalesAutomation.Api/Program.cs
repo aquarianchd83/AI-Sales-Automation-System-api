@@ -12,6 +12,7 @@ using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
+using WhatsAppSalesAutomation.Infrastructure.Realtime;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -62,6 +63,7 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
+    app.MapHub<ConversationHub>("/hubs/conversations");
 
     app.UseHangfireDashboard("/hangfire", new DashboardOptions
     {

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 
@@ -37,5 +38,12 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .WithMany()
             .HasForeignKey(m => m.CampaignCustomerId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Conversation>()
+            .WithMany()
+            .HasForeignKey(m => m.ConversationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(m => m.ConversationId);
     }
 }

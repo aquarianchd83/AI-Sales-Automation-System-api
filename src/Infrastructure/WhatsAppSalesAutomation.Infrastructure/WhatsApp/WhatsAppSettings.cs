@@ -14,4 +14,12 @@ public class WhatsAppSettings
 
     /// <summary>0-100. Lets the retry pipeline be exercised without needing a real Meta failure.</summary>
     public int SimulatedFailureRatePercent { get; set; } = 0;
+
+    /// <summary>Meta App Secret, used to verify the X-Hub-Signature-256 HMAC on every inbound webhook
+    /// POST before any of its content is trusted. Phase 4.</summary>
+    public string AppSecret { get; set; } = string.Empty;
+
+    /// <summary>The value configured in Meta's webhook setup - echoed back on the GET verification
+    /// handshake to prove this endpoint belongs to the same person who registered the webhook URL.</summary>
+    public string WebhookVerifyToken { get; set; } = string.Empty;
 }

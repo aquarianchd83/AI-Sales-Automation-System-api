@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -35,6 +37,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<CampaignCustomer> CampaignCustomers => Set<CampaignCustomer>();
 
     public DbSet<Message> Messages => Set<Message>();
+
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+
+    public DbSet<HumanHandoff> HumanHandoffs => Set<HumanHandoff>();
+
+    public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

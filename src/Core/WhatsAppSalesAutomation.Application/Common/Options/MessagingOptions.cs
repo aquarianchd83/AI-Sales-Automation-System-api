@@ -15,4 +15,12 @@ public class MessagingOptions
 
     /// <summary>Backoff schedule by attempt number (1-indexed); the last value repeats past its length.</summary>
     public int[] RetryBackoffMinutes { get; set; } = { 1, 5, 15, 60, 240 };
+
+    /// <summary>
+    /// WhatsApp's customer service window (Phase 4): free-form text replies are only allowed within
+    /// this many hours of the customer's last inbound message; an approved template is required
+    /// outside it. 24 is Meta's real rule - configurable only so it is not a hardcoded magic number
+    /// buried in ConversationService.
+    /// </summary>
+    public int CustomerServiceWindowHours { get; set; } = 24;
 }
