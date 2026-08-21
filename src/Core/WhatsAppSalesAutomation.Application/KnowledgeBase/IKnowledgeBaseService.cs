@@ -22,6 +22,11 @@ public interface IKnowledgeBaseService
     /// article to pick up an edited Content (re-chunks/re-embeds from the current Version).</summary>
     Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>Publishes several articles in one call - each one still runs PublishAsync's full
+    /// re-chunk/re-embed individually (this is not a bulk UPDATE), but a not-found or failed id is
+    /// reported rather than aborting the rest of the batch.</summary>
+    Task<BulkPublishArticlesResultDto> BulkPublishAsync(BulkPublishArticlesRequest request, Guid approvedByUserId, CancellationToken cancellationToken = default);
+
     /// <summary>Re-chunks and re-embeds every Published article whose chunks are stale (embedded from
     /// an older Version than the article's current one) - the bulk/scheduled counterpart to calling
     /// PublishAsync on one article by hand.</summary>

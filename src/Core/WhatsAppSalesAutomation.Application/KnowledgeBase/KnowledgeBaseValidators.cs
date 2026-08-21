@@ -25,3 +25,18 @@ public class UpdateKnowledgeBaseArticleRequestValidator : AbstractValidator<Upda
         RuleFor(x => x.Content).NotEmpty();
     }
 }
+
+public class BulkPublishArticlesRequestValidator : AbstractValidator<BulkPublishArticlesRequest>
+{
+    /// <summary>Lower than BulkDeleteCustomersRequestValidator's 500 - each id here does real
+    /// re-chunk/re-embed work (an external provider call per chunk), not a single UPDATE batch.</summary>
+    public const int MaxIds = 100;
+
+    public BulkPublishArticlesRequestValidator()
+    {
+        RuleFor(x => x.Ids)
+            .NotEmpty().WithMessage("At least one article id is required.")
+            .Must(ids => ids is null || ids.Count <= MaxIds)
+            .WithMessage($"A maximum of {MaxIds} articles can be published per request.");
+    }
+}

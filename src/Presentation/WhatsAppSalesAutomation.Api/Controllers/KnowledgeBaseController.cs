@@ -54,6 +54,16 @@ public class KnowledgeBaseController : ControllerBase
         return Ok(await _knowledgeBaseService.PublishAsync(id, approvedByUserId, cancellationToken));
     }
 
+    /// <summary>Publishes several articles at once - each still re-chunks/re-embeds individually, but
+    /// a not-found or failed id is reported rather than aborting the rest of the batch.</summary>
+    [HttpPost("articles/bulk-publish")]
+    public async Task<ActionResult<BulkPublishArticlesResultDto>> BulkPublish(
+        [FromBody] BulkPublishArticlesRequest request, CancellationToken cancellationToken)
+    {
+        var approvedByUserId = _currentUser.UserId ?? throw new InvalidOperationException("Authenticated request has no user id claim.");
+        return Ok(await _knowledgeBaseService.BulkPublishAsync(request, approvedByUserId, cancellationToken));
+    }
+
     [HttpPost("reindex")]
     public async Task<IActionResult> Reindex(CancellationToken cancellationToken)
     {

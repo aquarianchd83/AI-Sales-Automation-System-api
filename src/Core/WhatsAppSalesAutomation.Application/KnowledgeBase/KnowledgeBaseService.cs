@@ -26,6 +26,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     private readonly AiOptions _aiOptions;
     private readonly IValidator<CreateKnowledgeBaseArticleRequest> _createValidator;
     private readonly IValidator<UpdateKnowledgeBaseArticleRequest> _updateValidator;
+    private readonly IValidator<BulkPublishArticlesRequest> _bulkPublishValidator;
 
     public KnowledgeBaseService(
         IApplicationDbContext context,
@@ -33,7 +34,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         IEmbeddingService embeddings,
         IOptions<AiOptions> aiOptions,
         IValidator<CreateKnowledgeBaseArticleRequest> createValidator,
-        IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator)
+        IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
+        IValidator<BulkPublishArticlesRequest> bulkPublishValidator)
     {
         _context = context;
         _dateTime = dateTime;
@@ -41,6 +43,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         _aiOptions = aiOptions.Value;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
+        _bulkPublishValidator = bulkPublishValidator;
     }
 
     public async Task<PagedResult<KnowledgeBaseArticleDto>> GetPagedAsync(PagedRequest request, string? status = null, CancellationToken cancellationToken = default)
@@ -146,6 +149,43 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         await _context.SaveChangesAsync(cancellationToken);
 
         return await GetByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<BulkPublishArticlesResultDto> BulkPublishAsync(BulkPublishArticlesRequest request, Guid approvedByUserId, CancellationToken cancellationToken = default)
+    {
+        await _bulkPublishValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        // Distinct so a caller repeating an id cannot inflate RequestedCount past what was published.
+        var ids = request.Ids.Distinct().ToList();
+
+        // Sequential, not parallel: every iteration shares one IApplicationDbContext (EF Core's
+        // DbContext is not thread-safe), and each one calls out to IEmbeddingService per chunk - firing
+        // those concurrently would just as likely trip a provider's own rate limit as save any time.
+        var notFound = new List<Guid>();
+        var failed = new List<Guid>();
+        var publishedCount = 0;
+
+        foreach (var id in ids)
+        {
+            try
+            {
+                await PublishAsync(id, approvedByUserId, cancellationToken);
+                publishedCount++;
+            }
+            catch (NotFoundException)
+            {
+                notFound.Add(id);
+            }
+            catch (Exception)
+            {
+                // An embedding provider call failing partway through is a real, expected outcome here
+                // (network blip, rate limit) - reported like a not-found id rather than aborting
+                // whatever in the batch would otherwise have succeeded.
+                failed.Add(id);
+            }
+        }
+
+        return new BulkPublishArticlesResultDto(ids.Count, publishedCount, notFound, failed);
     }
 
     public async Task ReindexAsync(CancellationToken cancellationToken = default)
