@@ -1,5 +1,12 @@
 namespace WhatsAppSalesAutomation.Application.Conversations;
 
+/// <summary>
+/// <paramref name="AiConfidenceLast"/>/<paramref name="LastDetectedIntent"/>/
+/// <paramref name="LastLeadScore"/>/<paramref name="Summary"/> are Phase 5 (ConversationOrchestrator)
+/// fields - null until the AI has taken at least one turn on this conversation (e.g. Mode has stayed
+/// Human throughout, or it predates Phase 5). Not a substitute for the underlying AiInteraction rows,
+/// which this DTO does not expose - there is no endpoint for those yet.
+/// </summary>
 public record ConversationDto(
     Guid Id,
     Guid CustomerId,
@@ -11,7 +18,11 @@ public record ConversationDto(
     DateTime? LastMessageAt,
     DateTime? LastInboundMessageAt,
     DateTime CreatedAt,
-    DateTime? ClosedAt);
+    DateTime? ClosedAt,
+    double? AiConfidenceLast,
+    string? LastDetectedIntent,
+    string? LastLeadScore,
+    string? Summary);
 
 public record ConversationMessageDto(
     Guid Id,

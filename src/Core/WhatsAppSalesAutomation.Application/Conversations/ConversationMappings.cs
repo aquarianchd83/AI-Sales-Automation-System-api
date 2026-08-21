@@ -17,7 +17,11 @@ public static class ConversationMappings
         conversation.LastMessageAt,
         conversation.LastInboundMessageAt,
         conversation.CreatedAt,
-        conversation.ClosedAt);
+        conversation.ClosedAt,
+        conversation.AiConfidenceLast,
+        conversation.LastDetectedIntent,
+        conversation.LastLeadScore?.ToString(),
+        conversation.Summary);
 
     public static ConversationMessageDto ToDto(this Message message) => new(
         message.Id,

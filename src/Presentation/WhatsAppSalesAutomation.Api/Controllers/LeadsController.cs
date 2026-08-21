@@ -46,4 +46,11 @@ public class LeadsController : ControllerBase
         var createdByUserId = _currentUser.UserId ?? throw new InvalidOperationException("Authenticated request has no user id claim.");
         return Ok(await _leadService.AddActivityAsync(id, request, createdByUserId, cancellationToken));
     }
+
+    /// <summary>The timeline behind this lead's current Stage/Score/Budget/Interest/PurchaseTimeline -
+    /// newest first.</summary>
+    [HttpGet("{id:guid}/activities")]
+    public async Task<ActionResult<PagedResult<LeadActivityDto>>> GetActivities(
+        Guid id, [FromQuery] PagedRequest request, CancellationToken cancellationToken)
+        => Ok(await _leadService.GetActivitiesAsync(id, request, cancellationToken));
 }

@@ -149,6 +149,24 @@ public class LeadService : ILeadService
         return activity.ToDto();
     }
 
+    public async Task<PagedResult<LeadActivityDto>> GetActivitiesAsync(Guid id, PagedRequest request, CancellationToken cancellationToken = default)
+    {
+        var exists = await _context.Leads.AnyAsync(l => l.Id == id, cancellationToken);
+        if (!exists)
+            throw new NotFoundException(nameof(Lead), id);
+
+        var query = _context.LeadActivities.Where(a => a.LeadId == id);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var rows = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<LeadActivityDto>(rows.Select(a => a.ToDto()).ToList(), totalCount, request.Page, request.PageSize);
+    }
+
     public async Task<Guid> GetOrCreateActiveLeadIdAsync(Guid customerId, Guid? campaignId, CancellationToken cancellationToken = default)
     {
         var existingId = await _context.Leads

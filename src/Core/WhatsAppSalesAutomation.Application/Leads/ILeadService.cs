@@ -19,6 +19,12 @@ public interface ILeadService
 
     Task<LeadActivityDto> AddActivityAsync(Guid id, AddLeadActivityRequest request, Guid createdByUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>The timeline behind a lead's current Stage/Score/Budget/Interest/PurchaseTimeline -
+    /// every automatic (CreatedBy null) and manual change, newest first. Without this there was no way
+    /// to read back what AddActivityAsync/the AI-driven writes in ApplyAiExtractedAttributesAsync had
+    /// recorded.</summary>
+    Task<PagedResult<LeadActivityDto>> GetActivitiesAsync(Guid id, PagedRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>The customer's current non-terminal Lead (Stage not in Won/Lost), or a freshly created
     /// New-stage one if none exists - mirrors IConversationService.GetOrCreateActiveConversationIdAsync's
     /// "decide the active one in exactly one place" reasoning. Shared by CampaignSendService (a lead
