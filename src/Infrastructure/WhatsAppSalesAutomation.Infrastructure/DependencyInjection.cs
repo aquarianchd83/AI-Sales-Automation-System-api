@@ -120,6 +120,12 @@ public static class DependencyInjection
         services.Configure<WhatsAppSettings>(configuration.GetSection("WhatsApp"));
         var provider = configuration.GetSection("WhatsApp")["Provider"] ?? "Simulated";
 
+        // Registered regardless of provider - IWhatsAppTokenStore is a cheap no-op for Simulated (it
+        // only ever gets read from by MetaWhatsAppCloudApiClient), and WhatsAppTokenRefreshService
+        // itself is what checks Provider == "Meta" before ever calling out to Meta.
+        services.AddScoped<IWhatsAppTokenStore, WhatsAppTokenStore>();
+        services.AddHttpClient<IWhatsAppTokenRefreshService, WhatsAppTokenRefreshService>();
+
         if (string.Equals(provider, "Meta", StringComparison.OrdinalIgnoreCase))
             services.AddHttpClient<IWhatsAppService, MetaWhatsAppCloudApiClient>();
         else
@@ -192,5 +198,6 @@ public static class DependencyInjection
         services.AddScoped<FollowUpSchedulerJob>();
         services.AddScoped<MessageStatusRetryJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
+        services.AddScoped<WhatsAppTokenRefreshJob>();
     }
 }

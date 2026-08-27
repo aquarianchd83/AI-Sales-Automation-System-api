@@ -18,23 +18,35 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
 {
     private readonly HttpClient _httpClient;
     private readonly WhatsAppSettings _settings;
+    private readonly IWhatsAppTokenStore _tokenStore;
     private readonly ILogger<MetaWhatsAppCloudApiClient> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public MetaWhatsAppCloudApiClient(HttpClient httpClient, IOptions<WhatsAppSettings> settings, ILogger<MetaWhatsAppCloudApiClient> logger)
+    public MetaWhatsAppCloudApiClient(
+        HttpClient httpClient, IOptions<WhatsAppSettings> settings, IWhatsAppTokenStore tokenStore, ILogger<MetaWhatsAppCloudApiClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value;
+        _tokenStore = tokenStore;
         _logger = logger;
 
         var baseUrl = _settings.ApiBaseUrl.EndsWith('/') ? _settings.ApiBaseUrl : $"{_settings.ApiBaseUrl}/";
         _httpClient.BaseAddress = new Uri($"{baseUrl}{_settings.ApiVersion}/");
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.AccessToken);
+        // No Authorization header set here (unlike before WhatsAppTokenRefreshService existed) - the
+        // bearer token is fetched fresh from IWhatsAppTokenStore immediately before every call via
+        // ApplyCurrentTokenAsync, since WhatsAppTokenRefreshJob can replace it at any time while this
+        // client instance (one per DI scope) is alive.
         // Without an explicit timeout, a stuck DNS lookup or dead connection can hang far past
         // any reasonable wait (observed: 5+ minutes with no error) instead of failing fast into
         // the existing app-level retry/backoff (Messaging:MaxRetryAttempts / RetryBackoffMinutes).
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    private async Task ApplyCurrentTokenAsync(CancellationToken cancellationToken)
+    {
+        var current = await _tokenStore.GetCurrentAsync(cancellationToken);
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", current.AccessToken);
     }
 
     public async Task<WhatsAppSendResult> SendTemplateMessageAsync(
@@ -100,6 +112,7 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
     {
         try
         {
+            await ApplyCurrentTokenAsync(cancellationToken);
             using var response = await _httpClient.PostAsJsonAsync($"{_settings.PhoneNumberId}/messages", payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -143,6 +156,7 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         form.Add(streamContent, "file", "upload");
         form.Add(new StringContent("whatsapp"), "messaging_product");
 
+        await ApplyCurrentTokenAsync(cancellationToken);
         using var response = await _httpClient.PostAsync($"{_settings.PhoneNumberId}/media", form, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
