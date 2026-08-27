@@ -26,7 +26,7 @@ public class GoogleEmbeddingClient : IEmbeddingService
         _settings = settings.Value.Google;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
     }
 
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)

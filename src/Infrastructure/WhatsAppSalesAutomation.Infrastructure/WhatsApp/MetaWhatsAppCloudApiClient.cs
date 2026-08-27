@@ -28,8 +28,13 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         _settings = settings.Value;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri($"https://graph.facebook.com/{_settings.ApiVersion}/");
+        var baseUrl = _settings.ApiBaseUrl.EndsWith('/') ? _settings.ApiBaseUrl : $"{_settings.ApiBaseUrl}/";
+        _httpClient.BaseAddress = new Uri($"{baseUrl}{_settings.ApiVersion}/");
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.AccessToken);
+        // Without an explicit timeout, a stuck DNS lookup or dead connection can hang far past
+        // any reasonable wait (observed: 5+ minutes with no error) instead of failing fast into
+        // the existing app-level retry/backoff (Messaging:MaxRetryAttempts / RetryBackoffMinutes).
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
     public async Task<WhatsAppSendResult> SendTemplateMessageAsync(
@@ -112,7 +117,14 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
             var error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions);
             var errorMessage = error?.Error?.Message ?? $"Meta API returned {(int)response.StatusCode}.";
 
-            _logger.LogWarning("Meta send failed for {Phone}: {Error}", toPhoneNumberE164, errorMessage);
+            // The top-level message (e.g. "(#131005) Access denied") is often too generic to act on;
+            // subcode/details/fbtrace_id are what Meta support actually needs to diagnose it, and what
+            // usually names the real cause (e.g. recipient not in the test allow-list vs. a real
+            // permission problem) - log the full raw body rather than re-guessing from the summary.
+            _logger.LogWarning(
+                "Meta send failed for {Phone}: {Error} (code={Code}, subcode={Subcode}, details={Details}, fbtrace_id={FbtraceId}). Raw: {Body}",
+                toPhoneNumberE164, errorMessage, error?.Error?.Code, error?.Error?.ErrorSubcode,
+                error?.Error?.ErrorData?.Details, error?.Error?.FbtraceId, body);
             return WhatsAppSendResult.Failed(errorMessage);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -182,5 +194,28 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
     {
         [JsonPropertyName("message")]
         public string? Message { get; set; }
+
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
+
+        [JsonPropertyName("code")]
+        public int? Code { get; set; }
+
+        [JsonPropertyName("error_subcode")]
+        public int? ErrorSubcode { get; set; }
+
+        [JsonPropertyName("error_data")]
+        public MetaErrorData? ErrorData { get; set; }
+
+        [JsonPropertyName("fbtrace_id")]
+        public string? FbtraceId { get; set; }
+    }
+
+    /// <summary>Meta's top-level error message (e.g. "(#131005) Access denied") is often generic;
+    /// "details" here is what actually names the cause (e.g. recipient not in the allowed test list).</summary>
+    private class MetaErrorData
+    {
+        [JsonPropertyName("details")]
+        public string? Details { get; set; }
     }
 }

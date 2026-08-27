@@ -39,7 +39,11 @@ public static class TemplatePlaceholderResolver
     }
 
     /// <summary>Substitutes every token with the customer's value and returns the positional
-    /// parameter list in the same order, ready for <c>IWhatsAppService.SendTemplateMessageAsync</c>.</summary>
+    /// parameter list, ready for <c>IWhatsAppService.SendTemplateMessageAsync</c>. One parameter
+    /// per DISTINCT token (same rule as <see cref="ExtractTokens"/>) - WhatsApp's approved template
+    /// has one {{n}} per distinct variable, so a token reused later in the body (e.g. the same
+    /// {{FirstName}} appearing twice) must resolve to the same positional parameter, not a second
+    /// one, or Meta rejects the send with "(#132000) Number of parameters does not match".</summary>
     public static (string ResolvedText, IReadOnlyList<string> ParameterValues) Resolve(string bodyText, Customer customer)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -49,14 +53,19 @@ public static class TemplatePlaceholderResolver
             ["PhoneNumber"] = customer.PhoneNumberE164
         };
 
-        var parameterValues = new List<string>();
+        var tokenOrder = new List<string>();
         var resolvedText = TokenPattern.Replace(bodyText, match =>
         {
             var token = match.Groups[1].Value;
-            var value = values.TryGetValue(token, out var v) ? v : string.Empty;
-            parameterValues.Add(value);
-            return value;
+            if (!tokenOrder.Contains(token, StringComparer.OrdinalIgnoreCase))
+                tokenOrder.Add(token);
+
+            return values.TryGetValue(token, out var v) ? v : string.Empty;
         });
+
+        var parameterValues = tokenOrder
+            .Select(token => values.TryGetValue(token, out var v) ? v : string.Empty)
+            .ToList();
 
         return (resolvedText, parameterValues);
     }

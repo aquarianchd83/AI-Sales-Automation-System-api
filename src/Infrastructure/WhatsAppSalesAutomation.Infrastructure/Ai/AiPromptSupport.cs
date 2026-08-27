@@ -12,6 +12,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// </summary>
 internal static class AiPromptSupport
 {
+    /// <summary>Ensures a configured base URL ends with '/' before a relative path is appended to it -
+    /// a bare HttpClient.BaseAddress + relative-request-URI combination silently drops the last path
+    /// segment without this. Shared by every real client (WhatsApp's MetaWhatsAppCloudApiClient has its
+    /// own copy of this same one-liner, predating this shared helper).</summary>
+    public static string EnsureTrailingSlash(string baseUrl) => baseUrl.EndsWith('/') ? baseUrl : $"{baseUrl}/";
+
     public const string ToolName = "record_response";
 
     public const string ToolDescription =

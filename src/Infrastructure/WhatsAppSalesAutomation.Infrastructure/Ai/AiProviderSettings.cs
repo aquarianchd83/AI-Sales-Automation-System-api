@@ -47,6 +47,11 @@ public class AnthropicSettings
     public string Model { get; set; } = "claude-haiku-4-5-20251001";
 
     public string ApiVersion { get; set; } = "2023-06-01";
+
+    /// <summary>Not a secret (a public, well-known API domain) - configurable for the same reason as
+    /// WhatsAppSettings.ApiBaseUrl: a regional endpoint or a mock server for testing shouldn't need a
+    /// code change.</summary>
+    public string BaseUrl { get; set; } = "https://api.anthropic.com/v1/";
 }
 
 public class OpenAiSettings
@@ -58,6 +63,10 @@ public class OpenAiSettings
     public string ChatModel { get; set; } = "gpt-5-nano";
 
     public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+
+    /// <summary>See AnthropicSettings.BaseUrl's doc comment. Shared by both the chat and embeddings
+    /// clients, same as OpenAI's own API structure.</summary>
+    public string BaseUrl { get; set; } = "https://api.openai.com/v1/";
 }
 
 public class GoogleAiSettings
@@ -67,4 +76,7 @@ public class GoogleAiSettings
     public string ChatModel { get; set; } = "gemini-flash-lite-latest";
 
     public string EmbeddingModel { get; set; } = "text-embedding-004";
+
+    /// <summary>See AnthropicSettings.BaseUrl's doc comment.</summary>
+    public string BaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/";
 }

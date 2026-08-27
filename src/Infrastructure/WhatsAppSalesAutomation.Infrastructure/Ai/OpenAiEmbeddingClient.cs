@@ -28,7 +28,7 @@ public class OpenAiEmbeddingClient : IEmbeddingService
         _settings = settings.Value.OpenAI;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri("https://api.openai.com/v1/");
+        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.ApiKey);
     }
 

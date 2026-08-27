@@ -30,7 +30,7 @@ public class GoogleAiClient : IAiService
         _settings = settings.Value.Google;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
     }
 
     public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)

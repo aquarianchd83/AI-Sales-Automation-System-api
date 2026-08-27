@@ -30,7 +30,7 @@ public class AnthropicAiClient : IAiService
         _settings = settings.Value.Anthropic;
         _logger = logger;
 
-        _httpClient.BaseAddress = new Uri("https://api.anthropic.com/v1/");
+        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
         _httpClient.DefaultRequestHeaders.Add("x-api-key", _settings.ApiKey);
         _httpClient.DefaultRequestHeaders.Add("anthropic-version", _settings.ApiVersion);
     }

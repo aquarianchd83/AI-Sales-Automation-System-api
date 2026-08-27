@@ -12,6 +12,11 @@ public class WhatsAppSettings
 
     public string ApiVersion { get; set; } = "v19.0";
 
+    /// <summary>Base URL for the Cloud API, with or without a trailing slash - MetaWhatsAppCloudApiClient
+    /// normalizes it. Configurable rather than hardcoded so a Meta API domain change, a regional
+    /// endpoint, or (for testing) a mock server can be pointed at without a code change.</summary>
+    public string ApiBaseUrl { get; set; } = "https://graph.facebook.com/";
+
     /// <summary>0-100. Lets the retry pipeline be exercised without needing a real Meta failure.</summary>
     public int SimulatedFailureRatePercent { get; set; } = 0;
 
