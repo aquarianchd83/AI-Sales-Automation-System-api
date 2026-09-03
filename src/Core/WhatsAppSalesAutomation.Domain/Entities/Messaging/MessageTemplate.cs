@@ -28,4 +28,15 @@ public class MessageTemplate : BaseEntity
     public string BodyText { get; set; } = string.Empty;
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Meta's own template id, populated once MessageTemplateSyncJob has successfully
+    /// created this template on Meta's side. Null means "never pushed yet" - the create path, not
+    /// the update path, is used the first time this becomes non-null.</summary>
+    public string? MetaTemplateId { get; set; }
+
+    /// <summary>Snapshot of BodyText as of the last successful push to Meta - compared against the
+    /// current BodyText to decide whether an edit needs pushing again. Null (same as MetaTemplateId)
+    /// means never pushed; kept as its own field rather than inferred from WhatsAppTemplateStatus
+    /// since a locally-edited-then-reverted body should not force a pointless re-push.</summary>
+    public string? LastPushedBodyText { get; set; }
 }

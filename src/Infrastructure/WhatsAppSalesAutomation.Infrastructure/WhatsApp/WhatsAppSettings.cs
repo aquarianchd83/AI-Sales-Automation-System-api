@@ -8,6 +8,11 @@ public class WhatsAppSettings
 
     public string PhoneNumberId { get; set; } = string.Empty;
 
+    /// <summary>The WhatsApp Business Account (WABA) id - distinct from PhoneNumberId. Template
+    /// review/status lives at the WABA level (one WABA can own several phone numbers), so
+    /// MessageTemplateSyncJob's Meta call is keyed off this, not PhoneNumberId.</summary>
+    public string WhatsAppBusinessAccountId { get; set; } = string.Empty;
+
     public string AccessToken { get; set; } = string.Empty;
 
     public string ApiVersion { get; set; } = "v19.0";

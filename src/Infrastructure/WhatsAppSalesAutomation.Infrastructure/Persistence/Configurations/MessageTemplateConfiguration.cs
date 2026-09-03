@@ -17,6 +17,8 @@ public class MessageTemplateConfiguration : IEntityTypeConfiguration<MessageTemp
         builder.Property(t => t.BodyText).IsRequired().HasMaxLength(2000);
         builder.Property(t => t.Category).HasConversion<string>().HasMaxLength(20);
         builder.Property(t => t.WhatsAppTemplateStatus).HasConversion<string>().HasMaxLength(20);
+        builder.Property(t => t.MetaTemplateId).HasMaxLength(100);
+        builder.Property(t => t.LastPushedBodyText).HasMaxLength(2000);
 
         // Meta scopes template names by (name, language) - the same template name commonly exists
         // once per language, e.g. "welcome_offer" in both en and hi.

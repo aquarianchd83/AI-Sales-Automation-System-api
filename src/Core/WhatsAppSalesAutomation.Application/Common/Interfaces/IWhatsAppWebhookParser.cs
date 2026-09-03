@@ -31,8 +31,14 @@ public record InboundWhatsAppMessage(
     string MessageType,
     string? TextBody);
 
-/// <summary><paramref name="Status"/> is Meta's raw status string: "sent", "delivered", "read" or "failed".</summary>
+/// <summary>
+/// <paramref name="Status"/> is Meta's raw status string: "sent", "delivered", "read" or "failed".
+/// <paramref name="FailureReason"/> is only ever non-null when <paramref name="Status"/> is "failed" -
+/// Meta's human-readable explanation (its numeric error code prefixed, e.g. "[131047] Re-engagement
+/// message ...") for why the message could not be delivered.
+/// </summary>
 public record WhatsAppStatusUpdate(
     string WhatsAppMessageId,
     string Status,
-    DateTime Timestamp);
+    DateTime Timestamp,
+    string? FailureReason = null);

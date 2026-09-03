@@ -74,4 +74,36 @@ public class SimulatedWhatsAppClient : IWhatsAppService
         _logger.LogInformation("[Simulated WhatsApp] Uploaded media {MediaId} ({ContentType})", mediaId, contentType);
         return Task.FromResult(mediaId);
     }
+
+    /// <summary>Empty, not fabricated data - there is no simulated WhatsApp Business Account for a
+    /// template list to plausibly belong to (unlike sends, which just need *a* message id). A real
+    /// review status is a genuine external fact this client has no basis to invent; MessageTemplateSyncJob
+    /// harmlessly finds nothing to update, same as it would against a WABA with no templates yet.</summary>
+    public Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("[Simulated WhatsApp] GetMessageTemplatesAsync - no-op, returning an empty list.");
+        return Task.FromResult<IReadOnlyList<WhatsAppRemoteTemplate>>(Array.Empty<WhatsAppRemoteTemplate>());
+    }
+
+    /// <summary>Unlike GetMessageTemplatesAsync, fabricating a result here is the right call, not a
+    /// cop-out - the whole push half of MessageTemplateSyncJob (create, store MetaTemplateId, compare
+    /// against LastPushedBodyText next run) should be exercisable locally with no real WABA, same
+    /// reasoning as SendTemplateMessageAsync fabricating a message id.</summary>
+    public Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        var metaTemplateId = $"sim-template.{Guid.NewGuid():N}";
+        _logger.LogInformation(
+            "[Simulated WhatsApp] Created template {MetaTemplateId}: name={Name} lang={Language} category={Category} body={Body}",
+            metaTemplateId, submission.Name, submission.Language, submission.Category, submission.MetaBodyText);
+
+        return Task.FromResult(new WhatsAppTemplateSubmitResult(true, metaTemplateId, "PENDING", null));
+    }
+
+    public Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "[Simulated WhatsApp] Updated template {MetaTemplateId}: body={Body}", metaTemplateId, submission.MetaBodyText);
+
+        return Task.FromResult(new WhatsAppTemplateSubmitResult(true, metaTemplateId, "PENDING", null));
+    }
 }

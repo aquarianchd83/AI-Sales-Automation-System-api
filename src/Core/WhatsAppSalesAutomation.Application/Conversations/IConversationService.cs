@@ -9,6 +9,14 @@ public interface IConversationService
 
     Task<ConversationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The customer's current non-Closed conversation, creating one if none exists yet - the
+    /// customer-facing counterpart to <see cref="GetOrCreateActiveConversationIdAsync"/>, exposed so a
+    /// "message this customer" flow can resolve a conversation id (and thus its message history) before
+    /// a first message has ever been sent or received.
+    /// </summary>
+    Task<ConversationDto> GetOrCreateByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken = default);
+
     Task<PagedResult<ConversationMessageDto>> GetMessagesAsync(Guid conversationId, PagedRequest request, CancellationToken cancellationToken = default);
 
     Task<ConversationDto> ChangeModeAsync(Guid id, ChangeConversationModeRequest request, CancellationToken cancellationToken = default);

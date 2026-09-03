@@ -199,5 +199,6 @@ public static class DependencyInjection
         services.AddScoped<MessageStatusRetryJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
+        services.AddScoped<MessageTemplateSyncJob>();
     }
 }

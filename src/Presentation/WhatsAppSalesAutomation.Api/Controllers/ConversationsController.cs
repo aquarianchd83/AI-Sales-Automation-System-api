@@ -29,6 +29,13 @@ public class ConversationsController : ControllerBase
     public async Task<ActionResult<ConversationDto>> GetById(Guid id, CancellationToken cancellationToken)
         => Ok(await _conversationService.GetByIdAsync(id, cancellationToken));
 
+    /// <summary>Resolves (creating if needed) the customer's active conversation, so a "message this
+    /// customer" flow can look up history and send even before any message has ever been exchanged
+    /// with them - see IConversationService.GetOrCreateByCustomerIdAsync.</summary>
+    [HttpGet("by-customer/{customerId:guid}")]
+    public async Task<ActionResult<ConversationDto>> GetOrCreateByCustomerId(Guid customerId, CancellationToken cancellationToken)
+        => Ok(await _conversationService.GetOrCreateByCustomerIdAsync(customerId, cancellationToken));
+
     /// <summary>The transcript - both directions, campaign-originated and agent-originated alike.</summary>
     [HttpGet("{id:guid}/messages")]
     public async Task<ActionResult<PagedResult<ConversationMessageDto>>> GetMessages(

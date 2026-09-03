@@ -170,6 +170,154 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         return result?.Id ?? throw new InvalidOperationException("Meta returned success but no media id.");
     }
 
+    public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.WhatsAppBusinessAccountId))
+        {
+            _logger.LogWarning("WhatsApp template sync skipped: WhatsAppBusinessAccountId is not configured.");
+            return Array.Empty<WhatsAppRemoteTemplate>();
+        }
+
+        var results = new List<WhatsAppRemoteTemplate>();
+
+        await ApplyCurrentTokenAsync(cancellationToken);
+
+        // Meta paginates at 100/page by default for this endpoint; following paging.next until it's
+        // absent is the documented way to get the full list rather than assuming one page is everything -
+        // a WABA with more templates than that would otherwise silently look fully synced when it isn't.
+        string? nextUrl = $"{_settings.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category&limit=100";
+
+        while (nextUrl is not null)
+        {
+            // nextUrl becomes an absolute Meta URL from the second page onward (paging.next is a full
+            // URL, not a relative path) - GetAsync accepts either against a client with BaseAddress set.
+            using var response = await _httpClient.GetAsync(nextUrl, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions);
+                _logger.LogWarning(
+                    "Meta template list fetch failed: {Error} (code={Code}, fbtrace_id={FbtraceId}). Raw: {Body}",
+                    error?.Error?.Message, error?.Error?.Code, error?.Error?.FbtraceId, body);
+                break;
+            }
+
+            var parsed = JsonSerializer.Deserialize<MetaTemplateListResponse>(body, JsonOptions);
+            if (parsed?.Data is not null)
+            {
+                results.AddRange(parsed.Data
+                    .Where(t => t.Id is not null && t.Name is not null && t.Language is not null && t.Status is not null && t.Category is not null)
+                    .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!)));
+            }
+
+            nextUrl = parsed?.Paging?.Next;
+        }
+
+        return results;
+    }
+
+    public async Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.WhatsAppBusinessAccountId))
+            return new WhatsAppTemplateSubmitResult(false, null, null, "WhatsAppBusinessAccountId is not configured.");
+
+        var payload = new
+        {
+            name = submission.Name,
+            language = submission.Language,
+            category = submission.Category.ToUpperInvariant(),
+            components = BuildTemplateComponents(submission)
+        };
+
+        try
+        {
+            await ApplyCurrentTokenAsync(cancellationToken);
+            using var response = await _httpClient.PostAsJsonAsync($"{_settings.WhatsAppBusinessAccountId}/message_templates", payload, JsonOptions, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                return FailedTemplateSubmit(submission.Name, "create", body);
+
+            var created = JsonSerializer.Deserialize<MetaTemplateSubmitResponse>(body, JsonOptions);
+            if (string.IsNullOrEmpty(created?.Id))
+                return new WhatsAppTemplateSubmitResult(false, null, null, "Meta returned success but no template id.");
+
+            return new WhatsAppTemplateSubmitResult(true, created.Id, created.Status, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Meta template create threw for {Name}", submission.Name);
+            return new WhatsAppTemplateSubmitResult(false, null, null, $"Request to WhatsApp API failed: {ex.Message}");
+        }
+    }
+
+    public async Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        var payload = new { components = BuildTemplateComponents(submission) };
+
+        try
+        {
+            await ApplyCurrentTokenAsync(cancellationToken);
+            using var response = await _httpClient.PostAsJsonAsync(metaTemplateId, payload, JsonOptions, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                return FailedTemplateSubmit(submission.Name, "update", body);
+
+            // The edit endpoint's own response does not reliably include a fresh status the way create
+            // does - MessageTemplateSyncJob's existing pull half (GetMessageTemplatesAsync) is what
+            // picks up the real post-edit status on its next run, so null here is honest, not a gap.
+            return new WhatsAppTemplateSubmitResult(true, metaTemplateId, null, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Meta template update threw for {MetaTemplateId}", metaTemplateId);
+            return new WhatsAppTemplateSubmitResult(false, metaTemplateId, null, $"Request to WhatsApp API failed: {ex.Message}");
+        }
+    }
+
+    private WhatsAppTemplateSubmitResult FailedTemplateSubmit(string name, string action, string rawBody)
+    {
+        var error = JsonSerializer.Deserialize<MetaErrorResponse>(rawBody, JsonOptions);
+        var errorMessage = error?.Error?.Message ?? "Meta API returned an error.";
+
+        _logger.LogWarning(
+            "Meta template {Action} failed for {Name}: {Error} (code={Code}, subcode={Subcode}, details={Details}, fbtrace_id={FbtraceId}). Raw: {Body}",
+            action, name, errorMessage, error?.Error?.Code, error?.Error?.ErrorSubcode,
+            error?.Error?.ErrorData?.Details, error?.Error?.FbtraceId, rawBody);
+
+        return new WhatsAppTemplateSubmitResult(false, null, null, errorMessage);
+    }
+
+    /// <summary>Meta requires an "example" for every numbered placeholder in a BODY component - see
+    /// TemplatePlaceholderResolver.ToMetaTemplateBody's own doc comment for where ExampleValues comes
+    /// from. Built as a plain Dictionary rather than an anonymous type since the "example" key is
+    /// only added conditionally (a template with no placeholders has nothing to give an example for,
+    /// and Meta rejects an empty body_text example array as readily as a missing one).</summary>
+    private static object[] BuildTemplateComponents(WhatsAppTemplateSubmission submission)
+    {
+        var component = new Dictionary<string, object?>
+        {
+            ["type"] = "BODY",
+            ["text"] = submission.MetaBodyText
+        };
+
+        if (submission.ExampleValues.Count > 0)
+            component["example"] = new { body_text = new[] { submission.ExampleValues.ToArray() } };
+
+        return new object[] { component };
+    }
+
+    private class MetaTemplateSubmitResponse
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("status")]
+        public string? Status { get; set; }
+    }
+
     /// <summary>Meta's template header requires the media kind up front; there is no generic "file"
     /// header type, so this infers image vs. video from the extension. Good enough for the two
     /// content types the Media Library actually accepts (see MediaOptions.AllowedContentTypes) -
@@ -190,6 +338,39 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
     {
         [JsonPropertyName("id")]
         public string? Id { get; set; }
+    }
+
+    private class MetaTemplateListResponse
+    {
+        [JsonPropertyName("data")]
+        public List<MetaTemplateItem>? Data { get; set; }
+
+        [JsonPropertyName("paging")]
+        public MetaPaging? Paging { get; set; }
+    }
+
+    private class MetaTemplateItem
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("language")]
+        public string? Language { get; set; }
+
+        [JsonPropertyName("status")]
+        public string? Status { get; set; }
+
+        [JsonPropertyName("category")]
+        public string? Category { get; set; }
+    }
+
+    private class MetaPaging
+    {
+        [JsonPropertyName("next")]
+        public string? Next { get; set; }
     }
 
     private class MetaMediaUploadResponse

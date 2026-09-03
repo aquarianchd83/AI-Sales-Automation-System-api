@@ -69,4 +69,41 @@ public static class TemplatePlaceholderResolver
 
         return (resolvedText, parameterValues);
     }
+
+    /// <summary>Fixture values for each KnownTokens entry, used only as the "example" Meta's template
+    /// creation/edit API mandates for every numbered placeholder (real customer data is never involved
+    /// in registering a template - only in sending one, via Resolve above).</summary>
+    private static readonly IReadOnlyDictionary<string, string> ExampleValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["FirstName"] = "John",
+        ["LastName"] = "Doe",
+        ["PhoneNumber"] = "+15551234567"
+    };
+
+    /// <summary>
+    /// Converts our named-placeholder body ("Hi {{FirstName}}...") into Meta's own positional syntax
+    /// ("Hi {{1}}...") plus the example values Meta requires for each position when creating or
+    /// editing a template - the same first-occurrence token order ExtractTokens/Resolve already use,
+    /// so the position assigned here is exactly what Resolve's ParameterValues will fill at send time.
+    /// </summary>
+    public static (string MetaBodyText, IReadOnlyList<string> ExampleValues) ToMetaTemplateBody(string bodyText)
+    {
+        var tokenOrder = ExtractTokens(bodyText);
+
+        // A distinct token gets ONE position, reused for every occurrence - a repeated {{FirstName}}
+        // must map to the same {{1}} both times, not a fresh number per regex match, or Resolve's
+        // "one parameter per distinct token" contract (see its own doc comment) would no longer match
+        // what was actually registered with Meta.
+        var positionByToken = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < tokenOrder.Count; i++)
+            positionByToken[tokenOrder[i]] = i + 1;
+
+        var metaBodyText = TokenPattern.Replace(bodyText, match => $"{{{{{positionByToken[match.Groups[1].Value]}}}}}");
+
+        var examples = tokenOrder
+            .Select(token => ExampleValues.TryGetValue(token, out var v) ? v : "value")
+            .ToList();
+
+        return (metaBodyText, examples);
+    }
 }

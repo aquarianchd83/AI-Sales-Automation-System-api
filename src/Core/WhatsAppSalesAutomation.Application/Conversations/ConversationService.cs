@@ -138,6 +138,16 @@ public class ConversationService : IConversationService
         return await GetByIdAsync(id, cancellationToken);
     }
 
+    public async Task<ConversationDto> GetOrCreateByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken = default)
+    {
+        var customerExists = await _context.Customers.AnyAsync(c => c.Id == customerId, cancellationToken);
+        if (!customerExists)
+            throw new NotFoundException(nameof(Customer), customerId);
+
+        var conversationId = await GetOrCreateActiveConversationIdAsync(customerId, cancellationToken);
+        return await GetByIdAsync(conversationId, cancellationToken);
+    }
+
     public async Task<Guid> GetOrCreateActiveConversationIdAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         var existingId = await _context.Conversations

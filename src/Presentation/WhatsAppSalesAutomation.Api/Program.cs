@@ -1,5 +1,6 @@
 using Hangfire;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -46,6 +47,17 @@ try
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
     app.UseSerilogRequestLogging();
+
+    // Must run before UseHttpsRedirection: a TLS-terminating tunnel (ngrok, or any reverse proxy)
+    // forwards plain HTTP to Kestrel on localhost, so without this the app sees an "insecure"
+    // request and 307s to its own local HTTPS port (e.g. https://<public-host>:7080/...) - a port
+    // nothing external forwards to, so Meta's webhook call just dead-ends. The immediate proxy here
+    // is the ngrok agent connecting over loopback, which is within ForwardedHeadersMiddleware's
+    // default trusted-proxy range, so no KnownProxies/KnownNetworks override is needed.
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    });
     app.UseHttpsRedirection();
 
     // Serves uploaded campaign media under MediaStorage:PublicBasePath. Local disk only, per

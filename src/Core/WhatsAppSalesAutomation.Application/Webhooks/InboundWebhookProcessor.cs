@@ -20,6 +20,12 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         "stop", "unsubscribe", "unsub", "cancel", "opt out", "optout", "quit"
     };
 
+    /// <summary>How many times a status update referencing an unknown message is retried (see
+    /// ApplyStatusUpdateAsync/ProcessAsync) before giving up. The race this covers - our own send
+    /// finishing its SaveChangesAsync a beat after Meta's webhook for it arrives - normally resolves
+    /// within seconds; InboundWebhookProcessingJob owns the actual delay between attempts.</summary>
+    private const int MaxAttempts = 6;
+
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
     private readonly IWhatsAppWebhookParser _parser;
@@ -62,13 +68,13 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         return webhookEvent.Id;
     }
 
-    public async Task ProcessAsync(Guid webhookEventId, CancellationToken cancellationToken = default)
+    public async Task<WebhookProcessOutcome> ProcessAsync(Guid webhookEventId, int attempt = 1, CancellationToken cancellationToken = default)
     {
         var webhookEvent = await _context.WebhookEvents.FirstOrDefaultAsync(w => w.Id == webhookEventId, cancellationToken);
         if (webhookEvent is null)
         {
             _logger.LogWarning("WebhookEvent {Id} not found when processing was attempted", webhookEventId);
-            return;
+            return WebhookProcessOutcome.Completed;
         }
 
         // Any failure here - malformed payload, an unexpected data shape - is caught and recorded on
@@ -79,16 +85,49 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         {
             var parsed = _parser.Parse(webhookEvent.RawPayload);
             var processedAnything = false;
+            var anyMessageNotFound = false;
 
             foreach (var status in parsed.Statuses)
-                processedAnything |= await ApplyStatusUpdateAsync(status, cancellationToken);
+            {
+                var outcome = await ApplyStatusUpdateAsync(status, cancellationToken);
+                processedAnything |= outcome == StatusApplyOutcome.Applied;
+                anyMessageNotFound |= outcome == StatusApplyOutcome.MessageNotFound;
+            }
 
             foreach (var message in parsed.Messages)
                 processedAnything |= await ProcessInboundMessageAsync(message, cancellationToken);
 
             webhookEvent.WhatsAppMessageId ??= parsed.Messages.FirstOrDefault()?.WhatsAppMessageId
                 ?? parsed.Statuses.FirstOrDefault()?.WhatsAppMessageId;
-            webhookEvent.ProcessingStatus = processedAnything ? WebhookProcessingStatus.Processed : WebhookProcessingStatus.Duplicate;
+
+            // A status update whose message isn't found yet is very likely a race with our own send
+            // still committing its WhatsAppMessageId (see CampaignSendService/ConversationService),
+            // not a real problem with the event - reprocessing the whole event later is safe (every
+            // effect here is idempotent) and normally resolves it within seconds. Without this, such
+            // an update was previously indistinguishable from a genuine duplicate and silently
+            // dropped forever - the exact bug being fixed here.
+            if (anyMessageNotFound && attempt < MaxAttempts)
+            {
+                webhookEvent.ProcessingStatus = WebhookProcessingStatus.PendingRetry;
+                await _context.SaveChangesAsync(cancellationToken);
+                return WebhookProcessOutcome.RetryNeeded;
+            }
+
+            if (anyMessageNotFound)
+            {
+                // Retries exhausted - the referenced message will very likely never exist (e.g. it
+                // predates this system). Record it as a real, inspectable terminal outcome rather than
+                // the misleading "Duplicate" a plain processedAnything=false would otherwise produce.
+                _logger.LogWarning(
+                    "WebhookEvent {Id} still references an unknown message after {Attempts} attempts - giving up",
+                    webhookEventId, attempt);
+                webhookEvent.ProcessingStatus = processedAnything ? WebhookProcessingStatus.Processed : WebhookProcessingStatus.Failed;
+                webhookEvent.ProcessingError = $"One or more status updates referenced a message this system never recorded, after {attempt} attempts.";
+            }
+            else
+            {
+                webhookEvent.ProcessingStatus = processedAnything ? WebhookProcessingStatus.Processed : WebhookProcessingStatus.Duplicate;
+            }
         }
         catch (Exception ex)
         {
@@ -99,15 +138,20 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
 
         webhookEvent.ProcessedAt = _dateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
+        return WebhookProcessOutcome.Completed;
     }
 
-    /// <summary>Returns false for a status referring to a message we have no record of (nothing to
-    /// update) or one that would move the message backwards (a stale/out-of-order delivery).</summary>
-    private async Task<bool> ApplyStatusUpdateAsync(WhatsAppStatusUpdate status, CancellationToken cancellationToken)
+    /// <summary>MessageNotFound signals a retry-worthy condition to ProcessAsync (see MaxAttempts)
+    /// rather than a permanent no-op - almost always the race described there. NoChange covers a
+    /// genuine duplicate delivery, or an out-of-order/stale status that would move the message
+    /// backwards (see CanAdvanceTo) - neither is worth retrying.</summary>
+    private enum StatusApplyOutcome { Applied, NoChange, MessageNotFound }
+
+    private async Task<StatusApplyOutcome> ApplyStatusUpdateAsync(WhatsAppStatusUpdate status, CancellationToken cancellationToken)
     {
         var message = await _context.Messages.FirstOrDefaultAsync(m => m.WhatsAppMessageId == status.WhatsAppMessageId, cancellationToken);
         if (message is null)
-            return false;
+            return StatusApplyOutcome.MessageNotFound;
 
         var newStatus = status.Status.ToLowerInvariant() switch
         {
@@ -119,15 +163,22 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         };
 
         if (newStatus is null || !CanAdvanceTo(message.Status, newStatus.Value))
-            return false;
+            return StatusApplyOutcome.NoChange;
 
         message.Status = newStatus.Value;
         if (newStatus == MessageStatus.Delivered)
             message.DeliveredAt ??= status.Timestamp;
         if (newStatus == MessageStatus.Read)
             message.ReadAt ??= status.Timestamp;
+        if (newStatus == MessageStatus.Failed)
+            // Meta's own explanation for the rejection (template/policy/window violation, invalid
+            // recipient, etc.) - this field used to only ever be populated on a *synchronous* send
+            // failure (see CampaignSendService/ConversationService), so a webhook-driven rejection
+            // looked identical to a message that simply never advanced. Falls back to any reason
+            // already on the row rather than clobbering it with null if Meta ever omits errors.
+            message.FailureReason = status.FailureReason ?? message.FailureReason;
 
-        return true;
+        return StatusApplyOutcome.Applied;
     }
 
     /// <summary>

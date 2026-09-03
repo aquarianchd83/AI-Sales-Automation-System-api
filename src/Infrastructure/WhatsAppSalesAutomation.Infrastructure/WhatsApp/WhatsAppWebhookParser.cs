@@ -72,7 +72,7 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
                     if (s.Id is null || s.Status is null)
                         continue;
 
-                    statuses.Add(new WhatsAppStatusUpdate(s.Id, s.Status, ParseUnixTimestamp(s.Timestamp)));
+                    statuses.Add(new WhatsAppStatusUpdate(s.Id, s.Status, ParseUnixTimestamp(s.Timestamp), BuildFailureReason(s.Errors)));
                 }
             }
         }
@@ -86,6 +86,20 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
         long.TryParse(timestamp, out var seconds)
             ? DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime
             : DateTime.UtcNow;
+
+    /// <summary>Meta reports why a message failed via this array - present only on a "failed" status,
+    /// e.g. code 131047 "Re-engagement message" for a template sent outside the 24-hour customer
+    /// service window, or 470 for a paused template. error_data.details is the specific human-readable
+    /// explanation when present; message/title are the generic fallbacks Meta always includes.</summary>
+    private static string? BuildFailureReason(List<MetaStatusError>? errors)
+    {
+        var first = errors?.FirstOrDefault();
+        if (first is null)
+            return null;
+
+        var detail = first.ErrorData?.Details ?? first.Message ?? first.Title ?? "Unknown error";
+        return first.Code is { } code ? $"[{code}] {detail}" : detail;
+    }
 
     private class MetaWebhookPayload
     {
@@ -166,5 +180,29 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
         [JsonPropertyName("timestamp")]
         public string? Timestamp { get; set; }
+
+        [JsonPropertyName("errors")]
+        public List<MetaStatusError>? Errors { get; set; }
+    }
+
+    private class MetaStatusError
+    {
+        [JsonPropertyName("code")]
+        public int? Code { get; set; }
+
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
+
+        [JsonPropertyName("error_data")]
+        public MetaErrorData? ErrorData { get; set; }
+    }
+
+    private class MetaErrorData
+    {
+        [JsonPropertyName("details")]
+        public string? Details { get; set; }
     }
 }
