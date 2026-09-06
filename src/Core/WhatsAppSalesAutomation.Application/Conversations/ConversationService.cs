@@ -105,6 +105,16 @@ public class ConversationService : IConversationService
         return new PagedResult<ConversationMessageDto>(rows.Select(m => m.ToDto()).ToList(), totalCount, request.Page, request.PageSize);
     }
 
+    public async Task<PagedResult<ConversationMessageDto>> GetMessagesByCustomerIdAsync(Guid customerId, PagedRequest request, CancellationToken cancellationToken = default)
+    {
+        var customerExists = await _context.Customers.AnyAsync(c => c.Id == customerId, cancellationToken);
+        if (!customerExists)
+            throw new NotFoundException(nameof(Customer), customerId);
+
+        var conversationId = await GetOrCreateActiveConversationIdAsync(customerId, cancellationToken);
+        return await GetMessagesAsync(conversationId, request, cancellationToken);
+    }
+
     public async Task<ConversationDto> ChangeModeAsync(Guid id, ChangeConversationModeRequest request, CancellationToken cancellationToken = default)
     {
         await _modeValidator.ValidateAndThrowAsync(request, cancellationToken);

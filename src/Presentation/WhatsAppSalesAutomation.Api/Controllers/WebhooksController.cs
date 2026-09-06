@@ -62,6 +62,7 @@ public class WebhooksController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Receive(CancellationToken cancellationToken)
     {
+        _logger.LogWarning("Whatsapp webhook called");
         using var reader = new StreamReader(Request.Body, Encoding.UTF8);
         var rawBody = await reader.ReadToEndAsync(cancellationToken);
 
