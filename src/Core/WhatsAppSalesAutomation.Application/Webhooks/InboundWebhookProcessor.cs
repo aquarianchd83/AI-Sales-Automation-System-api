@@ -178,6 +178,12 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             // already on the row rather than clobbering it with null if Meta ever omits errors.
             message.FailureReason = status.FailureReason ?? message.FailureReason;
 
+        // Best-effort: every message is expected to carry a ConversationId (see the class remarks in
+        // CampaignSendService/ConversationService), but this is a live-UI nicety, not the source of
+        // truth - the row itself has already been updated above regardless of whether this fires.
+        if (message.ConversationId is { } conversationId)
+            await _notifications.NotifyMessageStatusUpdatedAsync(conversationId, message.Id, newStatus.Value.ToString(), cancellationToken);
+
         return StatusApplyOutcome.Applied;
     }
 

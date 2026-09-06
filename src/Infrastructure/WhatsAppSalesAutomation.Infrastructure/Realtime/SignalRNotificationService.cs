@@ -22,4 +22,7 @@ public class SignalRNotificationService : INotificationService
 
     public Task NotifyNewHandoffAsync(Guid handoffId, Guid conversationId, string triggerReason, CancellationToken cancellationToken = default) =>
         _hubContext.Clients.All.SendAsync("NewHandoff", new { handoffId, conversationId, triggerReason }, cancellationToken);
+
+    public Task NotifyMessageStatusUpdatedAsync(Guid conversationId, Guid messageId, string status, CancellationToken cancellationToken = default) =>
+        _hubContext.Clients.All.SendAsync("MessageStatusUpdated", new { conversationId, messageId, status }, cancellationToken);
 }
