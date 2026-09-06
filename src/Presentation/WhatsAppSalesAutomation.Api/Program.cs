@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using Serilog.Enrichers.CallerInfo;
 using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Api.Middleware;
 using WhatsAppSalesAutomation.Application;
@@ -18,6 +19,7 @@ using WhatsAppSalesAutomation.Infrastructure.Realtime;
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .Enrich.FromLogContext()
+    .Enrich.WithCallerInfo(includeFileInfo: false, assemblyPrefix: "WhatsAppSalesAutomation.")
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
@@ -25,10 +27,25 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
+    builder.Host.UseSerilog((context, services, configuration) =>
+    {
+        configuration
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext();
+
+        // "LogViewer:EnableModuleLogging" (default on) - stamps every event with the calling
+        // class/method (Namespace/Method properties, consumed by the {Namespace}/{Method}
+        // placeholders in the Serilog:WriteTo output templates below), which is what LogsController's
+        // module/method filters and GET .../logs/modules read back. It works by walking the stack
+        // trace on every single log call, so this is the off switch for that overhead if it's ever
+        // suspected under load - flip to false and restart to fall back to plain, un-attributed lines.
+        // The assemblyPrefix keeps the walk from wasting time attributing framework-internal events
+        // (ASP.NET Core, EF Core, Hangfire) to a frame that was never actually ours; those just get an
+        // empty Namespace/Method, which LogService already treats as "unknown".
+        if (context.Configuration.GetValue("LogViewer:EnableModuleLogging", true))
+            configuration.Enrich.WithCallerInfo(includeFileInfo: false, assemblyPrefix: "WhatsAppSalesAutomation.");
+    });
 
     builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
@@ -39,11 +56,11 @@ try
 
     var app = builder.Build();
 
-    if (app.Environment.IsDevelopment())
-    {
+   // if (app.Environment.IsDevelopment())
+   // {
         app.UseSwagger();
         app.UseSwaggerUI();
-    }
+   // }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
     app.UseSerilogRequestLogging();

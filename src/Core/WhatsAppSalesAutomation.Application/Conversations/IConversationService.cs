@@ -19,6 +19,13 @@ public interface IConversationService
 
     Task<PagedResult<ConversationMessageDto>> GetMessagesAsync(Guid conversationId, PagedRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The message history log for one customer directly - resolves (creating if needed) their active
+    /// conversation and returns its transcript in one call, so a "message this customer" screen does not
+    /// need a separate round trip through <see cref="GetOrCreateByCustomerIdAsync"/> just to get an id.
+    /// </summary>
+    Task<PagedResult<ConversationMessageDto>> GetMessagesByCustomerIdAsync(Guid customerId, PagedRequest request, CancellationToken cancellationToken = default);
+
     Task<ConversationDto> ChangeModeAsync(Guid id, ChangeConversationModeRequest request, CancellationToken cancellationToken = default);
 
     Task<ConversationDto> AssignAsync(Guid id, AssignConversationRequest request, CancellationToken cancellationToken = default);

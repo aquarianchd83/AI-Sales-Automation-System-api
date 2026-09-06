@@ -12,6 +12,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
+using WhatsAppSalesAutomation.Infrastructure.Logging;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
 using WhatsAppSalesAutomation.Infrastructure.Realtime;
@@ -98,6 +99,9 @@ public static class DependencyInjection
 
         services.Configure<LocalMediaStorageSettings>(configuration.GetSection("MediaStorage"));
         services.AddScoped<IMediaStorageService, LocalFileMediaStorageService>();
+
+        services.Configure<LocalLogFileReaderSettings>(configuration.GetSection("LogViewer"));
+        services.AddScoped<ILogFileReaderService, LocalLogFileReaderService>();
 
         services.AddScoped<IWhatsAppWebhookParser, WhatsAppWebhookParser>();
         services.AddScoped<IWebhookSignatureValidator, WebhookSignatureValidator>();

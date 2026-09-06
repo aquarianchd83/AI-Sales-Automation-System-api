@@ -10,6 +10,7 @@ using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
+using WhatsAppSalesAutomation.Application.LogViewer;
 using WhatsAppSalesAutomation.Application.Media;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
@@ -45,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
+        services.AddScoped<ILogService, LogService>();
 
         return services;
     }
