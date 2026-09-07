@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907115209_AddKnowledgeBaseChunkEmbeddingProvider")]
+    partial class AddKnowledgeBaseChunkEmbeddingProvider
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -888,43 +891,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("KnowledgeBaseChunks", (string)null);
                 });
 
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunkEmbedding", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ChunkId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Embedding")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChunkId", "Provider")
-                        .IsUnique();
-
-                    b.ToTable("KnowledgeBaseChunkEmbeddings", (string)null);
-                });
-
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.Lead", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1501,15 +1467,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasOne("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseArticle", null)
                         .WithMany("Chunks")
                         .HasForeignKey("ArticleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunkEmbedding", b =>
-                {
-                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunk", null)
-                        .WithMany()
-                        .HasForeignKey("ChunkId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

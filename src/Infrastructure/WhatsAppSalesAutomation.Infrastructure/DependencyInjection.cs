@@ -144,6 +144,7 @@ public static class DependencyInjection
     private static void AddAiClients(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AiProviderSettings>(configuration.GetSection("AiProviders"));
+        services.AddScoped<IActiveAiProviderAccessor, ActiveAiProviderAccessor>();
         var section = configuration.GetSection("AiProviders");
         var provider = section["Provider"] ?? "Simulated";
         var embeddingProvider = section["EmbeddingProvider"] ?? "Simulated";
@@ -176,6 +177,19 @@ public static class DependencyInjection
                 services.AddScoped<IEmbeddingService, SimulatedEmbeddingClient>();
                 break;
         }
+
+        // Separate concrete-type registrations (not interface-bound, so they don't collide with the
+        // single "active" IEmbeddingService switch above) so IEmbeddingProviderCatalog can hold all
+        // three simultaneously - see its own doc comment for why KnowledgeBaseService needs that.
+        services.AddScoped<SimulatedEmbeddingClient>();
+        services.AddHttpClient<OpenAiEmbeddingClient>();
+        services.AddHttpClient<GoogleEmbeddingClient>();
+        services.AddScoped<IEmbeddingProviderCatalog>(sp => new EmbeddingProviderCatalog(new IEmbeddingService[]
+        {
+            sp.GetRequiredService<SimulatedEmbeddingClient>(),
+            sp.GetRequiredService<OpenAiEmbeddingClient>(),
+            sp.GetRequiredService<GoogleEmbeddingClient>()
+        }));
     }
 
     private static void AddHangfire(IServiceCollection services, IConfiguration configuration)

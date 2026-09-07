@@ -24,6 +24,11 @@ public class KnowledgeBaseArticleConfiguration : IEntityTypeConfiguration<Knowle
             .HasForeignKey(c => c.ArticleId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasMany(a => a.ModelPublications)
+            .WithOne()
+            .HasForeignKey(p => p.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasQueryFilter(a => !a.IsDeleted);
     }
 }

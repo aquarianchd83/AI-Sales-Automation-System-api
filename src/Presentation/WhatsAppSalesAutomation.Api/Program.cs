@@ -89,6 +89,13 @@ try
         RequestPath = mediaPublicPath
     });
 
+    // Serves the small self-contained admin pages under wwwroot (e.g. /admin/knowledge-base.html) -
+    // static HTML/JS hitting this same app's own API, same "no separate frontend project" reasoning
+    // as the Hangfire dashboard below. Every page under here still calls [Authorize] API endpoints
+    // with a real JWT it obtains via /api/v1/auth/login - this middleware only serves the static
+    // shell, it does not bypass API authorization.
+    app.UseStaticFiles();
+
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();

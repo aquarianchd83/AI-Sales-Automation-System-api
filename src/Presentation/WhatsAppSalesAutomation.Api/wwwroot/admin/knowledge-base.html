@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge base admin</title>
+<style>
+  :root {
+    --bg: #f5f5f3; --card: #ffffff; --border: #e2e0da; --text: #24231f; --muted: #6b6a63;
+    --accent: #2563eb; --accent-bg: #eaf1ff; --green: #15803d; --green-bg: #e8f6ec;
+    --gray-bg: #f0efe9; --gray-text: #6b6a63; --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); background: var(--card); display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  #whoami { font-size: 13px; color: var(--muted); }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  #login-panel { max-width: 360px; margin: 60px auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 28px; }
+  #login-panel h2 { margin: 0 0 16px; font-size: 16px; }
+  #login-panel label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  #login-panel input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+  #login-panel button { margin-top: 18px; width: 100%; padding: 10px; border: none; border-radius: 6px; background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
+  #login-panel button:hover { opacity: 0.92; }
+  #login-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  .toolbar { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--card); }
+  .toolbar input { flex: 1; min-width: 160px; }
+  .toolbar button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 13px; cursor: pointer; }
+  .toolbar button:hover { background: var(--gray-bg); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--gray-bg); font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .title { font-weight: 600; }
+  .category { color: var(--muted); font-size: 12px; }
+
+  .status-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .status-Published { background: var(--green-bg); color: var(--green); }
+  .status-Draft { background: var(--gray-bg); color: var(--gray-text); }
+  .status-Archived { background: #fdecea; color: var(--danger); }
+
+  .models { display: flex; gap: 6px; flex-wrap: wrap; }
+  .model-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); cursor: pointer; background: var(--card); color: var(--gray-text); user-select: none; }
+  .model-badge.on { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .model-badge:hover { opacity: 0.85; }
+  .model-badge[disabled] { cursor: not-allowed; opacity: 0.5; }
+
+  .row-actions button { padding: 5px 11px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; }
+  .row-actions button:hover { background: var(--gray-bg); }
+  .row-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #empty-state, #load-error { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; }
+  #load-error { color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Knowledge base admin</h1>
+  <div id="whoami" hidden></div>
+</header>
+
+<main>
+  <section id="login-panel">
+    <h2>Sign in</h2>
+    <label for="login-email">Email</label>
+    <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <button id="login-button" type="button">Sign in</button>
+    <div id="login-error"></div>
+  </section>
+
+  <section id="app-panel" hidden>
+    <div class="toolbar">
+      <input id="search-input" type="text" placeholder="Search by title...">
+      <select id="status-filter">
+        <option value="">All statuses</option>
+        <option value="Draft">Draft</option>
+        <option value="Published">Published</option>
+        <option value="Archived">Archived</option>
+      </select>
+      <button id="refresh-button" type="button">Refresh</button>
+      <button id="reindex-button" type="button">Reindex stale</button>
+      <button id="logout-button" type="button" style="margin-left:auto;">Sign out</button>
+    </div>
+
+    <table id="articles-table" hidden>
+      <thead>
+        <tr>
+          <th>Article</th>
+          <th>Status</th>
+          <th>Chunks</th>
+          <th>Published to model</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="articles-body"></tbody>
+    </table>
+
+    <div id="empty-state" hidden>No articles match this filter.</div>
+    <div id="load-error" hidden></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var API_BASE = window.location.origin;
+  var MODELS = ['OpenAI', 'Google', 'Anthropic'];
+  var state = { accessToken: null, refreshToken: null, articles: [] };
+
+  var el = {
+    loginPanel: document.getElementById('login-panel'),
+    appPanel: document.getElementById('app-panel'),
+    whoami: document.getElementById('whoami'),
+    loginEmail: document.getElementById('login-email'),
+    loginPassword: document.getElementById('login-password'),
+    loginButton: document.getElementById('login-button'),
+    loginError: document.getElementById('login-error'),
+    searchInput: document.getElementById('search-input'),
+    statusFilter: document.getElementById('status-filter'),
+    refreshButton: document.getElementById('refresh-button'),
+    reindexButton: document.getElementById('reindex-button'),
+    logoutButton: document.getElementById('logout-button'),
+    table: document.getElementById('articles-table'),
+    body: document.getElementById('articles-body'),
+    emptyState: document.getElementById('empty-state'),
+    loadError: document.getElementById('load-error')
+  };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function loadSession() {
+    try {
+      var raw = sessionStorage.getItem('kbAdminSession');
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      state.accessToken = parsed.accessToken;
+      state.refreshToken = parsed.refreshToken;
+      state.email = parsed.email;
+    } catch (e) { /* corrupt/blocked storage - just start logged out */ }
+  }
+
+  function saveSession() {
+    try {
+      sessionStorage.setItem('kbAdminSession', JSON.stringify({
+        accessToken: state.accessToken, refreshToken: state.refreshToken, email: state.email
+      }));
+    } catch (e) { /* private browsing etc - session just won't survive a reload */ }
+  }
+
+  function clearSession() {
+    state.accessToken = null; state.refreshToken = null; state.email = null;
+    try { sessionStorage.removeItem('kbAdminSession'); } catch (e) {}
+  }
+
+  function showLoggedOut(message) {
+    clearSession();
+    el.loginPanel.hidden = false;
+    el.appPanel.hidden = true;
+    el.whoami.hidden = true;
+    if (message) el.loginError.textContent = message;
+  }
+
+  function showLoggedIn() {
+    el.loginPanel.hidden = true;
+    el.appPanel.hidden = false;
+    el.whoami.hidden = false;
+    el.whoami.textContent = state.email || '';
+  }
+
+  // Wraps fetch with the bearer token and a single silent refresh-token retry on 401 - an admin
+  // page left open across a 15-minute access token expiry (see Jwt:AccessTokenMinutes) shouldn't
+  // force a re-login for every click.
+  function api(path, options) {
+    options = options || {};
+    options.headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + state.accessToken });
+
+    return fetch(API_BASE + path, options).then(function (res) {
+      if (res.status !== 401) return res;
+
+      return fetch(API_BASE + '/api/v1/auth/refresh-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: state.refreshToken })
+      }).then(function (refreshRes) {
+        if (!refreshRes.ok) { showLoggedOut('Session expired - please sign in again.'); throw new Error('unauthorized'); }
+        return refreshRes.json();
+      }).then(function (tokens) {
+        state.accessToken = tokens.accessToken;
+        state.refreshToken = tokens.refreshToken;
+        saveSession();
+        options.headers['Authorization'] = 'Bearer ' + state.accessToken;
+        return fetch(API_BASE + path, options);
+      });
+    });
+  }
+
+  function login() {
+    el.loginError.textContent = '';
+    var email = el.loginEmail.value.trim();
+    var password = el.loginPassword.value;
+    if (!email || !password) { el.loginError.textContent = 'Enter both email and password.'; return; }
+
+    el.loginButton.disabled = true;
+    fetch(API_BASE + '/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.status === 401 ? 'Incorrect email or password.' : 'Sign-in failed (' + res.status + ').');
+      return res.json();
+    }).then(function (data) {
+      state.accessToken = data.accessToken;
+      state.refreshToken = data.refreshToken;
+      state.email = data.user && data.user.email ? data.user.email : email;
+      el.loginPassword.value = '';
+      saveSession();
+      showLoggedIn();
+      loadArticles();
+    }).catch(function (err) {
+      el.loginError.textContent = err.message || 'Sign-in failed.';
+    }).finally(function () {
+      el.loginButton.disabled = false;
+    });
+  }
+
+  function logout() {
+    var refreshToken = state.refreshToken;
+    showLoggedOut();
+    if (refreshToken) {
+      fetch(API_BASE + '/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshToken })
+      }).catch(function () { /* best-effort - the token is already discarded client-side */ });
+    }
+  }
+
+  function loadArticles() {
+    el.loadError.hidden = true;
+    el.emptyState.hidden = true;
+
+    var params = new URLSearchParams({ page: '1', pageSize: '100' });
+    var search = el.searchInput.value.trim();
+    var status = el.statusFilter.value;
+    if (search) params.set('search', search);
+    if (status) params.set('status', status);
+
+    api('/api/v1/knowledge-base/articles?' + params.toString())
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load articles (' + res.status + ').');
+        return res.json();
+      })
+      .then(function (data) {
+        state.articles = data.items || [];
+        renderArticles();
+      })
+      .catch(function (err) {
+        el.table.hidden = true;
+        el.loadError.hidden = false;
+        el.loadError.textContent = err.message || 'Failed to load articles.';
+      });
+  }
+
+  function modelBadgeHtml(article, provider) {
+    var pub = (article.publishedModels || []).filter(function (p) { return p.provider === provider; })[0];
+    var on = !!pub;
+    var title = on ? (provider + ' - published ' + new Date(pub.publishedAt).toLocaleString()) : (provider + ' - not published');
+    return '<button type="button" class="model-badge' + (on ? ' on' : '') + '" title="' + escapeHtml(title) + '" ' +
+      'data-article="' + article.id + '" data-provider="' + provider + '" data-on="' + on + '">' +
+      (on ? '✓ ' : '') + provider + '</button>';
+  }
+
+  function renderArticles() {
+    if (state.articles.length === 0) {
+      el.table.hidden = true;
+      el.emptyState.hidden = false;
+      return;
+    }
+
+    el.emptyState.hidden = true;
+    el.table.hidden = false;
+
+    el.body.innerHTML = state.articles.map(function (a) {
+      var modelsHtml = a.status === 'Published'
+        ? '<div class="models">' + MODELS.map(function (p) { return modelBadgeHtml(a, p); }).join('') + '</div>'
+        : '<span class="category">Publish the article first</span>';
+
+      var actionHtml = a.status === 'Draft'
+        ? '<button type="button" class="publish-btn" data-article="' + a.id + '">Publish</button>'
+        : '<button type="button" class="publish-btn" data-article="' + a.id + '">Re-publish</button>';
+
+      return '<tr>' +
+        '<td><div class="title">' + escapeHtml(a.title) + '</div>' +
+          (a.category ? '<div class="category">' + escapeHtml(a.category) + '</div>' : '') + '</td>' +
+        '<td><span class="status-pill status-' + a.status + '">' + a.status + '</span></td>' +
+        '<td>' + a.chunkCount + '</td>' +
+        '<td>' + modelsHtml + '</td>' +
+        '<td class="row-actions">' + actionHtml + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function publishArticle(id, button) {
+    button.disabled = true;
+    api('/api/v1/knowledge-base/articles/' + id + '/publish', { method: 'POST' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Publish failed (' + res.status + ').');
+        return loadArticles();
+      })
+      .catch(function (err) { alert(err.message || 'Publish failed.'); })
+      .finally(function () { button.disabled = false; });
+  }
+
+  function toggleModel(id, provider, currentlyOn, badge) {
+    badge.disabled = true;
+    var method = currentlyOn ? 'DELETE' : 'POST';
+    api('/api/v1/knowledge-base/articles/' + id + '/models/' + provider, { method: method })
+      .then(function (res) {
+        if (!res.ok) throw new Error((currentlyOn ? 'Unpublish' : 'Publish') + ' failed (' + res.status + ').');
+        return loadArticles();
+      })
+      .catch(function (err) { alert(err.message || 'Update failed.'); badge.disabled = false; });
+  }
+
+  function reindex() {
+    el.reindexButton.disabled = true;
+    api('/api/v1/knowledge-base/reindex', { method: 'POST' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Reindex failed (' + res.status + ').');
+        return loadArticles();
+      })
+      .catch(function (err) { alert(err.message || 'Reindex failed.'); })
+      .finally(function () { el.reindexButton.disabled = false; });
+  }
+
+  el.body.addEventListener('click', function (e) {
+    var publishBtn = e.target.closest('.publish-btn');
+    if (publishBtn) { publishArticle(publishBtn.getAttribute('data-article'), publishBtn); return; }
+
+    var badge = e.target.closest('.model-badge');
+    if (badge) {
+      toggleModel(badge.getAttribute('data-article'), badge.getAttribute('data-provider'), badge.getAttribute('data-on') === 'true', badge);
+    }
+  });
+
+  el.loginButton.addEventListener('click', login);
+  el.loginPassword.addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+  el.logoutButton.addEventListener('click', logout);
+  el.refreshButton.addEventListener('click', loadArticles);
+  el.reindexButton.addEventListener('click', reindex);
+  el.searchInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') loadArticles(); });
+  el.statusFilter.addEventListener('change', loadArticles);
+
+  loadSession();
+  if (state.accessToken) { showLoggedIn(); loadArticles(); } else { showLoggedOut(); }
+})();
+</script>
+
+</body>
+</html>

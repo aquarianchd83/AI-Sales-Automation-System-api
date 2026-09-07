@@ -29,6 +29,12 @@ public class GoogleEmbeddingClient : IEmbeddingService
         _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
     }
 
+    public string ProviderName => "Google";
+
+    public string ModelName => _settings.EmbeddingModel;
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(_settings.ApiKey);
+
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)
     {
         var payload = new { content = new { parts = new[] { new { text } } } };

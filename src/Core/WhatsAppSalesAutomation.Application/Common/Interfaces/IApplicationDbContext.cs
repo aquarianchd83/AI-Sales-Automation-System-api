@@ -55,6 +55,10 @@ public interface IApplicationDbContext
 
     DbSet<KnowledgeBaseChunk> KnowledgeBaseChunks { get; }
 
+    DbSet<KnowledgeBaseChunkEmbedding> KnowledgeBaseChunkEmbeddings { get; }
+
+    DbSet<KnowledgeBaseArticleModelPublication> KnowledgeBaseArticleModelPublications { get; }
+
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }
