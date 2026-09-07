@@ -14,6 +14,8 @@ public class KnowledgeBaseChunkConfiguration : IEntityTypeConfiguration<Knowledg
         builder.Property(c => c.ChunkText).IsRequired().HasColumnType("nvarchar(max)");
         // See KnowledgeBaseChunk.Embedding's doc comment for why this is JSON text, not varbinary/vector.
         builder.Property(c => c.Embedding).HasColumnType("nvarchar(max)");
+        builder.Property(c => c.EmbeddingProvider).HasMaxLength(20);
+        builder.Property(c => c.EmbeddingModel).HasMaxLength(100);
 
         builder.HasIndex(c => c.ArticleId);
     }

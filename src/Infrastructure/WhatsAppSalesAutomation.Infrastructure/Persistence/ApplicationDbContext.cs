@@ -56,6 +56,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<KnowledgeBaseChunk> KnowledgeBaseChunks => Set<KnowledgeBaseChunk>();
 
+    public DbSet<KnowledgeBaseChunkEmbedding> KnowledgeBaseChunkEmbeddings => Set<KnowledgeBaseChunkEmbedding>();
+
+    public DbSet<KnowledgeBaseArticleModelPublication> KnowledgeBaseArticleModelPublications => Set<KnowledgeBaseArticleModelPublication>();
+
     public DbSet<Lead> Leads => Set<Lead>();
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();

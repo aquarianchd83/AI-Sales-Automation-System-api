@@ -32,6 +32,12 @@ public class OpenAiEmbeddingClient : IEmbeddingService
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.ApiKey);
     }
 
+    public string ProviderName => "OpenAI";
+
+    public string ModelName => _settings.EmbeddingModel;
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(_settings.ApiKey);
+
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)
     {
         var payload = new { model = _settings.EmbeddingModel, input = text };

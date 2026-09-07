@@ -21,6 +21,12 @@ public class SimulatedEmbeddingClient : IEmbeddingService
     private const int Dimensions = 64;
     private static readonly char[] Delimiters = { ' ', '\t', '\n', '\r', '.', ',', '!', '?', ';', ':', '"', '\'' };
 
+    public string ProviderName => "Simulated";
+
+    public string ModelName => $"hashing-trick-{Dimensions}d";
+
+    public bool IsAvailable => true;
+
     public Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)
     {
         var vector = new float[Dimensions];

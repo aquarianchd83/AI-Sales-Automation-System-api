@@ -28,4 +28,15 @@ public class KnowledgeBaseChunk : BaseEntity
     /// <summary>Snapshot of KnowledgeBaseArticle.Version at embedding time - lets a reindex job detect
     /// chunks embedded from a since-edited article version without re-reading the article every time.</summary>
     public int EmbeddedFromArticleVersion { get; set; }
+
+    /// <summary>Which IEmbeddingService produced the current Embedding value - "Simulated"/"OpenAI"/
+    /// "Google", from IEmbeddingService.ProviderName at the moment ReembedAsync ran. Null until
+    /// embedded, same as Embedding itself. Exists so a chunk that was embedded under one provider
+    /// (e.g. "Simulated", before a real provider was configured) doesn't silently look identical, in
+    /// the admin UI, to one embedded for real - see IEmbeddingService.ProviderName's doc comment.</summary>
+    public string? EmbeddingProvider { get; set; }
+
+    /// <summary>The specific model within EmbeddingProvider - IEmbeddingService.ModelName at embed
+    /// time, e.g. "text-embedding-3-small". Null until embedded, same as EmbeddingProvider.</summary>
+    public string? EmbeddingModel { get; set; }
 }

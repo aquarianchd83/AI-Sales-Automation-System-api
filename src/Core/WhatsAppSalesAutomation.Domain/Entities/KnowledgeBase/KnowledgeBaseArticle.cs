@@ -29,4 +29,8 @@ public class KnowledgeBaseArticle : BaseEntity, ISoftDelete
     public DateTime? DeletedAt { get; set; }
 
     public ICollection<KnowledgeBaseChunk> Chunks { get; set; } = new List<KnowledgeBaseChunk>();
+
+    /// <summary>Which AI chat models this article is currently eligible for - see
+    /// KnowledgeBaseArticleModelPublication's doc comment.</summary>
+    public ICollection<KnowledgeBaseArticleModelPublication> ModelPublications { get; set; } = new List<KnowledgeBaseArticleModelPublication>();
 }
