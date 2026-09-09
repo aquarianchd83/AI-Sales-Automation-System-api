@@ -22,7 +22,7 @@ public class WebhookSignatureValidator : IWebhookSignatureValidator
 
     private readonly WhatsAppSettings _settings;
 
-    public WebhookSignatureValidator(IOptions<WhatsAppSettings> settings)
+    public WebhookSignatureValidator(IOptionsSnapshot<WhatsAppSettings> settings)
     {
         _settings = settings.Value;
     }

@@ -1,7 +1,9 @@
 using Hangfire;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +17,7 @@ using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 using WhatsAppSalesAutomation.Infrastructure.Realtime;
+using WhatsAppSalesAutomation.Infrastructure.Settings;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -46,6 +49,28 @@ try
         if (context.Configuration.GetValue("LogViewer:EnableModuleLogging", true))
             configuration.Enrich.WithCallerInfo(includeFileInfo: false, assemblyPrefix: "WhatsAppSalesAutomation.");
     });
+
+    // Feeds the AppSettings table (WhatsApp/AiProviders/Campaigns/Media/Messaging/Ai - see the "Move
+    // config into DB" plan) into IConfiguration, added after the JSON providers so a DB row always
+    // wins. AppSettingsConfigurationProvider.Load() falls back to appsettings.json values on its own
+    // if the table doesn't exist yet (fresh DB, migrations haven't run below) - see its own doc
+    // comment. IAppSettingsReloader is what SettingsController and AppSettingsSeeder call after a
+    // write so every IOptionsSnapshot<T>/IOptionsMonitor<T> consumer picks it up with no restart.
+    var appSettingsSource = new AppSettingsConfigurationSource(
+        () => builder.Configuration.GetConnectionString("DefaultConnection")!,
+        builder.Environment.ContentRootPath);
+    // ConfigurationManager implements IConfigurationBuilder.Add explicitly, and an unrelated
+    // ApplicationModelConventionExtensions.Add extension otherwise wins overload resolution on the
+    // bare "builder.Configuration.Add(...)" call - the explicit interface cast is required here.
+    ((IConfigurationBuilder)builder.Configuration).Add(appSettingsSource);
+    builder.Services.AddSingleton<IAppSettingsReloader>(new AppSettingsReloader(appSettingsSource));
+
+    // Encrypts AppSettingCatalog's IsSecret values (WhatsApp/AiProviders credentials) at rest - the
+    // key ring lives on local disk (App_Data/keys), not in the DB row itself or a cloud secret
+    // store, mirroring LocalFileMediaStorageService's App_Data/media convention.
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(AppSettingsSecretProtection.KeyRingPath(builder.Environment.ContentRootPath)))
+        .SetApplicationName(AppSettingsSecretProtection.ApplicationName);
 
     builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
@@ -111,6 +136,15 @@ try
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await db.Database.MigrateAsync();
         await IdentitySeeder.SeedAsync(scope.ServiceProvider);
+
+        // Inserts a DB row (defaulted from appsettings.json) for any AppSettingCatalog key that
+        // doesn't have one yet - covers both the very first run against a fresh DB and any new key
+        // added to the catalog in a later release. Then Reload() so this boot's first request
+        // already sees the DB-backed values, not just the appsettings.json fallback
+        // AppSettingsConfigurationProvider.Load() used above (the table didn't exist yet at that
+        // point on a fresh DB).
+        await AppSettingsSeeder.SeedDefaultsAsync(scope.ServiceProvider);
+        scope.ServiceProvider.GetRequiredService<IAppSettingsReloader>().Reload();
 
         // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
         if (app.Environment.IsDevelopment())

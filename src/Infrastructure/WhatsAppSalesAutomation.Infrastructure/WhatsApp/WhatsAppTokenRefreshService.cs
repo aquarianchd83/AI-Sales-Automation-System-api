@@ -31,7 +31,7 @@ public class WhatsAppTokenRefreshService : IWhatsAppTokenRefreshService
         HttpClient httpClient,
         IWhatsAppTokenStore tokenStore,
         IDateTimeProvider dateTime,
-        IOptions<WhatsAppSettings> settings,
+        IOptionsSnapshot<WhatsAppSettings> settings,
         ILogger<WhatsAppTokenRefreshService> logger)
     {
         _httpClient = httpClient;

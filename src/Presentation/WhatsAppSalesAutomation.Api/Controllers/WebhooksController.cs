@@ -29,7 +29,7 @@ public class WebhooksController : ControllerBase
     public WebhooksController(
         IInboundWebhookProcessor processor,
         IWebhookSignatureValidator signatureValidator,
-        IOptions<WhatsAppSettings> settings,
+        IOptionsSnapshot<WhatsAppSettings> settings,
         IBackgroundJobClient backgroundJobClient,
         ILogger<WebhooksController> logger)
     {

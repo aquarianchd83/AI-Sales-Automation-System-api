@@ -22,7 +22,7 @@ public class OpenAiEmbeddingClient : IEmbeddingService
     private readonly OpenAiSettings _settings;
     private readonly ILogger<OpenAiEmbeddingClient> _logger;
 
-    public OpenAiEmbeddingClient(HttpClient httpClient, IOptions<AiProviderSettings> settings, ILogger<OpenAiEmbeddingClient> logger)
+    public OpenAiEmbeddingClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<OpenAiEmbeddingClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value.OpenAI;

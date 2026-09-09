@@ -12,6 +12,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
+using WhatsAppSalesAutomation.Infrastructure.Settings;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -67,6 +68,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for
     // why this is Infrastructure-internal state, not something Application services should reach.
     public DbSet<WhatsAppAccessTokenState> WhatsAppAccessTokenStates => Set<WhatsAppAccessTokenState>();
+
+    // Deliberately not on IApplicationDbContext - reached only through IAppSettingsStore/
+    // ISettingsService, same reasoning as WhatsAppAccessTokenStates above.
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

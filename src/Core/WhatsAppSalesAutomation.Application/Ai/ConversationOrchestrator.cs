@@ -49,7 +49,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IHandoffService handoffs,
         IWhatsAppService whatsApp,
         INotificationService notifications,
-        IOptions<AiOptions> options,
+        IOptionsSnapshot<AiOptions> options,
         ILogger<ConversationOrchestrator> logger)
     {
         _context = context;

@@ -14,6 +14,7 @@ using WhatsAppSalesAutomation.Application.LogViewer;
 using WhatsAppSalesAutomation.Application.Media;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
+using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Application.Tags;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Application.Webhooks;
@@ -47,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
         services.AddScoped<ILogService, LogService>();
+        services.AddScoped<ISettingsService, SettingsService>();
 
         return services;
     }

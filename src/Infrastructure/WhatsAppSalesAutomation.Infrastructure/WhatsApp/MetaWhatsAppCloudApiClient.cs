@@ -24,7 +24,7 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public MetaWhatsAppCloudApiClient(
-        HttpClient httpClient, IOptions<WhatsAppSettings> settings, IWhatsAppTokenStore tokenStore, ILogger<MetaWhatsAppCloudApiClient> logger)
+        HttpClient httpClient, IOptionsSnapshot<WhatsAppSettings> settings, IWhatsAppTokenStore tokenStore, ILogger<MetaWhatsAppCloudApiClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value;

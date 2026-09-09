@@ -17,7 +17,7 @@ public class MediaService : IMediaService
     private readonly IMediaStorageService _storage;
     private readonly MediaOptions _options;
 
-    public MediaService(IApplicationDbContext context, IMediaStorageService storage, IOptions<MediaOptions> options)
+    public MediaService(IApplicationDbContext context, IMediaStorageService storage, IOptionsSnapshot<MediaOptions> options)
     {
         _context = context;
         _storage = storage;

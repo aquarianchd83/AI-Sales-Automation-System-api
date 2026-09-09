@@ -20,7 +20,7 @@ public class GoogleEmbeddingClient : IEmbeddingService
     private readonly GoogleAiSettings _settings;
     private readonly ILogger<GoogleEmbeddingClient> _logger;
 
-    public GoogleEmbeddingClient(HttpClient httpClient, IOptions<AiProviderSettings> settings, ILogger<GoogleEmbeddingClient> logger)
+    public GoogleEmbeddingClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<GoogleEmbeddingClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value.Google;

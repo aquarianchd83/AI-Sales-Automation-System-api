@@ -24,7 +24,7 @@ public class CampaignService : ICampaignService
     public CampaignService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
-        IOptions<CampaignOptions> options,
+        IOptionsSnapshot<CampaignOptions> options,
         IValidator<CreateCampaignRequest> createValidator,
         IValidator<UpdateCampaignRequest> updateValidator,
         IValidator<UpsertCampaignStepRequest> stepValidator,

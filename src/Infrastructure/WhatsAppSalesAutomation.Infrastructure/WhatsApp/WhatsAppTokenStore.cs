@@ -14,7 +14,7 @@ public class WhatsAppTokenStore : IWhatsAppTokenStore
     private readonly WhatsAppSettings _settings;
     private readonly IDateTimeProvider _dateTime;
 
-    public WhatsAppTokenStore(ApplicationDbContext context, IOptions<WhatsAppSettings> settings, IDateTimeProvider dateTime)
+    public WhatsAppTokenStore(ApplicationDbContext context, IOptionsSnapshot<WhatsAppSettings> settings, IDateTimeProvider dateTime)
     {
         _context = context;
         _settings = settings.Value;
