@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings admin</title>
+<style>
+  :root {
+    --bg: #f5f5f3; --card: #ffffff; --border: #e2e0da; --text: #24231f; --muted: #6b6a63;
+    --accent: #2563eb; --accent-bg: #eaf1ff; --green: #15803d; --green-bg: #e8f6ec;
+    --gray-bg: #f0efe9; --gray-text: #6b6a63; --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); background: var(--card); display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  #whoami { font-size: 13px; color: var(--muted); }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  #login-panel { max-width: 360px; margin: 60px auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 28px; }
+  #login-panel h2 { margin: 0 0 16px; font-size: 16px; }
+  #login-panel label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  #login-panel input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+  #login-panel button { margin-top: 18px; width: 100%; padding: 10px; border: none; border-radius: 6px; background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
+  #login-panel button:hover { opacity: 0.92; }
+  #login-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
+  .tabs button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 13px; cursor: pointer; }
+  .tabs button:hover { background: var(--gray-bg); }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .field .key { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .field .desc { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+  .field input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: ui-monospace, Consolas, monospace; }
+  .field input:not([type="password"]) { font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .restart-note { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--gray-bg); color: var(--gray-text); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .panel-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .panel-actions button { padding: 9px 18px; border: none; border-radius: 6px; background: var(--accent); color: #fff; font-size: 13px; cursor: pointer; }
+  .panel-actions button:hover { opacity: 0.92; }
+  .panel-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #logout-button { margin-left: auto; padding: 9px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 13px; cursor: pointer; }
+  #logout-button:hover { background: var(--gray-bg); }
+  .save-status { font-size: 12px; color: var(--muted); }
+  .save-status.ok { color: var(--green); }
+  .save-status.error { color: var(--danger); }
+
+  #load-error { text-align: center; padding: 40px 20px; color: var(--danger); font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Settings admin</h1>
+  <div id="whoami" hidden></div>
+</header>
+
+<main>
+  <section id="login-panel">
+    <h2>Sign in</h2>
+    <label for="login-email">Email</label>
+    <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <button id="login-button" type="button">Sign in</button>
+    <div id="login-error"></div>
+  </section>
+
+  <section id="app-panel" hidden>
+    <div class="tabs" id="tabs"></div>
+    <div class="panel" id="panel"></div>
+    <div id="load-error" hidden></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var API_BASE = window.location.origin;
+  var CATEGORIES = ['WhatsApp', 'AiProviders', 'Campaigns', 'Media', 'Messaging', 'Ai'];
+  var state = { accessToken: null, refreshToken: null, email: null, category: CATEGORIES[0], items: [] };
+
+  var el = {
+    loginPanel: document.getElementById('login-panel'),
+    appPanel: document.getElementById('app-panel'),
+    whoami: document.getElementById('whoami'),
+    loginEmail: document.getElementById('login-email'),
+    loginPassword: document.getElementById('login-password'),
+    loginButton: document.getElementById('login-button'),
+    loginError: document.getElementById('login-error'),
+    tabs: document.getElementById('tabs'),
+    panel: document.getElementById('panel'),
+    loadError: document.getElementById('load-error')
+  };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function loadSession() {
+    try {
+      var raw = sessionStorage.getItem('settingsAdminSession');
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      state.accessToken = parsed.accessToken;
+      state.refreshToken = parsed.refreshToken;
+      state.email = parsed.email;
+    } catch (e) { /* corrupt/blocked storage - just start logged out */ }
+  }
+
+  function saveSession() {
+    try {
+      sessionStorage.setItem('settingsAdminSession', JSON.stringify({
+        accessToken: state.accessToken, refreshToken: state.refreshToken, email: state.email
+      }));
+    } catch (e) { /* private browsing etc - session just won't survive a reload */ }
+  }
+
+  function clearSession() {
+    state.accessToken = null; state.refreshToken = null; state.email = null;
+    try { sessionStorage.removeItem('settingsAdminSession'); } catch (e) {}
+  }
+
+  function showLoggedOut(message) {
+    clearSession();
+    el.loginPanel.hidden = false;
+    el.appPanel.hidden = true;
+    el.whoami.hidden = true;
+    if (message) el.loginError.textContent = message;
+  }
+
+  function showLoggedIn() {
+    el.loginPanel.hidden = true;
+    el.appPanel.hidden = false;
+    el.whoami.hidden = false;
+    el.whoami.textContent = state.email || '';
+  }
+
+  // Wraps fetch with the bearer token and a single silent refresh-token retry on 401 - an admin
+  // page left open across a 15-minute access token expiry (see Jwt:AccessTokenMinutes) shouldn't
+  // force a re-login for every click. Same pattern as knowledge-base.html.
+  function api(path, options) {
+    options = options || {};
+    options.headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + state.accessToken });
+
+    return fetch(API_BASE + path, options).then(function (res) {
+      if (res.status !== 401) return res;
+
+      return fetch(API_BASE + '/api/v1/auth/refresh-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: state.refreshToken })
+      }).then(function (refreshRes) {
+        if (!refreshRes.ok) { showLoggedOut('Session expired - please sign in again.'); throw new Error('unauthorized'); }
+        return refreshRes.json();
+      }).then(function (tokens) {
+        state.accessToken = tokens.accessToken;
+        state.refreshToken = tokens.refreshToken;
+        saveSession();
+        options.headers['Authorization'] = 'Bearer ' + state.accessToken;
+        return fetch(API_BASE + path, options);
+      });
+    });
+  }
+
+  function login() {
+    el.loginError.textContent = '';
+    var email = el.loginEmail.value.trim();
+    var password = el.loginPassword.value;
+    if (!email || !password) { el.loginError.textContent = 'Enter both email and password.'; return; }
+
+    el.loginButton.disabled = true;
+    fetch(API_BASE + '/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.status === 401 ? 'Incorrect email or password.' : 'Sign-in failed (' + res.status + ').');
+      return res.json();
+    }).then(function (data) {
+      state.accessToken = data.accessToken;
+      state.refreshToken = data.refreshToken;
+      state.email = data.user && data.user.email ? data.user.email : email;
+      el.loginPassword.value = '';
+      saveSession();
+      showLoggedIn();
+      renderTabs();
+      loadCategory(state.category);
+    }).catch(function (err) {
+      // A non-SuperAdmin who happens to know real credentials still gets a clean message, not a
+      // silent blank page - GetCategory/GetAll are SuperAdmin-only (see SettingsController).
+      el.loginError.textContent = err.message || 'Sign-in failed.';
+    }).finally(function () {
+      el.loginButton.disabled = false;
+    });
+  }
+
+  function logout() {
+    var refreshToken = state.refreshToken;
+    showLoggedOut();
+    if (refreshToken) {
+      fetch(API_BASE + '/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshToken })
+      }).catch(function () { /* best-effort - the token is already discarded client-side */ });
+    }
+  }
+
+  function renderTabs() {
+    el.tabs.innerHTML = CATEGORIES.map(function (c) {
+      return '<button type="button" class="tab-btn' + (c === state.category ? ' active' : '') + '" data-category="' + c + '">' + c + '</button>';
+    }).join('');
+  }
+
+  function loadCategory(category) {
+    state.category = category;
+    renderTabs();
+    el.loadError.hidden = true;
+    el.panel.innerHTML = '<div class="save-status">Loading…</div>';
+
+    api('/api/v1/settings/' + category)
+      .then(function (res) {
+        if (res.status === 403) throw new Error('Your account does not have access to Settings (SuperAdmin only).');
+        if (!res.ok) throw new Error('Failed to load ' + category + ' (' + res.status + ').');
+        return res.json();
+      })
+      .then(function (data) {
+        state.items = data.items || [];
+        renderPanel();
+      })
+      .catch(function (err) {
+        el.panel.innerHTML = '';
+        el.loadError.hidden = false;
+        el.loadError.textContent = err.message || 'Failed to load settings.';
+      });
+  }
+
+  function fieldHtml(item) {
+    var restartNote = /Provider/.test(item.key.split(':').pop()) && /restart required/i.test(item.description || '')
+      ? '<span class="restart-note" title="' + escapeHtml(item.description) + '">Restart required</span>' : '';
+
+    var inputHtml;
+    if (item.isSecret) {
+      var placeholder = item.hasValue ? ('Unchanged (' + (item.valueHint || 'set') + ')') : 'Not set';
+      inputHtml = '<input type="password" data-key="' + escapeHtml(item.key) + '" placeholder="' + escapeHtml(placeholder) + '" autocomplete="new-password">' +
+        '<div class="hint">Leave blank to keep the current value. Never shown once saved.</div>';
+    } else {
+      inputHtml = '<input type="text" data-key="' + escapeHtml(item.key) + '" value="' + escapeHtml(item.value || '') + '"' +
+        (item.isList ? ' placeholder="Comma-separated"' : '') + '>';
+    }
+
+    return '<div class="field">' +
+      '<label>' + escapeHtml(item.key.split(':').pop()) + restartNote + '<span class="key">' + escapeHtml(item.key) + '</span></label>' +
+      (item.description ? '<div class="desc">' + escapeHtml(item.description) + '</div>' : '') +
+      inputHtml +
+      '</div>';
+  }
+
+  function renderPanel() {
+    el.panel.innerHTML = state.items.map(fieldHtml).join('') +
+      '<div class="panel-actions">' +
+      '<button type="button" id="save-button">Save ' + escapeHtml(state.category) + '</button>' +
+      '<span class="save-status" id="save-status"></span>' +
+      '<button type="button" id="logout-button">Sign out</button>' +
+      '</div>';
+
+    document.getElementById('save-button').addEventListener('click', save);
+    document.getElementById('logout-button').addEventListener('click', logout);
+  }
+
+  function save() {
+    var status = document.getElementById('save-status');
+    var button = document.getElementById('save-button');
+    var values = {};
+
+    el.panel.querySelectorAll('input[data-key]').forEach(function (input) {
+      // Blank secret input = "leave unchanged" (never re-submit a value the UI was never shown),
+      // so it's simply omitted from the request - see UpdateSettingsRequest's own doc comment.
+      // A non-secret field is always sent, including a cleared one (empty string).
+      if (input.type === 'password' && input.value === '') return;
+      values[input.getAttribute('data-key')] = input.value;
+    });
+
+    button.disabled = true;
+    status.className = 'save-status';
+    status.textContent = 'Saving…';
+
+    api('/api/v1/settings/' + state.category, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: values })
+    }).then(function (res) {
+      if (!res.ok) return res.text().then(function (t) { throw new Error(t || ('Save failed (' + res.status + ').')); });
+      status.className = 'save-status ok';
+      status.textContent = 'Saved - live immediately, no restart needed.';
+      return loadCategory(state.category);
+    }).catch(function (err) {
+      status.className = 'save-status error';
+      status.textContent = err.message || 'Save failed.';
+    }).finally(function () {
+      button.disabled = false;
+    });
+  }
+
+  el.tabs.addEventListener('click', function (e) {
+    var btn = e.target.closest('.tab-btn');
+    if (btn) loadCategory(btn.getAttribute('data-category'));
+  });
+
+  el.loginButton.addEventListener('click', login);
+  el.loginPassword.addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+
+  loadSession();
+  if (state.accessToken) {
+    showLoggedIn();
+    renderTabs();
+    loadCategory(state.category);
+  } else {
+    showLoggedOut();
+  }
+})();
+</script>
+
+</body>
+</html>

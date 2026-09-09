@@ -45,7 +45,7 @@ public class CampaignSendService : ICampaignSendService
         IWhatsAppService whatsApp,
         IDateTimeProvider dateTime,
         IConversationService conversations,
-        IOptions<MessagingOptions> options,
+        IOptionsSnapshot<MessagingOptions> options,
         ILogger<CampaignSendService> logger)
     {
         _context = context;

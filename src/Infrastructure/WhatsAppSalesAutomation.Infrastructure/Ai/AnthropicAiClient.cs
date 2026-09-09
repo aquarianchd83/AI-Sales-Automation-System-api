@@ -24,7 +24,7 @@ public class AnthropicAiClient : IAiService
     private readonly AnthropicSettings _settings;
     private readonly ILogger<AnthropicAiClient> _logger;
 
-    public AnthropicAiClient(HttpClient httpClient, IOptions<AiProviderSettings> settings, ILogger<AnthropicAiClient> logger)
+    public AnthropicAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<AnthropicAiClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value.Anthropic;

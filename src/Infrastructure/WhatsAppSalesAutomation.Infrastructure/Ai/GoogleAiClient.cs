@@ -24,7 +24,7 @@ public class GoogleAiClient : IAiService
     private readonly GoogleAiSettings _settings;
     private readonly ILogger<GoogleAiClient> _logger;
 
-    public GoogleAiClient(HttpClient httpClient, IOptions<AiProviderSettings> settings, ILogger<GoogleAiClient> logger)
+    public GoogleAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<GoogleAiClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value.Google;

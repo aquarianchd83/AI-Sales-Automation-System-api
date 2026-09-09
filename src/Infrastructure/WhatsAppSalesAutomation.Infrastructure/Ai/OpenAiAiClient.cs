@@ -23,7 +23,7 @@ public class OpenAiAiClient : IAiService
     private readonly OpenAiSettings _settings;
     private readonly ILogger<OpenAiAiClient> _logger;
 
-    public OpenAiAiClient(HttpClient httpClient, IOptions<AiProviderSettings> settings, ILogger<OpenAiAiClient> logger)
+    public OpenAiAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<OpenAiAiClient> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value.OpenAI;

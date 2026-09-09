@@ -17,7 +17,7 @@ public class SimulatedWhatsAppClient : IWhatsAppService
     private readonly ILogger<SimulatedWhatsAppClient> _logger;
     private readonly Random _random = new();
 
-    public SimulatedWhatsAppClient(IOptions<WhatsAppSettings> settings, ILogger<SimulatedWhatsAppClient> logger)
+    public SimulatedWhatsAppClient(IOptionsSnapshot<WhatsAppSettings> settings, ILogger<SimulatedWhatsAppClient> logger)
     {
         _settings = settings.Value;
         _logger = logger;

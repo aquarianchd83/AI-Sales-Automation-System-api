@@ -9,7 +9,7 @@ public class ActiveAiProviderAccessor : IActiveAiProviderAccessor
 {
     private readonly AiProviderSettings _settings;
 
-    public ActiveAiProviderAccessor(IOptions<AiProviderSettings> settings)
+    public ActiveAiProviderAccessor(IOptionsSnapshot<AiProviderSettings> settings)
     {
         _settings = settings.Value;
     }

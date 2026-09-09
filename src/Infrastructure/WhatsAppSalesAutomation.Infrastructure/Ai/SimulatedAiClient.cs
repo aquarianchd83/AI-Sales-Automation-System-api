@@ -28,7 +28,7 @@ public class SimulatedAiClient : IAiService
     private readonly ILogger<SimulatedAiClient> _logger;
     private readonly Random _random = new();
 
-    public SimulatedAiClient(IOptions<AiProviderSettings> settings, ILogger<SimulatedAiClient> logger)
+    public SimulatedAiClient(IOptionsSnapshot<AiProviderSettings> settings, ILogger<SimulatedAiClient> logger)
     {
         _settings = settings.Value;
         _logger = logger;

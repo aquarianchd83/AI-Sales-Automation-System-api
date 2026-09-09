@@ -36,7 +36,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         IEmbeddingService embeddings,
         IEmbeddingProviderCatalog embeddingCatalog,
         IActiveAiProviderAccessor activeProvider,
-        IOptions<AiOptions> aiOptions,
+        IOptionsSnapshot<AiOptions> aiOptions,
         IValidator<CreateKnowledgeBaseArticleRequest> createValidator,
         IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
         IValidator<BulkPublishArticlesRequest> bulkPublishValidator)

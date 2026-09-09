@@ -26,7 +26,7 @@ public class ConversationService : IConversationService
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
         IWhatsAppService whatsApp,
-        IOptions<MessagingOptions> options,
+        IOptionsSnapshot<MessagingOptions> options,
         IValidator<ChangeConversationModeRequest> modeValidator,
         IValidator<SendConversationMessageRequest> sendValidator)
     {
