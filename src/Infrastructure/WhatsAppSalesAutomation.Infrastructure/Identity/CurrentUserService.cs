@@ -36,4 +36,13 @@ public class CurrentUserService : ICurrentUserService
             return Guid.TryParse(value, out var id) ? id : null;
         }
     }
+
+    public Guid? ImpersonatorUserId
+    {
+        get
+        {
+            var value = _httpContextAccessor.HttpContext?.User?.FindFirstValue(JwtClaimNames.ImpersonatedBy);
+            return Guid.TryParse(value, out var id) ? id : null;
+        }
+    }
 }

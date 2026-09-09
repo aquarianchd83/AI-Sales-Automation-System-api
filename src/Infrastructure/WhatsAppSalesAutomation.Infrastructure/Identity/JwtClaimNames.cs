@@ -6,4 +6,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Identity;
 public static class JwtClaimNames
 {
     public const string TenantId = "tenant_id";
+
+    /// <summary>Present only on an impersonation access token (see
+    /// <see cref="JwtTokenService.GenerateImpersonationAccessToken"/>) - the acting PlatformSuperAdmin's
+    /// user id, so every request made during a support session is traceable back to who initiated it.</summary>
+    public const string ImpersonatedBy = "impersonated_by";
 }

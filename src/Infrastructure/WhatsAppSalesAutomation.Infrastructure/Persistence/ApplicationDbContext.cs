@@ -14,6 +14,7 @@ using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 using WhatsAppSalesAutomation.Infrastructure.Settings;
@@ -83,6 +84,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Plan> Plans => Set<Plan>();
 
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
+
+    public DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries => Set<PlatformAuditLogEntry>();
+
+    public DbSet<Announcement> Announcements => Set<Announcement>();
 
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for
     // why this is Infrastructure-internal state, not something Application services should reach.

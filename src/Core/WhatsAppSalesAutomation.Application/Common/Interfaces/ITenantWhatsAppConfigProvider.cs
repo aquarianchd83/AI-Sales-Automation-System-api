@@ -37,6 +37,12 @@ public interface ITenantWhatsAppConfigProvider
     /// time. Returns the saved config's masked view.</summary>
     Task<TenantWhatsAppConfigDto> SaveConfigForCurrentTenantAsync(
         UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Cross-tenant, masked connection status for every tenant that has ever saved a config -
+    /// what the Platform Admin Console's WhatsApp Connections screen (spec item #5) lists. Deliberately
+    /// omits any expiry - see <see cref="TenantWhatsAppConnectionSummary"/>'s own doc comment for why
+    /// that column can't be filled in honestly today.</summary>
+    Task<IReadOnlyList<TenantWhatsAppConnectionSummary>> GetAllConnectionSummariesAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Already-decrypted credentials, ready to use against Meta's Cloud API - never logged or
@@ -71,3 +77,19 @@ public record UpdateTenantWhatsAppConfigRequest(
     string? AppSecret,
     string? ApiVersion,
     string? ApiBaseUrl);
+
+/// <summary>
+/// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Deliberately has no
+/// token-expiry field: BYO-WABA tenant credentials are a long-lived System User token that this
+/// platform's own <c>WhatsAppTokenRefreshService</c>/<c>WhatsAppAccessTokenState</c> does not track -
+/// that mechanism only ever concerned the single pre-multi-tenancy platform-global fallback account,
+/// never a tenant's own Meta App. <see cref="IsConnected"/> is therefore the honest ceiling on what
+/// this system can currently report about a tenant's WABA health - not "is the token still valid
+/// right now against Meta," just "did the tenant finish saving a complete config."
+/// </summary>
+public record TenantWhatsAppConnectionSummary(
+    Guid TenantId,
+    string? PhoneNumberId,
+    string? WhatsAppBusinessAccountId,
+    bool IsConnected,
+    DateTime UpdatedAtUtc);

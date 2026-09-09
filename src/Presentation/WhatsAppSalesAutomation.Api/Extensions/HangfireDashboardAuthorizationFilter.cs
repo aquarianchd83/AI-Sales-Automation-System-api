@@ -25,6 +25,8 @@ public class HangfireDashboardAuthorizationFilter : IDashboardAuthorizationFilte
             return true;
 
         var httpContext = context.GetHttpContext();
-        return httpContext.User.Identity?.IsAuthenticated == true && httpContext.User.IsInRole(AppRoles.SuperAdmin);
+        // PlatformSuperAdmin, not the tenant-scoped SuperAdmin - the dashboard spans every tenant's
+        // background jobs, so a tenant's own SuperAdmin must not pass this check.
+        return httpContext.User.Identity?.IsAuthenticated == true && httpContext.User.IsInRole(AppRoles.PlatformSuperAdmin);
     }
 }

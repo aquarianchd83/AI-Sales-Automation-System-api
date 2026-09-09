@@ -9,6 +9,7 @@ using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 
@@ -70,6 +71,10 @@ public interface IApplicationDbContext
     DbSet<Plan> Plans { get; }
 
     DbSet<Subscription> Subscriptions { get; }
+
+    DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
+
+    DbSet<Announcement> Announcements { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

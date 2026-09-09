@@ -119,6 +119,16 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         return ToDto(row);
     }
 
+    public async Task<IReadOnlyList<TenantWhatsAppConnectionSummary>> GetAllConnectionSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        // Cross-tenant by design - see this method's own interface doc comment, same IgnoreQueryFilters()
+        // reasoning as GetByPhoneNumberIdAsync. Only PhoneNumberId/WhatsAppBusinessAccountId/IsConnected/
+        // UpdatedAtUtc are selected - never AccessToken/AppSecret ciphertext, this never needs decrypting.
+        return await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().AsNoTracking()
+            .Select(c => new TenantWhatsAppConnectionSummary(c.TenantId, c.PhoneNumberId, c.WhatsAppBusinessAccountId, c.IsConnected, c.UpdatedAtUtc))
+            .ToListAsync(cancellationToken);
+    }
+
     private TenantWhatsAppCredentials Decrypt(TenantWhatsAppConfig row)
     {
         var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);

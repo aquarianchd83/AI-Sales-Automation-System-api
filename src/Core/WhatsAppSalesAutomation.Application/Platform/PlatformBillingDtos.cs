@@ -1,0 +1,37 @@
+using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Enums;
+
+namespace WhatsAppSalesAutomation.Application.Platform;
+
+/// <summary>Platform-only view of the plan catalog - unlike the tenant-facing <c>PlanDto</c>
+/// (Application.Billing), this includes <see cref="IsActive"/> and <see cref="StripePriceId"/> since a
+/// PlatformSuperAdmin manages the catalog itself rather than just picking from it.</summary>
+public record PlatformPlanDto(
+    Guid Id,
+    string Code,
+    string Name,
+    string? StripePriceId,
+    int MaxUsers,
+    int MaxMessagesPerMonth,
+    int MaxCampaigns,
+    int MaxKnowledgeBaseArticles,
+    int PriceMonthlyCents,
+    bool IsActive);
+
+/// <summary>One row of the Subscriptions & Billing screen (spec item #3). <see cref="HasFailedPayment"/>
+/// is derived from <see cref="SubscriptionStatus.PastDue"/> - this system keeps no local invoice
+/// ledger (Stripe itself is the system of record for actual invoice line items/payment attempts, per
+/// Subscription's own doc comment), so "failed payments" here means "this tenant's subscription is
+/// currently past due," not a per-invoice history. Use the Stripe Dashboard for invoice-level detail.</summary>
+public record PlatformSubscriptionListItemDto(
+    Guid TenantId,
+    string TenantName,
+    string? PlanName,
+    SubscriptionStatus? Status,
+    DateTime? CurrentPeriodEndUtc,
+    bool HasFailedPayment);
+
+public record PlatformSubscriptionQuery : PagedRequest
+{
+    public SubscriptionStatus? Status { get; init; }
+}

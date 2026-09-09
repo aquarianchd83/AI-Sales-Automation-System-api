@@ -16,4 +16,11 @@ public interface ICurrentUserService
     /// read exists mainly as <c>ITenantContext</c>'s default source.
     /// </summary>
     Guid? TenantId { get; }
+
+    /// <summary>
+    /// Non-null only when the current request is riding an impersonation access token (see
+    /// <c>IJwtTokenService.GenerateImpersonationAccessToken</c>) - the PlatformSuperAdmin who started
+    /// the support session. Null for a normal login, including a normal PlatformSuperAdmin session.
+    /// </summary>
+    Guid? ImpersonatorUserId { get; }
 }
