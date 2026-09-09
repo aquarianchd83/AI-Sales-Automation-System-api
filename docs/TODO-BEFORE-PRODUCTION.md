@@ -52,3 +52,19 @@ platform.openai.com before high message volume goes through this.
 Once the above is cleaned up, consider adding a pre-commit hook or CI check
 (e.g. `gitleaks`, `git-secrets`) so a real key/token can't accidentally get
 re-committed the same way in the future.
+
+## 5. Stripe billing is wired up but not configured (added 2026-09-09)
+
+`Stripe:SecretKey` / `Stripe:WebhookSecret` in `appsettings.json` are empty
+placeholders - `StripeBillingService`/`StripeWebhookHandler` will throw/reject
+everything until real values are set, same "sits in plaintext, must move
+before sharing" treatment as item 1 above once they are. Also needed before
+this is usable at all:
+
+- Create the real Prices in the Stripe dashboard (test mode first) for each
+  row `PlanSeeder` seeds (`starter`/`growth`/`scale`), then set that Plan's
+  `StripePriceId` - the seeder deliberately never invents a placeholder for
+  this (see its own doc comment).
+- Register the webhook endpoint (`/api/v1/webhooks/stripe`) in the Stripe
+  dashboard (or via `stripe listen --forward-to` for local testing) and copy
+  its signing secret into `Stripe:WebhookSecret`.

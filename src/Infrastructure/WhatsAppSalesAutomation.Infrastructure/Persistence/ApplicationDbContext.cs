@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Common;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -78,6 +79,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Lead> Leads => Set<Lead>();
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+
+    public DbSet<Plan> Plans => Set<Plan>();
+
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
 
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for
     // why this is Infrastructure-internal state, not something Application services should reach.

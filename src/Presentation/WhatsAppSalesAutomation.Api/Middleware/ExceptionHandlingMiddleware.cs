@@ -36,6 +36,7 @@ public class ExceptionHandlingMiddleware
             NotFoundException notFound => (StatusCodes.Status404NotFound, notFound.Message, (IReadOnlyList<string>?)null),
             ConflictException conflict => (StatusCodes.Status409Conflict, conflict.Message, null),
             AuthenticationFailedException auth => (StatusCodes.Status401Unauthorized, auth.Message, null),
+            PlanLimitExceededException planLimit => (StatusCodes.Status402PaymentRequired, planLimit.Message, null),
             FluentValidation.ValidationException validation =>
                 (StatusCodes.Status400BadRequest, "One or more validation errors occurred.", (IReadOnlyList<string>?)validation.Errors.Select(e => e.ErrorMessage).ToList()),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.", null)

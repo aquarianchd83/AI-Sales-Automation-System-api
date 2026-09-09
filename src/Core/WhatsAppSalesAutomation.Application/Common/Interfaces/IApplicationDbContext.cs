@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -65,6 +66,10 @@ public interface IApplicationDbContext
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }
+
+    DbSet<Plan> Plans { get; }
+
+    DbSet<Subscription> Subscriptions { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

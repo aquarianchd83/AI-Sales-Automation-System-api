@@ -1,7 +1,9 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 
@@ -11,6 +13,8 @@ public class UserService : IUserService
 {
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly RoleManager<ApplicationRole> _roleManager;
+    private readonly ITenantContext _tenantContext;
+    private readonly IPlanLimitsService _planLimits;
     private readonly IValidator<CreateUserRequest> _createValidator;
     private readonly IValidator<UpdateUserRequest> _updateValidator;
     private readonly IValidator<AssignRolesRequest> _assignRolesValidator;
@@ -18,12 +22,16 @@ public class UserService : IUserService
     public UserService(
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
+        ITenantContext tenantContext,
+        IPlanLimitsService planLimits,
         IValidator<CreateUserRequest> createValidator,
         IValidator<UpdateUserRequest> updateValidator,
         IValidator<AssignRolesRequest> assignRolesValidator)
     {
         _userManager = userManager;
         _roleManager = roleManager;
+        _tenantContext = tenantContext;
+        _planLimits = planLimits;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
         _assignRolesValidator = assignRolesValidator;
@@ -71,12 +79,23 @@ public class UserService : IUserService
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
 
+        var tenantId = _tenantContext.TenantId
+            ?? throw new InvalidOperationException("Cannot create a user without a tenant in scope.");
+        await _planLimits.EnsureCanAddUserAsync(tenantId, cancellationToken);
+
         var existing = await _userManager.FindByEmailAsync(request.Email);
         if (existing is not null)
             throw new ConflictException($"A user with email '{request.Email}' already exists.");
 
         var user = new ApplicationUser
         {
+            // Bug fix: this was never set before, silently leaving every user a tenant Admin created
+            // with no TenantId at all - invisible to that tenant's own user list (ApplicationUser's
+            // query filter compares TenantId to the ambient tenant) and unable to see any tenant-owned
+            // data after logging in (every other filter compares TenantId to a JWT claim this user's
+            // token would never carry). See ApplicationDbContext.ApplyTenantQueryFilters for both
+            // filters this was silently defeating.
+            TenantId = tenantId,
             UserName = request.Email,
             Email = request.Email,
             FullName = request.FullName,

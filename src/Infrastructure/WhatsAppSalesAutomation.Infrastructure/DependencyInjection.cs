@@ -6,11 +6,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Stripe;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
+using WhatsAppSalesAutomation.Infrastructure.Billing;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Logging;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -119,8 +123,38 @@ public static class DependencyInjection
         AddWhatsAppClient(services, configuration);
         AddAiClients(services, configuration);
         AddHangfire(services, configuration);
+        AddBilling(services, configuration);
 
         return services;
+    }
+
+    /// <summary>
+    /// Stripe secret key/webhook secret are platform-global (one Stripe account for the whole
+    /// platform - see StripeSettings' own doc comment), so unlike WhatsApp/AI they need no per-tenant
+    /// factory: StripeClient is a single, thread-safe, DI-injected singleton (Stripe.net's documented
+    /// alternative to the static StripeConfiguration.ApiKey), shared by every tenant's billing calls.
+    /// </summary>
+    private static void AddBilling(IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<StripeSettings>(configuration.GetSection("Stripe"));
+
+        services.AddSingleton(sp =>
+        {
+            var settings = sp.GetRequiredService<IOptions<StripeSettings>>().Value;
+
+            // Stripe.net's StripeClient constructor throws ArgumentException for an empty key - since
+            // this is a singleton, that would fail at first resolution (i.e. the first billing
+            // request of any kind, including GetPlansAsync, which never actually calls Stripe) rather
+            // than only when a real Stripe call is attempted. A non-empty placeholder defers that
+            // failure to the one place it belongs: inside an actual Stripe API call, which correctly
+            // rejects the placeholder as an invalid key instead of taking down every billing endpoint
+            // before Stripe:SecretKey is configured.
+            var apiKey = string.IsNullOrEmpty(settings.SecretKey) ? "sk_not_configured" : settings.SecretKey;
+            return new StripeClient(apiKey);
+        });
+
+        services.AddScoped<IBillingService, StripeBillingService>();
+        services.AddScoped<IStripeWebhookHandler, StripeWebhookHandler>();
     }
 
     /// <summary>

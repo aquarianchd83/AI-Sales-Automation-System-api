@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -22,6 +23,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantContext _tenantContext;
+    private readonly IPlanLimitsService _planLimits;
     private readonly IEmbeddingService _embeddings;
     private readonly IEmbeddingProviderCatalog _embeddingCatalog;
     private readonly IActiveAiProviderAccessor _activeProvider;
@@ -33,6 +36,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public KnowledgeBaseService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
+        ITenantContext tenantContext,
+        IPlanLimitsService planLimits,
         IEmbeddingService embeddings,
         IEmbeddingProviderCatalog embeddingCatalog,
         IActiveAiProviderAccessor activeProvider,
@@ -43,6 +48,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     {
         _context = context;
         _dateTime = dateTime;
+        _tenantContext = tenantContext;
+        _planLimits = planLimits;
         _embeddings = embeddings;
         _embeddingCatalog = embeddingCatalog;
         _activeProvider = activeProvider;
@@ -146,6 +153,9 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public async Task<KnowledgeBaseArticleDto> CreateAsync(CreateKnowledgeBaseArticleRequest request, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        if (_tenantContext.TenantId is { } tenantId)
+            await _planLimits.EnsureCanCreateKnowledgeBaseArticleAsync(tenantId, cancellationToken);
 
         var article = new KnowledgeBaseArticle
         {

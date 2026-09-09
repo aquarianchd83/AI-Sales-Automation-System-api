@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -15,6 +16,8 @@ public class CampaignService : ICampaignService
 {
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantContext _tenantContext;
+    private readonly IPlanLimitsService _planLimits;
     private readonly CampaignOptions _options;
     private readonly IValidator<CreateCampaignRequest> _createValidator;
     private readonly IValidator<UpdateCampaignRequest> _updateValidator;
@@ -24,6 +27,8 @@ public class CampaignService : ICampaignService
     public CampaignService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
+        ITenantContext tenantContext,
+        IPlanLimitsService planLimits,
         IOptionsSnapshot<CampaignOptions> options,
         IValidator<CreateCampaignRequest> createValidator,
         IValidator<UpdateCampaignRequest> updateValidator,
@@ -32,6 +37,8 @@ public class CampaignService : ICampaignService
     {
         _context = context;
         _dateTime = dateTime;
+        _tenantContext = tenantContext;
+        _planLimits = planLimits;
         _options = options.Value;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
@@ -70,6 +77,9 @@ public class CampaignService : ICampaignService
     public async Task<CampaignDto> CreateAsync(CreateCampaignRequest request, Guid createdBy, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        if (_tenantContext.TenantId is { } tenantId)
+            await _planLimits.EnsureCanCreateCampaignAsync(tenantId, cancellationToken);
 
         var campaign = new Campaign
         {

@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
@@ -37,6 +39,8 @@ public class CampaignSendService : ICampaignSendService
     private readonly IWhatsAppService _whatsApp;
     private readonly IDateTimeProvider _dateTime;
     private readonly IConversationService _conversations;
+    private readonly ITenantContext _tenantContext;
+    private readonly IPlanLimitsService _planLimits;
     private readonly MessagingOptions _options;
     private readonly ILogger<CampaignSendService> _logger;
 
@@ -45,6 +49,8 @@ public class CampaignSendService : ICampaignSendService
         IWhatsAppService whatsApp,
         IDateTimeProvider dateTime,
         IConversationService conversations,
+        ITenantContext tenantContext,
+        IPlanLimitsService planLimits,
         IOptionsSnapshot<MessagingOptions> options,
         ILogger<CampaignSendService> logger)
     {
@@ -52,6 +58,8 @@ public class CampaignSendService : ICampaignSendService
         _whatsApp = whatsApp;
         _dateTime = dateTime;
         _conversations = conversations;
+        _tenantContext = tenantContext;
+        _planLimits = planLimits;
         _options = options.Value;
         _logger = logger;
     }
@@ -225,6 +233,25 @@ public class CampaignSendService : ICampaignSendService
             // A previous tick already reserved this key (most likely it crashed between saving
             // Queued and getting a WhatsApp response) - the retry job owns it from here, not this one.
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        // Checked here, not once per Process*Async batch: a live count against the plan's
+        // MaxMessagesPerMonth limit, one query per message actually about to send rather than one per
+        // batch, in exchange for never overshooting the limit within a single tick - see
+        // IPlanLimitsService's own "no caching for v1" doc comment for why a query this small is an
+        // acceptable v1 cost. PlanLimitExceededException converts into this method's own established
+        // skip idiom rather than propagating - a tenant over budget should look like "nothing left to
+        // send this tick", not fail the whole run for every other candidate in it.
+        if (_tenantContext.TenantId is { } tenantId)
+        {
+            try
+            {
+                await _planLimits.EnsureCanSendMessageAsync(tenantId, cancellationToken);
+            }
+            catch (PlanLimitExceededException)
+            {
+                return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+            }
         }
 
         var template = step.MessageTemplateId.HasValue

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Auth;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
@@ -51,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
         services.AddScoped<ILogService, LogService>();
         services.AddScoped<ISettingsService, SettingsService>();
+        services.AddScoped<IPlanLimitsService, PlanLimitsService>();
 
         return services;
     }
