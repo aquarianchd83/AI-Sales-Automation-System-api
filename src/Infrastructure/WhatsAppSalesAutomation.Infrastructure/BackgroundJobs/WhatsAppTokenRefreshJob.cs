@@ -7,7 +7,17 @@ namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 /// <summary>Daily check that keeps the WhatsApp Cloud API access token from expiring - see
 /// WhatsAppTokenRefreshService for the actual Meta OAuth exchange. A no-op most days (only actually
 /// calls Meta once the token is within its refresh window), so a daily cadence against a ~60-day
-/// token lifetime is deliberately generous, not tightly timed.</summary>
+/// token lifetime is deliberately generous, not tightly timed.
+///
+/// Deliberately NOT converted to the per-tenant TenantJobRunner fan-out the other four recurring jobs
+/// got in this phase: WhatsAppTokenRefreshService refreshes the single platform-level
+/// WhatsAppAccessTokenState row (WhatsAppSettings.AppId/AppSecret), which is Infrastructure-internal,
+/// not ITenantOwned, and which the Phase 2 BYO-WABA credentials work deliberately disconnected from
+/// MetaWhatsAppCloudApiClient (each tenant supplies their own long-lived AccessToken directly on
+/// TenantWhatsAppConfig instead - see that entity's own doc comment). Looping this over tenants would
+/// call the exact same global, non-tenant-scoped refresh N times per run for no benefit. Per-tenant
+/// WhatsApp token refresh is not designed yet - BYO-WABA leaves that to each tenant's own Meta App for
+/// now - so there is nothing tenant-shaped for this job to fan out over until that changes.</summary>
 public class WhatsAppTokenRefreshJob
 {
     private readonly IWhatsAppTokenRefreshService _refreshService;

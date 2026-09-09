@@ -1,4 +1,5 @@
 using Hangfire;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
 
@@ -10,24 +11,33 @@ namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 /// Meta's review status back). Both phases no-op safely against the Simulated WhatsApp client - the
 /// push half fabricates a successful result there (see SimulatedWhatsAppClient.CreateMessageTemplateAsync),
 /// the pull half returns an empty list - so this runs safely with or without a real WhatsApp Business
-/// Account configured.</summary>
+/// Account configured.
+///
+/// Fans out over every active tenant - see CampaignInitialSenderJob's identical doc comment for the
+/// TenantJobRunner/scope-per-tenant reasoning. This is the job where that fan-out matters most of the
+/// three "no real credentials configured yet" outcomes look the same either way, but each tenant's own
+/// WhatsAppServiceFactory resolution (see Phase 2 of the SaaS conversion plan) now depends on
+/// ITenantContext actually being set to that tenant before IWhatsAppService is resolved - without the
+/// per-tenant scope here, every tenant's sync would silently run against whichever tenant (if any)
+/// happened to be ambient, or against Simulated for all of them.</summary>
 public class MessageTemplateSyncJob
 {
-    private readonly IMessageTemplateService _templateService;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MessageTemplateSyncJob> _logger;
 
-    public MessageTemplateSyncJob(IMessageTemplateService templateService, ILogger<MessageTemplateSyncJob> logger)
+    public MessageTemplateSyncJob(IServiceScopeFactory scopeFactory, ILogger<MessageTemplateSyncJob> logger)
     {
-        _templateService = templateService;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 120)]
     public async Task RunAsync()
     {
-        try
+        await TenantJobRunner.RunForEachActiveTenantAsync(_scopeFactory, _logger, nameof(MessageTemplateSyncJob), async (services, cancellationToken) =>
         {
-            var result = await _templateService.SyncWithMetaAsync();
+            var templateService = services.GetRequiredService<IMessageTemplateService>();
+            var result = await templateService.SyncWithMetaAsync(cancellationToken: cancellationToken);
 
             if (result.CreatedCount > 0 || result.UpdatedCount > 0 || result.PushFailures.Count > 0
                 || result.StatusUpdatedCount > 0 || result.UnmatchedRemoteTemplateNames.Count > 0)
@@ -42,12 +52,6 @@ public class MessageTemplateSyncJob
                 foreach (var failure in result.PushFailures)
                     _logger.LogWarning("MessageTemplateSyncJob push failed for {Name}: {Error}", failure.WhatsAppTemplateName, failure.ErrorMessage);
             }
-        }
-        catch (Exception ex)
-        {
-            // Never let a Meta-side hiccup (rate limit, transient outage) turn into a permanently-
-            // failing Hangfire job - same reasoning as WhatsAppTokenRefreshJob's own catch-all.
-            _logger.LogError(ex, "MessageTemplateSyncJob failed unexpectedly");
-        }
+        });
     }
 }

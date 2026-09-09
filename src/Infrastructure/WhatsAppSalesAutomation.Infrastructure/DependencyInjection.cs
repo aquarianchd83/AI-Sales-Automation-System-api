@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();
+        services.AddScoped<IActiveTenantLookup, ActiveTenantLookup>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
