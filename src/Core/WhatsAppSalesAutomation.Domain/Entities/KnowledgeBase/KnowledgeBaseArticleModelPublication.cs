@@ -11,8 +11,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// with a unique index. Independent of KnowledgeBaseArticle.Status: Status still just means "has
 /// embedded chunks"; this is an additional eligibility layer on top, not a replacement for it.
 /// </summary>
-public class KnowledgeBaseArticleModelPublication : BaseEntity
+public class KnowledgeBaseArticleModelPublication : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid ArticleId { get; set; }
 
     public AiModelProvider Provider { get; set; }

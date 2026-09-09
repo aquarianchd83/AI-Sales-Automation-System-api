@@ -11,8 +11,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// JSON keeps the value human-inspectable for debugging and trivially portable if the storage format
 /// changes later (e.g. to SQL Server's native VECTOR type or an external vector DB) without a data
 /// migration beyond "re-embed everything", which KnowledgeBaseReindexJob already exists to do.</summary>
-public class KnowledgeBaseChunk : BaseEntity
+public class KnowledgeBaseChunk : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid ArticleId { get; set; }
 
     public int ChunkIndex { get; set; }

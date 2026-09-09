@@ -3,40 +3,36 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
-/// Real Google Gemini client (Generative Language API), selected via
-/// <c>AiProviders:Provider = "Google"</c>. Forces the record_response function call via
-/// <c>tool_config.function_calling_config</c>, same reasoning as AnthropicAiClient. Never exercised
-/// against a live API key in this codebase - see that class's doc comment for the same caveat. Unlike
-/// the other two providers, Gemini's REST API takes the API key as a query-string parameter rather than
-/// a header, so the request URI is built per-call instead of via a fixed BaseAddress.
+/// Real Google Gemini client (Generative Language API). No longer implements <see cref="IAiService"/>
+/// directly - see <see cref="AnthropicAiClient"/>'s own doc comment for why. Forces the record_response
+/// function call via <c>tool_config.function_calling_config</c>, same reasoning as AnthropicAiClient.
+/// Never exercised against a live API key in this codebase - see that class's doc comment for the same
+/// caveat. Unlike the other two providers, Gemini's REST API takes the API key as a query-string
+/// parameter rather than a header, so the request URI is built per-call instead of via a fixed
+/// BaseAddress (this was already true before multi-tenancy - now the base itself is per-tenant too).
 /// </summary>
-public class GoogleAiClient : IAiService
+public class GoogleAiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
-    private readonly GoogleAiSettings _settings;
     private readonly ILogger<GoogleAiClient> _logger;
 
-    public GoogleAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<GoogleAiClient> logger)
+    public GoogleAiClient(HttpClient httpClient, ILogger<GoogleAiClient> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value.Google;
         _logger = logger;
-
-        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
     }
 
-    public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
+    public async Task<AiReplyResult> GetResponseAsync(TenantAiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var modelUsed = $"Google:{_settings.ChatModel}";
+        var modelUsed = $"Google:{credentials.GoogleChatModel}";
 
         var payload = new
         {
@@ -62,8 +58,9 @@ public class GoogleAiClient : IAiService
 
         try
         {
-            var requestUri = $"models/{_settings.ChatModel}:generateContent?key={Uri.EscapeDataString(_settings.ApiKey)}";
-            using var response = await _httpClient.PostAsJsonAsync(requestUri, payload, JsonOptions, cancellationToken);
+            var baseUri = new Uri(AiPromptSupport.EnsureTrailingSlash(credentials.GoogleBaseUrl));
+            var uri = new Uri(baseUri, $"models/{credentials.GoogleChatModel}:generateContent?key={Uri.EscapeDataString(credentials.GoogleApiKey ?? string.Empty)}");
+            using var response = await _httpClient.PostAsJsonAsync(uri, payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)

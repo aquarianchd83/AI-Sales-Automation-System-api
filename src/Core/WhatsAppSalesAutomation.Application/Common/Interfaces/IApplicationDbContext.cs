@@ -8,6 +8,7 @@ using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -21,6 +22,8 @@ namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 /// </summary>
 public interface IApplicationDbContext
 {
+    DbSet<Tenant> Tenants { get; }
+
     DbSet<Customer> Customers { get; }
 
     DbSet<CustomerTag> CustomerTags { get; }

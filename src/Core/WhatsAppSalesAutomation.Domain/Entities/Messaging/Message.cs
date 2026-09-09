@@ -7,8 +7,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Messaging;
 /// One outbound (Phase 3) or inbound (Phase 4) WhatsApp message - the transcript
 /// <c>Conversation</c> is built from, via <see cref="ConversationId"/>.
 /// </summary>
-public class Message : BaseEntity
+public class Message : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CustomerId { get; set; }
 
     /// <summary>

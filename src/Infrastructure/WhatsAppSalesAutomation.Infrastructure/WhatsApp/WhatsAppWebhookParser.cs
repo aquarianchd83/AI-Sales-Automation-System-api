@@ -27,6 +27,7 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
     {
         var messages = new List<InboundWhatsAppMessage>();
         var statuses = new List<WhatsAppStatusUpdate>();
+        string? phoneNumberId = null;
 
         MetaWebhookPayload? payload;
         try
@@ -46,6 +47,11 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
                 var value = change.Value;
                 if (value is null)
                     continue;
+
+                // Meta sends the same metadata.phone_number_id on every change under an entry - the
+                // first one found is as good as any other; a payload that somehow mixed two different
+                // WABAs in one delivery is not a real Meta behavior worth specially handling.
+                phoneNumberId ??= value.Metadata?.PhoneNumberId;
 
                 var contactNameByWaId = (value.Contacts ?? new List<MetaContact>())
                     .Where(c => c.WaId is not null)
@@ -77,7 +83,7 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
             }
         }
 
-        return new WhatsAppWebhookParseResult(messages, statuses);
+        return new WhatsAppWebhookParseResult(messages, statuses, phoneNumberId);
     }
 
     /// <summary>Meta sends Unix epoch seconds as a string. Falls back to now on anything else rather
@@ -121,6 +127,9 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
     private class MetaValue
     {
+        [JsonPropertyName("metadata")]
+        public MetaMetadata? Metadata { get; set; }
+
         [JsonPropertyName("contacts")]
         public List<MetaContact>? Contacts { get; set; }
 
@@ -129,6 +138,12 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
         [JsonPropertyName("statuses")]
         public List<MetaStatus>? Statuses { get; set; }
+    }
+
+    private class MetaMetadata
+    {
+        [JsonPropertyName("phone_number_id")]
+        public string? PhoneNumberId { get; set; }
     }
 
     private class MetaContact

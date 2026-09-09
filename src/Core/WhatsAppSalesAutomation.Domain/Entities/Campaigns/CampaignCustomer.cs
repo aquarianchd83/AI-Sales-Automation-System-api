@@ -4,8 +4,10 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 
 /// <summary>Join between a campaign and a customer that also tracks that customer's progress through it.</summary>
-public class CampaignCustomer : BaseEntity
+public class CampaignCustomer : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CampaignId { get; set; }
 
     public Guid CustomerId { get; set; }

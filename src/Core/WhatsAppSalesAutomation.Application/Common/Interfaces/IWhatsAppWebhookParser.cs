@@ -12,9 +12,17 @@ public interface IWhatsAppWebhookParser
     WhatsAppWebhookParseResult Parse(string rawPayload);
 }
 
+/// <summary>
+/// <paramref name="PhoneNumberId"/> is Meta's <c>metadata.phone_number_id</c> - the WABA phone number
+/// this delivery was addressed to, present on every real Meta webhook payload regardless of whether it
+/// carries messages, statuses, or both. Null only for a malformed/unrecognised payload; multi-tenant
+/// webhook routing (WebhooksController.Receive) depends on this being populated to know which tenant
+/// the delivery belongs to before anything else about it is trusted.
+/// </summary>
 public record WhatsAppWebhookParseResult(
     IReadOnlyList<InboundWhatsAppMessage> Messages,
-    IReadOnlyList<WhatsAppStatusUpdate> Statuses);
+    IReadOnlyList<WhatsAppStatusUpdate> Statuses,
+    string? PhoneNumberId = null);
 
 /// <summary>
 /// <paramref name="FromPhone"/> is Meta's raw digit string (e.g. "919876543210"), not yet run through

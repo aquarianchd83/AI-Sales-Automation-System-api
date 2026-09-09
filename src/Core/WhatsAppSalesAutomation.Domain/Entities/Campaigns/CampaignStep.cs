@@ -4,8 +4,10 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 
 /// <summary>One message in a campaign sequence: the Initial send, or one of any number of follow-ups.</summary>
-public class CampaignStep : BaseEntity
+public class CampaignStep : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CampaignId { get; set; }
 
     /// <summary>"Initial" or "FollowUp{N}" - see <see cref="CampaignStepTypeName"/>. Kept as a

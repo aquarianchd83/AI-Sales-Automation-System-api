@@ -3,8 +3,10 @@ using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 
-public class Campaign : BaseEntity
+public class Campaign : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public string? Description { get; set; }

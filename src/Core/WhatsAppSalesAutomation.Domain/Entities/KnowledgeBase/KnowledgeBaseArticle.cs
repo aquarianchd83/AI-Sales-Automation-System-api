@@ -6,8 +6,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// <summary>Canonical, human-authored/approved source text the AI is allowed to ground replies in.
 /// Only <see cref="Status"/> == Published is ever chunked/embedded for retrieval - see
 /// KnowledgeBaseArticleStatus's doc comment.</summary>
-public class KnowledgeBaseArticle : BaseEntity, ISoftDelete
+public class KnowledgeBaseArticle : BaseEntity, ISoftDelete, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public string Title { get; set; } = string.Empty;
 
     public string? Category { get; set; }

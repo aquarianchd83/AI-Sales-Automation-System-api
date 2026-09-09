@@ -4,7 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Users;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Auth;
 
@@ -14,6 +17,7 @@ public class AuthService : IAuthService
     private readonly IApplicationDbContext _context;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
+    private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
     private readonly IValidator<ChangePasswordRequest> _changePasswordValidator;
@@ -23,6 +27,7 @@ public class AuthService : IAuthService
         IApplicationDbContext context,
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
+        IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
         IValidator<ChangePasswordRequest> changePasswordValidator)
@@ -31,9 +36,91 @@ public class AuthService : IAuthService
         _context = context;
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
+        _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
         _changePasswordValidator = changePasswordValidator;
+    }
+
+    public async Task<TokenPairDto> SignUpAsync(TenantSignUpRequest request, string? ipAddress, CancellationToken cancellationToken = default)
+    {
+        await _signUpValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var existingUser = await _userManager.FindByEmailAsync(request.Email);
+        if (existingUser is not null)
+            throw new ConflictException($"A user with email '{request.Email}' already exists.");
+
+        var slug = await ResolveSlugAsync(request.Slug, request.CompanyName, cancellationToken);
+
+        var tenant = new Tenant
+        {
+            Name = request.CompanyName,
+            Slug = slug,
+            Status = TenantStatus.Trial,
+            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14)
+        };
+        _context.Tenants.Add(tenant);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var user = new ApplicationUser
+        {
+            TenantId = tenant.Id,
+            UserName = request.Email,
+            Email = request.Email,
+            FullName = request.FullName,
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = _dateTime.UtcNow
+        };
+
+        var result = await _userManager.CreateAsync(user, request.Password);
+        if (!result.Succeeded)
+            throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.Password), e.Description)));
+
+        await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+
+        tenant.OwnerUserId = user.Id;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var roles = await _userManager.GetRolesAsync(user);
+        return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
+    }
+
+    /// <summary>Lowercases/derives a URL-safe slug from the company name when none was supplied, and
+    /// de-duplicates against existing tenants by appending "-2", "-3", etc. A slug the caller supplied
+    /// explicitly is never silently altered beyond lowercasing - if it collides, sign-up fails loudly
+    /// instead (see <see cref="TenantSignUpRequestValidator"/> for the format it must already match).</summary>
+    private async Task<string> ResolveSlugAsync(string? requestedSlug, string companyName, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedSlug))
+        {
+            var normalized = requestedSlug.Trim().ToLowerInvariant();
+            if (await _context.Tenants.AnyAsync(t => t.Slug == normalized, cancellationToken))
+                throw new ConflictException($"Workspace URL '{normalized}' is already taken.");
+
+            return normalized;
+        }
+
+        var baseSlug = new string(companyName.ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray());
+        while (baseSlug.Contains("--"))
+            baseSlug = baseSlug.Replace("--", "-");
+        baseSlug = baseSlug.Trim('-');
+        if (string.IsNullOrEmpty(baseSlug))
+            baseSlug = "workspace";
+        if (baseSlug.Length > 55)
+            baseSlug = baseSlug[..55].Trim('-');
+
+        var candidate = baseSlug;
+        var suffix = 2;
+        while (await _context.Tenants.AnyAsync(t => t.Slug == candidate, cancellationToken))
+        {
+            candidate = $"{baseSlug}-{suffix}";
+            suffix++;
+        }
+
+        return candidate;
     }
 
     public async Task<TokenPairDto> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default)
@@ -43,6 +130,20 @@ public class AuthService : IAuthService
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user is null || !user.IsActive || !await _userManager.CheckPasswordAsync(user, request.Password))
             throw new AuthenticationFailedException();
+
+        var tenant = user.TenantId is { } userTenantId
+            ? await _context.Tenants.FirstOrDefaultAsync(t => t.Id == userTenantId, cancellationToken)
+            : null;
+
+        if (user.TenantId is not null && (tenant is null || tenant.Status is TenantStatus.Suspended or TenantStatus.Cancelled))
+            throw new AuthenticationFailedException("This workspace is not available. Contact support.");
+
+        // UX nicety only, not a security boundary - see LoginRequest.Slug's doc comment.
+        if (!string.IsNullOrWhiteSpace(request.Slug) &&
+            !string.Equals(tenant?.Slug, request.Slug, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AuthenticationFailedException("This account does not belong to that workspace.");
+        }
 
         var roles = await _userManager.GetRolesAsync(user);
         var tokenPair = await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
@@ -131,6 +232,7 @@ public class AuthService : IAuthService
 
         _context.RefreshTokens.Add(new RefreshToken
         {
+            TenantId = user.TenantId,
             UserId = user.Id,
             TokenHash = _jwtTokenService.HashToken(refreshToken.Token),
             ExpiresAt = refreshToken.ExpiresAtUtc,

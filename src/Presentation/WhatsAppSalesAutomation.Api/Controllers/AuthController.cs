@@ -18,6 +18,14 @@ public class AuthController : ControllerBase
         _authService = authService;
     }
 
+    [HttpPost("signup")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TokenPairDto>> SignUp([FromBody] TenantSignUpRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _authService.SignUpAsync(request, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<ActionResult<TokenPairDto>> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)

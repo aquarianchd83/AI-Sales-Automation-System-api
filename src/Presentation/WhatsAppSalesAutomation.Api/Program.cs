@@ -75,6 +75,22 @@ try
     builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
 
+    // The frontend is served from one deployment reached via per-tenant subdomains under a wildcard
+    // DNS record (acme.<domain>, mechicel.<domain>, ...) while the API stays on its own single origin
+    // (api.<domain>) - every tenant subdomain is therefore a cross-origin caller of this API.
+    // "Cors:AllowedOrigins" supports a single '*' wildcard segment per entry, e.g.
+    // "https://*.saleautomation.com" - see IsOriginAllowed below.
+    const string TenantCorsPolicy = "TenantSubdomains";
+    var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy(TenantCorsPolicy, policy => policy
+            .SetIsOriginAllowed(origin => IsOriginAllowed(origin, corsOrigins))
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials());
+    });
+
     builder.Services.AddControllers();
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerDocumentation();
@@ -101,6 +117,7 @@ try
         ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
     });
     app.UseHttpsRedirection();
+    app.UseCors(TenantCorsPolicy);
 
     // Serves uploaded campaign media under MediaStorage:PublicBasePath. Local disk only, per
     // LocalFileMediaStorageService - swap for a cloud provider's own public URLs and this goes away.
@@ -162,6 +179,35 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+/// <summary>Matches an Origin header against "Cors:AllowedOrigins" patterns, each of which may
+/// contain a single '*' wildcard segment (e.g. "https://*.saleautomation.com" matches
+/// "https://acme.saleautomation.com" but not "https://saleautomation.com" itself - list the bare
+/// apex domain separately if it also needs to call the API).</summary>
+static bool IsOriginAllowed(string origin, IReadOnlyList<string> patterns)
+{
+    foreach (var pattern in patterns)
+    {
+        var starIndex = pattern.IndexOf('*');
+        if (starIndex < 0)
+        {
+            if (string.Equals(origin, pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+            continue;
+        }
+
+        var prefix = pattern[..starIndex];
+        var suffix = pattern[(starIndex + 1)..];
+        if (origin.Length >= prefix.Length + suffix.Length &&
+            origin.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            origin.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // Exposed so WebApplicationFactory<Program> can be used for integration tests in a later phase.

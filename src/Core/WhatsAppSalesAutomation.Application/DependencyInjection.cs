@@ -16,6 +16,7 @@ using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Application.Tags;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Application.Webhooks;
 
@@ -34,6 +35,7 @@ public static class DependencyInjection
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ITagService, TagService>();

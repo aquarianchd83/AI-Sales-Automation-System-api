@@ -15,8 +15,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// RetrieveRelevantChunksAsync's cosine similarity actually reads, so retrieval logic did not need to
 /// change when this table was added. This table is the full record; the chunk's own columns are a
 /// convenience cache of "the one row retrieval currently cares about".</summary>
-public class KnowledgeBaseChunkEmbedding : BaseEntity
+public class KnowledgeBaseChunkEmbedding : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid ChunkId { get; set; }
 
     /// <summary>"Simulated"/"OpenAI"/"Google" - IEmbeddingService.ProviderName at embed time.</summary>

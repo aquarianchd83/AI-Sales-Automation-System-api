@@ -7,8 +7,14 @@ using WhatsAppSalesAutomation.Domain.Entities.Identity;
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// Seeds the four fixed roles and, if configured, a first Super Admin so there is always a way
-/// to log in on a fresh database. Run once at startup from Program.cs.
+/// Seeds the fixed roles (the four tenant-scoped ones plus PlatformSuperAdmin) and, if configured, a
+/// first PlatformSuperAdmin so there is always a way to log in on a fresh database. Run once at
+/// startup from Program.cs.
+///
+/// Before multi-tenancy, <c>Seed:SuperAdminEmail</c>/<c>SuperAdminPassword</c> seeded a tenant-scoped
+/// SuperAdmin; there is no tenant to attach one to at this point in startup, so this now seeds the
+/// platform-operator account instead - a tenant's own first Admin comes from self-serve signup
+/// (<c>AuthService.SignUpAsync</c>) instead, same as any real customer would create one.
 /// </summary>
 public static class IdentitySeeder
 {
@@ -18,7 +24,7 @@ public static class IdentitySeeder
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
         var configuration = services.GetRequiredService<IConfiguration>();
 
-        foreach (var roleName in AppRoles.All)
+        foreach (var roleName in AppRoles.All.Append(AppRoles.PlatformSuperAdmin))
         {
             if (!await roleManager.RoleExistsAsync(roleName))
                 await roleManager.CreateAsync(new ApplicationRole(roleName));
@@ -36,9 +42,10 @@ public static class IdentitySeeder
 
         var admin = new ApplicationUser
         {
+            TenantId = null,
             UserName = adminEmail,
             Email = adminEmail,
-            FullName = "Super Admin",
+            FullName = "Platform Super Admin",
             EmailConfirmed = true,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
@@ -46,6 +53,6 @@ public static class IdentitySeeder
 
         var result = await userManager.CreateAsync(admin, adminPassword);
         if (result.Succeeded)
-            await userManager.AddToRoleAsync(admin, AppRoles.SuperAdmin);
+            await userManager.AddToRoleAsync(admin, AppRoles.PlatformSuperAdmin);
     }
 }

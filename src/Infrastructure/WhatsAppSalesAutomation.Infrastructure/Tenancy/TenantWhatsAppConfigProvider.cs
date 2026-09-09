@@ -1,0 +1,160 @@
+using FluentValidation;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Infrastructure.Persistence;
+using WhatsAppSalesAutomation.Infrastructure.Settings;
+
+namespace WhatsAppSalesAutomation.Infrastructure.Tenancy;
+
+/// <summary>DI-facing implementation of <see cref="ITenantWhatsAppConfigProvider"/> - EF Core against
+/// the same ApplicationDbContext everything else uses, same pattern as AppSettingsStore. Depends on
+/// the concrete ApplicationDbContext (not IApplicationDbContext) because TenantWhatsAppConfig is
+/// deliberately not exposed there - see that entity's own doc comment.</summary>
+public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
+{
+    private readonly ApplicationDbContext _context;
+    private readonly ITenantContext _tenantContext;
+    private readonly IDataProtectionProvider _dataProtectionProvider;
+    private readonly IDateTimeProvider _dateTime;
+    private readonly IValidator<UpdateTenantWhatsAppConfigRequest> _saveValidator;
+
+    // Memoized per instance (this is registered Scoped - one per request/job), not per call: every
+    // WhatsAppServiceFactory method resolves credentials fresh "per call" in the sense of never
+    // trusting a value cached from an earlier scope, but within one scope there is exactly one DB
+    // round trip to pay, not one per retry/component.
+    private Task<TenantWhatsAppCredentials?>? _cachedCredentials;
+
+    public TenantWhatsAppConfigProvider(
+        ApplicationDbContext context,
+        ITenantContext tenantContext,
+        IDataProtectionProvider dataProtectionProvider,
+        IDateTimeProvider dateTime,
+        IValidator<UpdateTenantWhatsAppConfigRequest> saveValidator)
+    {
+        _context = context;
+        _tenantContext = tenantContext;
+        _dataProtectionProvider = dataProtectionProvider;
+        _dateTime = dateTime;
+        _saveValidator = saveValidator;
+    }
+
+    public Task<TenantWhatsAppCredentials?> GetForCurrentTenantAsync(CancellationToken cancellationToken = default)
+        => _cachedCredentials ??= LoadForCurrentTenantAsync();
+
+    private async Task<TenantWhatsAppCredentials?> LoadForCurrentTenantAsync()
+    {
+        if (_tenantContext.TenantId is not { } tenantId)
+            return null;
+
+        // Ordinary tenant-scoped read: the reflective ITenantOwned filter already restricts this to
+        // the caller's own tenant, so no explicit TenantId comparison is needed (or would be wrong to
+        // add - see GetByPhoneNumberIdAsync for the one place that deliberately bypasses it instead).
+        var row = await _context.TenantWhatsAppConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId);
+        return row is null ? null : Decrypt(row);
+    }
+
+    public async Task<TenantWhatsAppLookupResult?> GetByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken = default)
+    {
+        // The one deliberately cross-tenant lookup - see this method's own interface doc comment.
+        // IgnoreQueryFilters() bypasses the reflective ITenantOwned filter (which would otherwise
+        // evaluate to "TenantId == null" for this anonymous request and find nothing, no matter which
+        // tenant actually owns the row - the exact class of bug fixed on ApplicationUser in Phase 1).
+        var row = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.PhoneNumberId == phoneNumberId, cancellationToken);
+
+        return row is null ? null : new TenantWhatsAppLookupResult(row.TenantId, Decrypt(row));
+    }
+
+    public async Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.TenantId is not { } tenantId)
+            return null;
+
+        var row = await _context.TenantWhatsAppConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        return row is null ? null : ToDto(row);
+    }
+
+    public async Task<TenantWhatsAppConfigDto> SaveConfigForCurrentTenantAsync(
+        UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.TenantId is not { } tenantId)
+            throw new InvalidOperationException("Cannot save WhatsApp config without a tenant in scope.");
+
+        await _saveValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);
+
+        var row = await _context.TenantWhatsAppConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        if (row is null)
+        {
+            row = new TenantWhatsAppConfig { TenantId = tenantId };
+            _context.TenantWhatsAppConfigs.Add(row);
+        }
+
+        row.PhoneNumberId = request.PhoneNumberId.Trim();
+        row.WhatsAppBusinessAccountId = request.WhatsAppBusinessAccountId.Trim();
+        // Null leaves the stored ciphertext untouched (see UpdateTenantWhatsAppConfigRequest's own
+        // doc comment); an empty string is the caller's explicit way to clear it.
+        if (request.AccessToken is not null)
+            row.AccessToken = request.AccessToken.Length == 0 ? null : protector.Protect(request.AccessToken);
+        if (request.AppSecret is not null)
+            row.AppSecret = request.AppSecret.Length == 0 ? null : protector.Protect(request.AppSecret);
+        if (!string.IsNullOrWhiteSpace(request.ApiVersion))
+            row.ApiVersion = request.ApiVersion.Trim();
+        if (!string.IsNullOrWhiteSpace(request.ApiBaseUrl))
+            row.ApiBaseUrl = request.ApiBaseUrl.Trim();
+
+        row.IsConnected = !string.IsNullOrWhiteSpace(row.PhoneNumberId) && row.AccessToken is not null && row.AppSecret is not null;
+        row.UpdatedAtUtc = _dateTime.UtcNow;
+        row.UpdatedByUserId = updatedByUserId;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the memoized read - a save-then-immediately-use within the same scope (unlikely
+        // today, but cheap to make safe) must see the fresh row, not whatever GetForCurrentTenantAsync
+        // may have already cached (including a cached "null" from before this row existed).
+        _cachedCredentials = null;
+
+        return ToDto(row);
+    }
+
+    private TenantWhatsAppCredentials Decrypt(TenantWhatsAppConfig row)
+    {
+        var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);
+        return new TenantWhatsAppCredentials(
+            row.PhoneNumberId,
+            row.WhatsAppBusinessAccountId,
+            TryUnprotect(protector, row.AccessToken),
+            TryUnprotect(protector, row.AppSecret),
+            row.ApiVersion,
+            row.ApiBaseUrl);
+    }
+
+    private static TenantWhatsAppConfigDto ToDto(TenantWhatsAppConfig row) => new(
+        row.PhoneNumberId,
+        row.WhatsAppBusinessAccountId,
+        row.AccessToken is not null,
+        row.AppSecret is not null,
+        row.ApiVersion,
+        row.ApiBaseUrl,
+        row.IsConnected);
+
+    private static string TryUnprotect(IDataProtector protector, string? ciphertext)
+    {
+        if (ciphertext is null)
+            return string.Empty;
+
+        try
+        {
+            return protector.Unprotect(ciphertext);
+        }
+        catch
+        {
+            // Same "corrupt/undecryptable value behaves as unset" tolerance as AppSettingsStore's own
+            // TryUnprotect - a key-ring rotation or manual DB edit should degrade to "not configured",
+            // not throw and take the whole webhook/send pipeline down with it.
+            return string.Empty;
+        }
+    }
+}

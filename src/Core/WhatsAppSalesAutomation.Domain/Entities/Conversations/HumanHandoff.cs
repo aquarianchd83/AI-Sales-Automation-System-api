@@ -4,8 +4,10 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Domain.Entities.Conversations;
 
 /// <summary>An escalation raised against a conversation, queued for a human agent to claim and resolve.</summary>
-public class HumanHandoff : BaseEntity
+public class HumanHandoff : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid ConversationId { get; set; }
 
     public HandoffTriggerReason TriggerReason { get; set; }

@@ -2,17 +2,19 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// Seeds a realistic sample data set (sales users, customer tags, customers) so the schema can be
-/// explored end to end without hand-typing rows. Deliberately covers the edge cases the schema
-/// encodes - every <see cref="OptInStatus"/> value, an inactive user, an unassigned customer, a
+/// Seeds a realistic sample data set (a dev tenant, sales users, customer tags, customers) so the
+/// schema can be explored end to end without hand-typing rows. Deliberately covers the edge cases the
+/// schema encodes - every <see cref="OptInStatus"/> value, an inactive user, an unassigned customer, a
 /// soft-deleted customer, a customer with no tags - so queries against it exercise real branches.
 ///
 /// Runs only when <c>Seed:DummyData</c> is true, and only on an empty Customers table, so it can
@@ -21,6 +23,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 public static class DevDataSeeder
 {
     private const string DefaultPassword = "DevPass123!";
+    private const string DevTenantSlug = "dev";
 
     public static async Task SeedAsync(IServiceProvider services)
     {
@@ -30,22 +33,42 @@ public static class DevDataSeeder
 
         var db = services.GetRequiredService<ApplicationDbContext>();
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        var tenantContext = services.GetRequiredService<ITenantContext>();
 
-        // IgnoreQueryFilters: a soft-deleted row still counts as "already seeded".
+        // IgnoreQueryFilters: a soft-deleted row - or, now, a row belonging to some other tenant -
+        // still counts as "already seeded". This seeder only ever needs to run once, ever.
         if (await db.Customers.IgnoreQueryFilters().AnyAsync())
             return;
 
+        var tenant = await SeedTenantAsync(db);
+        // Every insert below is ITenantOwned; TenantStampingSaveChangesInterceptor needs this set
+        // for the rest of this seeding pass, the same way a real request's JWT claim would set it.
+        tenantContext.SetTenant(tenant.Id);
+
         var password = configuration["Seed:DummyUserPassword"] ?? DefaultPassword;
-        var agents = await SeedUsersAsync(userManager, password);
+        var agents = await SeedUsersAsync(userManager, password, tenant.Id);
         var tags = await SeedTagsAsync(db);
 
         await SeedCustomersAsync(db, agents, tags);
     }
 
+    private static async Task<Tenant> SeedTenantAsync(ApplicationDbContext db)
+    {
+        var existing = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == DevTenantSlug);
+        if (existing is not null)
+            return existing;
+
+        var tenant = new Tenant { Name = "Dev Tenant", Slug = DevTenantSlug, Status = TenantStatus.Active };
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+        return tenant;
+    }
+
     /// <summary>Creates one user per role plus a deactivated one, and returns the sales agents by email.</summary>
     private static async Task<Dictionary<string, ApplicationUser>> SeedUsersAsync(
         UserManager<ApplicationUser> userManager,
-        string password)
+        string password,
+        Guid tenantId)
     {
         var specs = new (string FullName, string Email, string Role, bool IsActive)[]
         {
@@ -66,6 +89,7 @@ public static class DevDataSeeder
             {
                 user = new ApplicationUser
                 {
+                    TenantId = tenantId,
                     UserName = email,
                     Email = email,
                     FullName = fullName,

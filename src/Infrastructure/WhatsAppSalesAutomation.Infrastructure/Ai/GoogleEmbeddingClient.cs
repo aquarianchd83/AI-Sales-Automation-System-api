@@ -2,47 +2,37 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
-/// Real Google embeddings client, selected via <c>AiProviders:EmbeddingProvider = "Google"</c> -
-/// independent of <c>AiProviders:Provider</c>, same reasoning as OpenAiEmbeddingClient. Never
-/// exercised against a live API key in this codebase - same caveat as the chat clients.
+/// Real Google embeddings client. No longer implements <see cref="IEmbeddingService"/> directly - see
+/// <see cref="OpenAiEmbeddingClient"/>'s own doc comment for why. Never exercised against a live API
+/// key in this codebase - same caveat as the chat clients.
 /// </summary>
-public class GoogleEmbeddingClient : IEmbeddingService
+public class GoogleEmbeddingClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
-    private readonly GoogleAiSettings _settings;
     private readonly ILogger<GoogleEmbeddingClient> _logger;
 
-    public GoogleEmbeddingClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<GoogleEmbeddingClient> logger)
+    public GoogleEmbeddingClient(HttpClient httpClient, ILogger<GoogleEmbeddingClient> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value.Google;
         _logger = logger;
-
-        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
     }
 
-    public string ProviderName => "Google";
-
-    public string ModelName => _settings.EmbeddingModel;
-
-    public bool IsAvailable => !string.IsNullOrWhiteSpace(_settings.ApiKey);
-
-    public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)
+    public async Task<float[]> GetEmbeddingAsync(TenantAiCredentials credentials, string text, CancellationToken cancellationToken)
     {
         var payload = new { content = new { parts = new[] { new { text } } } };
 
         try
         {
-            var requestUri = $"models/{_settings.EmbeddingModel}:embedContent?key={Uri.EscapeDataString(_settings.ApiKey)}";
-            using var response = await _httpClient.PostAsJsonAsync(requestUri, payload, JsonOptions, cancellationToken);
+            var baseUri = new Uri(AiPromptSupport.EnsureTrailingSlash(credentials.GoogleBaseUrl));
+            var uri = new Uri(baseUri, $"models/{credentials.GoogleEmbeddingModel}:embedContent?key={Uri.EscapeDataString(credentials.GoogleApiKey ?? string.Empty)}");
+            using var response = await _httpClient.PostAsJsonAsync(uri, payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)

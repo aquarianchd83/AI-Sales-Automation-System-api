@@ -8,8 +8,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Ai;
 /// AI-performance report (confidence trends, escalation/containment rate) reads this table, not
 /// HumanHandoffs, since not every low-confidence turn results in a handoff being created (Mode ==
 /// Human bypasses the AI entirely and never writes a row here).</summary>
-public class AiInteraction : BaseEntity
+public class AiInteraction : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid ConversationId { get; set; }
 
     /// <summary>The inbound Message that triggered this AI turn.</summary>

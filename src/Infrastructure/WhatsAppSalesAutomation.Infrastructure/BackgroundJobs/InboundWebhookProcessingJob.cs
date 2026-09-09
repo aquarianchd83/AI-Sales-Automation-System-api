@@ -39,17 +39,23 @@ public class InboundWebhookProcessingJob
         _logger = logger;
     }
 
-    public Task RunAsync(Guid webhookEventId) => RunAsync(webhookEventId, 1);
+    public Task RunAsync(Guid tenantId, Guid webhookEventId) => RunAsync(tenantId, webhookEventId, 1);
 
-    public async Task RunAsync(Guid webhookEventId, int attempt)
+    /// <summary>
+    /// <paramref name="tenantId"/> must survive the Hangfire enqueue boundary as an explicit argument
+    /// rather than relying on ambient context - this job runs in its own DI scope with no request to
+    /// inherit a tenant from, unlike a controller action. WebhooksController.Receive resolves it once
+    /// (off Meta's phone_number_id) and passes it straight through to the initial Enqueue call.
+    /// </summary>
+    public async Task RunAsync(Guid tenantId, Guid webhookEventId, int attempt)
     {
-        _logger.LogInformation("Processing WebhookEvent {Id} (attempt {Attempt})", webhookEventId, attempt);
-        var outcome = await _processor.ProcessAsync(webhookEventId, attempt);
+        _logger.LogInformation("Processing WebhookEvent {Id} for tenant {TenantId} (attempt {Attempt})", webhookEventId, tenantId, attempt);
+        var outcome = await _processor.ProcessAsync(tenantId, webhookEventId, attempt);
 
         if (outcome != WebhookProcessOutcome.RetryNeeded)
             return;
 
         var delay = RetryDelays[Math.Min(attempt - 1, RetryDelays.Length - 1)];
-        _backgroundJobClient.Schedule<InboundWebhookProcessingJob>(job => job.RunAsync(webhookEventId, attempt + 1), delay);
+        _backgroundJobClient.Schedule<InboundWebhookProcessingJob>(job => job.RunAsync(tenantId, webhookEventId, attempt + 1), delay);
     }
 }

@@ -9,8 +9,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Conversations;
 /// customer at a time; a closed one stays as history, and a new inbound message re-opens a fresh one
 /// rather than reusing the closed thread.
 /// </summary>
-public class Conversation : BaseEntity
+public class Conversation : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CustomerId { get; set; }
 
     public ConversationMode Mode { get; set; } = ConversationMode.AI;

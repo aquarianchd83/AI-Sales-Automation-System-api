@@ -8,8 +8,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Messaging;
 /// must always use an approved template, regardless of the 24-hour customer service window; that
 /// window only governs free-form replies to a customer who messaged first, which is Phase 4/5 scope.
 /// </summary>
-public class MessageTemplate : BaseEntity
+public class MessageTemplate : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public string Language { get; set; } = "en";

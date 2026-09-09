@@ -3,59 +3,57 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 
 /// <summary>
-/// Real Meta WhatsApp Cloud API client, selected via <c>WhatsApp:Provider = "Meta"</c>. Never
-/// exercised against a live account in this codebase - no WhatsApp Business Account was available
-/// when Phase 3 was built (see the Phase 1 open assumptions) - so treat first use against production
-/// credentials as the actual first test of this class, not as already-verified code.
+/// Real Meta WhatsApp Cloud API client. No longer implements <see cref="IWhatsAppService"/> directly -
+/// <see cref="WhatsAppServiceFactory"/> is the DI-registered <see cref="IWhatsAppService"/> and is the
+/// only caller of this class, passing the calling tenant's already-resolved
+/// <see cref="TenantWhatsAppCredentials"/> into every method instead of this class reading one fixed
+/// global setting. Never exercised against a live account in this codebase - no WhatsApp Business
+/// Account was available when Phase 3 was built (see the Phase 1 open assumptions) - so treat first use
+/// against production credentials as the actual first test of this class, not as already-verified code.
 /// </summary>
-public class MetaWhatsAppCloudApiClient : IWhatsAppService
+public class MetaWhatsAppCloudApiClient
 {
     private readonly HttpClient _httpClient;
-    private readonly WhatsAppSettings _settings;
-    private readonly IWhatsAppTokenStore _tokenStore;
     private readonly ILogger<MetaWhatsAppCloudApiClient> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public MetaWhatsAppCloudApiClient(
-        HttpClient httpClient, IOptionsSnapshot<WhatsAppSettings> settings, IWhatsAppTokenStore tokenStore, ILogger<MetaWhatsAppCloudApiClient> logger)
+    public MetaWhatsAppCloudApiClient(HttpClient httpClient, ILogger<MetaWhatsAppCloudApiClient> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value;
-        _tokenStore = tokenStore;
         _logger = logger;
 
-        var baseUrl = _settings.ApiBaseUrl.EndsWith('/') ? _settings.ApiBaseUrl : $"{_settings.ApiBaseUrl}/";
-        _httpClient.BaseAddress = new Uri($"{baseUrl}{_settings.ApiVersion}/");
-        // No Authorization header set here (unlike before WhatsAppTokenRefreshService existed) - the
-        // bearer token is fetched fresh from IWhatsAppTokenStore immediately before every call via
-        // ApplyCurrentTokenAsync, since WhatsAppTokenRefreshJob can replace it at any time while this
-        // client instance (one per DI scope) is alive.
         // Without an explicit timeout, a stuck DNS lookup or dead connection can hang far past
         // any reasonable wait (observed: 5+ minutes with no error) instead of failing fast into
         // the existing app-level retry/backoff (Messaging:MaxRetryAttempts / RetryBackoffMinutes).
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
-    private async Task ApplyCurrentTokenAsync(CancellationToken cancellationToken)
+    /// <summary>Builds the absolute Cloud API URL for one call against this tenant's own
+    /// ApiBaseUrl/ApiVersion, and applies this tenant's bearer token - done per call (never cached
+    /// on the HttpClient instance) since the same typed client is reused across whichever tenant's
+    /// request/job happens to resolve it within one DI scope's lifetime.</summary>
+    private Uri BuildUri(TenantWhatsAppCredentials credentials, string relativePath)
     {
-        var current = await _tokenStore.GetCurrentAsync(cancellationToken);
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", current.AccessToken);
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credentials.AccessToken);
+
+        var baseUrl = credentials.ApiBaseUrl.EndsWith('/') ? credentials.ApiBaseUrl : $"{credentials.ApiBaseUrl}/";
+        return new Uri(new Uri($"{baseUrl}{credentials.ApiVersion}/"), relativePath);
     }
 
     public async Task<WhatsAppSendResult> SendTemplateMessageAsync(
+        TenantWhatsAppCredentials credentials,
         string toPhoneNumberE164,
         string templateName,
         string languageCode,
         IReadOnlyList<string> parameterValues,
-        string? mediaUrl = null,
-        CancellationToken cancellationToken = default)
+        string? mediaUrl,
+        CancellationToken cancellationToken)
     {
         var components = new List<object>();
 
@@ -92,10 +90,11 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
             }
         };
 
-        return await PostMessageAsync(payload, toPhoneNumberE164, cancellationToken);
+        return await PostMessageAsync(credentials, payload, toPhoneNumberE164, cancellationToken);
     }
 
-    public async Task<WhatsAppSendResult> SendTextMessageAsync(string toPhoneNumberE164, string text, CancellationToken cancellationToken = default)
+    public async Task<WhatsAppSendResult> SendTextMessageAsync(
+        TenantWhatsAppCredentials credentials, string toPhoneNumberE164, string text, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -105,15 +104,16 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
             text = new { body = text }
         };
 
-        return await PostMessageAsync(payload, toPhoneNumberE164, cancellationToken);
+        return await PostMessageAsync(credentials, payload, toPhoneNumberE164, cancellationToken);
     }
 
-    private async Task<WhatsAppSendResult> PostMessageAsync(object payload, string toPhoneNumberE164, CancellationToken cancellationToken)
+    private async Task<WhatsAppSendResult> PostMessageAsync(
+        TenantWhatsAppCredentials credentials, object payload, string toPhoneNumberE164, CancellationToken cancellationToken)
     {
         try
         {
-            await ApplyCurrentTokenAsync(cancellationToken);
-            using var response = await _httpClient.PostAsJsonAsync($"{_settings.PhoneNumberId}/messages", payload, JsonOptions, cancellationToken);
+            var uri = BuildUri(credentials, $"{credentials.PhoneNumberId}/messages");
+            using var response = await _httpClient.PostAsJsonAsync(uri, payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (response.IsSuccessStatusCode)
@@ -147,7 +147,8 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         }
     }
 
-    public async Task<string> UploadMediaAsync(Stream content, string contentType, CancellationToken cancellationToken = default)
+    public async Task<string> UploadMediaAsync(
+        TenantWhatsAppCredentials credentials, Stream content, string contentType, CancellationToken cancellationToken)
     {
         using var form = new MultipartFormDataContent();
         using var streamContent = new StreamContent(content);
@@ -156,8 +157,8 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         form.Add(streamContent, "file", "upload");
         form.Add(new StringContent("whatsapp"), "messaging_product");
 
-        await ApplyCurrentTokenAsync(cancellationToken);
-        using var response = await _httpClient.PostAsync($"{_settings.PhoneNumberId}/media", form, cancellationToken);
+        var uri = BuildUri(credentials, $"{credentials.PhoneNumberId}/media");
+        using var response = await _httpClient.PostAsync(uri, form, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -170,9 +171,10 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         return result?.Id ?? throw new InvalidOperationException("Meta returned success but no media id.");
     }
 
-    public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(
+        TenantWhatsAppCredentials credentials, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.WhatsAppBusinessAccountId))
+        if (string.IsNullOrWhiteSpace(credentials.WhatsAppBusinessAccountId))
         {
             _logger.LogWarning("WhatsApp template sync skipped: WhatsAppBusinessAccountId is not configured.");
             return Array.Empty<WhatsAppRemoteTemplate>();
@@ -180,18 +182,14 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
 
         var results = new List<WhatsAppRemoteTemplate>();
 
-        await ApplyCurrentTokenAsync(cancellationToken);
-
         // Meta paginates at 100/page by default for this endpoint; following paging.next until it's
         // absent is the documented way to get the full list rather than assuming one page is everything -
         // a WABA with more templates than that would otherwise silently look fully synced when it isn't.
-        string? nextUrl = $"{_settings.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category&limit=100";
+        Uri? nextUri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category&limit=100");
 
-        while (nextUrl is not null)
+        while (nextUri is not null)
         {
-            // nextUrl becomes an absolute Meta URL from the second page onward (paging.next is a full
-            // URL, not a relative path) - GetAsync accepts either against a client with BaseAddress set.
-            using var response = await _httpClient.GetAsync(nextUrl, cancellationToken);
+            using var response = await _httpClient.GetAsync(nextUri, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -211,15 +209,17 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
                     .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!)));
             }
 
-            nextUrl = parsed?.Paging?.Next;
+            // paging.next is already a full, absolute Meta URL from the second page onward.
+            nextUri = parsed?.Paging?.Next is { } next ? new Uri(next) : null;
         }
 
         return results;
     }
 
-    public async Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    public async Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(
+        TenantWhatsAppCredentials credentials, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.WhatsAppBusinessAccountId))
+        if (string.IsNullOrWhiteSpace(credentials.WhatsAppBusinessAccountId))
             return new WhatsAppTemplateSubmitResult(false, null, null, "WhatsAppBusinessAccountId is not configured.");
 
         var payload = new
@@ -232,8 +232,8 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
 
         try
         {
-            await ApplyCurrentTokenAsync(cancellationToken);
-            using var response = await _httpClient.PostAsJsonAsync($"{_settings.WhatsAppBusinessAccountId}/message_templates", payload, JsonOptions, cancellationToken);
+            var uri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates");
+            using var response = await _httpClient.PostAsJsonAsync(uri, payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -252,14 +252,15 @@ public class MetaWhatsAppCloudApiClient : IWhatsAppService
         }
     }
 
-    public async Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    public async Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(
+        TenantWhatsAppCredentials credentials, string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken)
     {
         var payload = new { components = BuildTemplateComponents(submission) };
 
         try
         {
-            await ApplyCurrentTokenAsync(cancellationToken);
-            using var response = await _httpClient.PostAsJsonAsync(metaTemplateId, payload, JsonOptions, cancellationToken);
+            var uri = BuildUri(credentials, metaTemplateId);
+            using var response = await _httpClient.PostAsJsonAsync(uri, payload, JsonOptions, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)

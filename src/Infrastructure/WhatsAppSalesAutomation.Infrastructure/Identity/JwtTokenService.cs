@@ -27,6 +27,12 @@ public class JwtTokenService : IJwtTokenService
             new(ClaimTypes.Name, user.FullName),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        // Null for a PlatformSuperAdmin (no single tenant) - CurrentUserService.TenantId/ITenantContext
+        // both treat a missing/unparsable claim the same as "no tenant", so omitting it here is enough.
+        if (user.TenantId is { } tenantId)
+            claims.Add(new Claim(JwtClaimNames.TenantId, tenantId.ToString()));
+
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.Secret));
