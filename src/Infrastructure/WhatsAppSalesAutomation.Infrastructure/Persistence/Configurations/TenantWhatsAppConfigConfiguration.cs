@@ -13,6 +13,7 @@ public class TenantWhatsAppConfigConfiguration : IEntityTypeConfiguration<Tenant
 
         builder.Property(c => c.PhoneNumberId).IsRequired().HasMaxLength(64);
         builder.Property(c => c.WhatsAppBusinessAccountId).HasMaxLength(64);
+        builder.Property(c => c.AppId).HasMaxLength(64);
         builder.Property(c => c.ApiVersion).HasMaxLength(20);
         builder.Property(c => c.ApiBaseUrl).HasMaxLength(500);
 

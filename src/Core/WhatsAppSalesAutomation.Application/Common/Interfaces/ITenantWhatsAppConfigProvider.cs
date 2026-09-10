@@ -80,6 +80,9 @@ public record TenantWhatsAppCredentials(
 /// <summary>Result of the cross-tenant, by-phone-number-id webhook routing lookup.</summary>
 public record TenantWhatsAppLookupResult(Guid TenantId, TenantWhatsAppCredentials Credentials);
 
+/// <param name="AppId">Not a secret, returned in full (not a Has* flag). Stored for record-keeping/a
+/// future per-tenant-App architecture - see <c>TenantWhatsAppConfig.AppId</c>'s own doc comment for
+/// why it isn't yet what webhook routing actually keys off.</param>
 /// <param name="HasWebhookVerifyToken">Stored for schema completeness/a future per-tenant handshake -
 /// see <c>TenantWhatsAppConfig.WebhookVerifyToken</c>'s own doc comment. Not what
 /// WebhooksController.Verify actually checks today: Meta subscribes per-App (one platform Meta App
@@ -93,11 +96,15 @@ public record TenantWhatsAppConfigDto(
     string ApiVersion,
     string ApiBaseUrl,
     bool IsConnected,
-    bool HasWebhookVerifyToken);
+    bool HasWebhookVerifyToken,
+    string? AppId);
 
 /// <summary>Body of PUT the tenant WhatsApp settings endpoint. <see cref="AccessToken"/>/<see cref="AppSecret"/>/
 /// <see cref="WebhookVerifyToken"/> null leaves the currently-stored value unchanged - see
-/// ITenantWhatsAppConfigProvider.SaveConfigForCurrentTenantAsync's own doc comment.</summary>
+/// ITenantWhatsAppConfigProvider.SaveConfigForCurrentTenantAsync's own doc comment. <see cref="AppId"/>
+/// is not a secret and follows the same convention as ApiVersion/ApiBaseUrl: blank/whitespace leaves
+/// the stored value unchanged (there is no way to clear it back to null through this endpoint, same
+/// limitation those two already have).</summary>
 public record UpdateTenantWhatsAppConfigRequest(
     string PhoneNumberId,
     string WhatsAppBusinessAccountId,
@@ -105,7 +112,8 @@ public record UpdateTenantWhatsAppConfigRequest(
     string? AppSecret,
     string? ApiVersion,
     string? ApiBaseUrl,
-    string? WebhookVerifyToken = null);
+    string? WebhookVerifyToken = null,
+    string? AppId = null);
 
 /// <summary>
 /// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Deliberately has no

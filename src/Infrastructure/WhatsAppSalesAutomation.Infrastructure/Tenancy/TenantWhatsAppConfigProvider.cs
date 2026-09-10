@@ -128,6 +128,10 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
             row.ApiVersion = request.ApiVersion.Trim();
         if (!string.IsNullOrWhiteSpace(request.ApiBaseUrl))
             row.ApiBaseUrl = request.ApiBaseUrl.Trim();
+        // Not a secret, plain text - same "blank leaves it unchanged" convention as ApiVersion/
+        // ApiBaseUrl above, not the "empty explicitly clears" convention the three secrets use.
+        if (!string.IsNullOrWhiteSpace(request.AppId))
+            row.AppId = request.AppId.Trim();
 
         row.IsConnected = !string.IsNullOrWhiteSpace(row.PhoneNumberId) && row.AccessToken is not null && row.AppSecret is not null;
         row.UpdatedAtUtc = _dateTime.UtcNow;
@@ -184,7 +188,8 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         row.ApiVersion,
         row.ApiBaseUrl,
         row.IsConnected,
-        row.WebhookVerifyToken is not null);
+        row.WebhookVerifyToken is not null,
+        row.AppId);
 
     private static string TryUnprotect(IDataProtector protector, string? ciphertext)
     {

@@ -26,6 +26,14 @@ public class TenantWhatsAppConfig : ITenantOwned
 
     public string WhatsAppBusinessAccountId { get; set; } = string.Empty;
 
+    /// <summary>The Meta App this tenant's WABA is connected under. Not a secret. Stored for record-
+    /// keeping/a future per-tenant-App architecture, but NOT what webhook routing actually keys off
+    /// today - Meta subscribes per-App (one platform Meta App under BYO-WABA, see
+    /// AppSettingCatalog's "WhatsApp:AppId" entry), so every tenant's inbound webhooks arrive through
+    /// that one platform App regardless of what's saved here. Same "schema completeness ahead of the
+    /// feature" status as <see cref="WebhookVerifyToken"/>.</summary>
+    public string? AppId { get; set; }
+
     /// <summary>Ciphertext (AppSettingsSecretProtection) - never read or written unencrypted. A long-
     /// lived System User token is expected here; BYO-WABA means auto-refresh is each tenant's own
     /// Meta App's concern, not something this platform's WhatsAppTokenRefreshService (built for the
