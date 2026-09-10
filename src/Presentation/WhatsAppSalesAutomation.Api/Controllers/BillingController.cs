@@ -7,7 +7,7 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
-/// Tenant-facing billing: the public plan catalog, and (SuperAdmin/Admin-only, same reasoning as
+/// Tenant-facing billing: the public plan catalog, and (Admin-only, same reasoning as
 /// TenantSettingsController - this is real money) starting a Checkout/Billing Portal session and
 /// checking the tenant's current subscription. Stripe's own webhook (activation, cancellation,
 /// payment failure) is handled entirely separately by StripeWebhooksController - nothing here ever
@@ -32,12 +32,12 @@ public class BillingController : ControllerBase
         => Ok(await _billingService.GetPlansAsync(cancellationToken));
 
     [HttpGet("subscription")]
-    [Authorize(Roles = $"{AppRoles.SuperAdmin},{AppRoles.Admin}")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<SubscriptionDto?>> GetSubscription(CancellationToken cancellationToken)
         => Ok(await _billingService.GetSubscriptionForTenantAsync(RequireTenantId(), cancellationToken));
 
     [HttpPost("checkout")]
-    [Authorize(Roles = $"{AppRoles.SuperAdmin},{AppRoles.Admin}")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<BillingSessionUrlDto>> CreateCheckoutSession(
         [FromBody] CreateCheckoutSessionRequest request, CancellationToken cancellationToken)
     {
@@ -47,7 +47,7 @@ public class BillingController : ControllerBase
     }
 
     [HttpPost("portal")]
-    [Authorize(Roles = $"{AppRoles.SuperAdmin},{AppRoles.Admin}")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<BillingSessionUrlDto>> CreateBillingPortalSession(
         [FromBody] CreateBillingPortalSessionRequest request, CancellationToken cancellationToken)
     {

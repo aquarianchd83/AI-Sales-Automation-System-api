@@ -9,13 +9,13 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// A tenant's own self-service settings screen: pasting in their Meta WhatsApp Business Account
 /// credentials and choosing/keying an AI provider - the BYO-WABA/BYO-API-key equivalent of
 /// SettingsController, but scoped to the caller's own tenant (via ITenantContext) rather than
-/// platform-wide. SuperAdmin/Admin-only, same reasoning as SettingsController: both sections hold real
+/// platform-wide. Admin-only, same reasoning as SettingsController: both sections hold real
 /// credentials. A full Meta OAuth embedded-signup flow for WhatsApp is out of scope - this is manual
 /// token/phone-number-ID entry.
 /// </summary>
 [ApiController]
 [Route("api/v1/tenant-settings")]
-[Authorize(Roles = $"{AppRoles.SuperAdmin},{AppRoles.Admin}")]
+[Authorize(Roles = AppRoles.Admin)]
 public class TenantSettingsController : ControllerBase
 {
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;

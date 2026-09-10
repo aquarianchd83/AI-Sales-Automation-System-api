@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
+using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -39,7 +40,7 @@ public class MessageTemplatesController : ControllerBase
     /// <summary>A manual override, independent of the hourly MessageTemplateSyncJob - see
     /// <see cref="ReviewMessageTemplateRequest"/>.</summary>
     [HttpPost("{id:guid}/review")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<MessageTemplateDto>> Review(Guid id, [FromBody] ReviewMessageTemplateRequest request, CancellationToken cancellationToken)
         => Ok(await _templateService.ReviewAsync(id, request, cancellationToken));
 
@@ -47,14 +48,14 @@ public class MessageTemplatesController : ControllerBase
     /// demand - useful right after creating/editing a template so it reaches Meta (and its resulting
     /// status comes back) without waiting for the next scheduled run.</summary>
     [HttpPost("sync")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<TemplateSyncResultDto>> Sync(CancellationToken cancellationToken)
         => Ok(await _templateService.SyncWithMetaAsync(cancellationToken));
 
     /// <summary>Same push-then-pull cycle as <see cref="Sync"/>, scoped to one template - the per-row
     /// "Sync" button on the Message Templates admin page.</summary>
     [HttpPost("{id:guid}/sync")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<MessageTemplateSyncOneResultDto>> SyncOne(Guid id, CancellationToken cancellationToken)
         => Ok(await _templateService.SyncOneAsync(id, cancellationToken));
 

@@ -219,13 +219,10 @@ public class PlatformTenantService : IPlatformTenantService
             .OrderBy(u => u.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        foreach (var role in new[] { AppRoles.Admin, AppRoles.SuperAdmin })
+        foreach (var candidate in candidates)
         {
-            foreach (var candidate in candidates)
-            {
-                if (await _userManager.IsInRoleAsync(candidate, role))
-                    return candidate;
-            }
+            if (await _userManager.IsInRoleAsync(candidate, AppRoles.Admin))
+                return candidate;
         }
 
         return null;

@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Messaging;
+using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -114,12 +115,12 @@ public class CampaignsController : ControllerBase
 /// Runs the send pipeline immediately instead of waiting for Hangfire's next tick - useful in dev/
 /// test where waiting a real minute per step is friction, and occasionally in production to nudge a
 /// backlog. Kept as its own controller/route group (rather than nested under CampaignsController) so
-/// its narrower SuperAdmin-only authorization is visible at a glance rather than mixed in with the
-/// broader campaign CRUD policy.
+/// its Admin-only authorization is visible at a glance rather than mixed in with the broader campaign
+/// CRUD policy.
 /// </summary>
 [ApiController]
 [Route("api/v1/campaigns/ops")]
-[Authorize(Roles = "SuperAdmin")]
+[Authorize(Roles = AppRoles.Admin)]
 public class CampaignOpsController : ControllerBase
 {
     private readonly ICampaignSendService _sendService;
