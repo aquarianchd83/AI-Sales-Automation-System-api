@@ -14,16 +14,17 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null);
 
 /// <summary>
-/// Single source of truth for which six appsettings.json sections
-/// (<see cref="Categories"/>) are DB-backed and UI-editable - see the "Move config into DB" plan.
-/// Everything else (ConnectionStrings, Serilog, Jwt, MediaStorage, LogViewer, Seed, AllowedHosts)
-/// is intentionally left out and keeps reading straight from appsettings.json.
+/// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
+/// DB-backed and UI-editable - see the "Move config into DB" plan. Everything else
+/// (ConnectionStrings, Serilog, Jwt, LogViewer, Seed, AllowedHosts) is intentionally left out and
+/// keeps reading straight from appsettings.json - none of it is something an admin would ever want
+/// to change without a deploy alongside it.
 /// </summary>
 public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "Stripe"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -78,5 +79,20 @@ public static class AppSettingCatalog
         new("Ai:KnowledgeBaseTopN", "Ai", IsSecret: false),
         new("Ai:MinRelevanceScore", "Ai", IsSecret: false),
         new("Ai:ConversationHistoryTurns", "Ai", IsSecret: false),
+
+        // MediaStorage - all three need a restart: Program.cs reads RootPath/PublicBasePath directly
+        // off IConfiguration (not IOptionsSnapshot) to configure static-file-serving middleware once,
+        // at startup, and LocalFileMediaStorageService resolves IOptions<LocalMediaStorageSettings>
+        // (the non-live-reloading variant) at construction - neither observes a later change.
+        new("MediaStorage:RootPath", "MediaStorage", IsSecret: false, Description: "Where uploaded media is written on disk - restart required to take effect."),
+        new("MediaStorage:PublicBasePath", "MediaStorage", IsSecret: false, Description: "URL prefix media is served under - restart required to take effect."),
+        new("MediaStorage:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Scheme+host to prepend so Meta can fetch template media - restart required to take effect."),
+
+        // Stripe - platform-global (one Stripe account for the whole platform, not per-tenant - see
+        // StripeSettings' own doc comment). Both keys need a restart: the DI-registered StripeClient
+        // is built once, at startup, from IOptions<StripeSettings> (also the non-live-reloading
+        // variant) - same reasoning as WhatsApp/AiProviders' own Provider fields.
+        new("Stripe:SecretKey", "Stripe", IsSecret: true, Description: "Restart required to take effect."),
+        new("Stripe:WebhookSecret", "Stripe", IsSecret: true, Description: "Restart required to take effect."),
     };
 }
