@@ -122,6 +122,8 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
             row.AccessToken = request.AccessToken.Length == 0 ? null : protector.Protect(request.AccessToken);
         if (request.AppSecret is not null)
             row.AppSecret = request.AppSecret.Length == 0 ? null : protector.Protect(request.AppSecret);
+        if (request.WebhookVerifyToken is not null)
+            row.WebhookVerifyToken = request.WebhookVerifyToken.Length == 0 ? null : protector.Protect(request.WebhookVerifyToken);
         if (!string.IsNullOrWhiteSpace(request.ApiVersion))
             row.ApiVersion = request.ApiVersion.Trim();
         if (!string.IsNullOrWhiteSpace(request.ApiBaseUrl))
@@ -181,7 +183,8 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         row.AppSecret is not null,
         row.ApiVersion,
         row.ApiBaseUrl,
-        row.IsConnected);
+        row.IsConnected,
+        row.WebhookVerifyToken is not null);
 
     private static string TryUnprotect(IDataProtector protector, string? ciphertext)
     {

@@ -80,6 +80,11 @@ public record TenantWhatsAppCredentials(
 /// <summary>Result of the cross-tenant, by-phone-number-id webhook routing lookup.</summary>
 public record TenantWhatsAppLookupResult(Guid TenantId, TenantWhatsAppCredentials Credentials);
 
+/// <param name="HasWebhookVerifyToken">Stored for schema completeness/a future per-tenant handshake -
+/// see <c>TenantWhatsAppConfig.WebhookVerifyToken</c>'s own doc comment. Not what
+/// WebhooksController.Verify actually checks today: Meta subscribes per-App (one platform Meta App
+/// under BYO-WABA), not per-WABA, so the GET verification handshake still uses the one platform-
+/// global WhatsAppSettings.WebhookVerifyToken regardless of what's saved here.</param>
 public record TenantWhatsAppConfigDto(
     string? PhoneNumberId,
     string? WhatsAppBusinessAccountId,
@@ -87,18 +92,20 @@ public record TenantWhatsAppConfigDto(
     bool HasAppSecret,
     string ApiVersion,
     string ApiBaseUrl,
-    bool IsConnected);
+    bool IsConnected,
+    bool HasWebhookVerifyToken);
 
-/// <summary>Body of PUT the tenant WhatsApp settings endpoint. <see cref="AccessToken"/>/<see cref="AppSecret"/>
-/// null leaves the currently-stored value unchanged - see ITenantWhatsAppConfigProvider.SaveConfigForCurrentTenantAsync's
-/// own doc comment.</summary>
+/// <summary>Body of PUT the tenant WhatsApp settings endpoint. <see cref="AccessToken"/>/<see cref="AppSecret"/>/
+/// <see cref="WebhookVerifyToken"/> null leaves the currently-stored value unchanged - see
+/// ITenantWhatsAppConfigProvider.SaveConfigForCurrentTenantAsync's own doc comment.</summary>
 public record UpdateTenantWhatsAppConfigRequest(
     string PhoneNumberId,
     string WhatsAppBusinessAccountId,
     string? AccessToken,
     string? AppSecret,
     string? ApiVersion,
-    string? ApiBaseUrl);
+    string? ApiBaseUrl,
+    string? WebhookVerifyToken = null);
 
 /// <summary>
 /// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Deliberately has no
