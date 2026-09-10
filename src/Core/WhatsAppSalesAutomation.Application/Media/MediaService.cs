@@ -2,11 +2,9 @@ using System.Security.Cryptography;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
-using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 
 namespace WhatsAppSalesAutomation.Application.Media;
@@ -15,13 +13,13 @@ public class MediaService : IMediaService
 {
     private readonly IApplicationDbContext _context;
     private readonly IMediaStorageService _storage;
-    private readonly MediaOptions _options;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
 
-    public MediaService(IApplicationDbContext context, IMediaStorageService storage, IOptionsSnapshot<MediaOptions> options)
+    public MediaService(IApplicationDbContext context, IMediaStorageService storage, ITenantConfigOverrideProvider tenantConfig)
     {
         _context = context;
         _storage = storage;
-        _options = options.Value;
+        _tenantConfig = tenantConfig;
     }
 
     public async Task<PagedResult<MediaAssetDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
@@ -58,11 +56,15 @@ public class MediaService : IMediaService
         if (sizeBytes <= 0)
             throw Invalid(nameof(content), "The uploaded file is empty.");
 
-        if (sizeBytes > _options.MaxSizeBytes)
-            throw Invalid(nameof(sizeBytes), $"File exceeds the {_options.MaxSizeBytes / (1024 * 1024)} MB limit.");
+        // Resolved per call (not once per DI scope) - merges this tenant's Media:* overrides, if any,
+        // over the platform default. See ITenantConfigOverrideProvider's own doc comment.
+        var options = await _tenantConfig.GetMediaOptionsAsync(cancellationToken);
 
-        if (!_options.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
-            throw Invalid(nameof(contentType), $"Content type '{contentType}' is not allowed. Use one of: {string.Join(", ", _options.AllowedContentTypes)}.");
+        if (sizeBytes > options.MaxSizeBytes)
+            throw Invalid(nameof(sizeBytes), $"File exceeds the {options.MaxSizeBytes / (1024 * 1024)} MB limit.");
+
+        if (!options.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+            throw Invalid(nameof(contentType), $"Content type '{contentType}' is not allowed. Use one of: {string.Join(", ", options.AllowedContentTypes)}.");
 
         // Buffered rather than streamed straight to storage: the checksum has to be computed before
         // we know whether to store the bytes at all, and 16 MB is small enough that holding it in

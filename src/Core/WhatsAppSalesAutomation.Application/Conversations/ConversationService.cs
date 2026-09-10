@@ -1,11 +1,9 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
-using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -18,7 +16,7 @@ public class ConversationService : IConversationService
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
     private readonly IWhatsAppService _whatsApp;
-    private readonly MessagingOptions _options;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly IValidator<ChangeConversationModeRequest> _modeValidator;
     private readonly IValidator<SendConversationMessageRequest> _sendValidator;
 
@@ -26,14 +24,14 @@ public class ConversationService : IConversationService
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
         IWhatsAppService whatsApp,
-        IOptionsSnapshot<MessagingOptions> options,
+        ITenantConfigOverrideProvider tenantConfig,
         IValidator<ChangeConversationModeRequest> modeValidator,
         IValidator<SendConversationMessageRequest> sendValidator)
     {
         _context = context;
         _dateTime = dateTime;
         _whatsApp = whatsApp;
-        _options = options.Value;
+        _tenantConfig = tenantConfig;
         _modeValidator = modeValidator;
         _sendValidator = sendValidator;
     }
@@ -194,7 +192,10 @@ public class ConversationService : IConversationService
 
         if (!string.IsNullOrWhiteSpace(request.Text))
         {
-            var windowHours = _options.CustomerServiceWindowHours;
+            // Resolved per call (not once per DI scope) - merges this tenant's Messaging:* overrides,
+            // if any, over the platform default. See ITenantConfigOverrideProvider's own doc comment.
+            var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+            var windowHours = options.CustomerServiceWindowHours;
             var windowOpen = conversation.LastInboundMessageAt is { } lastInbound &&
                 lastInbound.AddHours(windowHours) >= _dateTime.UtcNow;
 

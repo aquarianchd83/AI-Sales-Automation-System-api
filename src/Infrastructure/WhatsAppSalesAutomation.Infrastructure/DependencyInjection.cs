@@ -181,6 +181,7 @@ public static class DependencyInjection
         services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
 
         services.AddScoped<ITenantWhatsAppConfigProvider, TenantWhatsAppConfigProvider>();
+        services.AddScoped<ITenantConfigOverrideProvider, TenantConfigOverrideProvider>();
     }
 
     /// <summary>

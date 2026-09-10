@@ -1,9 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
-using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
@@ -37,7 +35,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IHandoffService _handoffs;
     private readonly IWhatsAppService _whatsApp;
     private readonly INotificationService _notifications;
-    private readonly AiOptions _options;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ILogger<ConversationOrchestrator> _logger;
 
     public ConversationOrchestrator(
@@ -49,7 +47,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IHandoffService handoffs,
         IWhatsAppService whatsApp,
         INotificationService notifications,
-        IOptionsSnapshot<AiOptions> options,
+        ITenantConfigOverrideProvider tenantConfig,
         ILogger<ConversationOrchestrator> logger)
     {
         _context = context;
@@ -60,7 +58,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _handoffs = handoffs;
         _whatsApp = whatsApp;
         _notifications = notifications;
-        _options = options.Value;
+        _tenantConfig = tenantConfig;
         _logger = logger;
     }
 
@@ -91,10 +89,16 @@ public class ConversationOrchestrator : IConversationOrchestrator
         var retrieved = await _knowledgeBase.RetrieveRelevantChunksAsync(inboundMessage.Text ?? string.Empty, cancellationToken);
         var groundingChunks = retrieved.Select(r => new AiKnowledgeSnippet(r.ChunkId, r.Text, r.RelevanceScore)).ToList();
 
+        // Resolved per call (not once per DI scope) - merges this tenant's Ai:* overrides, if any,
+        // over the platform default. See ITenantConfigOverrideProvider's own doc comment. The ambient
+        // tenant is already set correctly by the time this runs - see InboundWebhookProcessor's own
+        // doc comment.
+        var options = await _tenantConfig.GetAiOptionsAsync(cancellationToken);
+
         var historyRows = await _context.Messages
             .Where(m => m.ConversationId == conversationId && m.Id != inboundMessageId)
             .OrderByDescending(m => m.CreatedAt)
-            .Take(_options.ConversationHistoryTurns)
+            .Take(options.ConversationHistoryTurns)
             .ToListAsync(cancellationToken);
         historyRows.Reverse(); // oldest first, for a natural reading order in the prompt
 
@@ -108,8 +112,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         var result = await _ai.GetResponseAsync(context, cancellationToken);
 
-        var escalate = result.ConfidenceScore < _options.ConfidenceThreshold ||
-            _options.EscalationIntents.Any(i => string.Equals(i, result.DetectedIntent, StringComparison.OrdinalIgnoreCase));
+        var escalate = result.ConfidenceScore < options.ConfidenceThreshold ||
+            options.EscalationIntents.Any(i => string.Equals(i, result.DetectedIntent, StringComparison.OrdinalIgnoreCase));
 
         var interaction = new AiInteraction
         {

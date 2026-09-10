@@ -1,12 +1,10 @@
 using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
-using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -18,7 +16,7 @@ public class CampaignService : ICampaignService
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantContext _tenantContext;
     private readonly IPlanLimitsService _planLimits;
-    private readonly CampaignOptions _options;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly IValidator<CreateCampaignRequest> _createValidator;
     private readonly IValidator<UpdateCampaignRequest> _updateValidator;
     private readonly IValidator<UpsertCampaignStepRequest> _stepValidator;
@@ -29,7 +27,7 @@ public class CampaignService : ICampaignService
         IDateTimeProvider dateTime,
         ITenantContext tenantContext,
         IPlanLimitsService planLimits,
-        IOptionsSnapshot<CampaignOptions> options,
+        ITenantConfigOverrideProvider tenantConfig,
         IValidator<CreateCampaignRequest> createValidator,
         IValidator<UpdateCampaignRequest> updateValidator,
         IValidator<UpsertCampaignStepRequest> stepValidator,
@@ -39,7 +37,7 @@ public class CampaignService : ICampaignService
         _dateTime = dateTime;
         _tenantContext = tenantContext;
         _planLimits = planLimits;
-        _options = options.Value;
+        _tenantConfig = tenantConfig;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
         _stepValidator = stepValidator;
@@ -181,8 +179,11 @@ public class CampaignService : ICampaignService
         if (request.MediaAssetIds.Distinct().Count() != request.MediaAssetIds.Count)
             throw Invalid("mediaAssetIds", "Duplicate media asset ids.");
 
-        if (request.MediaAssetIds.Count < _options.MinStepMedia || request.MediaAssetIds.Count > _options.MaxStepMedia)
-            throw Invalid("mediaAssetIds", $"A step needs between {_options.MinStepMedia} and {_options.MaxStepMedia} media items; {request.MediaAssetIds.Count} given.");
+        // Resolved per call (not once per DI scope) - merges this tenant's Campaigns:* overrides, if
+        // any, over the platform default. See ITenantConfigOverrideProvider's own doc comment.
+        var options = await _tenantConfig.GetCampaignOptionsAsync(cancellationToken);
+        if (request.MediaAssetIds.Count < options.MinStepMedia || request.MediaAssetIds.Count > options.MaxStepMedia)
+            throw Invalid("mediaAssetIds", $"A step needs between {options.MinStepMedia} and {options.MaxStepMedia} media items; {request.MediaAssetIds.Count} given.");
 
         var mediaCount = await _context.MediaAssets.CountAsync(m => request.MediaAssetIds.Contains(m.Id), cancellationToken);
         if (mediaCount != request.MediaAssetIds.Count)
@@ -474,10 +475,12 @@ public class CampaignService : ICampaignService
             .Where(t => templateIds.Contains(t.Id))
             .ToDictionaryAsync(t => t.Id, cancellationToken);
 
+        var options = await _tenantConfig.GetCampaignOptionsAsync(cancellationToken);
+
         foreach (var step in activeSteps)
         {
-            if (step.StepMedia.Count < _options.MinStepMedia || step.StepMedia.Count > _options.MaxStepMedia)
-                throw new ConflictException($"Step '{step.StepType}' needs between {_options.MinStepMedia} and {_options.MaxStepMedia} media items; it has {step.StepMedia.Count}.");
+            if (step.StepMedia.Count < options.MinStepMedia || step.StepMedia.Count > options.MaxStepMedia)
+                throw new ConflictException($"Step '{step.StepType}' needs between {options.MinStepMedia} and {options.MaxStepMedia} media items; it has {step.StepMedia.Count}.");
 
             if (step.MessageTemplateId is null || !templates.TryGetValue(step.MessageTemplateId.Value, out var template))
                 throw new ConflictException($"Step '{step.StepType}' has no template assigned.");

@@ -105,6 +105,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<TenantAiProviderConfig> TenantAiProviderConfigs => Set<TenantAiProviderConfig>();
 
+    // Deliberately not on IApplicationDbContext - reached only through ITenantConfigOverrideProvider,
+    // same reasoning as TenantWhatsAppConfigs/TenantAiProviderConfigs above.
+    public DbSet<TenantAppSettingOverride> TenantAppSettingOverrides => Set<TenantAppSettingOverride>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

@@ -22,17 +22,20 @@ public class PlatformTenantConfigController : ControllerBase
 {
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;
     private readonly ITenantAiConfigProvider _aiConfigProvider;
+    private readonly ITenantConfigOverrideProvider _configOverrideProvider;
     private readonly IPlatformAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
 
     public PlatformTenantConfigController(
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
         ITenantAiConfigProvider aiConfigProvider,
+        ITenantConfigOverrideProvider configOverrideProvider,
         IPlatformAuditService auditService,
         ICurrentUserService currentUser)
     {
         _whatsAppConfigProvider = whatsAppConfigProvider;
         _aiConfigProvider = aiConfigProvider;
+        _configOverrideProvider = configOverrideProvider;
         _auditService = auditService;
         _currentUser = currentUser;
     }
@@ -91,6 +94,36 @@ public class PlatformTenantConfigController : ControllerBase
     {
         await _aiConfigProvider.DeleteConfigForTenantAsync(tenantId, cancellationToken);
         await _auditService.LogAsync(ActorUserId, ActorEmail, PlatformAuditActions.TenantAiConfigDeleted, tenantId, cancellationToken: cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>Every tenant-overridable Campaigns/Media/Messaging/Ai key, showing the platform
+    /// default, this tenant's override (if any) and the effective value - see
+    /// AppSettingDefinition.IsTenantOverridable's own doc comment for which keys these are and why.</summary>
+    [HttpGet("config-overrides")]
+    public async Task<ActionResult<IReadOnlyList<TenantSettingCategoryDto>>> GetConfigOverrides(Guid tenantId, CancellationToken cancellationToken)
+        => Ok(await _configOverrideProvider.GetOverridesForTenantAsync(tenantId, cancellationToken));
+
+    [HttpPut("config-overrides")]
+    public async Task<ActionResult<IReadOnlyList<TenantSettingCategoryDto>>> SaveConfigOverrides(
+        Guid tenantId, [FromBody] UpdateTenantSettingsRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _configOverrideProvider.SaveOverridesForTenantAsync(tenantId, request, ActorUserId, cancellationToken);
+
+        await _auditService.LogAsync(
+            ActorUserId, ActorEmail, PlatformAuditActions.TenantConfigOverridesSaved, tenantId,
+            details: $"{request.Values.Count} value(s) changed", cancellationToken: cancellationToken);
+
+        return Ok(result);
+    }
+
+    /// <summary>Clears every override this tenant has across all four categories at once - back to the
+    /// platform default for everything.</summary>
+    [HttpDelete("config-overrides")]
+    public async Task<IActionResult> DeleteConfigOverrides(Guid tenantId, CancellationToken cancellationToken)
+    {
+        await _configOverrideProvider.DeleteOverridesForTenantAsync(tenantId, cancellationToken);
+        await _auditService.LogAsync(ActorUserId, ActorEmail, PlatformAuditActions.TenantConfigOverridesDeleted, tenantId, cancellationToken: cancellationToken);
         return NoContent();
     }
 

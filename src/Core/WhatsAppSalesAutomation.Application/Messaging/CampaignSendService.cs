@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
@@ -41,7 +40,7 @@ public class CampaignSendService : ICampaignSendService
     private readonly IConversationService _conversations;
     private readonly ITenantContext _tenantContext;
     private readonly IPlanLimitsService _planLimits;
-    private readonly MessagingOptions _options;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ILogger<CampaignSendService> _logger;
 
     public CampaignSendService(
@@ -51,7 +50,7 @@ public class CampaignSendService : ICampaignSendService
         IConversationService conversations,
         ITenantContext tenantContext,
         IPlanLimitsService planLimits,
-        IOptionsSnapshot<MessagingOptions> options,
+        ITenantConfigOverrideProvider tenantConfig,
         ILogger<CampaignSendService> logger)
     {
         _context = context;
@@ -60,7 +59,7 @@ public class CampaignSendService : ICampaignSendService
         _conversations = conversations;
         _tenantContext = tenantContext;
         _planLimits = planLimits;
-        _options = options.Value;
+        _tenantConfig = tenantConfig;
         _logger = logger;
     }
 
@@ -99,17 +98,23 @@ public class CampaignSendService : ICampaignSendService
         if (campaignId is { } scopeToSend)
             runningCampaigns = runningCampaigns.Where(c => c.Id == scopeToSend);
 
+        // Resolved once per tick, not once per DI scope - merges this tenant's Messaging:* overrides,
+        // if any, over the platform default (TenantJobRunner already sets the ambient tenant for this
+        // whole scope before CampaignSendService is resolved). Passed down to ProcessOneAsync rather
+        // than re-resolved per candidate.
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
         var candidates = await _context.CampaignCustomers
             .Where(cc => cc.Status == CampaignCustomerStatus.Pending)
             .Join(runningCampaigns, cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
             .OrderBy(cc => cc.CreatedAt)
-            .Take(_options.MaxSendsPerRun)
+            .Take(options.MaxSendsPerRun)
             .Select(cc => cc.Id)
             .ToListAsync(cancellationToken);
 
         var result = SendRunResult.Empty;
         foreach (var ccId in candidates)
-            result = Add(result, await ProcessOneAsync(ccId, fromStepNumber: 0, now, cancellationToken));
+            result = Add(result, await ProcessOneAsync(ccId, fromStepNumber: 0, now, options, cancellationToken));
 
         return result;
     }
@@ -122,17 +127,19 @@ public class CampaignSendService : ICampaignSendService
         if (campaignId is { } scopeTo)
             runningCampaigns = runningCampaigns.Where(c => c.Id == scopeTo);
 
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
         var due = await _context.CampaignCustomers
             .Where(cc => cc.Status == CampaignCustomerStatus.AwaitingResponse && cc.NextFollowUpDueAt != null && cc.NextFollowUpDueAt <= now)
             .Join(runningCampaigns, cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
             .OrderBy(cc => cc.NextFollowUpDueAt)
-            .Take(_options.MaxSendsPerRun)
+            .Take(options.MaxSendsPerRun)
             .Select(cc => new { cc.Id, cc.CurrentStepNumber })
             .ToListAsync(cancellationToken);
 
         var result = SendRunResult.Empty;
         foreach (var item in due)
-            result = Add(result, await ProcessOneAsync(item.Id, item.CurrentStepNumber + 1, now, cancellationToken));
+            result = Add(result, await ProcessOneAsync(item.Id, item.CurrentStepNumber + 1, now, options, cancellationToken));
 
         return result;
     }
@@ -142,9 +149,11 @@ public class CampaignSendService : ICampaignSendService
         var now = _dateTime.UtcNow;
         var staleBefore = now - StaleQueuedThreshold;
 
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
         var query = _context.Messages
             .Where(m =>
-                (m.Status == MessageStatus.Failed && m.AttemptCount < _options.MaxRetryAttempts && (m.NextAttemptAt == null || m.NextAttemptAt <= now)) ||
+                (m.Status == MessageStatus.Failed && m.AttemptCount < options.MaxRetryAttempts && (m.NextAttemptAt == null || m.NextAttemptAt <= now)) ||
                 (m.Status == MessageStatus.Queued && m.CreatedAt <= staleBefore));
 
         if (campaignId is { } id)
@@ -158,13 +167,13 @@ public class CampaignSendService : ICampaignSendService
 
         var messageIds = await query
             .OrderBy(m => m.CreatedAt)
-            .Take(_options.MaxSendsPerRun)
+            .Take(options.MaxSendsPerRun)
             .Select(m => m.Id)
             .ToListAsync(cancellationToken);
 
         var result = SendRunResult.Empty;
         foreach (var messageId in messageIds)
-            result = Add(result, await RetryOneAsync(messageId, now, cancellationToken));
+            result = Add(result, await RetryOneAsync(messageId, now, options, cancellationToken));
 
         return result;
     }
@@ -172,7 +181,7 @@ public class CampaignSendService : ICampaignSendService
     /// <summary>Loads one campaign customer fresh and attempts the lowest active step at or after
     /// <paramref name="fromStepNumber"/> - used for both initial sends (fromStepNumber 0) and
     /// follow-ups (fromStepNumber = CurrentStepNumber + 1).</summary>
-    private async Task<SendRunResult> ProcessOneAsync(Guid campaignCustomerId, int fromStepNumber, DateTime now, CancellationToken cancellationToken)
+    private async Task<SendRunResult> ProcessOneAsync(Guid campaignCustomerId, int fromStepNumber, DateTime now, MessagingOptions options, CancellationToken cancellationToken)
     {
         var cc = await _context.CampaignCustomers.FirstOrDefaultAsync(x => x.Id == campaignCustomerId, cancellationToken);
         if (cc is null)
@@ -287,11 +296,11 @@ public class CampaignSendService : ICampaignSendService
         // Reserve the idempotency key BEFORE calling the external API - see class remarks.
         await _context.SaveChangesAsync(cancellationToken);
 
-        var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, cancellationToken);
+        var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, options, cancellationToken);
         return new SendRunResult(1, sent ? 1 : 0, sent ? 0 : 1, 0);
     }
 
-    private async Task<SendRunResult> RetryOneAsync(Guid messageId, DateTime now, CancellationToken cancellationToken)
+    private async Task<SendRunResult> RetryOneAsync(Guid messageId, DateTime now, MessagingOptions options, CancellationToken cancellationToken)
     {
         var message = await _context.Messages.FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
         if (message is null || message.CampaignCustomerId is null || message.CampaignStepNumber is null)
@@ -324,7 +333,7 @@ public class CampaignSendService : ICampaignSendService
             message.Status = MessageStatus.Failed;
             message.FailureReason = $"Campaign is {campaign.Status}, not Running - retry abandoned.";
             message.NextAttemptAt = null;
-            message.AttemptCount = Math.Max(message.AttemptCount, _options.MaxRetryAttempts);
+            message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
             await _context.SaveChangesAsync(cancellationToken);
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
@@ -334,7 +343,7 @@ public class CampaignSendService : ICampaignSendService
             message.Status = MessageStatus.Failed;
             message.FailureReason = "Customer opted out before retry";
             message.NextAttemptAt = null;
-            message.AttemptCount = Math.Max(message.AttemptCount, _options.MaxRetryAttempts);
+            message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
 
             if (cc.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.AwaitingResponse)
             {
@@ -359,7 +368,7 @@ public class CampaignSendService : ICampaignSendService
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
-        var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, cancellationToken);
+        var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, options, cancellationToken);
         return new SendRunResult(1, sent ? 1 : 0, sent ? 0 : 1, 0);
     }
 
@@ -373,6 +382,7 @@ public class CampaignSendService : ICampaignSendService
         CampaignCustomer cc,
         Campaign campaign,
         DateTime now,
+        MessagingOptions options,
         CancellationToken cancellationToken)
     {
         var (resolvedText, parameterValues) = TemplatePlaceholderResolver.Resolve(step.MessageText, customer);
@@ -429,7 +439,7 @@ public class CampaignSendService : ICampaignSendService
             message.Status = MessageStatus.Failed;
             message.FailureReason = result.ErrorMessage;
 
-            if (message.AttemptCount >= _options.MaxRetryAttempts)
+            if (message.AttemptCount >= options.MaxRetryAttempts)
             {
                 message.NextAttemptAt = null;
                 cc.Status = CampaignCustomerStatus.Failed;
@@ -438,7 +448,7 @@ public class CampaignSendService : ICampaignSendService
             }
             else
             {
-                var backoff = _options.RetryBackoffMinutes;
+                var backoff = options.RetryBackoffMinutes;
                 var minutes = backoff.Length == 0 ? 5 : backoff[Math.Min(message.AttemptCount - 1, backoff.Length - 1)];
                 message.NextAttemptAt = now.AddMinutes(minutes);
             }
