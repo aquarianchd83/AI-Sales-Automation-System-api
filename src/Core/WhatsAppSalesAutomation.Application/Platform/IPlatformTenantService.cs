@@ -13,6 +13,11 @@ public interface IPlatformTenantService
 
     Task<PlatformTenantDetailDto> GetDetailAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
+    /// <summary>Operator-initiated tenant creation - see <see cref="CreatePlatformTenantRequest"/>'s
+    /// own doc comment. Throws <c>ConflictException</c> if the admin email or the requested slug is
+    /// already taken, the same as self-serve signup.</summary>
+    Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
     /// <summary>Locks the tenant out (login already refuses Suspended tenants - see
     /// AuthService.LoginAsync) without touching any of its data.</summary>
     Task SuspendAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);

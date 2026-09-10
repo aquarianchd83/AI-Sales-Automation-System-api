@@ -1,8 +1,10 @@
+using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
@@ -18,6 +20,8 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantSlugResolver _slugResolver;
+    private readonly IValidator<CreatePlatformTenantRequest> _createValidator;
     private readonly IPlatformAuditService _auditService;
 
     public PlatformTenantService(
@@ -26,6 +30,8 @@ public class PlatformTenantService : IPlatformTenantService
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
+        ITenantSlugResolver slugResolver,
+        IValidator<CreatePlatformTenantRequest> createValidator,
         IPlatformAuditService auditService)
     {
         _context = context;
@@ -33,6 +39,8 @@ public class PlatformTenantService : IPlatformTenantService
         _whatsAppConfigProvider = whatsAppConfigProvider;
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
+        _slugResolver = slugResolver;
+        _createValidator = createValidator;
         _auditService = auditService;
     }
 
@@ -127,6 +135,53 @@ public class PlatformTenantService : IPlatformTenantService
             connection?.IsConnected ?? false,
             messagesSentThisMonth, plan?.MaxMessagesPerMonth,
             aiInteractionsThisMonth.Count, estimatedAiSpend);
+    }
+
+    public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var existingUser = await _userManager.FindByEmailAsync(request.AdminEmail);
+        if (existingUser is not null)
+            throw new ConflictException($"A user with email '{request.AdminEmail}' already exists.");
+
+        var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
+
+        var tenant = new Tenant
+        {
+            Name = request.CompanyName.Trim(),
+            Slug = slug,
+            Status = TenantStatus.Trial,
+            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14)
+        };
+        _context.Tenants.Add(tenant);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var user = new ApplicationUser
+        {
+            TenantId = tenant.Id,
+            UserName = request.AdminEmail,
+            Email = request.AdminEmail,
+            FullName = request.AdminFullName.Trim(),
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = _dateTime.UtcNow
+        };
+
+        var result = await _userManager.CreateAsync(user, request.AdminPassword);
+        if (!result.Succeeded)
+            throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.AdminPassword), e.Description)));
+
+        await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+
+        tenant.OwnerUserId = user.Id;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantCreated, tenant.Id, user.Id,
+            details: $"Created tenant '{tenant.Name}' ({tenant.Slug}) with admin {user.Email}", cancellationToken: cancellationToken);
+
+        return await GetDetailAsync(tenant.Id, cancellationToken);
     }
 
     public async Task SuspendAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)

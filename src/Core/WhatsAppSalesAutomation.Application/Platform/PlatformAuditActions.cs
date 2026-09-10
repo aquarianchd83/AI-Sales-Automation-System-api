@@ -6,6 +6,7 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 /// entity, not an enum - see <c>PlatformAuditLogEntry.Action</c>'s own doc comment for why.</summary>
 public static class PlatformAuditActions
 {
+    public const string TenantCreated = "TenantCreated";
     public const string TenantSuspended = "TenantSuspended";
     public const string TenantReactivated = "TenantReactivated";
     public const string TenantDeleted = "TenantDeleted";

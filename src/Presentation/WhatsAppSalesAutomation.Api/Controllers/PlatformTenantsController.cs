@@ -31,6 +31,15 @@ public class PlatformTenantsController : ControllerBase
     public async Task<ActionResult<PlatformTenantDetailDto>> GetDetail(Guid id, CancellationToken cancellationToken)
         => Ok(await _tenantService.GetDetailAsync(id, cancellationToken));
 
+    /// <summary>Operator-initiated tenant creation - see CreatePlatformTenantRequest's own doc
+    /// comment for how this differs from self-serve signup.</summary>
+    [HttpPost]
+    public async Task<ActionResult<PlatformTenantDetailDto>> Create([FromBody] CreatePlatformTenantRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _tenantService.CreateAsync(request, ActorUserId, ActorEmail, cancellationToken);
+        return CreatedAtAction(nameof(GetDetail), new { id = result.Id }, result);
+    }
+
     [HttpPost("{id:guid}/suspend")]
     public async Task<IActionResult> Suspend(Guid id, CancellationToken cancellationToken)
     {

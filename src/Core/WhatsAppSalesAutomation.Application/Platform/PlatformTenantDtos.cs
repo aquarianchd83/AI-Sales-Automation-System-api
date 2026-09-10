@@ -51,3 +51,19 @@ public record ImpersonationSessionDto(
 /// StripeWebhookHandler can still overwrite this the next time a real Stripe event for this tenant
 /// arrives, so this is "what we show/enforce right now," not a permanent override of billing truth.</summary>
 public record OverrideTenantPlanRequest(Guid PlanId);
+
+/// <summary>
+/// Operator-initiated tenant creation - the Platform Admin Console's counterpart to the self-serve
+/// <c>AuthService.SignUpAsync</c> flow (same shape: a new Tenant on trial plus its first Admin
+/// user), for support/sales-assisted onboarding rather than the customer signing themselves up.
+/// Unlike self-serve signup, the caller here doesn't log in as the new admin afterwards - the
+/// PlatformSuperAdmin sets <see cref="AdminPassword"/> as a temporary password to hand off, the
+/// same "set it, then share it securely" convention <c>CreateUserRequest</c> already uses for
+/// tenant-scoped user creation.
+/// </summary>
+public record CreatePlatformTenantRequest(
+    string CompanyName,
+    string? Slug,
+    string AdminFullName,
+    string AdminEmail,
+    string AdminPassword);

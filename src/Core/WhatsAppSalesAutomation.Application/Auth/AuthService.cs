@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
@@ -17,6 +18,7 @@ public class AuthService : IAuthService
     private readonly IApplicationDbContext _context;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantSlugResolver _slugResolver;
     private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
@@ -27,6 +29,7 @@ public class AuthService : IAuthService
         IApplicationDbContext context,
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
+        ITenantSlugResolver slugResolver,
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
@@ -36,6 +39,7 @@ public class AuthService : IAuthService
         _context = context;
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
+        _slugResolver = slugResolver;
         _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
@@ -50,7 +54,7 @@ public class AuthService : IAuthService
         if (existingUser is not null)
             throw new ConflictException($"A user with email '{request.Email}' already exists.");
 
-        var slug = await ResolveSlugAsync(request.Slug, request.CompanyName, cancellationToken);
+        var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
 
         var tenant = new Tenant
         {
@@ -84,43 +88,6 @@ public class AuthService : IAuthService
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
-    }
-
-    /// <summary>Lowercases/derives a URL-safe slug from the company name when none was supplied, and
-    /// de-duplicates against existing tenants by appending "-2", "-3", etc. A slug the caller supplied
-    /// explicitly is never silently altered beyond lowercasing - if it collides, sign-up fails loudly
-    /// instead (see <see cref="TenantSignUpRequestValidator"/> for the format it must already match).</summary>
-    private async Task<string> ResolveSlugAsync(string? requestedSlug, string companyName, CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrWhiteSpace(requestedSlug))
-        {
-            var normalized = requestedSlug.Trim().ToLowerInvariant();
-            if (await _context.Tenants.AnyAsync(t => t.Slug == normalized, cancellationToken))
-                throw new ConflictException($"Workspace URL '{normalized}' is already taken.");
-
-            return normalized;
-        }
-
-        var baseSlug = new string(companyName.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray());
-        while (baseSlug.Contains("--"))
-            baseSlug = baseSlug.Replace("--", "-");
-        baseSlug = baseSlug.Trim('-');
-        if (string.IsNullOrEmpty(baseSlug))
-            baseSlug = "workspace";
-        if (baseSlug.Length > 55)
-            baseSlug = baseSlug[..55].Trim('-');
-
-        var candidate = baseSlug;
-        var suffix = 2;
-        while (await _context.Tenants.AnyAsync(t => t.Slug == candidate, cancellationToken))
-        {
-            candidate = $"{baseSlug}-{suffix}";
-            suffix++;
-        }
-
-        return candidate;
     }
 
     public async Task<TokenPairDto> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default)
