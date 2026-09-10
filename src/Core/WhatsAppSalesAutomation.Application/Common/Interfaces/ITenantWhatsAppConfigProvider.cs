@@ -1,12 +1,19 @@
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 /// <summary>
-/// Reads (and, from the tenant's own self-service settings screen, writes) one tenant's WhatsApp
-/// Business Account credentials - implemented in Infrastructure against the Infrastructure-internal
-/// <c>TenantWhatsAppConfig</c> table, decrypting on the way out and encrypting on the way in so nothing
-/// above this interface ever sees ciphertext or plaintext secrets mixed up. <c>WhatsAppServiceFactory</c>
-/// (Infrastructure) is the main consumer of the credential-reading half, resolving them fresh on every
-/// outbound call the same way the old IWhatsAppTokenStore did for the single pre-multi-tenant token.
+/// Reads one tenant's WhatsApp Business Account credentials, and writes them on a PlatformSuperAdmin's
+/// behalf (see <see cref="SaveConfigForTenantAsync"/>/<see cref="DeleteConfigForTenantAsync"/>) -
+/// implemented in Infrastructure against the Infrastructure-internal <c>TenantWhatsAppConfig</c> table,
+/// decrypting on the way out and encrypting on the way in so nothing above this interface ever sees
+/// ciphertext or plaintext secrets mixed up. <c>WhatsAppServiceFactory</c> (Infrastructure) is the main
+/// consumer of the credential-reading half, resolving them fresh on every outbound call the same way
+/// the old IWhatsAppTokenStore did for the single pre-multi-tenant token.
+///
+/// Write access used to be the tenant's own self-service settings screen (Phase B); it now belongs to
+/// the Platform Admin Console exclusively - see <c>PlatformTenantConfigController</c>'s own doc
+/// comment for why a tenant no longer edits or deletes its own WhatsApp credentials. A tenant admin
+/// can still read the masked status of their own config (<see cref="GetConfigForCurrentTenantAsync"/>),
+/// unchanged.
 /// </summary>
 public interface ITenantWhatsAppConfigProvider
 {
@@ -31,12 +38,27 @@ public interface ITenantWhatsAppConfigProvider
     /// SettingItemDto.HasValue/ValueHint). Null if not yet configured.</summary>
     Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Creates or updates the calling tenant's config. A null field in <paramref name="request"/>
-    /// leaves that field unchanged (same "omit to leave alone" convention as UpdateSettingsRequest) -
-    /// this is what lets the tenant re-save PhoneNumberId without having to re-paste AccessToken every
-    /// time. Returns the saved config's masked view.</summary>
+    /// <summary>Deprecated call path kept only for <see cref="GetConfigForCurrentTenantAsync"/>'s own
+    /// read-only use - throws <see cref="InvalidOperationException"/> if actually invoked without a
+    /// tenant in scope, same as before. No controller writes through this anymore; see
+    /// <see cref="SaveConfigForTenantAsync"/>.</summary>
     Task<TenantWhatsAppConfigDto> SaveConfigForCurrentTenantAsync(
         UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Masked view of the given tenant's config, for the Platform Admin Console's Tenant
+    /// detail screen. Null if not yet configured.</summary>
+    Task<TenantWhatsAppConfigDto?> GetConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Creates or updates <paramref name="tenantId"/>'s config on a PlatformSuperAdmin's
+    /// behalf - the only way a tenant's WhatsApp credentials get written now. Same "null leaves it
+    /// unchanged, empty string clears it" convention as every other field here.</summary>
+    Task<TenantWhatsAppConfigDto> SaveConfigForTenantAsync(
+        Guid tenantId, UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the tenant's WhatsApp config entirely - back to "not connected," the same
+    /// state a brand-new trial tenant starts in. A no-op (not an error) if the tenant had no config
+    /// to begin with.</summary>
+    Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     /// <summary>Cross-tenant, masked connection status for every tenant that has ever saved a config -
     /// what the Platform Admin Console's WhatsApp Connections screen (spec item #5) lists. Deliberately

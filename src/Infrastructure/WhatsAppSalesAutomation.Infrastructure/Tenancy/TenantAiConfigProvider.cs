@@ -49,26 +49,42 @@ public class TenantAiConfigProvider : ITenantAiConfigProvider
         return row is null ? null : Decrypt(row);
     }
 
-    public async Task<TenantAiProviderConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default)
-    {
-        if (_tenantContext.TenantId is not { } tenantId)
-            return null;
+    public Task<TenantAiProviderConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default) =>
+        _tenantContext.TenantId is { } tenantId ? GetConfigForTenantAsync(tenantId, cancellationToken) : Task.FromResult<TenantAiProviderConfigDto?>(null);
 
-        var row = await _context.TenantAiProviderConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
-        return row is null ? null : ToDto(row);
-    }
-
+    /// <summary>Deprecated - see this method's own interface doc comment. Still resolves the ambient
+    /// tenant and delegates to <see cref="SaveConfigForTenantAsync"/> rather than duplicating the save
+    /// logic, but nothing in this codebase calls it anymore now that TenantSettingsController's PUT
+    /// endpoints are gone.</summary>
     public async Task<TenantAiProviderConfigDto> SaveConfigForCurrentTenantAsync(
         UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
     {
         if (_tenantContext.TenantId is not { } tenantId)
             throw new InvalidOperationException("Cannot save AI provider config without a tenant in scope.");
 
+        var dto = await SaveConfigForTenantAsync(tenantId, request, updatedByUserId, cancellationToken);
+        _cachedCredentials = null;
+        return dto;
+    }
+
+    public async Task<TenantAiProviderConfigDto?> GetConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        // IgnoreQueryFilters() - see TenantWhatsAppConfigProvider.GetConfigForTenantAsync's identical
+        // reasoning: the caller here is a PlatformSuperAdmin (no ambient tenant) or the delegation
+        // above, neither of which can rely on the reflective ITenantOwned filter matching tenantId.
+        var row = await _context.TenantAiProviderConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        return row is null ? null : ToDto(row);
+    }
+
+    public async Task<TenantAiProviderConfigDto> SaveConfigForTenantAsync(
+        Guid tenantId, UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
         await _saveValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);
 
-        var row = await _context.TenantAiProviderConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        var row = await _context.TenantAiProviderConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
         if (row is null)
         {
             row = new TenantAiProviderConfig { TenantId = tenantId };
@@ -81,7 +97,7 @@ public class TenantAiConfigProvider : ITenantAiConfigProvider
             row.EmbeddingProvider = request.EmbeddingProvider.Trim();
 
         // Null leaves the stored ciphertext untouched, empty string explicitly clears it - same
-        // convention as TenantWhatsAppConfigProvider.SaveConfigForCurrentTenantAsync.
+        // convention as TenantWhatsAppConfigProvider.SaveConfigForTenantAsync.
         if (request.AnthropicApiKey is not null)
             row.AnthropicApiKey = request.AnthropicApiKey.Length == 0 ? null : protector.Protect(request.AnthropicApiKey);
         if (!string.IsNullOrWhiteSpace(request.AnthropicModel))
@@ -105,9 +121,24 @@ public class TenantAiConfigProvider : ITenantAiConfigProvider
         row.UpdatedByUserId = updatedByUserId;
 
         await _context.SaveChangesAsync(cancellationToken);
-        _cachedCredentials = null;
+
+        if (_tenantContext.TenantId == tenantId)
+            _cachedCredentials = null;
 
         return ToDto(row);
+    }
+
+    public async Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var row = await _context.TenantAiProviderConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        if (row is null)
+            return;
+
+        _context.TenantAiProviderConfigs.Remove(row);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (_tenantContext.TenantId == tenantId)
+            _cachedCredentials = null;
     }
 
     private TenantAiCredentials Decrypt(TenantAiProviderConfig row)

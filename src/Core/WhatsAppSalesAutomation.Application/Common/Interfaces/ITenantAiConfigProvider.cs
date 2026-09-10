@@ -1,11 +1,13 @@
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 /// <summary>
-/// Reads (and, from the tenant's own self-service settings screen, writes) one tenant's AI provider
-/// choice and API keys - see <c>ITenantWhatsAppConfigProvider</c>'s own doc comment for the identical
-/// encrypt/decrypt-boundary reasoning. <c>AiServiceFactory</c>/<c>TenantEmbeddingService</c>/
-/// <c>TenantEmbeddingProviderCatalog</c> (Infrastructure) are what actually consume the credential-
-/// reading half to pick and configure the right concrete client per tenant, per call.
+/// Reads one tenant's AI provider choice and API keys, and writes them on a PlatformSuperAdmin's
+/// behalf - see <c>ITenantWhatsAppConfigProvider</c>'s own doc comment for the identical encrypt/
+/// decrypt-boundary reasoning and for why write access moved off the tenant's own self-service
+/// settings screen and onto the Platform Admin Console. <c>AiServiceFactory</c>/
+/// <c>TenantEmbeddingService</c>/<c>TenantEmbeddingProviderCatalog</c> (Infrastructure) are what
+/// actually consume the credential-reading half to pick and configure the right concrete client per
+/// tenant, per call.
 /// </summary>
 public interface ITenantAiConfigProvider
 {
@@ -16,14 +18,32 @@ public interface ITenantAiConfigProvider
     /// ITenantWhatsAppConfigProvider.GetForCurrentTenantAsync's own doc comment on why.</summary>
     Task<TenantAiCredentials?> GetForCurrentTenantAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Masked view of the calling tenant's config for the settings screen - API keys are
-    /// never exposed in full, only whether each is set. Null if not yet configured (defaults apply).</summary>
+    /// <summary>Masked view of the calling tenant's config for their own (read-only) settings screen -
+    /// API keys are never exposed in full, only whether each is set. Null if not yet configured
+    /// (defaults apply).</summary>
     Task<TenantAiProviderConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Creates or updates the calling tenant's config. A null field in <paramref name="request"/>
-    /// leaves that field unchanged - see UpdateTenantWhatsAppConfigRequest's identical convention.</summary>
+    /// <summary>Deprecated call path kept only so <see cref="GetConfigForCurrentTenantAsync"/> can
+    /// resolve the ambient tenant and delegate - throws <see cref="InvalidOperationException"/> if
+    /// actually invoked without a tenant in scope. No controller writes through this anymore; see
+    /// <see cref="SaveConfigForTenantAsync"/>.</summary>
     Task<TenantAiProviderConfigDto> SaveConfigForCurrentTenantAsync(
         UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Masked view of the given tenant's config, for the Platform Admin Console's Tenant
+    /// detail screen. Null if not yet configured.</summary>
+    Task<TenantAiProviderConfigDto?> GetConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Creates or updates <paramref name="tenantId"/>'s config on a PlatformSuperAdmin's
+    /// behalf - the only way a tenant's AI provider config gets written now. Same "null leaves it
+    /// unchanged, empty string clears it" convention as every other field here.</summary>
+    Task<TenantAiProviderConfigDto> SaveConfigForTenantAsync(
+        Guid tenantId, UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the tenant's AI provider config entirely - back to the built-in "Simulated"
+    /// defaults, the same state a brand-new trial tenant starts in. A no-op (not an error) if the
+    /// tenant had no config to begin with.</summary>
+    Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Already-decrypted AI provider config, ready to use against whichever provider's client -

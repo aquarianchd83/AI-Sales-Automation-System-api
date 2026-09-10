@@ -66,26 +66,48 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         return row is null ? null : new TenantWhatsAppLookupResult(row.TenantId, Decrypt(row));
     }
 
-    public async Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default)
-    {
-        if (_tenantContext.TenantId is not { } tenantId)
-            return null;
+    public Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default) =>
+        _tenantContext.TenantId is { } tenantId ? GetConfigForTenantAsync(tenantId, cancellationToken) : Task.FromResult<TenantWhatsAppConfigDto?>(null);
 
-        var row = await _context.TenantWhatsAppConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
-        return row is null ? null : ToDto(row);
-    }
-
+    /// <summary>Deprecated - see this method's own interface doc comment. Still resolves the ambient
+    /// tenant and delegates to <see cref="SaveConfigForTenantAsync"/> rather than duplicating the save
+    /// logic, but nothing in this codebase calls it anymore now that TenantSettingsController's PUT
+    /// endpoints are gone.</summary>
     public async Task<TenantWhatsAppConfigDto> SaveConfigForCurrentTenantAsync(
         UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
     {
         if (_tenantContext.TenantId is not { } tenantId)
             throw new InvalidOperationException("Cannot save WhatsApp config without a tenant in scope.");
 
+        var dto = await SaveConfigForTenantAsync(tenantId, request, updatedByUserId, cancellationToken);
+
+        // Invalidate the memoized read - a save-then-immediately-use within the same scope (unlikely
+        // today, but cheap to make safe) must see the fresh row, not whatever GetForCurrentTenantAsync
+        // may have already cached (including a cached "null" from before this row existed).
+        _cachedCredentials = null;
+
+        return dto;
+    }
+
+    public async Task<TenantWhatsAppConfigDto?> GetConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        // IgnoreQueryFilters() - the caller is a PlatformSuperAdmin (Platform Admin Console) or the
+        // ambient-tenant delegation above, neither of which is guaranteed to have tenantId as the
+        // reflective ITenantOwned filter's ambient tenant, so the filter can't be relied on here the
+        // way GetForCurrentTenantAsync's ordinary tenant-scoped read does.
+        var row = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        return row is null ? null : ToDto(row);
+    }
+
+    public async Task<TenantWhatsAppConfigDto> SaveConfigForTenantAsync(
+        Guid tenantId, UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
         await _saveValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);
 
-        var row = await _context.TenantWhatsAppConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        var row = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
         if (row is null)
         {
             row = new TenantWhatsAppConfig { TenantId = tenantId };
@@ -111,12 +133,23 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Invalidate the memoized read - a save-then-immediately-use within the same scope (unlikely
-        // today, but cheap to make safe) must see the fresh row, not whatever GetForCurrentTenantAsync
-        // may have already cached (including a cached "null" from before this row existed).
-        _cachedCredentials = null;
+        if (_tenantContext.TenantId == tenantId)
+            _cachedCredentials = null;
 
         return ToDto(row);
+    }
+
+    public async Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var row = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        if (row is null)
+            return;
+
+        _context.TenantWhatsAppConfigs.Remove(row);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (_tenantContext.TenantId == tenantId)
+            _cachedCredentials = null;
     }
 
     public async Task<IReadOnlyList<TenantWhatsAppConnectionSummary>> GetAllConnectionSummariesAsync(CancellationToken cancellationToken = default)
