@@ -26,10 +26,19 @@ public class BillingController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Anonymous callers (e.g. a not-yet-signed-up visitor) can pass <paramref name="country"/>
+    /// to preview localized pricing; an authenticated tenant gets its own stored Tenant.CountryCode
+    /// automatically and doesn't need to pass anything - see IBillingService.GetPlansAsync's own doc
+    /// comment.</summary>
     [HttpGet("plans")]
     [AllowAnonymous]
-    public async Task<ActionResult<IReadOnlyList<PlanDto>>> GetPlans(CancellationToken cancellationToken)
-        => Ok(await _billingService.GetPlansAsync(cancellationToken));
+    public async Task<ActionResult<IReadOnlyList<PlanDto>>> GetPlans([FromQuery] string? country, CancellationToken cancellationToken)
+        => Ok(await _billingService.GetPlansAsync(country, cancellationToken));
+
+    [HttpGet("regions")]
+    [AllowAnonymous]
+    public async Task<ActionResult<IReadOnlyList<RegionDto>>> GetRegions(CancellationToken cancellationToken)
+        => Ok(await _billingService.GetRegionsAsync(cancellationToken));
 
     [HttpGet("subscription")]
     [Authorize(Roles = AppRoles.Admin)]

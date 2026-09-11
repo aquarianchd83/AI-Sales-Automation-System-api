@@ -21,24 +21,48 @@ namespace WhatsAppSalesAutomation.Infrastructure.Billing;
 public class StripeBillingService : IBillingService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ITenantContext _tenantContext;
     private readonly StripeClient _stripeClient;
 
-    public StripeBillingService(IApplicationDbContext context, StripeClient stripeClient)
+    public StripeBillingService(IApplicationDbContext context, ITenantContext tenantContext, StripeClient stripeClient)
     {
         _context = context;
+        _tenantContext = tenantContext;
         _stripeClient = stripeClient;
     }
 
-    public async Task<IReadOnlyList<PlanDto>> GetPlansAsync(CancellationToken cancellationToken = default)
+    /// <summary>Resolves the region to price in: the explicit <paramref name="countryCode"/> when the
+    /// caller supplied one (BillingController threads through an anonymous ?country= query param, for
+    /// a not-yet-signed-up visitor previewing pricing), else the ambient tenant's own stored
+    /// Tenant.CountryCode when this is an authenticated call, else no country at all - which
+    /// RegionalPricingCatalog.Resolve treats the same as an unmatched code (USD).</summary>
+    public async Task<IReadOnlyList<PlanDto>> GetPlansAsync(string? countryCode = null, CancellationToken cancellationToken = default)
     {
+        var resolvedCountryCode = countryCode;
+        if (resolvedCountryCode is null && _tenantContext.TenantId is { } tenantId)
+        {
+            resolvedCountryCode = await _context.Tenants
+                .Where(t => t.Id == tenantId)
+                .Select(t => t.CountryCode)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var pricing = RegionalPricingCatalog.Resolve(resolvedCountryCode);
+
         var plans = await _context.Plans
             .Where(p => p.IsActive)
             .OrderBy(p => p.PriceMonthlyCents)
             .ToListAsync(cancellationToken);
 
         return plans.Select(p => new PlanDto(
-            p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.PriceMonthlyCents)).ToList();
+            p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles,
+            p.PriceMonthlyCents, pricing.CurrencyCode, pricing.CurrencySymbol,
+            Math.Round(p.PriceMonthlyCents / 100m * pricing.RateToUsd, 2))).ToList();
     }
+
+    public Task<IReadOnlyList<RegionDto>> GetRegionsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RegionDto>>(
+            RegionalPricingCatalog.All.Select(r => new RegionDto(r.CountryCode, r.CountryName, r.CurrencyCode, r.CurrencySymbol)).ToList());
 
     public async Task<SubscriptionDto?> GetSubscriptionForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {

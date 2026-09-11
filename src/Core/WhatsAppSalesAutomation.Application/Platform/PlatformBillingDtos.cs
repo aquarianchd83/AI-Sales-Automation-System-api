@@ -35,3 +35,27 @@ public record PlatformSubscriptionQuery : PagedRequest
 {
     public SubscriptionStatus? Status { get; init; }
 }
+
+/// <summary>Body of POST the plan catalog endpoint. <see cref="Code"/> is immutable once a plan
+/// exists (see Plan.Code's own doc comment) - there is no update path for it, only creation.</summary>
+public record CreatePlanRequest(
+    string Code,
+    string Name,
+    int MaxUsers,
+    int MaxMessagesPerMonth,
+    int MaxCampaigns,
+    int MaxKnowledgeBaseArticles,
+    int PriceMonthlyCents,
+    string? StripePriceId);
+
+/// <summary>Body of PUT one plan. <see cref="IsActive"/> is how a plan is both retired ("Delete" in
+/// the admin UI sets it false) and un-retired - there is no separate reactivate endpoint.</summary>
+public record UpdatePlanRequest(
+    string Name,
+    int MaxUsers,
+    int MaxMessagesPerMonth,
+    int MaxCampaigns,
+    int MaxKnowledgeBaseArticles,
+    int PriceMonthlyCents,
+    string? StripePriceId,
+    bool IsActive);

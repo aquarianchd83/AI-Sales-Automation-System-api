@@ -3,7 +3,11 @@ namespace WhatsAppSalesAutomation.Application.Billing;
 /// <summary>One row of the public plan catalog - safe to return unauthenticated (GET /billing/plans),
 /// so it deliberately excludes StripePriceId (an internal detail, not a secret, but not this DTO's
 /// business either) and IsActive (retired plans are simply omitted from the list, not shown as
-/// unavailable - see BillingService.GetPlansAsync).</summary>
+/// unavailable - see BillingService.GetPlansAsync). <see cref="PriceMonthlyCents"/> stays the base USD
+/// price Stripe actually charges; <see cref="CurrencyCode"/>/<see cref="CurrencySymbol"/>/
+/// <see cref="LocalPriceAmount"/> are a display/quote figure resolved from
+/// RegionalPricingCatalog for whichever country applies to this call (see
+/// StripeBillingService.GetPlansAsync's own doc comment) - not what Stripe bills.</summary>
 public record PlanDto(
     Guid Id,
     string Code,
@@ -12,7 +16,15 @@ public record PlanDto(
     int MaxMessagesPerMonth,
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
-    int PriceMonthlyCents);
+    int PriceMonthlyCents,
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal LocalPriceAmount);
+
+/// <summary>One row of the public region catalog (GET /billing/regions, no auth required) - what the
+/// signup page's country picker renders. See RegionalPricingCatalog's own doc comment for why this is
+/// a small hand-maintained list rather than a DB table.</summary>
+public record RegionDto(string CountryCode, string CountryName, string CurrencyCode, string CurrencySymbol);
 
 /// <summary>The calling tenant's current billing state - <paramref name="Status"/> is the string form
 /// of SubscriptionStatus. Null (the whole DTO, from GetSubscriptionForTenantAsync) means the tenant

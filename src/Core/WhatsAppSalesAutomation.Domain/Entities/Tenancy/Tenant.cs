@@ -30,4 +30,10 @@ public class Tenant : BaseEntity
     /// <summary>Wired up in the billing phase - null means "no active plan selected yet" (still on trial
     /// or between plans), not an error.</summary>
     public Guid? PlanId { get; set; }
+
+    /// <summary>ISO 3166-1 alpha-2 (e.g. "US", "IN"), picked on the signup form - null for a tenant
+    /// who signed up before this existed, or who left it blank. Drives which currency/exchange rate
+    /// IBillingService.GetPlansAsync quotes plan prices in (see RegionalPricingCatalog); null or any
+    /// unmatched code falls back to USD, never an error.</summary>
+    public string? CountryCode { get; set; }
 }

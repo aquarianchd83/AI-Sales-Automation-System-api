@@ -14,12 +14,16 @@ public record LoginRequest(string Email, string Password, string? Slug = null);
 /// <summary>Self-serve tenant signup: creates a new <c>Tenant</c> (on trial) and its first Admin user
 /// in one call - see <c>AuthService.SignUpAsync</c>. <paramref name="Slug"/> is optional; when omitted
 /// it's derived from <paramref name="CompanyName"/> and de-duplicated automatically.</summary>
+/// <param name="CountryCode">ISO 3166-1 alpha-2 (e.g. "US", "IN"), optional - drives which currency
+/// IBillingService.GetPlansAsync later quotes this tenant's plan prices in (see
+/// RegionalPricingCatalog). Omitted or unmatched falls back to USD, never an error.</param>
 public record TenantSignUpRequest(
     string CompanyName,
     string? Slug,
     string FullName,
     string Email,
-    string Password);
+    string Password,
+    string? CountryCode = null);
 
 public record RefreshTokenRequest(string RefreshToken);
 

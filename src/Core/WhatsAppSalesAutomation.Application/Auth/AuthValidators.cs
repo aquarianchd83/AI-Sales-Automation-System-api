@@ -23,6 +23,9 @@ public class TenantSignUpRequestValidator : AbstractValidator<TenantSignUpReques
         RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
         RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+        // Loose on purpose - an unmatched code just falls back to USD display
+        // (RegionalPricingCatalog.Resolve), never an error, so this only guards the shape.
+        RuleFor(x => x.CountryCode).Length(2).When(x => x.CountryCode is not null);
     }
 }
 

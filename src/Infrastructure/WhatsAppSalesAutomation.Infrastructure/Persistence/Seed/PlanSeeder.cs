@@ -5,13 +5,20 @@ using WhatsAppSalesAutomation.Domain.Entities.Billing;
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// Idempotently upserts the platform's plan catalog by <see cref="Plan.Code"/> - run once at startup,
-/// same "safe to run every restart" shape as IdentitySeeder's role seeding. Unlike IdentitySeeder this
-/// always runs, not gated behind a Seed:* config flag: the plan catalog is not dummy/dev-only data,
-/// every environment (including production) needs these rows to exist for signup/billing to work at
-/// all. StripePriceId is deliberately left null here - wiring a plan to a real Stripe Price is an
-/// operational step (create it in the Stripe dashboard, paste the id back), not something to invent a
-/// placeholder value for.
+/// Idempotently inserts the platform's starter plan catalog by <see cref="Plan.Code"/> - run once at
+/// startup, same "safe to run every restart" shape as IdentitySeeder's role seeding. Unlike
+/// IdentitySeeder this always runs, not gated behind a Seed:* config flag: the plan catalog is not
+/// dummy/dev-only data, every environment (including production) needs these rows to exist for
+/// signup/billing to work at all on a fresh database. StripePriceId is deliberately left null here -
+/// wiring a plan to a real Stripe Price is an operational step (create it in the Stripe dashboard,
+/// paste the id back), not something to invent a placeholder value for.
+///
+/// Insert-only, deliberately: a plan is now a PlatformSuperAdmin-owned resource, created/edited/
+/// retired through the Platform Admin Console's Plan catalog screen (see
+/// IPlatformBillingService.CreatePlanAsync/UpdatePlanAsync). This seeder used to also re-sync every
+/// existing row's Name/limits/price from the catalog below on every boot - that would have silently
+/// reverted any edit made through that screen on the next deploy/restart, so it now only fills in a
+/// Code that doesn't exist yet and never touches an existing row again.
 /// </summary>
 public static class PlanSeeder
 {
@@ -26,39 +33,26 @@ public static class PlanSeeder
     {
         var db = services.GetRequiredService<ApplicationDbContext>();
 
-        var existingByCode = await db.Plans.ToDictionaryAsync(p => p.Code, StringComparer.OrdinalIgnoreCase);
+        var existingCodes = await db.Plans.Select(p => p.Code).ToListAsync();
+        var existingCodeSet = new HashSet<string>(existingCodes, StringComparer.OrdinalIgnoreCase);
         var changed = false;
 
         foreach (var spec in Catalog)
         {
-            if (existingByCode.TryGetValue(spec.Code, out var plan))
-            {
-                // Re-syncs limits/price from the catalog above on every startup - a plan's numbers are
-                // meant to be edited here in source control, not by hand in the DB (StripePriceId is
-                // the one exception: never overwritten once set, since that's the one field this
-                // seeder has no source-of-truth value for - see the class doc comment).
-                plan.Name = spec.Name;
-                plan.MaxUsers = spec.MaxUsers;
-                plan.MaxMessagesPerMonth = spec.MaxMessagesPerMonth;
-                plan.MaxCampaigns = spec.MaxCampaigns;
-                plan.MaxKnowledgeBaseArticles = spec.MaxKnowledgeBaseArticles;
-                plan.PriceMonthlyCents = spec.PriceMonthlyCents;
-            }
-            else
-            {
-                db.Plans.Add(new Plan
-                {
-                    Code = spec.Code,
-                    Name = spec.Name,
-                    MaxUsers = spec.MaxUsers,
-                    MaxMessagesPerMonth = spec.MaxMessagesPerMonth,
-                    MaxCampaigns = spec.MaxCampaigns,
-                    MaxKnowledgeBaseArticles = spec.MaxKnowledgeBaseArticles,
-                    PriceMonthlyCents = spec.PriceMonthlyCents,
-                    IsActive = true
-                });
-            }
+            if (existingCodeSet.Contains(spec.Code))
+                continue;
 
+            db.Plans.Add(new Plan
+            {
+                Code = spec.Code,
+                Name = spec.Name,
+                MaxUsers = spec.MaxUsers,
+                MaxMessagesPerMonth = spec.MaxMessagesPerMonth,
+                MaxCampaigns = spec.MaxCampaigns,
+                MaxKnowledgeBaseArticles = spec.MaxKnowledgeBaseArticles,
+                PriceMonthlyCents = spec.PriceMonthlyCents,
+                IsActive = true
+            });
             changed = true;
         }
 

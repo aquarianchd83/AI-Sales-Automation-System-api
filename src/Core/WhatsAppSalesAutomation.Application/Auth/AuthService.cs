@@ -61,7 +61,8 @@ public class AuthService : IAuthService
             Name = request.CompanyName,
             Slug = slug,
             Status = TenantStatus.Trial,
-            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14)
+            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
+            CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant()
         };
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);

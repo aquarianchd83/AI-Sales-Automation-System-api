@@ -10,8 +10,15 @@ namespace WhatsAppSalesAutomation.Application.Billing;
 /// </summary>
 public interface IBillingService
 {
-    /// <summary>The public plan catalog - every active Plan, safe to call unauthenticated.</summary>
-    Task<IReadOnlyList<PlanDto>> GetPlansAsync(CancellationToken cancellationToken = default);
+    /// <summary>The public plan catalog - every active Plan, safe to call unauthenticated. Each
+    /// plan's local price is resolved from <paramref name="countryCode"/> when given (the anonymous/
+    /// pre-signup preview case - see BillingController.GetPlans), else from the calling tenant's own
+    /// stored Tenant.CountryCode when authenticated, else USD - see RegionalPricingCatalog.Resolve.</summary>
+    Task<IReadOnlyList<PlanDto>> GetPlansAsync(string? countryCode = null, CancellationToken cancellationToken = default);
+
+    /// <summary>The public region catalog - safe to call unauthenticated, backs the signup page's
+    /// country picker.</summary>
+    Task<IReadOnlyList<RegionDto>> GetRegionsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The calling tenant's current billing state - null if it has never completed
     /// Checkout (see SubscriptionDto's own doc comment).</summary>

@@ -18,6 +18,9 @@ public static class PlatformAuditActions
     public const string TenantAiConfigDeleted = "TenantAiConfigDeleted";
     public const string TenantConfigOverridesSaved = "TenantConfigOverridesSaved";
     public const string TenantConfigOverridesDeleted = "TenantConfigOverridesDeleted";
+    public const string PlanCreated = "PlanCreated";
+    public const string PlanUpdated = "PlanUpdated";
+    public const string PlanDeactivated = "PlanDeactivated";
     public const string AnnouncementCreated = "AnnouncementCreated";
     public const string AnnouncementUpdated = "AnnouncementUpdated";
     public const string AnnouncementDeleted = "AnnouncementDeleted";
