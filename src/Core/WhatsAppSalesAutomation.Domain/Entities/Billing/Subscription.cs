@@ -28,5 +28,11 @@ public class Subscription : BaseEntity, ITenantOwned
 
     public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Trialing;
 
+    /// <summary>When the current billing period (and so the current plan) started - set alongside
+    /// <see cref="CurrentPeriodEndUtc"/> from Stripe's own subscription item (see
+    /// StripeWebhookHandler.HandleSubscriptionUpdatedAsync). Null until the first
+    /// customer.subscription.updated event arrives, same as CurrentPeriodEndUtc.</summary>
+    public DateTime? CurrentPeriodStartUtc { get; set; }
+
     public DateTime? CurrentPeriodEndUtc { get; set; }
 }

@@ -111,9 +111,10 @@ public class StripeWebhookHandler : IStripeWebhookHandler
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Keeps Status/CurrentPeriodEndUtc in sync with Stripe's own record - covers plan
-    /// changes, renewals, and Stripe's own retry/recovery out of PastDue (a successful payment on a
-    /// previously past_due subscription arrives as this event, not a separate "recovered" one).</summary>
+    /// <summary>Keeps Status/CurrentPeriodStartUtc/CurrentPeriodEndUtc in sync with Stripe's own
+    /// record - covers plan changes, renewals, and Stripe's own retry/recovery out of PastDue (a
+    /// successful payment on a previously past_due subscription arrives as this event, not a separate
+    /// "recovered" one).</summary>
     private async Task HandleSubscriptionUpdatedAsync(Event stripeEvent, CancellationToken cancellationToken)
     {
         if (stripeEvent.Data.Object is not Stripe.Subscription stripeSubscription)
@@ -127,11 +128,13 @@ public class StripeWebhookHandler : IStripeWebhookHandler
         }
 
         subscription.Status = MapStatus(stripeSubscription.Status);
-        // CurrentPeriodEnd moved from Subscription itself onto each SubscriptionItem in Stripe's 2025
-        // API redesign (a subscription can hold multiple items with independent billing periods) -
-        // Checkout always creates exactly one item per this platform's plans, so the first one's
-        // period is the subscription's period as far as this app is concerned.
-        subscription.CurrentPeriodEndUtc = stripeSubscription.Items?.Data?.FirstOrDefault()?.CurrentPeriodEnd;
+        // CurrentPeriodStart/End moved from Subscription itself onto each SubscriptionItem in
+        // Stripe's 2025 API redesign (a subscription can hold multiple items with independent billing
+        // periods) - Checkout always creates exactly one item per this platform's plans, so the first
+        // one's period is the subscription's period as far as this app is concerned.
+        var period = stripeSubscription.Items?.Data?.FirstOrDefault();
+        subscription.CurrentPeriodStartUtc = period?.CurrentPeriodStart;
+        subscription.CurrentPeriodEndUtc = period?.CurrentPeriodEnd;
 
         await _context.SaveChangesAsync(cancellationToken);
     }

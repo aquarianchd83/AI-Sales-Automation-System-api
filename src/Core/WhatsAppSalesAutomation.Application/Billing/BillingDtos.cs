@@ -29,11 +29,15 @@ public record RegionDto(string CountryCode, string CountryName, string CurrencyC
 /// <summary>The calling tenant's current billing state - <paramref name="Status"/> is the string form
 /// of SubscriptionStatus. Null (the whole DTO, from GetSubscriptionForTenantAsync) means the tenant
 /// has never completed Checkout - still on AuthService.SignUpAsync's trial, not yet a Stripe
-/// customer at all.</summary>
+/// customer at all. <paramref name="CurrentPeriodStartUtc"/>/<paramref name="CurrentPeriodEndUtc"/>
+/// are both null until the first customer.subscription.updated webhook lands (see
+/// StripeWebhookHandler.HandleSubscriptionUpdatedAsync) - a beat after Checkout completes, not
+/// simultaneous with it.</summary>
 public record SubscriptionDto(
     Guid? PlanId,
     string? PlanName,
     string Status,
+    DateTime? CurrentPeriodStartUtc,
     DateTime? CurrentPeriodEndUtc);
 
 /// <summary><paramref name="SuccessUrl"/>/<paramref name="CancelUrl"/> are the frontend's own routes
