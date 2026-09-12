@@ -28,17 +28,24 @@ public record RegionDto(string CountryCode, string CountryName, string CurrencyC
 
 /// <summary>The calling tenant's current billing state - <paramref name="Status"/> is the string form
 /// of SubscriptionStatus. Null (the whole DTO, from GetSubscriptionForTenantAsync) means the tenant
-/// has never completed Checkout - still on AuthService.SignUpAsync's trial, not yet a Stripe
-/// customer at all. <paramref name="CurrentPeriodStartUtc"/>/<paramref name="CurrentPeriodEndUtc"/>
-/// are both null until the first customer.subscription.updated webhook lands (see
+/// has no Subscription row at all yet - still on AuthService.SignUpAsync's trial, never completed
+/// Checkout and never had a plan set any other way either. A non-null DTO does NOT by itself mean a
+/// Stripe customer exists though - a PlatformSuperAdmin's OverridePlanAsync creates/updates this same
+/// row directly, with no Stripe involved at all - see <paramref name="HasStripeCustomer"/>, the exact
+/// condition CreateBillingPortalSessionAsync itself requires; a tenant whose plan was only ever set
+/// that way has no Billing Portal to open yet ("This tenant has no Stripe customer yet - complete
+/// Checkout first" is CreateBillingPortalSessionAsync's own error for calling it anyway).
+/// <paramref name="CurrentPeriodStartUtc"/>/<paramref name="CurrentPeriodEndUtc"/> are both null until
+/// the first customer.subscription.updated webhook lands (see
 /// StripeWebhookHandler.HandleSubscriptionUpdatedAsync) - a beat after Checkout completes, not
-/// simultaneous with it.</summary>
+/// simultaneous with it, and never at all for an admin-overridden plan.</summary>
 public record SubscriptionDto(
     Guid? PlanId,
     string? PlanName,
     string Status,
     DateTime? CurrentPeriodStartUtc,
-    DateTime? CurrentPeriodEndUtc);
+    DateTime? CurrentPeriodEndUtc,
+    bool HasStripeCustomer);
 
 /// <summary><paramref name="SuccessUrl"/>/<paramref name="CancelUrl"/> are the frontend's own routes
 /// to redirect back to - this API has no opinion on the frontend's URL structure, so the caller

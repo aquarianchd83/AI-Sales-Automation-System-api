@@ -83,7 +83,8 @@ public class StripeBillingService : IBillingService
 
         return new SubscriptionDto(
             subscription.PlanId, planName, subscription.Status.ToString(),
-            subscription.CurrentPeriodStartUtc, subscription.CurrentPeriodEndUtc);
+            subscription.CurrentPeriodStartUtc, subscription.CurrentPeriodEndUtc,
+            subscription.StripeCustomerId is not null);
     }
 
     public async Task<string> CreateCheckoutSessionAsync(
