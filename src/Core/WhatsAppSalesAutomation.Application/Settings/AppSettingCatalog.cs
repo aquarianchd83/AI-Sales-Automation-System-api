@@ -15,8 +15,8 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
 /// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
 /// everything else here: WhatsApp/AiProviders already have their own bespoke per-tenant mechanism
-/// (TenantWhatsAppConfig/TenantAiProviderConfig), and MediaStorage/Stripe are platform infra shared by
-/// every tenant (one file store, one Stripe account) - neither belongs in a per-tenant override table.</param>
+/// (TenantWhatsAppConfig/TenantAiProviderConfig), and MediaStorage is platform infra shared by every
+/// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
 public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null, bool IsTenantOverridable = false);
 
 /// <summary>
@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "Stripe"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -93,12 +93,5 @@ public static class AppSettingCatalog
         new("MediaStorage:RootPath", "MediaStorage", IsSecret: false, Description: "Where uploaded media is written on disk - restart required to take effect."),
         new("MediaStorage:PublicBasePath", "MediaStorage", IsSecret: false, Description: "URL prefix media is served under - restart required to take effect."),
         new("MediaStorage:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Scheme+host to prepend so Meta can fetch template media - restart required to take effect."),
-
-        // Stripe - platform-global (one Stripe account for the whole platform, not per-tenant - see
-        // StripeSettings' own doc comment). Both keys need a restart: the DI-registered StripeClient
-        // is built once, at startup, from IOptions<StripeSettings> (also the non-live-reloading
-        // variant) - same reasoning as WhatsApp/AiProviders' own Provider fields.
-        new("Stripe:SecretKey", "Stripe", IsSecret: true, Description: "Restart required to take effect."),
-        new("Stripe:WebhookSecret", "Stripe", IsSecret: true, Description: "Restart required to take effect."),
     };
 }

@@ -37,12 +37,6 @@ public class ExceptionHandlingMiddleware
             ConflictException conflict => (StatusCodes.Status409Conflict, conflict.Message, null),
             AuthenticationFailedException auth => (StatusCodes.Status401Unauthorized, auth.Message, null),
             PlanLimitExceededException planLimit => (StatusCodes.Status402PaymentRequired, planLimit.Message, null),
-            // Almost always Stripe:SecretKey not configured yet (see Infrastructure's
-            // DependencyInjection.AddBilling doc comment on the "sk_not_configured" placeholder) or a
-            // real Stripe outage - neither is the tenant's fault, and Stripe's own exception message
-            // isn't something a tenant clicking "Choose plan" should have to interpret. The real
-            // message still reaches the log below (unredacted) for whoever's diagnosing it.
-            Stripe.StripeException => (StatusCodes.Status503ServiceUnavailable, "Billing isn't available right now — contact your platform administrator.", null),
             FluentValidation.ValidationException validation =>
                 (StatusCodes.Status400BadRequest, "One or more validation errors occurred.", (IReadOnlyList<string>?)validation.Errors.Select(e => e.ErrorMessage).ToList()),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.", null)

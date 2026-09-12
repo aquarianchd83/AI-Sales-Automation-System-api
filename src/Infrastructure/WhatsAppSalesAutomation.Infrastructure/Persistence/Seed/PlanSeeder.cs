@@ -9,9 +9,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 /// startup, same "safe to run every restart" shape as IdentitySeeder's role seeding. Unlike
 /// IdentitySeeder this always runs, not gated behind a Seed:* config flag: the plan catalog is not
 /// dummy/dev-only data, every environment (including production) needs these rows to exist for
-/// signup/billing to work at all on a fresh database. StripePriceId is deliberately left null here -
-/// wiring a plan to a real Stripe Price is an operational step (create it in the Stripe dashboard,
-/// paste the id back), not something to invent a placeholder value for.
+/// signup/billing to work at all on a fresh database.
 ///
 /// Insert-only, deliberately: a plan is now a PlatformSuperAdmin-owned resource, created/edited/
 /// retired through the Platform Admin Console's Plan catalog screen (see

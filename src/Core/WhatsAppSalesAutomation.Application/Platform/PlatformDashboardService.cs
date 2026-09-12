@@ -29,7 +29,7 @@ public class PlatformDashboardService : IPlatformDashboardService
         var signupsThisMonth = await _context.Tenants.CountAsync(t => t.CreatedAt >= monthStartUtc, cancellationToken);
 
         // MRR: sum of PriceMonthlyCents for every tenant currently Trialing or Active on a plan - see
-        // this DTO's own doc comment for why this isn't a true prorated Stripe figure.
+        // this DTO's own doc comment for why this isn't a true prorated figure.
         var mrrCents = await _context.Subscriptions.IgnoreQueryFilters()
             .Where(s => s.PlanId != null && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trialing))
             .Join(_context.Plans, s => s.PlanId, p => p.Id, (s, p) => p.PriceMonthlyCents)

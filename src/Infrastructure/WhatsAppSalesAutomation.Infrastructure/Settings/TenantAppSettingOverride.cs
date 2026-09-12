@@ -6,7 +6,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Settings;
 /// One tenant's override of one platform-global <see cref="Application.Settings.AppSettingCatalog"/>
 /// key - only for keys marked <c>IsTenantOverridable</c> there (the Campaigns/Media/Messaging/Ai
 /// tuning knobs; WhatsApp/AiProviders credentials have their own bespoke per-tenant tables, and
-/// MediaStorage/Stripe are platform infra with no per-tenant concept). Composite-keyed by
+/// MediaStorage is platform infra with no per-tenant concept). Composite-keyed by
 /// (<see cref="TenantId"/>, <see cref="Key"/>) rather than a single-row-per-tenant shape like
 /// <c>TenantWhatsAppConfig</c>, since a tenant may override anywhere from none to all of the
 /// overridable keys independently - a missing row for a given key simply means "this tenant uses the

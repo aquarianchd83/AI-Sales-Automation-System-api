@@ -72,6 +72,8 @@ public interface IApplicationDbContext
 
     DbSet<Subscription> Subscriptions { get; }
 
+    DbSet<Payment> Payments { get; }
+
     DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
 
     DbSet<Announcement> Announcements { get; }

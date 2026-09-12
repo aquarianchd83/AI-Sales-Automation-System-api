@@ -1,12 +1,11 @@
 namespace WhatsAppSalesAutomation.Application.Billing;
 
 /// <summary>
-/// Tenant-facing billing operations, backed by Stripe - implemented in Infrastructure
-/// (StripeBillingService) since it's the only thing in this codebase that talks to Stripe's API
-/// directly, same layering as IWhatsAppService/IAiService hiding their real providers from
-/// Application. Deliberately thin: Stripe's own Checkout and Customer Portal are Stripe-hosted pages
-/// this API only ever redirects to, never renders - far less to build and secure than a custom
-/// billing-management UI, at the cost of Stripe's own branding on those pages.
+/// Tenant-facing billing operations - implemented in Infrastructure (BillingService). Real-money
+/// integration (Stripe) has been pulled out for this platform's India-first launch, since Stripe
+/// doesn't work well for India (RBI's recurring-payment/export rules); Razorpay is the plan, but
+/// there's no Razorpay integration yet either. Until then, <see cref="ChoosePlanAsync"/> simulates a
+/// successful payment directly - see its own doc comment - rather than redirecting anywhere.
 /// </summary>
 public interface IBillingService
 {
@@ -20,19 +19,19 @@ public interface IBillingService
     /// country picker.</summary>
     Task<IReadOnlyList<RegionDto>> GetRegionsAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>The calling tenant's current billing state - null if it has never completed
-    /// Checkout (see SubscriptionDto's own doc comment).</summary>
+    /// <summary>The calling tenant's current billing state - null if it has no Subscription row at
+    /// all yet (see SubscriptionDto's own doc comment).</summary>
     Task<SubscriptionDto?> GetSubscriptionForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
-    /// <summary>Starts a Stripe Checkout session for one plan - creates a Stripe Customer for this
-    /// tenant on first use (see Subscription.StripeCustomerId's own doc comment), reused on every
-    /// later call. Returns the URL to redirect the browser to; the resulting Subscription row is not
-    /// activated here - that happens when Stripe's checkout.session.completed webhook arrives (see
-    /// StripeWebhookHandler), since Checkout itself can be abandoned.</summary>
-    Task<string> CreateCheckoutSessionAsync(Guid tenantId, Guid planId, string successUrl, string cancelUrl, CancellationToken cancellationToken = default);
+    /// <summary>Simulates a successful payment for one plan and switches the tenant to it
+    /// immediately - upserts the tenant's Subscription (PlanId, Status = Active, a fresh one-month
+    /// CurrentPeriodStartUtc/EndUtc) and records one Payment row with that amount snapshotted in the
+    /// tenant's own currency. Placeholder for a real payment gateway (Razorpay) - see
+    /// IBillingService's own doc comment - not itself a Stripe-style redirect, so there's no
+    /// success/cancel URL to pass; it either succeeds synchronously or throws.</summary>
+    Task<SubscriptionDto> ChoosePlanAsync(Guid tenantId, Guid planId, CancellationToken cancellationToken = default);
 
-    /// <summary>Starts a session for Stripe's own Customer Portal (plan changes, payment method,
-    /// invoice history, cancellation) - requires the tenant to already have a StripeCustomerId
-    /// (i.e., to have completed Checkout at least once).</summary>
-    Task<string> CreateBillingPortalSessionAsync(Guid tenantId, string returnUrl, CancellationToken cancellationToken = default);
+    /// <summary>The calling tenant's payment history, most recent first - empty, never null, for a
+    /// tenant that has never chosen a plan.</summary>
+    Task<IReadOnlyList<PaymentDto>> GetPaymentHistoryForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

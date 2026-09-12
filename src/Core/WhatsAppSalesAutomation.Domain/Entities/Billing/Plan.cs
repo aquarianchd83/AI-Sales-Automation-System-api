@@ -17,12 +17,6 @@ public class Plan : BaseEntity
 
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Stripe's Price id for this plan's recurring subscription - what
-    /// StripeBillingService.CreateCheckoutSessionAsync actually sells. Null only for a plan that
-    /// exists locally but hasn't been created on Stripe yet (e.g. mid-setup) - IBillingService.CreateCheckoutSessionAsync
-    /// refuses to sell a plan with no price id rather than letting Stripe reject the session.</summary>
-    public string? StripePriceId { get; set; }
-
     public int MaxUsers { get; set; }
 
     public int MaxMessagesPerMonth { get; set; }

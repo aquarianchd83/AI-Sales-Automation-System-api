@@ -29,7 +29,7 @@ public class PlatformBillingService : IPlatformBillingService
         return await _context.Plans
             .OrderBy(p => p.PriceMonthlyCents)
             .Select(p => new PlatformPlanDto(
-                p.Id, p.Code, p.Name, p.StripePriceId, p.MaxUsers, p.MaxMessagesPerMonth,
+                p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
                 p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.PriceMonthlyCents, p.IsActive))
             .ToListAsync(cancellationToken);
     }
@@ -78,7 +78,6 @@ public class PlatformBillingService : IPlatformBillingService
             MaxCampaigns = request.MaxCampaigns,
             MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles,
             PriceMonthlyCents = request.PriceMonthlyCents,
-            StripePriceId = string.IsNullOrWhiteSpace(request.StripePriceId) ? null : request.StripePriceId.Trim(),
             IsActive = true
         };
         _context.Plans.Add(plan);
@@ -100,7 +99,6 @@ public class PlatformBillingService : IPlatformBillingService
         plan.MaxCampaigns = request.MaxCampaigns;
         plan.MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles;
         plan.PriceMonthlyCents = request.PriceMonthlyCents;
-        plan.StripePriceId = string.IsNullOrWhiteSpace(request.StripePriceId) ? null : request.StripePriceId.Trim();
         plan.IsActive = request.IsActive;
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -121,6 +119,6 @@ public class PlatformBillingService : IPlatformBillingService
     }
 
     private static PlatformPlanDto ToDto(Plan p) => new(
-        p.Id, p.Code, p.Name, p.StripePriceId, p.MaxUsers, p.MaxMessagesPerMonth,
+        p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
         p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.PriceMonthlyCents, p.IsActive);
 }

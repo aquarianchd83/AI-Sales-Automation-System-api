@@ -24,7 +24,6 @@
     <PackageReference Include="ClosedXML" Version="0.104.1" />
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageReference Include="Hangfire.SqlServer" Version="1.8.14" />
-    <PackageReference Include="Stripe.net" Version="52.4.1" />
   </ItemGroup>
 
   <ItemGroup>
