@@ -23,10 +23,13 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(
             "whatsapp-token-refresh", job => job.RunAsync(), Cron.Daily());
 
-        // Hourly, and offset to :30 so a boot-time reconcile and this one are never trying to rebuild the
-        // same registrations at the same moment as the hourly template syncs they are registering.
+        // Daily, not hourly: nothing normal depends on this pass - every path that changes a tenant's
+        // status or schedule syncs Hangfire inline - so it only exists to catch drift, and drift is rare
+        // enough that an operator noticing it and pressing "Reconcile now" is the expected trigger. A
+        // scheduled pass this infrequent is the backstop for when nobody is looking, not the mechanism.
+        // 00:30 UTC keeps it clear of the token refresh at midnight and of the template syncs at :00.
         recurringJobs.AddOrUpdate<TenantJobReconciliationJob>(
-            "tenant-job-reconciliation", job => job.RunAsync(), "30 * * * *");
+            "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *");
     }
 
     /// <summary>

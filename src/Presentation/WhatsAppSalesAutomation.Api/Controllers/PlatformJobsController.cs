@@ -68,8 +68,9 @@ public class PlatformJobsController : ControllerBase
         Guid tenantId, string jobType, CancellationToken cancellationToken)
         => Ok(await _jobService.TriggerAsync(tenantId, jobType, ActorUserId, ActorEmail, cancellationToken));
 
-    /// <summary>Rebuilds every tenant's registrations from the schedule table - the same pass that runs at
-    /// startup and hourly, on demand.</summary>
+    /// <summary>Rebuilds every tenant's registrations from the schedule table - the same pass that runs
+    /// at startup and daily, on demand. This is the intended way to run a reconcile; the scheduled pass
+    /// is only there for when nobody is looking.</summary>
     [HttpPost("reconcile")]
     public async Task<ActionResult<TenantJobReconcileSummary>> Reconcile(CancellationToken cancellationToken)
         => Ok(await _jobService.ReconcileAsync(ActorUserId, ActorEmail, cancellationToken));

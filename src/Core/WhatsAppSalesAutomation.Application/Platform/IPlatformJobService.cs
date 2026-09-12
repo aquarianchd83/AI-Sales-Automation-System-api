@@ -37,7 +37,8 @@ public interface IPlatformJobService
 
     Task<IReadOnlyList<PlatformGlobalJobDto>> GetPlatformJobsAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Operator-triggered version of the reconcile pass that also runs at startup and hourly -
-    /// the "it looks wrong, put it back" button, so a support case never needs an app restart.</summary>
+    /// <summary>Operator-triggered version of the reconcile pass that also runs at startup and daily -
+    /// and the way it is normally meant to be run at all, the scheduled pass being only a backstop. The
+    /// "it looks wrong, put it back" button, so a support case never needs an app restart.</summary>
     Task<TenantJobReconcileSummary> ReconcileAsync(Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }

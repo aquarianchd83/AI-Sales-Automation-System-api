@@ -17,7 +17,7 @@ public class TenantJobScheduleConfiguration : IEntityTypeConfiguration<TenantJob
 
         // One row per tenant per job type, enforced in the database and not only by the provisioner's
         // own "create the missing ones" pass: that pass runs concurrently with itself (startup reconcile,
-        // the hourly reconcile job, and any console read can all hit a fresh tenant at once), and two of
+        // the reconcile job, and any console read can all hit a fresh tenant at once), and two of
         // them racing would otherwise leave duplicate rows whose schedules silently disagree.
         builder.HasIndex(s => new { s.TenantId, s.JobType }).IsUnique();
 

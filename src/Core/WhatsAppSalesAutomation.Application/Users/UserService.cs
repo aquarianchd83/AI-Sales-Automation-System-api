@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 
 namespace WhatsAppSalesAutomation.Application.Users;
@@ -160,6 +161,16 @@ public class UserService : IUserService
         return user.ToDto(roles);
     }
 
-    public async Task<IReadOnlyList<string>> GetAllRolesAsync(CancellationToken cancellationToken = default) =>
-        await _roleManager.Roles.Select(r => r.Name ?? string.Empty).ToListAsync(cancellationToken);
+    /// <summary>Only the roles a tenant Admin can assign (<see cref="AppRoles.All"/>) - the same set
+    /// CreateUserRequest/AssignRolesRequest validation accepts. The AspNetRoles table also holds
+    /// PlatformSuperAdmin (and possibly the retired SuperAdmin on older databases), neither of which
+    /// may be offered on a tenant's own Users screen.</summary>
+    public async Task<IReadOnlyList<string>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantRoles = AppRoles.All.ToArray();
+        return await _roleManager.Roles
+            .Where(r => r.Name != null && tenantRoles.Contains(r.Name))
+            .Select(r => r.Name!)
+            .ToListAsync(cancellationToken);
+    }
 }

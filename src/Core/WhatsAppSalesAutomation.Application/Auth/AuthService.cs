@@ -98,7 +98,7 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync(cancellationToken);
 
         // Creates this tenant's background job schedules and registers them with Hangfire, so its first
-        // campaign can send within the minute rather than waiting for the hourly reconcile pass.
+        // campaign can send within the minute rather than waiting for the daily reconcile pass.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);

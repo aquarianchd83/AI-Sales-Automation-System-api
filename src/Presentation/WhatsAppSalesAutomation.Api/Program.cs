@@ -178,8 +178,9 @@ try
         // those rows for any tenant that has none yet, and drops registrations for tenants that are no
         // longer eligible or no longer exist. Runs on every boot (not just the first) because the table
         // is the source of truth for these schedules, not Hangfire's own storage - so a restart is also
-        // how a deployment recovers from anything that drifted while it was down. It runs hourly
-        // thereafter via TenantJobReconciliationJob.
+        // how a deployment recovers from anything that drifted while it was down. Thereafter it is only
+        // run on demand from the Platform Admin Console, plus a daily backstop pass
+        // (TenantJobReconciliationJob) for when nobody is looking.
         await scope.ServiceProvider.GetRequiredService<ITenantJobProvisioner>().ReconcileAllAsync();
     }
 

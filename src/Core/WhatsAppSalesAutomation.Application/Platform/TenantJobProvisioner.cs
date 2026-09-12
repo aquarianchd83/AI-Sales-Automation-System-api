@@ -134,7 +134,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
         catch (DbUpdateException)
         {
             // Lost a race to create the same rows - this runs from several places at once for a brand new
-            // tenant (its creation, the boot/hourly reconcile, and any console read), and the unique
+            // tenant (its creation, a boot or scheduled reconcile, and any console read), and the unique
             // (TenantId, JobType) index is what stops a duplicate rather than letting two schedules for
             // the same job silently disagree. The other writer's rows are just as good as ours, so drop
             // ours and read theirs instead of failing the caller.
