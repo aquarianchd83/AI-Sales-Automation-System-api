@@ -13,6 +13,7 @@ public static class PlatformAuditActions
     public const string TenantImpersonated = "TenantImpersonated";
     public const string TenantPlanOverridden = "TenantPlanOverridden";
     public const string TenantTimezoneUpdated = "TenantTimezoneUpdated";
+    public const string TenantCountryUpdated = "TenantCountryUpdated";
     public const string TenantWhatsAppConfigSaved = "TenantWhatsAppConfigSaved";
     public const string TenantWhatsAppConfigDeleted = "TenantWhatsAppConfigDeleted";
     public const string TenantAiConfigSaved = "TenantAiConfigSaved";

@@ -37,7 +37,8 @@ public record PlatformTenantDetailDto(
     int? MaxMessagesPerMonth,
     int AiInteractionsThisMonth,
     decimal EstimatedAiSpendThisMonthUsd,
-    string Timezone);
+    string Timezone,
+    string? CountryCode);
 
 public record ImpersonationSessionDto(
     string AccessToken,

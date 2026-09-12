@@ -16,4 +16,12 @@ public interface ITenantService
     /// IPlatformTenantService.UpdateTimezoneAsync) - both paths write the same
     /// <c>Tenant.Timezone</c> column, neither is the sole owner of it.</summary>
     Task<TenantProfileDto> UpdateTimezoneForCurrentTenantAsync(UpdateTenantTimezoneRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Self-service country change - see <see cref="UpdateTenantCountryRequest"/>'s own doc
+    /// comment. This is what actually fixes a tenant's plan pricing currency (see
+    /// Billing.RegionalPricingCatalog.Resolve) when it's showing USD because CountryCode was never set
+    /// at signup. A PlatformSuperAdmin can also override this (see
+    /// IPlatformTenantService.UpdateCountryAsync) - both paths write the same
+    /// <c>Tenant.CountryCode</c> column, neither is the sole owner of it.</summary>
+    Task<TenantProfileDto> UpdateCountryForCurrentTenantAsync(UpdateTenantCountryRequest request, CancellationToken cancellationToken = default);
 }

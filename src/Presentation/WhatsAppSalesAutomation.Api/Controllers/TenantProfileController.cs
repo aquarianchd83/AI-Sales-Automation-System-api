@@ -5,12 +5,12 @@ using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
-/// <summary>A tenant's own editable profile - just Timezone for now. Deliberately separate from
+/// <summary>A tenant's own editable profile - Timezone and Country. Deliberately separate from
 /// TenantSettingsController, whose own doc comment frames it as a read-only WhatsApp/AI status view;
-/// Timezone is neither WhatsApp/AI-related nor read-only, so it doesn't belong bolted onto that
-/// controller's documented scope. A PlatformSuperAdmin can also change a tenant's timezone from the
-/// Platform Admin Console (see PlatformTenantsController's PUT {id}/timezone) - both write the same
-/// column, this is not the sole owner of it.</summary>
+/// neither field here is WhatsApp/AI-related or read-only, so they don't belong bolted onto that
+/// controller's documented scope. A PlatformSuperAdmin can also change either field from the Platform
+/// Admin Console (see PlatformTenantsController's PUT {id}/timezone and PUT {id}/country) - both write
+/// the same columns, this is not the sole owner of either.</summary>
 [ApiController]
 [Route("api/v1/tenant-profile")]
 [Authorize(Roles = AppRoles.Admin)]
@@ -30,4 +30,8 @@ public class TenantProfileController : ControllerBase
     [HttpPut("timezone")]
     public async Task<ActionResult<TenantProfileDto>> UpdateTimezone([FromBody] UpdateTenantTimezoneRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateTimezoneForCurrentTenantAsync(request, cancellationToken));
+
+    [HttpPut("country")]
+    public async Task<ActionResult<TenantProfileDto>> UpdateCountry([FromBody] UpdateTenantCountryRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.UpdateCountryForCurrentTenantAsync(request, cancellationToken));
 }

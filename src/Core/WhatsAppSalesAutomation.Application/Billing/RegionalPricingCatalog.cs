@@ -44,4 +44,12 @@ public static class RegionalPricingCatalog
     /// who never picked a country at signup.</summary>
     public static RegionalPricing Resolve(string? countryCode) =>
         countryCode is not null && ByCountryCode.TryGetValue(countryCode, out var pricing) ? pricing : UsdDefault;
+
+    /// <summary>Used to validate a tenant deliberately setting/changing their own Country (self-service
+    /// or a PlatformSuperAdmin override) - unlike <see cref="Resolve"/>, which silently accepts any
+    /// code (even one this catalog doesn't price) and falls back to USD, a deliberate change should be
+    /// rejected if it wouldn't actually produce a localized price. Same "must be one of the platform's
+    /// supported ids" treatment TimeZoneCatalog.IsValidId gives Timezone.</summary>
+    public static bool IsValidCode(string? countryCode) =>
+        countryCode is not null && ByCountryCode.ContainsKey(countryCode);
 }

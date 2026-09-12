@@ -45,4 +45,10 @@ public interface IPlatformTenantService
     /// counterpart to ITenantService.UpdateTimezoneForCurrentTenantAsync's self-service path; both
     /// write the same <c>Tenant.Timezone</c> column.</summary>
     Task<TenantProfileDto> UpdateTimezoneAsync(Guid tenantId, UpdateTenantTimezoneRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>PlatformSuperAdmin-initiated country change for one tenant - a support-facing
+    /// counterpart to ITenantService.UpdateCountryForCurrentTenantAsync's self-service path; both
+    /// write the same <c>Tenant.CountryCode</c> column. The typical use: fixing a tenant's plan
+    /// pricing currency (see Billing.RegionalPricingCatalog.Resolve) on their behalf.</summary>
+    Task<TenantProfileDto> UpdateCountryAsync(Guid tenantId, UpdateTenantCountryRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }

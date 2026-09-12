@@ -23,6 +23,7 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly ITenantSlugResolver _slugResolver;
     private readonly IValidator<CreatePlatformTenantRequest> _createValidator;
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
+    private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
     private readonly IPlatformAuditService _auditService;
 
     public PlatformTenantService(
@@ -34,6 +35,7 @@ public class PlatformTenantService : IPlatformTenantService
         ITenantSlugResolver slugResolver,
         IValidator<CreatePlatformTenantRequest> createValidator,
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
+        IValidator<UpdateTenantCountryRequest> updateCountryValidator,
         IPlatformAuditService auditService)
     {
         _context = context;
@@ -44,6 +46,7 @@ public class PlatformTenantService : IPlatformTenantService
         _slugResolver = slugResolver;
         _createValidator = createValidator;
         _updateTimezoneValidator = updateTimezoneValidator;
+        _updateCountryValidator = updateCountryValidator;
         _auditService = auditService;
     }
 
@@ -138,7 +141,8 @@ public class PlatformTenantService : IPlatformTenantService
             connection?.IsConnected ?? false,
             messagesSentThisMonth, plan?.MaxMessagesPerMonth,
             aiInteractionsThisMonth.Count, estimatedAiSpend,
-            string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone);
+            string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone,
+            tenant.CountryCode);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -281,7 +285,25 @@ public class PlatformTenantService : IPlatformTenantService
             actorUserId, actorEmail, PlatformAuditActions.TenantTimezoneUpdated, tenantId,
             details: $"Timezone {previousTimezone ?? "(default)"} -> {request.Timezone}", cancellationToken: cancellationToken);
 
-        return new TenantProfileDto(tenant.Timezone);
+        return new TenantProfileDto(tenant.Timezone, tenant.CountryCode);
+    }
+
+    public async Task<TenantProfileDto> UpdateCountryAsync(
+        Guid tenantId, UpdateTenantCountryRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        await _updateCountryValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+        var previousCountry = tenant.CountryCode;
+        tenant.CountryCode = request.CountryCode;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantCountryUpdated, tenantId,
+            details: $"Country {previousCountry ?? "(none)"} -> {request.CountryCode}", cancellationToken: cancellationToken);
+
+        return new TenantProfileDto(
+            string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone, tenant.CountryCode);
     }
 
     private async Task<Tenant> GetTenantOrThrowAsync(Guid tenantId, CancellationToken cancellationToken) =>

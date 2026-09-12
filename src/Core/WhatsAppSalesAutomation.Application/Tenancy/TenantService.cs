@@ -11,15 +11,18 @@ public class TenantService : ITenantService
     private readonly IApplicationDbContext _context;
     private readonly ITenantContext _tenantContext;
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
+    private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
 
     public TenantService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
-        IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator)
+        IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
+        IValidator<UpdateTenantCountryRequest> updateCountryValidator)
     {
         _context = context;
         _tenantContext = tenantContext;
         _updateTimezoneValidator = updateTimezoneValidator;
+        _updateCountryValidator = updateCountryValidator;
     }
 
     public async Task<TenantPublicDto> GetBySlugAsync(string slug, CancellationToken cancellationToken = default)
@@ -51,6 +54,17 @@ public class TenantService : ITenantService
         return ToDto(tenant);
     }
 
+    public async Task<TenantProfileDto> UpdateCountryForCurrentTenantAsync(UpdateTenantCountryRequest request, CancellationToken cancellationToken = default)
+    {
+        await _updateCountryValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var tenant = await GetCurrentTenantAsync(cancellationToken);
+        tenant.CountryCode = request.CountryCode;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return ToDto(tenant);
+    }
+
     private async Task<Tenant> GetCurrentTenantAsync(CancellationToken cancellationToken)
     {
         var tenantId = _tenantContext.TenantId
@@ -61,5 +75,5 @@ public class TenantService : ITenantService
     }
 
     private static TenantProfileDto ToDto(Tenant tenant) =>
-        new(string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone);
+        new(string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone, tenant.CountryCode);
 }

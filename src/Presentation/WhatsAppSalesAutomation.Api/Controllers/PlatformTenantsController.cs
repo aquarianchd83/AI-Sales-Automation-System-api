@@ -83,6 +83,13 @@ public class PlatformTenantsController : ControllerBase
     public async Task<ActionResult<TenantProfileDto>> UpdateTimezone(Guid id, [FromBody] UpdateTenantTimezoneRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateTimezoneAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
 
+    /// <summary>Support-facing override of one tenant's country (and therefore plan pricing currency -
+    /// see Application.Billing.RegionalPricingCatalog.Resolve) - see
+    /// IPlatformTenantService.UpdateCountryAsync's own doc comment.</summary>
+    [HttpPut("{id:guid}/country")]
+    public async Task<ActionResult<TenantProfileDto>> UpdateCountry(Guid id, [FromBody] UpdateTenantCountryRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.UpdateCountryAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
+
     private Guid ActorUserId => _currentUser.UserId ?? throw new InvalidOperationException("No authenticated user.");
 
     private string ActorEmail => _currentUser.Email ?? string.Empty;
