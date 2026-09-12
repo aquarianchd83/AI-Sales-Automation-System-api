@@ -51,14 +51,18 @@ public class PlanLimitsService : IPlanLimitsService
         if (plan is null)
             return;
 
-        var now = _dateTime.UtcNow;
-        var monthStartUtc = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        var sentThisMonth = await _context.Messages.IgnoreQueryFilters()
-            .CountAsync(m => m.TenantId == tenantId && m.CreatedAt >= monthStartUtc, cancellationToken);
+        var sentThisMonth = await CountMessagesSentThisMonthAsync(tenantId, cancellationToken);
 
         if (sentThisMonth >= plan.MaxMessagesPerMonth)
             throw new PlanLimitExceededException($"Your plan allows up to {plan.MaxMessagesPerMonth} messages per month. Upgrade to send more.");
+    }
+
+    public async Task<TenantMessageUsageDto> GetMessageUsageAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var plan = await GetPlanAsync(tenantId, cancellationToken);
+        var sentThisMonth = await CountMessagesSentThisMonthAsync(tenantId, cancellationToken);
+
+        return new TenantMessageUsageDto(sentThisMonth, plan?.MaxMessagesPerMonth);
     }
 
     public async Task EnsureCanCreateCampaignAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -88,6 +92,15 @@ public class PlanLimitsService : IPlanLimitsService
 
         if (currentCount >= plan.MaxKnowledgeBaseArticles)
             throw new PlanLimitExceededException($"Your plan allows up to {plan.MaxKnowledgeBaseArticles} knowledge base articles. Upgrade to add more.");
+    }
+
+    private async Task<int> CountMessagesSentThisMonthAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var now = _dateTime.UtcNow;
+        var monthStartUtc = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        return await _context.Messages.IgnoreQueryFilters()
+            .CountAsync(m => m.TenantId == tenantId && m.CreatedAt >= monthStartUtc, cancellationToken);
     }
 
     /// <summary>Null means "no limits apply" - a tenant with no Subscription row (never completed

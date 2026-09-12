@@ -26,4 +26,10 @@ public interface IPlanLimitsService
     Task EnsureCanCreateCampaignAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     Task EnsureCanCreateKnowledgeBaseArticleAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Read-only counterpart to <see cref="EnsureCanSendMessageAsync"/> - same "since the
+    /// start of the current UTC calendar month" count, same "no Subscription/PlanId yet -> unlimited"
+    /// treatment (returned as a null <see cref="TenantMessageUsageDto.MaxMessagesPerMonth"/> rather
+    /// than throwing), but never throws. Backs the tenant Settings page's WhatsApp usage display.</summary>
+    Task<TenantMessageUsageDto> GetMessageUsageAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

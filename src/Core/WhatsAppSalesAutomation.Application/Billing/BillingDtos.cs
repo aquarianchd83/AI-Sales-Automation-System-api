@@ -46,3 +46,10 @@ public record CreateBillingPortalSessionRequest(string ReturnUrl);
 /// <summary>The URL to redirect the browser to - Stripe Checkout/the Billing Portal are both
 /// Stripe-hosted pages, not something this API renders itself.</summary>
 public record BillingSessionUrlDto(string Url);
+
+/// <summary>How much of the calling tenant's WhatsApp message quota this calendar month it has used -
+/// the read-only counterpart to <see cref="IPlanLimitsService.EnsureCanSendMessageAsync"/>'s own
+/// enforcement, backing the tenant Settings page's WhatsApp card. <paramref name="MaxMessagesPerMonth"/>
+/// is null when the tenant has no plan yet (still on trial - see IPlanLimitsService's own doc comment)
+/// and means unlimited, not zero.</summary>
+public record TenantMessageUsageDto(int MessagesSentThisMonth, int? MaxMessagesPerMonth);
