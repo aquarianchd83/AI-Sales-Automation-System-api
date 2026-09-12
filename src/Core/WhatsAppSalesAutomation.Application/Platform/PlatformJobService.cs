@@ -252,12 +252,23 @@ public class PlatformJobService : IPlatformJobService
             registration?.NextExecutionUtc,
             registration?.LastExecutionUtc,
             registration?.LastJobState,
-            schedule.LastRunAtUtc,
+            AsUtc(schedule.LastRunAtUtc),
             schedule.LastRunOutcome,
             schedule.LastRunSummary,
             schedule.LastRunDurationMs,
             schedule.ConsecutiveFailureCount);
     }
+
+    /// <summary>
+    /// Marks a timestamp read back from the database as UTC, which is what it is: LastRunAtUtc is
+    /// written from IDateTimeProvider.UtcNow, but SQL Server's datetime2 carries no offset, so EF
+    /// returns it with DateTimeKind.Unspecified - and System.Text.Json then serializes it with no
+    /// trailing "Z". A browser reads that as local time, which put the console's "last run" hours away
+    /// from the "next run" beside it (that one comes from Hangfire, already marked UTC). Stamping the
+    /// Kind here is what makes the two comparable.
+    /// </summary>
+    private static DateTime? AsUtc(DateTime? value)
+        => value is null ? null : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc);
 
     /// <summary>A schedule row with the tenant it belongs to - the shape both the paged query and the
     /// single-tenant read project into so they can share <see cref="ToDto"/>.</summary>
