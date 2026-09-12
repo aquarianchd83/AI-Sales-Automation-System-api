@@ -22,6 +22,7 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantSlugResolver _slugResolver;
     private readonly IValidator<CreatePlatformTenantRequest> _createValidator;
+    private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
     private readonly IPlatformAuditService _auditService;
 
     public PlatformTenantService(
@@ -32,6 +33,7 @@ public class PlatformTenantService : IPlatformTenantService
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
         IValidator<CreatePlatformTenantRequest> createValidator,
+        IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
         IPlatformAuditService auditService)
     {
         _context = context;
@@ -41,6 +43,7 @@ public class PlatformTenantService : IPlatformTenantService
         _dateTime = dateTime;
         _slugResolver = slugResolver;
         _createValidator = createValidator;
+        _updateTimezoneValidator = updateTimezoneValidator;
         _auditService = auditService;
     }
 
@@ -134,7 +137,8 @@ public class PlatformTenantService : IPlatformTenantService
             plan?.Name, subscription?.Status, subscription?.CurrentPeriodEndUtc,
             connection?.IsConnected ?? false,
             messagesSentThisMonth, plan?.MaxMessagesPerMonth,
-            aiInteractionsThisMonth.Count, estimatedAiSpend);
+            aiInteractionsThisMonth.Count, estimatedAiSpend,
+            string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -261,6 +265,23 @@ public class PlatformTenantService : IPlatformTenantService
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantPlanOverridden, tenantId,
             details: $"Plan {previousPlanId} -> {plan.Id} ({plan.Name})", cancellationToken: cancellationToken);
+    }
+
+    public async Task<TenantProfileDto> UpdateTimezoneAsync(
+        Guid tenantId, UpdateTenantTimezoneRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        await _updateTimezoneValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+        var previousTimezone = tenant.Timezone;
+        tenant.Timezone = request.Timezone;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantTimezoneUpdated, tenantId,
+            details: $"Timezone {previousTimezone ?? "(default)"} -> {request.Timezone}", cancellationToken: cancellationToken);
+
+        return new TenantProfileDto(tenant.Timezone);
     }
 
     private async Task<Tenant> GetTenantOrThrowAsync(Guid tenantId, CancellationToken cancellationToken) =>

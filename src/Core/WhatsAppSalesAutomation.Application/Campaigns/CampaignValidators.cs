@@ -7,34 +7,37 @@ namespace WhatsAppSalesAutomation.Application.Campaigns;
 
 public class CreateCampaignRequestValidator : AbstractValidator<CreateCampaignRequest>
 {
-    public CreateCampaignRequestValidator(IDateTimeProvider dateTime)
+    public CreateCampaignRequestValidator(ITenantTimeZoneProvider tenantTimeZone)
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Description).MaximumLength(2000);
 
-        // Compared against IstNow, not UtcNow: ScheduledStartAt is pinned to IST (see
-        // Campaign.ScheduledStartAt) - comparing IST digits against a UTC clock would be wrong by
-        // up to 5:30 near midnight, which is exactly the bug this pinning exists to prevent.
+        // Compared against the tenant's own local "now" (ITenantTimeZoneProvider), not UtcNow:
+        // ScheduledStartAt is pinned to the tenant's own timezone (see Campaign.ScheduledStartAt) -
+        // comparing those digits against a UTC clock would be wrong by up to the tenant's own UTC
+        // offset near midnight, which is exactly the bug this pinning exists to prevent. MustAsync
+        // rather than GreaterThan since resolving "now" requires an ambient-tenant DB read.
         RuleFor(x => x.ScheduledStartAt)
-            .GreaterThan(_ => dateTime.IstNow)
+            .MustAsync(async (value, cancellationToken) => value!.Value > await tenantTimeZone.GetLocalNowAsync(cancellationToken))
             .When(x => x.ScheduledStartAt.HasValue)
-            .WithMessage("Scheduled start must be in the future (India Standard Time).");
+            .WithMessage("Scheduled start must be in the future.");
     }
 }
 
 public class UpdateCampaignRequestValidator : AbstractValidator<UpdateCampaignRequest>
 {
-    public UpdateCampaignRequestValidator(IDateTimeProvider dateTime)
+    public UpdateCampaignRequestValidator(ITenantTimeZoneProvider tenantTimeZone)
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Description).MaximumLength(2000);
 
         // A null ScheduledStartAt is fine (see CampaignService.UpdateAsync - it falls the campaign
-        // back to Draft), but a non-null one must still be in the future IST, same as on create.
+        // back to Draft), but a non-null one must still be in the tenant's own future, same as on
+        // create - see CreateCampaignRequestValidator's own comment.
         RuleFor(x => x.ScheduledStartAt)
-            .GreaterThan(_ => dateTime.IstNow)
+            .MustAsync(async (value, cancellationToken) => value!.Value > await tenantTimeZone.GetLocalNowAsync(cancellationToken))
             .When(x => x.ScheduledStartAt.HasValue)
-            .WithMessage("Scheduled start must be in the future (India Standard Time).");
+            .WithMessage("Scheduled start must be in the future.");
     }
 }
 

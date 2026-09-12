@@ -11,8 +11,11 @@ public interface IDateTimeProvider
     /// value has <see cref="DateTimeKind.Unspecified"/> to signal "these digits are IST, not UTC" -
     /// never call <c>.ToUniversalTime()</c> on it, that would shift it again by another 5:30.
     ///
-    /// Used only for <c>Campaign.ScheduledStartAt</c>, which is deliberately pinned to IST rather
-    /// than left ambiguous - see the doc comment on that property for why.
+    /// Originally used directly for <c>Campaign.ScheduledStartAt</c>'s "is it due yet" comparisons,
+    /// back when this platform's entire customer base was India-only. Per-tenant timezones
+    /// generalized that: <c>ITenantTimeZoneProvider.GetLocalNowAsync</c> is what those comparisons
+    /// use now, falling back to this exact value (via Tenancy.TimeZoneCatalog.DefaultId) only for a
+    /// tenant who hasn't set their own timezone - not called directly for that purpose anymore.
     /// </summary>
     DateTime IstNow { get; }
 }

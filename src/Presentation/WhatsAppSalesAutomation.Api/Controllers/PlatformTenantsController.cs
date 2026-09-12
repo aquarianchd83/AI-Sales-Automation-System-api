@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
@@ -75,6 +76,12 @@ public class PlatformTenantsController : ControllerBase
         await _tenantService.OverridePlanAsync(id, request, ActorUserId, ActorEmail, cancellationToken);
         return NoContent();
     }
+
+    /// <summary>Support-facing override of one tenant's timezone - see
+    /// IPlatformTenantService.UpdateTimezoneAsync's own doc comment.</summary>
+    [HttpPut("{id:guid}/timezone")]
+    public async Task<ActionResult<TenantProfileDto>> UpdateTimezone(Guid id, [FromBody] UpdateTenantTimezoneRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.UpdateTimezoneAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
 
     private Guid ActorUserId => _currentUser.UserId ?? throw new InvalidOperationException("No authenticated user.");
 

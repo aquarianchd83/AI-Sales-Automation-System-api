@@ -62,7 +62,13 @@ public class AuthService : IAuthService
             Slug = slug,
             Status = TenantStatus.Trial,
             TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
-            CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant()
+            CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            // Unlike CountryCode (no universal default makes sense there), every tenant gets an
+            // explicit Timezone from creation - seeded to the platform default (IST) when the signup
+            // form didn't collect one, the same value ITenantTimeZoneProvider would have fallen back
+            // to anyway. Keeps the column non-null for every tenant going forward, matching the
+            // AddTenantTimezone migration's one-time backfill of pre-existing tenants.
+            Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
         };
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);

@@ -1,4 +1,5 @@
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Tenancy;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
 
@@ -39,4 +40,9 @@ public interface IPlatformTenantService
     /// <summary>Force-sets <c>Subscription.PlanId</c> without Stripe - see
     /// <see cref="OverrideTenantPlanRequest"/>'s own doc comment.</summary>
     Task OverridePlanAsync(Guid tenantId, OverrideTenantPlanRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>PlatformSuperAdmin-initiated timezone change for one tenant - a support-facing
+    /// counterpart to ITenantService.UpdateTimezoneForCurrentTenantAsync's self-service path; both
+    /// write the same <c>Tenant.Timezone</c> column.</summary>
+    Task<TenantProfileDto> UpdateTimezoneAsync(Guid tenantId, UpdateTenantTimezoneRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }

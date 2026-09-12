@@ -182,6 +182,7 @@ public static class DependencyInjection
 
         services.AddScoped<ITenantWhatsAppConfigProvider, TenantWhatsAppConfigProvider>();
         services.AddScoped<ITenantConfigOverrideProvider, TenantConfigOverrideProvider>();
+        services.AddScoped<ITenantTimeZoneProvider, TenantTimeZoneProvider>();
     }
 
     /// <summary>

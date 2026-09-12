@@ -1,8 +1,9 @@
 namespace WhatsAppSalesAutomation.Application.Campaigns;
 
-/// <summary><paramref name="ScheduledStartAt"/> is India Standard Time (UTC+5:30), not UTC - any
-/// offset/'Z' suffix in the request is ignored; send/read the literal digits as IST. See
-/// <c>Campaign.ScheduledStartAt</c> for why.</summary>
+/// <summary><paramref name="ScheduledStartAt"/> is this tenant's own local time (Tenant.Timezone,
+/// defaulting to India Standard Time), not UTC - any offset/'Z' suffix in the request is ignored;
+/// send/read the literal digits as the tenant's own wall clock. See <c>Campaign.ScheduledStartAt</c>
+/// for why.</summary>
 public record CampaignDto(
     Guid Id,
     string Name,
@@ -27,13 +28,14 @@ public record CampaignStepDto(
     bool IsActive,
     IReadOnlyList<Guid> MediaAssetIds);
 
-/// <summary><paramref name="ScheduledStartAt"/> is interpreted as India Standard Time (UTC+5:30) -
+/// <summary><paramref name="ScheduledStartAt"/> is interpreted as the tenant's own local time -
 /// see <c>Campaign.ScheduledStartAt</c>.</summary>
 public record CreateCampaignRequest(string Name, string? Description, DateTime? ScheduledStartAt);
 
 /// <summary>
-/// <paramref name="ScheduledStartAt"/> is India Standard Time - see <c>Campaign.ScheduledStartAt</c>.
-/// Passing <c>null</c> while the campaign is Scheduled drops it back to Draft (see
+/// <paramref name="ScheduledStartAt"/> is the tenant's own local time - see
+/// <c>Campaign.ScheduledStartAt</c>. Passing <c>null</c> while the campaign is Scheduled drops it
+/// back to Draft (see
 /// <c>CampaignService.UpdateAsync</c>), since a Scheduled campaign with no date would otherwise never
 /// come up for promotion again.
 /// </summary>

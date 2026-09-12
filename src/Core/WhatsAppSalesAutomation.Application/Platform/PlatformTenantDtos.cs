@@ -36,7 +36,8 @@ public record PlatformTenantDetailDto(
     int MessagesSentThisMonth,
     int? MaxMessagesPerMonth,
     int AiInteractionsThisMonth,
-    decimal EstimatedAiSpendThisMonthUsd);
+    decimal EstimatedAiSpendThisMonthUsd,
+    string Timezone);
 
 public record ImpersonationSessionDto(
     string AccessToken,

@@ -17,13 +17,18 @@ public record LoginRequest(string Email, string Password, string? Slug = null);
 /// <param name="CountryCode">ISO 3166-1 alpha-2 (e.g. "US", "IN"), optional - drives which currency
 /// IBillingService.GetPlansAsync later quotes this tenant's plan prices in (see
 /// RegionalPricingCatalog). Omitted or unmatched falls back to USD, never an error.</param>
+/// <param name="Timezone">IANA timezone id (Tenancy.TimeZoneCatalog), optional - drives which local
+/// time Campaign.ScheduledStartAt is compared against for this tenant (see
+/// ITenantTimeZoneProvider). Omitted falls back to India Standard Time, the same default every
+/// tenant already had before per-tenant timezones existed.</param>
 public record TenantSignUpRequest(
     string CompanyName,
     string? Slug,
     string FullName,
     string Email,
     string Password,
-    string? CountryCode = null);
+    string? CountryCode = null,
+    string? Timezone = null);
 
 public record RefreshTokenRequest(string RefreshToken);
 

@@ -17,6 +17,7 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 
         builder.Property(t => t.Status).HasConversion<string>().HasMaxLength(20);
         builder.Property(t => t.CountryCode).HasMaxLength(2);
+        builder.Property(t => t.Timezone).HasMaxLength(50);
 
         // No FK constraint to ApplicationUser/Plan by design - same "loose Guid" treatment every other
         // cross-aggregate reference in this codebase already uses (AssignedAgentId, CreatedBy, etc.).

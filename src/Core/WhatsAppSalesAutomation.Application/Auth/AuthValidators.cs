@@ -1,4 +1,5 @@
 using FluentValidation;
+using WhatsAppSalesAutomation.Application.Tenancy;
 
 namespace WhatsAppSalesAutomation.Application.Auth;
 
@@ -26,6 +27,14 @@ public class TenantSignUpRequestValidator : AbstractValidator<TenantSignUpReques
         // Loose on purpose - an unmatched code just falls back to USD display
         // (RegionalPricingCatalog.Resolve), never an error, so this only guards the shape.
         RuleFor(x => x.CountryCode).Length(2).When(x => x.CountryCode is not null);
+
+        // Stricter than CountryCode above: an unrecognized timezone id would silently degrade to IST
+        // (ITenantTimeZoneProvider's own fallback), which is a worse failure mode for a field that
+        // directly controls when a tenant's campaigns actually send - reject it here instead.
+        RuleFor(x => x.Timezone)
+            .Must(TimeZoneCatalog.IsValidId)
+            .When(x => x.Timezone is not null)
+            .WithMessage("Timezone must be one of the platform's supported timezone ids.");
     }
 }
 

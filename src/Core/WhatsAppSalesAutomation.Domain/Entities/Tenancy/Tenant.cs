@@ -36,4 +36,12 @@ public class Tenant : BaseEntity
     /// IBillingService.GetPlansAsync quotes plan prices in (see RegionalPricingCatalog); null or any
     /// unmatched code falls back to USD, never an error.</summary>
     public string? CountryCode { get; set; }
+
+    /// <summary>IANA timezone id (e.g. "America/New_York", "Asia/Kolkata") - one of
+    /// TimeZoneCatalog.All, set at signup or changed later by the tenant's own Admin or a
+    /// PlatformSuperAdmin. Null defaults to TimeZoneCatalog.DefaultId (India Standard Time) via
+    /// ITenantTimeZoneProvider - the same fixed offset this platform always assumed before per-tenant
+    /// timezones existed, so an existing tenant's campaign scheduling is unaffected until it
+    /// explicitly sets one.</summary>
+    public string? Timezone { get; set; }
 }

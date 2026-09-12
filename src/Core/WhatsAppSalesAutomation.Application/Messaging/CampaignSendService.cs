@@ -41,6 +41,7 @@ public class CampaignSendService : ICampaignSendService
     private readonly ITenantContext _tenantContext;
     private readonly IPlanLimitsService _planLimits;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
+    private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly ILogger<CampaignSendService> _logger;
 
     public CampaignSendService(
@@ -51,6 +52,7 @@ public class CampaignSendService : ICampaignSendService
         ITenantContext tenantContext,
         IPlanLimitsService planLimits,
         ITenantConfigOverrideProvider tenantConfig,
+        ITenantTimeZoneProvider tenantTimeZone,
         ILogger<CampaignSendService> logger)
     {
         _context = context;
@@ -60,6 +62,7 @@ public class CampaignSendService : ICampaignSendService
         _tenantContext = tenantContext;
         _planLimits = planLimits;
         _tenantConfig = tenantConfig;
+        _tenantTimeZone = tenantTimeZone;
         _logger = logger;
     }
 
@@ -67,12 +70,15 @@ public class CampaignSendService : ICampaignSendService
     {
         var now = _dateTime.UtcNow;
 
-        // ScheduledStartAt is pinned to IST (see Campaign.ScheduledStartAt), so the "is it due yet"
-        // comparison uses IstNow; StartedAt is a true system timestamp and stays UTC (now).
-        var istNow = _dateTime.IstNow;
+        // ScheduledStartAt is pinned to this tenant's own local time (see Campaign.ScheduledStartAt),
+        // so the "is it due yet" comparison uses ITenantTimeZoneProvider's tenant-aware "now" -
+        // TenantJobRunner already set the ambient tenant for this whole scope before
+        // CampaignSendService was resolved, same as GetMessagingOptionsAsync's own reasoning.
+        // StartedAt is a true system timestamp and stays UTC (now).
+        var tenantLocalNow = await _tenantTimeZone.GetLocalNowAsync(cancellationToken);
 
         var dueToStartQuery = _context.Campaigns
-            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= istNow);
+            .Where(c => c.Status == CampaignStatus.Scheduled && c.ScheduledStartAt != null && c.ScheduledStartAt <= tenantLocalNow);
         if (campaignId is { } scopeToStart)
             dueToStartQuery = dueToStartQuery.Where(c => c.Id == scopeToStart);
 

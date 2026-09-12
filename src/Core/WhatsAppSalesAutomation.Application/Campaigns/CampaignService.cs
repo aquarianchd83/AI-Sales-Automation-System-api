@@ -17,6 +17,7 @@ public class CampaignService : ICampaignService
     private readonly ITenantContext _tenantContext;
     private readonly IPlanLimitsService _planLimits;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
+    private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly IValidator<CreateCampaignRequest> _createValidator;
     private readonly IValidator<UpdateCampaignRequest> _updateValidator;
     private readonly IValidator<UpsertCampaignStepRequest> _stepValidator;
@@ -28,6 +29,7 @@ public class CampaignService : ICampaignService
         ITenantContext tenantContext,
         IPlanLimitsService planLimits,
         ITenantConfigOverrideProvider tenantConfig,
+        ITenantTimeZoneProvider tenantTimeZone,
         IValidator<CreateCampaignRequest> createValidator,
         IValidator<UpdateCampaignRequest> updateValidator,
         IValidator<UpsertCampaignStepRequest> stepValidator,
@@ -38,6 +40,7 @@ public class CampaignService : ICampaignService
         _tenantContext = tenantContext;
         _planLimits = planLimits;
         _tenantConfig = tenantConfig;
+        _tenantTimeZone = tenantTimeZone;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
         _stepValidator = stepValidator;
@@ -339,9 +342,10 @@ public class CampaignService : ICampaignService
 
         await ValidateSendableAsync(campaign, cancellationToken);
 
-        // ScheduledStartAt is pinned to IST (see Campaign.ScheduledStartAt) - compared against
-        // IstNow, not UtcNow. StartedAt is a true system timestamp and stays UTC.
-        if (campaign.ScheduledStartAt is { } scheduled && scheduled > _dateTime.IstNow)
+        // ScheduledStartAt is pinned to this tenant's own local time (see
+        // Campaign.ScheduledStartAt), compared against ITenantTimeZoneProvider's tenant-aware "now",
+        // not UtcNow. StartedAt is a true system timestamp and stays UTC.
+        if (campaign.ScheduledStartAt is { } scheduled && scheduled > await _tenantTimeZone.GetLocalNowAsync(cancellationToken))
         {
             campaign.Status = CampaignStatus.Scheduled;
         }
