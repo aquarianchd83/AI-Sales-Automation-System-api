@@ -21,6 +21,7 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantSlugResolver _slugResolver;
+    private readonly ITenantJobProvisioner _jobProvisioner;
     private readonly IValidator<CreatePlatformTenantRequest> _createValidator;
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
@@ -33,6 +34,7 @@ public class PlatformTenantService : IPlatformTenantService
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
+        ITenantJobProvisioner jobProvisioner,
         IValidator<CreatePlatformTenantRequest> createValidator,
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
@@ -44,6 +46,7 @@ public class PlatformTenantService : IPlatformTenantService
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
         _slugResolver = slugResolver;
+        _jobProvisioner = jobProvisioner;
         _createValidator = createValidator;
         _updateTimezoneValidator = updateTimezoneValidator;
         _updateCountryValidator = updateCountryValidator;
@@ -185,6 +188,10 @@ public class PlatformTenantService : IPlatformTenantService
         tenant.OwnerUserId = user.Id;
         await _context.SaveChangesAsync(cancellationToken);
 
+        // Same reasoning as self-serve signup (see AuthService.SignUpAsync) - the tenant's background
+        // jobs exist and are registered from the moment it does.
+        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
+
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantCreated, tenant.Id, user.Id,
             details: $"Created tenant '{tenant.Name}' ({tenant.Slug}) with admin {user.Email}", cancellationToken: cancellationToken);
@@ -198,6 +205,11 @@ public class PlatformTenantService : IPlatformTenantService
         tenant.Status = TenantStatus.Suspended;
         await _context.SaveChangesAsync(cancellationToken);
 
+        // Unregisters every one of this tenant's recurring jobs immediately. Without this the suspension
+        // would not actually stop anything until the next reconcile pass - a suspended tenant would keep
+        // sending campaigns for up to an hour.
+        await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
+
         await _auditService.LogAsync(actorUserId, actorEmail, PlatformAuditActions.TenantSuspended, tenantId, cancellationToken: cancellationToken);
     }
 
@@ -207,6 +219,11 @@ public class PlatformTenantService : IPlatformTenantService
         tenant.Status = TenantStatus.Active;
         await _context.SaveChangesAsync(cancellationToken);
 
+        // Re-registers the jobs the suspension removed, at whatever schedules this tenant had - the
+        // TenantJobSchedules rows survive a suspension precisely so reactivating restores the operator's
+        // own settings rather than the catalog defaults.
+        await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
+
         await _auditService.LogAsync(actorUserId, actorEmail, PlatformAuditActions.TenantReactivated, tenantId, cancellationToken: cancellationToken);
     }
 
@@ -215,6 +232,8 @@ public class PlatformTenantService : IPlatformTenantService
         var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
         tenant.Status = TenantStatus.Deleted;
         await _context.SaveChangesAsync(cancellationToken);
+
+        await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
 
         await _auditService.LogAsync(actorUserId, actorEmail, PlatformAuditActions.TenantDeleted, tenantId, cancellationToken: cancellationToken);
     }

@@ -26,4 +26,7 @@ public static class PlatformAuditActions
     public const string AnnouncementCreated = "AnnouncementCreated";
     public const string AnnouncementUpdated = "AnnouncementUpdated";
     public const string AnnouncementDeleted = "AnnouncementDeleted";
+    public const string TenantJobScheduleUpdated = "TenantJobScheduleUpdated";
+    public const string TenantJobTriggered = "TenantJobTriggered";
+    public const string TenantJobsReconciled = "TenantJobsReconciled";
 }

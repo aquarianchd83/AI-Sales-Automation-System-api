@@ -91,6 +91,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
+    public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();
+
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for
     // why this is Infrastructure-internal state, not something Application services should reach.
     public DbSet<WhatsAppAccessTokenState> WhatsAppAccessTokenStates => Set<WhatsAppAccessTokenState>();

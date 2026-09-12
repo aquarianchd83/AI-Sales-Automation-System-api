@@ -1,41 +1,27 @@
-using Hangfire;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Messaging;
+using WhatsAppSalesAutomation.Application.Platform;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
-/// <summary>Fans out over every active tenant - see CampaignInitialSenderJob's identical doc comment
-/// for the TenantJobRunner/scope-per-tenant reasoning.</summary>
+/// <summary>Runs for one tenant per execution - see CampaignInitialSenderJob's identical doc comment for
+/// the per-tenant registration/TenantJobRunner reasoning.</summary>
 public class FollowUpSchedulerJob
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<FollowUpSchedulerJob> _logger;
+    private readonly TenantJobRunner _runner;
 
-    public FollowUpSchedulerJob(IServiceScopeFactory scopeFactory, ILogger<FollowUpSchedulerJob> logger)
+    public FollowUpSchedulerJob(TenantJobRunner runner)
     {
-        _scopeFactory = scopeFactory;
-        _logger = logger;
+        _runner = runner;
     }
 
-    [DisableConcurrentExecution(timeoutInSeconds: 280)]
-    public async Task RunAsync()
-    {
-        int considered = 0, sent = 0, failed = 0, skipped = 0;
-
-        await TenantJobRunner.RunForEachActiveTenantAsync(_scopeFactory, _logger, nameof(FollowUpSchedulerJob), async (services, cancellationToken) =>
+    [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 280)]
+    public Task RunAsync(Guid tenantId) =>
+        _runner.RunAsync(tenantId, TenantJobTypes.CampaignFollowUps, async (services, cancellationToken) =>
         {
             var sendService = services.GetRequiredService<ICampaignSendService>();
             var result = await sendService.ProcessFollowUpsAsync(cancellationToken: cancellationToken);
-            considered += result.Considered;
-            sent += result.Sent;
-            failed += result.Failed;
-            skipped += result.Skipped;
-        });
 
-        if (considered > 0)
-            _logger.LogInformation(
-                "FollowUpSchedulerJob: considered={Considered} sent={Sent} failed={Failed} skipped={Skipped}",
-                considered, sent, failed, skipped);
-    }
+            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+        });
 }

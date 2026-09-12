@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
@@ -35,7 +36,6 @@ public static class DependencyInjection
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();
-        services.AddScoped<IActiveTenantLookup, ActiveTenantLookup>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
@@ -150,8 +150,9 @@ public static class DependencyInjection
         // Pre-multi-tenant platform-level token store/refresher - MetaWhatsAppCloudApiClient no longer
         // reads from this (each tenant supplies their own AccessToken directly on TenantWhatsAppConfig
         // instead - BYO-WABA means auto-refresh is each tenant's own Meta App's concern). Kept
-        // registered only because WhatsAppTokenRefreshJob (see AddHangfire) still depends on it;
-        // expected to be revisited once per-tenant background jobs land.
+        // registered only because WhatsAppTokenRefreshJob (see AddHangfire) still depends on it - and it
+        // stayed platform-global when the other recurring jobs went per-tenant, for the reasons that
+        // job's own doc comment sets out.
         services.AddScoped<IWhatsAppTokenStore, WhatsAppTokenStore>();
         services.AddHttpClient<IWhatsAppTokenRefreshService, WhatsAppTokenRefreshService>();
 
@@ -217,11 +218,21 @@ public static class DependencyInjection
         // is the simplest option for the traffic Phase 3 is designed for.
         services.AddHangfireServer();
 
+        // The bridge between TenantJobTypes' string keys and these job classes - see
+        // ITenantJobScheduler's own doc comment for why the Application layer cannot hold that mapping.
+        // Singleton because every Hangfire service it wraps is one, and it keeps no per-request state.
+        services.AddSingleton<ITenantJobScheduler, HangfireTenantJobScheduler>();
+
+        // Singleton for the same reason: it creates its own per-run DI scope rather than depending on
+        // one, which is exactly what lets it set the tenant before anything tenant-aware is resolved.
+        services.AddSingleton<TenantJobRunner>();
+
         services.AddScoped<CampaignInitialSenderJob>();
         services.AddScoped<FollowUpSchedulerJob>();
         services.AddScoped<MessageStatusRetryJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
         services.AddScoped<MessageTemplateSyncJob>();
+        services.AddScoped<TenantJobReconciliationJob>();
     }
 }

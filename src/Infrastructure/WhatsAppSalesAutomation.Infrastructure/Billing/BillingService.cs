@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 using TenantSubscription = WhatsAppSalesAutomation.Domain.Entities.Billing.Subscription;
@@ -21,12 +22,18 @@ public class BillingService : IBillingService
     private readonly IApplicationDbContext _context;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantJobProvisioner _jobProvisioner;
 
-    public BillingService(IApplicationDbContext context, ITenantContext tenantContext, IDateTimeProvider dateTime)
+    public BillingService(
+        IApplicationDbContext context,
+        ITenantContext tenantContext,
+        IDateTimeProvider dateTime,
+        ITenantJobProvisioner jobProvisioner)
     {
         _context = context;
         _tenantContext = tenantContext;
         _dateTime = dateTime;
+        _jobProvisioner = jobProvisioner;
     }
 
     /// <summary>Resolves the region to price in: the explicit <paramref name="countryCode"/> when the
@@ -129,6 +136,12 @@ public class BillingService : IBillingService
         });
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Subscribing is the one non-operator path that moves a tenant's status, so it re-syncs its
+        // background jobs like the Platform Admin Console's own actions do: a tenant that was suspended
+        // for non-payment gets its campaigns sending again as soon as it pays, not up to an hour later
+        // when the reconcile pass next runs.
+        await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
 
         return new SubscriptionDto(
             subscription.PlanId, plan.Name, subscription.Status.ToString(),

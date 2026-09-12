@@ -12,6 +12,7 @@ using Serilog.Enrichers.CallerInfo;
 using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Api.Middleware;
 using WhatsAppSalesAutomation.Application;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -172,6 +173,14 @@ try
             await DevDataSeeder.SeedAsync(scope.ServiceProvider);
 
         RecurringJobsRegistrar.RegisterAll(scope.ServiceProvider.GetRequiredService<IRecurringJobManager>());
+
+        // Registers every active tenant's own recurring jobs from its TenantJobSchedules rows, creates
+        // those rows for any tenant that has none yet, and drops registrations for tenants that are no
+        // longer eligible or no longer exist. Runs on every boot (not just the first) because the table
+        // is the source of truth for these schedules, not Hangfire's own storage - so a restart is also
+        // how a deployment recovers from anything that drifted while it was down. It runs hourly
+        // thereafter via TenantJobReconciliationJob.
+        await scope.ServiceProvider.GetRequiredService<ITenantJobProvisioner>().ReconcileAllAsync();
     }
 
     app.Run();

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -19,6 +20,7 @@ public class AuthService : IAuthService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantSlugResolver _slugResolver;
+    private readonly ITenantJobProvisioner _jobProvisioner;
     private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
@@ -30,6 +32,7 @@ public class AuthService : IAuthService
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
+        ITenantJobProvisioner jobProvisioner,
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
@@ -40,6 +43,7 @@ public class AuthService : IAuthService
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
         _slugResolver = slugResolver;
+        _jobProvisioner = jobProvisioner;
         _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
@@ -92,6 +96,10 @@ public class AuthService : IAuthService
 
         tenant.OwnerUserId = user.Id;
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Creates this tenant's background job schedules and registers them with Hangfire, so its first
+        // campaign can send within the minute rather than waiting for the hourly reconcile pass.
+        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
