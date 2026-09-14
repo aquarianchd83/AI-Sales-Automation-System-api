@@ -7,7 +7,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/roles")]
-[Authorize(Roles = AppRoles.SuperAdmin + "," + AppRoles.Admin)]
+[Authorize(Roles = AppRoles.Admin)]
 public class RolesController : ControllerBase
 {
     private readonly IUserService _userService;

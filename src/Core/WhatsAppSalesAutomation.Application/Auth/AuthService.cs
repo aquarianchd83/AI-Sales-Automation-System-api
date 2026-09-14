@@ -3,8 +3,13 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Auth;
 
@@ -14,6 +19,9 @@ public class AuthService : IAuthService
     private readonly IApplicationDbContext _context;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantSlugResolver _slugResolver;
+    private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
     private readonly IValidator<ChangePasswordRequest> _changePasswordValidator;
@@ -23,6 +31,9 @@ public class AuthService : IAuthService
         IApplicationDbContext context,
         IJwtTokenService jwtTokenService,
         IDateTimeProvider dateTime,
+        ITenantSlugResolver slugResolver,
+        ITenantJobProvisioner jobProvisioner,
+        IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
         IValidator<ChangePasswordRequest> changePasswordValidator)
@@ -31,9 +42,67 @@ public class AuthService : IAuthService
         _context = context;
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
+        _slugResolver = slugResolver;
+        _jobProvisioner = jobProvisioner;
+        _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
         _changePasswordValidator = changePasswordValidator;
+    }
+
+    public async Task<TokenPairDto> SignUpAsync(TenantSignUpRequest request, string? ipAddress, CancellationToken cancellationToken = default)
+    {
+        await _signUpValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var existingUser = await _userManager.FindByEmailAsync(request.Email);
+        if (existingUser is not null)
+            throw new ConflictException($"A user with email '{request.Email}' already exists.");
+
+        var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
+
+        var tenant = new Tenant
+        {
+            Name = request.CompanyName,
+            Slug = slug,
+            Status = TenantStatus.Trial,
+            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
+            CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            // Unlike CountryCode (no universal default makes sense there), every tenant gets an
+            // explicit Timezone from creation - seeded to the platform default (IST) when the signup
+            // form didn't collect one, the same value ITenantTimeZoneProvider would have fallen back
+            // to anyway. Keeps the column non-null for every tenant going forward, matching the
+            // AddTenantTimezone migration's one-time backfill of pre-existing tenants.
+            Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
+        };
+        _context.Tenants.Add(tenant);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var user = new ApplicationUser
+        {
+            TenantId = tenant.Id,
+            UserName = request.Email,
+            Email = request.Email,
+            FullName = request.FullName,
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = _dateTime.UtcNow
+        };
+
+        var result = await _userManager.CreateAsync(user, request.Password);
+        if (!result.Succeeded)
+            throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.Password), e.Description)));
+
+        await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+
+        tenant.OwnerUserId = user.Id;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Creates this tenant's background job schedules and registers them with Hangfire, so its first
+        // campaign can send within the minute rather than waiting for the daily reconcile pass.
+        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
+
+        var roles = await _userManager.GetRolesAsync(user);
+        return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
     }
 
     public async Task<TokenPairDto> LoginAsync(LoginRequest request, string? ipAddress, CancellationToken cancellationToken = default)
@@ -43,6 +112,20 @@ public class AuthService : IAuthService
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user is null || !user.IsActive || !await _userManager.CheckPasswordAsync(user, request.Password))
             throw new AuthenticationFailedException();
+
+        var tenant = user.TenantId is { } userTenantId
+            ? await _context.Tenants.FirstOrDefaultAsync(t => t.Id == userTenantId, cancellationToken)
+            : null;
+
+        if (user.TenantId is not null && (tenant is null || tenant.Status is TenantStatus.Suspended or TenantStatus.Cancelled))
+            throw new AuthenticationFailedException("This workspace is not available. Contact support.");
+
+        // UX nicety only, not a security boundary - see LoginRequest.Slug's doc comment.
+        if (!string.IsNullOrWhiteSpace(request.Slug) &&
+            !string.Equals(tenant?.Slug, request.Slug, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AuthenticationFailedException("This account does not belong to that workspace.");
+        }
 
         var roles = await _userManager.GetRolesAsync(user);
         var tokenPair = await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
@@ -131,6 +214,7 @@ public class AuthService : IAuthService
 
         _context.RefreshTokens.Add(new RefreshToken
         {
+            TenantId = user.TenantId,
             UserId = user.Id,
             TokenHash = _jwtTokenService.HashToken(refreshToken.Token),
             ExpiresAt = refreshToken.ExpiresAtUtc,

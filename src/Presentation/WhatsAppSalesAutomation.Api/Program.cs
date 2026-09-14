@@ -12,6 +12,7 @@ using Serilog.Enrichers.CallerInfo;
 using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Api.Middleware;
 using WhatsAppSalesAutomation.Application;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -75,6 +76,22 @@ try
     builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
 
+    // The frontend is served from one deployment reached via per-tenant subdomains under a wildcard
+    // DNS record (acme.<domain>, mechicel.<domain>, ...) while the API stays on its own single origin
+    // (api.<domain>) - every tenant subdomain is therefore a cross-origin caller of this API.
+    // "Cors:AllowedOrigins" supports a single '*' wildcard segment per entry, e.g.
+    // "https://*.saleautomation.com" - see IsOriginAllowed below.
+    const string TenantCorsPolicy = "TenantSubdomains";
+    var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+    builder.Services.AddCors(options =>
+    {
+        options.AddPolicy(TenantCorsPolicy, policy => policy
+            .SetIsOriginAllowed(origin => IsOriginAllowed(origin, corsOrigins))
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials());
+    });
+
     builder.Services.AddControllers();
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerDocumentation();
@@ -101,6 +118,7 @@ try
         ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
     });
     app.UseHttpsRedirection();
+    app.UseCors(TenantCorsPolicy);
 
     // Serves uploaded campaign media under MediaStorage:PublicBasePath. Local disk only, per
     // LocalFileMediaStorageService - swap for a cloud provider's own public URLs and this goes away.
@@ -146,11 +164,24 @@ try
         await AppSettingsSeeder.SeedDefaultsAsync(scope.ServiceProvider);
         scope.ServiceProvider.GetRequiredService<IAppSettingsReloader>().Reload();
 
+        // The plan catalog signup/billing depend on - real data every environment needs, not a
+        // Seed:* gated dev convenience, so this always runs (see PlanSeeder's own doc comment).
+        await PlanSeeder.SeedAsync(scope.ServiceProvider);
+
         // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
         if (app.Environment.IsDevelopment())
             await DevDataSeeder.SeedAsync(scope.ServiceProvider);
 
         RecurringJobsRegistrar.RegisterAll(scope.ServiceProvider.GetRequiredService<IRecurringJobManager>());
+
+        // Registers every active tenant's own recurring jobs from its TenantJobSchedules rows, creates
+        // those rows for any tenant that has none yet, and drops registrations for tenants that are no
+        // longer eligible or no longer exist. Runs on every boot (not just the first) because the table
+        // is the source of truth for these schedules, not Hangfire's own storage - so a restart is also
+        // how a deployment recovers from anything that drifted while it was down. Thereafter it is only
+        // run on demand from the Platform Admin Console, plus a daily backstop pass
+        // (TenantJobReconciliationJob) for when nobody is looking.
+        await scope.ServiceProvider.GetRequiredService<ITenantJobProvisioner>().ReconcileAllAsync();
     }
 
     app.Run();
@@ -162,6 +193,35 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+/// <summary>Matches an Origin header against "Cors:AllowedOrigins" patterns, each of which may
+/// contain a single '*' wildcard segment (e.g. "https://*.saleautomation.com" matches
+/// "https://acme.saleautomation.com" but not "https://saleautomation.com" itself - list the bare
+/// apex domain separately if it also needs to call the API).</summary>
+static bool IsOriginAllowed(string origin, IReadOnlyList<string> patterns)
+{
+    foreach (var pattern in patterns)
+    {
+        var starIndex = pattern.IndexOf('*');
+        if (starIndex < 0)
+        {
+            if (string.Equals(origin, pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+            continue;
+        }
+
+        var prefix = pattern[..starIndex];
+        var suffix = pattern[(starIndex + 1)..];
+        if (origin.Length >= prefix.Length + suffix.Length &&
+            origin.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            origin.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // Exposed so WebApplicationFactory<Program> can be used for integration tests in a later phase.

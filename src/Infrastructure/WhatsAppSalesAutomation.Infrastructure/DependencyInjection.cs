@@ -6,11 +6,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
+using WhatsAppSalesAutomation.Infrastructure.Billing;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Logging;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -19,6 +23,7 @@ using WhatsAppSalesAutomation.Infrastructure.Realtime;
 using WhatsAppSalesAutomation.Infrastructure.Services;
 using WhatsAppSalesAutomation.Infrastructure.Settings;
 using WhatsAppSalesAutomation.Infrastructure.Storage;
+using WhatsAppSalesAutomation.Infrastructure.Tenancy;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 
 namespace WhatsAppSalesAutomation.Infrastructure;
@@ -29,13 +34,17 @@ public static class DependencyInjection
     {
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
+        services.AddScoped<TenantStampingSaveChangesInterceptor>();
+        services.AddScoped<ITenantContext, TenantContext>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
             options.UseSqlServer(
                 configuration.GetConnectionString("DefaultConnection"),
                 sql => sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName));
-            options.AddInterceptors(sp.GetRequiredService<AuditableEntitySaveChangesInterceptor>());
+            options.AddInterceptors(
+                sp.GetRequiredService<AuditableEntitySaveChangesInterceptor>(),
+                sp.GetRequiredService<TenantStampingSaveChangesInterceptor>());
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());
@@ -113,86 +122,79 @@ public static class DependencyInjection
         AddWhatsAppClient(services, configuration);
         AddAiClients(services, configuration);
         AddHangfire(services, configuration);
+        AddBilling(services);
 
         return services;
     }
 
+    /// <summary>Payments are simulated for now - see IBillingService's own doc comment (Stripe pulled
+    /// out for this platform's India-first launch, Razorpay not wired in yet) - so this is just the
+    /// plain service registration every other Application-layer service gets, no external client/
+    /// config binding needed the way Stripe's own singleton used to require.</summary>
+    private static void AddBilling(IServiceCollection services)
+    {
+        services.AddScoped<IBillingService, BillingService>();
+    }
+
     /// <summary>
-    /// "Simulated" (default) needs no credentials and lets the whole campaign pipeline run and be
-    /// tested without a live WhatsApp Business Account; "Meta" is the real Cloud API client. See
-    /// the Phase 1 open assumptions - no account was available when this was built.
+    /// Provider *type* selection (Meta vs "Simulated" - no credentials needed) can no longer be one
+    /// DI-time choice now that each tenant brings their own WhatsApp Business Account (or none at all)
+    /// independently - <see cref="WhatsAppServiceFactory"/> is the DI-registered
+    /// <see cref="IWhatsAppService"/> and picks per call, per tenant; both concrete clients are
+    /// registered as plain concrete types (not interface-bound) so it can hold and delegate to either.
     /// </summary>
     private static void AddWhatsAppClient(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<WhatsAppSettings>(configuration.GetSection("WhatsApp"));
-        var provider = configuration.GetSection("WhatsApp")["Provider"] ?? "Simulated";
 
-        // Registered regardless of provider - IWhatsAppTokenStore is a cheap no-op for Simulated (it
-        // only ever gets read from by MetaWhatsAppCloudApiClient), and WhatsAppTokenRefreshService
-        // itself is what checks Provider == "Meta" before ever calling out to Meta.
-        services.AddScoped<IWhatsAppTokenStore, WhatsAppTokenStore>();
-        services.AddHttpClient<IWhatsAppTokenRefreshService, WhatsAppTokenRefreshService>();
+        // Per-tenant token refresh (WhatsAppTokenRefreshJob). RemoveAllLoggers is a security requirement,
+        // not noise reduction: Meta's exchange takes client_secret and the access token as query
+        // parameters, and IHttpClientFactory's default loggers write each request URL at Information -
+        // a level this app's Serilog config keeps - so every tenant's secrets would otherwise land in the
+        // log files the LogViewer screen serves.
+        services.AddHttpClient<ITenantWhatsAppTokenRefreshService, TenantWhatsAppTokenRefreshService>()
+            .RemoveAllLoggers();
 
-        if (string.Equals(provider, "Meta", StringComparison.OrdinalIgnoreCase))
-            services.AddHttpClient<IWhatsAppService, MetaWhatsAppCloudApiClient>();
-        else
-            services.AddScoped<IWhatsAppService, SimulatedWhatsAppClient>();
+        services.AddHttpClient<MetaWhatsAppCloudApiClient>();
+        services.AddScoped<SimulatedWhatsAppClient>();
+        services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
+
+        services.AddScoped<ITenantWhatsAppConfigProvider, TenantWhatsAppConfigProvider>();
+        services.AddScoped<ITenantConfigOverrideProvider, TenantConfigOverrideProvider>();
+        services.AddScoped<ITenantTimeZoneProvider, TenantTimeZoneProvider>();
     }
 
     /// <summary>
-    /// Two independent provider selections read from the same AiProviderSettings - see its own doc
-    /// comment for why Provider (chat) and EmbeddingProvider are separate knobs. Both default to
-    /// "Simulated", same zero-credentials-needed reasoning as AddWhatsAppClient.
+    /// Same per-tenant-router reasoning as <see cref="AddWhatsAppClient"/>: every concrete chat/
+    /// embedding client is registered as a plain concrete type, and AiServiceFactory/
+    /// TenantEmbeddingService/TenantEmbeddingProviderCatalog are the DI-registered IAiService/
+    /// IEmbeddingService/IEmbeddingProviderCatalog, each picking per tenant per call. Two independent
+    /// provider selections read from the same TenantAiProviderConfig - see AiProviderSettings' own
+    /// (pre-multi-tenant) doc comment for why Provider (chat) and EmbeddingProvider are separate knobs;
+    /// identical reasoning applies per-tenant now.
     /// </summary>
     private static void AddAiClients(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AiProviderSettings>(configuration.GetSection("AiProviders"));
+
+        services.AddScoped<ITenantAiConfigProvider, TenantAiConfigProvider>();
         services.AddScoped<IActiveAiProviderAccessor, ActiveAiProviderAccessor>();
-        var section = configuration.GetSection("AiProviders");
-        var provider = section["Provider"] ?? "Simulated";
-        var embeddingProvider = section["EmbeddingProvider"] ?? "Simulated";
 
-        switch (provider)
-        {
-            case var p when string.Equals(p, "Anthropic", StringComparison.OrdinalIgnoreCase):
-                services.AddHttpClient<IAiService, AnthropicAiClient>();
-                break;
-            case var p when string.Equals(p, "OpenAI", StringComparison.OrdinalIgnoreCase):
-                services.AddHttpClient<IAiService, OpenAiAiClient>();
-                break;
-            case var p when string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase):
-                services.AddHttpClient<IAiService, GoogleAiClient>();
-                break;
-            default:
-                services.AddScoped<IAiService, SimulatedAiClient>();
-                break;
-        }
+        services.AddHttpClient<AnthropicAiClient>();
+        services.AddHttpClient<OpenAiAiClient>();
+        services.AddHttpClient<GoogleAiClient>();
+        services.AddScoped<SimulatedAiClient>();
+        services.AddScoped<IAiService, AiServiceFactory>();
 
-        switch (embeddingProvider)
-        {
-            case var p when string.Equals(p, "OpenAI", StringComparison.OrdinalIgnoreCase):
-                services.AddHttpClient<IEmbeddingService, OpenAiEmbeddingClient>();
-                break;
-            case var p when string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase):
-                services.AddHttpClient<IEmbeddingService, GoogleEmbeddingClient>();
-                break;
-            default:
-                services.AddScoped<IEmbeddingService, SimulatedEmbeddingClient>();
-                break;
-        }
-
-        // Separate concrete-type registrations (not interface-bound, so they don't collide with the
-        // single "active" IEmbeddingService switch above) so IEmbeddingProviderCatalog can hold all
-        // three simultaneously - see its own doc comment for why KnowledgeBaseService needs that.
-        services.AddScoped<SimulatedEmbeddingClient>();
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddHttpClient<GoogleEmbeddingClient>();
-        services.AddScoped<IEmbeddingProviderCatalog>(sp => new EmbeddingProviderCatalog(new IEmbeddingService[]
-        {
-            sp.GetRequiredService<SimulatedEmbeddingClient>(),
-            sp.GetRequiredService<OpenAiEmbeddingClient>(),
-            sp.GetRequiredService<GoogleEmbeddingClient>()
-        }));
+        services.AddScoped<SimulatedEmbeddingClient>();
+        // The single "active" embedding provider (query-time retrieval) and the full catalog (used by
+        // ReembedAsync to embed with every available provider at once) are two different DI
+        // registrations against the same concrete clients - see IEmbeddingProviderCatalog's own doc
+        // comment for why KnowledgeBaseService needs both.
+        services.AddScoped<IEmbeddingService, TenantEmbeddingService>();
+        services.AddScoped<IEmbeddingProviderCatalog, TenantEmbeddingProviderCatalog>();
     }
 
     private static void AddHangfire(IServiceCollection services, IConfiguration configuration)
@@ -215,11 +217,21 @@ public static class DependencyInjection
         // is the simplest option for the traffic Phase 3 is designed for.
         services.AddHangfireServer();
 
+        // The bridge between TenantJobTypes' string keys and these job classes - see
+        // ITenantJobScheduler's own doc comment for why the Application layer cannot hold that mapping.
+        // Singleton because every Hangfire service it wraps is one, and it keeps no per-request state.
+        services.AddSingleton<ITenantJobScheduler, HangfireTenantJobScheduler>();
+
+        // Singleton for the same reason: it creates its own per-run DI scope rather than depending on
+        // one, which is exactly what lets it set the tenant before anything tenant-aware is resolved.
+        services.AddSingleton<TenantJobRunner>();
+
         services.AddScoped<CampaignInitialSenderJob>();
         services.AddScoped<FollowUpSchedulerJob>();
         services.AddScoped<MessageStatusRetryJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
         services.AddScoped<MessageTemplateSyncJob>();
+        services.AddScoped<TenantJobReconciliationJob>();
     }
 }

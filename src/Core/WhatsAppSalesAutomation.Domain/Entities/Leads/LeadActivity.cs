@@ -6,8 +6,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Leads;
 /// <summary>Append-only history entry for a Lead - every score change, stage change, note, or
 /// reassignment. <see cref="CreatedBy"/> is null for AI/system-driven changes (e.g. an automatic score
 /// recompute after an AiInteraction) and set for a human agent's manual edit.</summary>
-public class LeadActivity : BaseEntity
+public class LeadActivity : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid LeadId { get; set; }
 
     public LeadActivityType ActivityType { get; set; }

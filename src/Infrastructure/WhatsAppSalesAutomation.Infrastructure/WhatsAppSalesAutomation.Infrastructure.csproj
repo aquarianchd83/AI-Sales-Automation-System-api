@@ -22,6 +22,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.8" />
     <PackageReference Include="CsvHelper" Version="31.0.2" />
     <PackageReference Include="ClosedXML" Version="0.104.1" />
+    <!-- The cron parser Hangfire itself uses, referenced directly because Hangfire ships its copy
+         internalized. HangfireTenantJobScheduler.IsValidCron needs it to reject a bad expression before
+         it is persisted as a tenant's schedule; keep this major/minor in step with Hangfire's own. -->
+    <PackageReference Include="Cronos" Version="0.8.4" />
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageReference Include="Hangfire.SqlServer" Version="1.8.14" />
   </ItemGroup>

@@ -1,27 +1,27 @@
-using Hangfire;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSalesAutomation.Application.Messaging;
+using WhatsAppSalesAutomation.Application.Platform;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
+/// <summary>Runs for one tenant per execution - see CampaignInitialSenderJob's identical doc comment for
+/// the per-tenant registration/TenantJobRunner reasoning.</summary>
 public class MessageStatusRetryJob
 {
-    private readonly ICampaignSendService _sendService;
-    private readonly ILogger<MessageStatusRetryJob> _logger;
+    private readonly TenantJobRunner _runner;
 
-    public MessageStatusRetryJob(ICampaignSendService sendService, ILogger<MessageStatusRetryJob> logger)
+    public MessageStatusRetryJob(TenantJobRunner runner)
     {
-        _sendService = sendService;
-        _logger = logger;
+        _runner = runner;
     }
 
-    [DisableConcurrentExecution(timeoutInSeconds: 280)]
-    public async Task RunAsync()
-    {
-        var result = await _sendService.RetryFailedSendsAsync();
-        if (result.Considered > 0)
-            _logger.LogInformation(
-                "MessageStatusRetryJob: considered={Considered} sent={Sent} failed={Failed} skipped={Skipped}",
-                result.Considered, result.Sent, result.Failed, result.Skipped);
-    }
+    [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 280)]
+    public Task RunAsync(Guid tenantId) =>
+        _runner.RunAsync(tenantId, TenantJobTypes.CampaignSendRetries, async (services, cancellationToken) =>
+        {
+            var sendService = services.GetRequiredService<ICampaignSendService>();
+            var result = await sendService.RetryFailedSendsAsync(cancellationToken: cancellationToken);
+
+            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+        });
 }

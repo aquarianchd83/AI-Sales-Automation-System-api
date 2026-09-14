@@ -7,8 +7,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Media;
 /// provider's own address for the bytes (a relative path today, an Azure Blob/S3 key later - the
 /// same field either way, per <c>IMediaStorageService</c>'s abstraction).
 /// </summary>
-public class MediaAsset : BaseEntity
+public class MediaAsset : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public string FileName { get; set; } = string.Empty;
 
     public string ContentType { get; set; } = string.Empty;

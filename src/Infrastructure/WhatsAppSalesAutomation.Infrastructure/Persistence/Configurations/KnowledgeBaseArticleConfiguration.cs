@@ -29,6 +29,8 @@ public class KnowledgeBaseArticleConfiguration : IEntityTypeConfiguration<Knowle
             .HasForeignKey(p => p.ArticleId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasQueryFilter(a => !a.IsDeleted);
+        // No HasQueryFilter here - see CustomerConfiguration's equivalent comment: the combined
+        // (!IsDeleted && TenantId == ...) filter is built reflectively in
+        // ApplicationDbContext.OnModelCreating instead, since EF Core allows only one per entity.
     }
 }

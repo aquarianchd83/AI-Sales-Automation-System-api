@@ -13,8 +13,13 @@ public class MessagingOptions
 
     public int MaxRetryAttempts { get; set; } = 5;
 
-    /// <summary>Backoff schedule by attempt number (1-indexed); the last value repeats past its length.</summary>
-    public int[] RetryBackoffMinutes { get; set; } = { 1, 5, 15, 60, 240 };
+    /// <summary>Backoff schedule by attempt number (1-indexed); the last value repeats past its length.
+    /// Must default to an empty array, not the real {1,5,15,60,240} schedule - ConfigurationBinder
+    /// appends config-bound array items onto an already-non-null array property rather than replacing
+    /// it, so a non-empty default here would come back from IOptionsSnapshot&lt;MessagingOptions&gt;
+    /// with every value duplicated. appsettings.json's own "Messaging:RetryBackoffMinutes" array is
+    /// what actually supplies the real default for a fresh install with no DB override.</summary>
+    public int[] RetryBackoffMinutes { get; set; } = Array.Empty<int>();
 
     /// <summary>
     /// WhatsApp's customer service window (Phase 4): free-form text replies are only allowed within

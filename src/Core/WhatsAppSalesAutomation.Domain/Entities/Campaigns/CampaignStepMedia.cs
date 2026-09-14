@@ -8,8 +8,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 /// implicit many-to-many, this needs its own row because <see cref="DisplayOrder"/> is data, not
 /// just a key pair.
 /// </summary>
-public class CampaignStepMedia : BaseEntity
+public class CampaignStepMedia : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CampaignStepId { get; set; }
 
     public Guid MediaAssetId { get; set; }

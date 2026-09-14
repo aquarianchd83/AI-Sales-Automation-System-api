@@ -1,37 +1,33 @@
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Options;
 
 namespace WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 
 /// <summary>
 /// Verifies Meta's X-Hub-Signature-256 header against the raw request body before anything about a
-/// webhook POST is trusted (Phase 1 §9). Pure crypto against config, with no business-logic
-/// abstraction to gain from an Application-layer interface - kept entirely in Infrastructure and
-/// injected straight into the webhook controller, unlike the provider abstractions (IWhatsAppService
-/// etc.) that genuinely need to hide behind Application.
+/// webhook POST is trusted (Phase 1 §9). Pure crypto, with no business-logic abstraction to gain from
+/// an Application-layer interface - kept entirely in Infrastructure and injected straight into the
+/// webhook controller, unlike the provider abstractions (IWhatsAppService etc.) that genuinely need to
+/// hide behind Application. Takes the secret to check against as a parameter rather than reading one
+/// fixed global setting - since each tenant supplies their own AppSecret (Phase 2), the caller
+/// (WebhooksController.Receive) resolves the right tenant first, then passes that tenant's own secret
+/// in here, rather than this validator knowing which tenant it's checking.
 /// </summary>
 public interface IWebhookSignatureValidator
 {
-    bool IsValid(byte[] rawBody, string? signatureHeader);
+    bool IsValid(byte[] rawBody, string? signatureHeader, string appSecret);
 }
 
 public class WebhookSignatureValidator : IWebhookSignatureValidator
 {
     private const string SignaturePrefix = "sha256=";
 
-    private readonly WhatsAppSettings _settings;
-
-    public WebhookSignatureValidator(IOptionsSnapshot<WhatsAppSettings> settings)
+    public bool IsValid(byte[] rawBody, string? signatureHeader, string appSecret)
     {
-        _settings = settings.Value;
-    }
-
-    public bool IsValid(byte[] rawBody, string? signatureHeader)
-    {
-        // No AppSecret configured is only expected in local/dev with the Simulated provider - a real
-        // deployment must set one, and an unconfigured secret should fail closed, not pass everything.
-        if (string.IsNullOrEmpty(signatureHeader) || string.IsNullOrEmpty(_settings.AppSecret))
+        // An unconfigured/empty secret should fail closed, not pass everything - callers only ever
+        // reach this with a tenant they already resolved a config row for, so an empty AppSecret here
+        // means that row is incomplete, not that signature checking should be skipped.
+        if (string.IsNullOrEmpty(signatureHeader) || string.IsNullOrEmpty(appSecret))
             return false;
 
         if (!signatureHeader.StartsWith(SignaturePrefix, StringComparison.OrdinalIgnoreCase))
@@ -39,7 +35,7 @@ public class WebhookSignatureValidator : IWebhookSignatureValidator
 
         var providedHex = signatureHeader[SignaturePrefix.Length..];
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_settings.AppSecret));
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(appSecret));
         var computedHex = Convert.ToHexString(hmac.ComputeHash(rawBody));
 
         // Fixed-time comparison: a signature check that returns faster on an early mismatched

@@ -32,6 +32,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
     private readonly IConversationService _conversations;
     private readonly IConversationOrchestrator _orchestrator;
     private readonly INotificationService _notifications;
+    private readonly ITenantContext _tenantContext;
     private readonly ILogger<InboundWebhookProcessor> _logger;
 
     public InboundWebhookProcessor(
@@ -41,6 +42,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         IConversationService conversations,
         IConversationOrchestrator orchestrator,
         INotificationService notifications,
+        ITenantContext tenantContext,
         ILogger<InboundWebhookProcessor> logger)
     {
         _context = context;
@@ -49,11 +51,17 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         _conversations = conversations;
         _orchestrator = orchestrator;
         _notifications = notifications;
+        _tenantContext = tenantContext;
         _logger = logger;
     }
 
-    public async Task<Guid> RecordAsync(string eventType, string rawPayload, CancellationToken cancellationToken = default)
+    public async Task<Guid> RecordAsync(Guid tenantId, string eventType, string rawPayload, CancellationToken cancellationToken = default)
     {
+        // Called from the webhook controller's own request scope, which already has no ambient
+        // tenant (the request is anonymous) - this is the first point tenantId, resolved by the
+        // caller off Meta's phone_number_id, becomes the ambient tenant for the rest of this scope.
+        _tenantContext.SetTenant(tenantId);
+
         var webhookEvent = new WebhookEvent
         {
             Provider = "WhatsApp",
@@ -68,8 +76,13 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         return webhookEvent.Id;
     }
 
-    public async Task<WebhookProcessOutcome> ProcessAsync(Guid webhookEventId, int attempt = 1, CancellationToken cancellationToken = default)
+    public async Task<WebhookProcessOutcome> ProcessAsync(Guid tenantId, Guid webhookEventId, int attempt = 1, CancellationToken cancellationToken = default)
     {
+        // Called from InboundWebhookProcessingJob's own Hangfire scope, which starts with no ambient
+        // tenant at all (unlike the original request scope, that scope never went through
+        // RecordAsync) - tenantId is threaded through explicitly as a job argument for exactly this.
+        _tenantContext.SetTenant(tenantId);
+
         var webhookEvent = await _context.WebhookEvents.FirstOrDefaultAsync(w => w.Id == webhookEventId, cancellationToken);
         if (webhookEvent is null)
         {
@@ -95,7 +108,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             }
 
             foreach (var message in parsed.Messages)
-                processedAnything |= await ProcessInboundMessageAsync(message, cancellationToken);
+                processedAnything |= await ProcessInboundMessageAsync(tenantId, message, cancellationToken);
 
             webhookEvent.WhatsAppMessageId ??= parsed.Messages.FirstOrDefault()?.WhatsAppMessageId
                 ?? parsed.Statuses.FirstOrDefault()?.WhatsAppMessageId;
@@ -201,8 +214,11 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         };
     }
 
-    private async Task<bool> ProcessInboundMessageAsync(InboundWhatsAppMessage inbound, CancellationToken cancellationToken)
+    private async Task<bool> ProcessInboundMessageAsync(Guid tenantId, InboundWhatsAppMessage inbound, CancellationToken cancellationToken)
     {
+        // Not tenant-scoped: WhatsAppMessageId is Meta's own id for the message, globally unique
+        // regardless of which tenant's WABA received it, so a plain (filtered-to-this-tenant-anyway)
+        // lookup is already correct dedup - no IgnoreQueryFilters needed here.
         var alreadyRecorded = await _context.Messages.AnyAsync(m => m.WhatsAppMessageId == inbound.WhatsAppMessageId, cancellationToken);
         if (alreadyRecorded)
             return false;
@@ -215,8 +231,14 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             phoneNumber = inbound.FromPhone.StartsWith('+') ? inbound.FromPhone : $"+{inbound.FromPhone}";
         }
 
+        // Tenant-scoped, not just IgnoreQueryFilters(PhoneNumberE164) - the same phone number can
+        // message two different tenants' WABAs (CustomerConfiguration's unique index is now
+        // (TenantId, PhoneNumberE164), not PhoneNumberE164 alone), so a global lookup here would find
+        // - and silently attach this message to - another tenant's customer row. Still explicitly
+        // ignoring only the soft-delete half of the filter (see the IsDeleted branch just below),
+        // never tenant isolation.
         var customer = await _context.Customers.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.PhoneNumberE164 == phoneNumber, cancellationToken);
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.PhoneNumberE164 == phoneNumber, cancellationToken);
 
         if (customer is null)
         {

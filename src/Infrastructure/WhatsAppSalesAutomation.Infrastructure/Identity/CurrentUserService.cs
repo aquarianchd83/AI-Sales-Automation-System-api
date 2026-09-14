@@ -27,4 +27,22 @@ public class CurrentUserService : ICurrentUserService
     public IReadOnlyList<string> Roles =>
         _httpContextAccessor.HttpContext?.User?.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList()
         ?? new List<string>();
+
+    public Guid? TenantId
+    {
+        get
+        {
+            var value = _httpContextAccessor.HttpContext?.User?.FindFirstValue(JwtClaimNames.TenantId);
+            return Guid.TryParse(value, out var id) ? id : null;
+        }
+    }
+
+    public Guid? ImpersonatorUserId
+    {
+        get
+        {
+            var value = _httpContextAccessor.HttpContext?.User?.FindFirstValue(JwtClaimNames.ImpersonatedBy);
+            return Guid.TryParse(value, out var id) ? id : null;
+        }
+    }
 }

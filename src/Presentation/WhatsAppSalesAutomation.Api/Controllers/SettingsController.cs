@@ -10,12 +10,17 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// <summary>
 /// Admin UI for the six DB-backed config sections (WhatsApp, AiProviders, Campaigns, Media,
 /// Messaging, Ai - see AppSettingCatalog) that used to only be editable by hand-editing
-/// appsettings.json and restarting the app. SuperAdmin-only: WhatsApp/AiProviders hold real
-/// credentials, and every other section here still tunes live production behaviour.
+/// appsettings.json and restarting the app.
+///
+/// PlatformSuperAdmin-only, not tenant SuperAdmin: since the SaaS conversion, per-tenant WhatsApp/AI
+/// credentials live on each tenant's own /tenant-settings endpoints (see TenantSettingsController) -
+/// what's left here is purely platform-owned config (the platform's own fallback AI provider keys,
+/// default plan config, etc.), shared by every tenant. Letting a tenant's SuperAdmin edit that would
+/// let one tenant change behaviour/credentials for every other tenant on the platform.
 /// </summary>
 [ApiController]
 [Route("api/v1/settings")]
-[Authorize(Roles = AppRoles.SuperAdmin)]
+[Authorize(Roles = AppRoles.PlatformSuperAdmin)]
 public class SettingsController : ControllerBase
 {
     private readonly ISettingsService _settingsService;

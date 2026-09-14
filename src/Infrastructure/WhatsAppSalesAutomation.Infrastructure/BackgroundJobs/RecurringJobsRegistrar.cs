@@ -1,32 +1,50 @@
 using Hangfire;
+using WhatsAppSalesAutomation.Application.Platform;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
-/// <summary>Registers every recurring job - the campaign pipeline's three, the WhatsApp token refresh
-/// check, and the Meta template status sync. Called once from Program.cs after the app is built -
-/// Hangfire persists the schedule in SQL Server, so this is idempotent across restarts (re-registering
-/// the same id with the same cron is a no-op).</summary>
+/// <summary>
+/// Registers the recurring jobs that are genuinely platform-global, and clears out the global
+/// registrations that the per-tenant jobs replaced. Called once from Program.cs after the app is built,
+/// immediately before the first <c>ITenantJobProvisioner.ReconcileAllAsync</c> pass, which is what
+/// registers the per-tenant jobs themselves. Hangfire persists schedules in SQL Server, so this is
+/// idempotent across restarts.
+///
+/// Every per-tenant job is deliberately absent - campaign sends, follow-ups, retries, template sync and
+/// the WhatsApp token refresh are all registered per tenant as <c>{jobType}:{tenantId}</c> from each
+/// tenant's own <c>TenantJobSchedules</c> row. See <see cref="TenantJobCatalog"/>.
+/// </summary>
 public static class RecurringJobsRegistrar
 {
     public static void RegisterAll(IRecurringJobManager recurringJobs)
     {
-        recurringJobs.AddOrUpdate<CampaignInitialSenderJob>(
-            "campaign-initial-sends", job => job.RunAsync(), Cron.Minutely());
+        RemoveLegacyGlobalTenantJobs(recurringJobs);
 
-        recurringJobs.AddOrUpdate<FollowUpSchedulerJob>(
-            "campaign-follow-ups", job => job.RunAsync(), Cron.Minutely());
+        // Daily, not hourly: nothing normal depends on this pass - every path that changes a tenant's
+        // status or schedule syncs Hangfire inline - so it only exists to catch drift, and drift is rare
+        // enough that an operator noticing it and pressing "Reconcile now" is the expected trigger. A
+        // scheduled pass this infrequent is the backstop for when nobody is looking, not the mechanism.
+        // 00:30 UTC keeps it clear of the per-tenant token refreshes at midnight and the template syncs
+        // at :00.
+        recurringJobs.AddOrUpdate<TenantJobReconciliationJob>(
+            "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *");
+    }
 
-        recurringJobs.AddOrUpdate<MessageStatusRetryJob>(
-            "campaign-send-retries", job => job.RunAsync(), "*/5 * * * *");
-
-        recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(
-            "whatsapp-token-refresh", job => job.RunAsync(), Cron.Daily());
-
-        // Hourly, not daily like the token refresh - a template stuck in Pending blocks a campaign
-        // step from being usable at all, so it is worth reflecting Meta's review outcome sooner than
-        // once a day; one WABA's template list is a light call well within Meta's rate limits at this
-        // frequency.
-        recurringJobs.AddOrUpdate<MessageTemplateSyncJob>(
-            "whatsapp-template-sync", job => job.RunAsync(), Cron.Hourly());
+    /// <summary>
+    /// Deletes the global registrations the per-tenant jobs replaced. Necessary, not tidiness: Hangfire
+    /// keeps a recurring job until something removes it, so on an existing deployment the old global jobs
+    /// would otherwise keep firing alongside the new per-tenant ones - every tenant's campaigns processed
+    /// twice a minute by two different jobs, with only the idempotency key standing between that and
+    /// duplicate sends, and a leftover global token refresh still calling into code that no longer exists.
+    ///
+    /// Keyed off the catalog rather than a hard-coded list because the per-tenant ids deliberately reuse
+    /// the old global ids as their prefix; <c>RemoveIfExists</c> is a no-op on a fresh database, so this
+    /// costs one storage call per job type on every boot forever, which is the cheapest way to be certain
+    /// no deployment is left with both.
+    /// </summary>
+    private static void RemoveLegacyGlobalTenantJobs(IRecurringJobManager recurringJobs)
+    {
+        foreach (var definition in TenantJobCatalog.All)
+            recurringJobs.RemoveIfExists(definition.Key);
     }
 }

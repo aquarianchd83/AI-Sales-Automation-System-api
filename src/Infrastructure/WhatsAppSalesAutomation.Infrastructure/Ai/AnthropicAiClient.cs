@@ -1,48 +1,43 @@
 using System.Diagnostics;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
-/// Real Anthropic Claude client (Messages API), selected via <c>AiProviders:Provider = "Anthropic"</c>.
-/// Forces tool-use (<c>tool_choice</c> pinned to AiPromptSupport.ToolName) so the reply text and the
-/// structured intent/confidence/entities always arrive together in one call - never exercised against
-/// a live API key in this codebase, same caveat as MetaWhatsAppCloudApiClient: treat first use against
-/// a real key as the actual first test of this class.
+/// Real Anthropic Claude client (Messages API). No longer implements <see cref="IAiService"/> directly -
+/// <see cref="AiServiceFactory"/> is the DI-registered IAiService and the only caller of this class,
+/// passing the calling tenant's already-resolved <see cref="TenantAiCredentials"/> into every call
+/// instead of this class reading one fixed global setting. Forces tool-use (<c>tool_choice</c> pinned
+/// to AiPromptSupport.ToolName) so the reply text and the structured intent/confidence/entities always
+/// arrive together in one call - never exercised against a live API key in this codebase, same caveat
+/// as MetaWhatsAppCloudApiClient: treat first use against a real key as the actual first test of this
+/// class.
 /// </summary>
-public class AnthropicAiClient : IAiService
+public class AnthropicAiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
-    private readonly AnthropicSettings _settings;
     private readonly ILogger<AnthropicAiClient> _logger;
 
-    public AnthropicAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<AnthropicAiClient> logger)
+    public AnthropicAiClient(HttpClient httpClient, ILogger<AnthropicAiClient> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value.Anthropic;
         _logger = logger;
-
-        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
-        _httpClient.DefaultRequestHeaders.Add("x-api-key", _settings.ApiKey);
-        _httpClient.DefaultRequestHeaders.Add("anthropic-version", _settings.ApiVersion);
     }
 
-    public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
+    public async Task<AiReplyResult> GetResponseAsync(TenantAiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var modelUsed = $"Anthropic:{_settings.Model}";
+        var modelUsed = $"Anthropic:{credentials.AnthropicModel}";
 
         var payload = new
         {
-            model = _settings.Model,
+            model = credentials.AnthropicModel,
             max_tokens = 1024,
             system = AiPromptSupport.SystemPrompt(context.CustomerName),
             messages = new[] { new { role = "user", content = AiPromptSupport.BuildUserMessage(context) } },
@@ -60,7 +55,15 @@ public class AnthropicAiClient : IAiService
 
         try
         {
-            using var response = await _httpClient.PostAsJsonAsync("messages", payload, JsonOptions, cancellationToken);
+            var uri = new Uri(new Uri(AiPromptSupport.EnsureTrailingSlash(credentials.AnthropicBaseUrl)), "messages");
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+            {
+                Content = JsonContent.Create(payload, options: JsonOptions)
+            };
+            request.Headers.Add("x-api-key", credentials.AnthropicApiKey);
+            request.Headers.Add("anthropic-version", credentials.AnthropicApiVersion);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)

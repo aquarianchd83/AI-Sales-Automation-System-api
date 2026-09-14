@@ -9,8 +9,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 /// Hangfire job (WebhookEventId only, not the payload itself, is enqueued) so the webhook HTTP request
 /// returns fast, which matters: Meta redelivers on a slow or non-2xx response.
 /// </summary>
-public class WebhookEvent : BaseEntity
+public class WebhookEvent : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public string Provider { get; set; } = "WhatsApp";
 
     /// <summary>Meta's top-level field name for this change, e.g. "messages".</summary>

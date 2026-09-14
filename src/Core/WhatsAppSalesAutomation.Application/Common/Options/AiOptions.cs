@@ -14,8 +14,13 @@ public class AiOptions
 
     /// <summary>Case-insensitive DetectedIntent values that always escalate even at high confidence -
     /// the Phase 1 design's ComplaintIntent/HumanRequestIntent/NegotiationIntent/ComplexTechnicalIntent,
-    /// named here without the "Intent" suffix since the model is prompted to return bare intent names.</summary>
-    public string[] EscalationIntents { get; set; } = { "Complaint", "HumanRequest", "Negotiation", "ComplexTechnical" };
+    /// named here without the "Intent" suffix since the model is prompted to return bare intent names.
+    /// Must default to an empty array, not the real 4-item list - ConfigurationBinder appends
+    /// config-bound array items onto an already-non-null array property rather than replacing it, so a
+    /// non-empty default here would come back from IOptionsSnapshot&lt;AiOptions&gt; with every intent
+    /// duplicated. appsettings.json's own "Ai:EscalationIntents" array is what actually supplies the
+    /// real default for a fresh install with no DB override.</summary>
+    public string[] EscalationIntents { get; set; } = Array.Empty<string>();
 
     /// <summary>Max knowledge base chunks retrieved as grounding context per AI turn.</summary>
     public int KnowledgeBaseTopN { get; set; } = 5;

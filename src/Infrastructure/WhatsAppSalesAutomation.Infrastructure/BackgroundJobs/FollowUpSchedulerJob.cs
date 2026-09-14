@@ -1,27 +1,27 @@
-using Hangfire;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSalesAutomation.Application.Messaging;
+using WhatsAppSalesAutomation.Application.Platform;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
+/// <summary>Runs for one tenant per execution - see CampaignInitialSenderJob's identical doc comment for
+/// the per-tenant registration/TenantJobRunner reasoning.</summary>
 public class FollowUpSchedulerJob
 {
-    private readonly ICampaignSendService _sendService;
-    private readonly ILogger<FollowUpSchedulerJob> _logger;
+    private readonly TenantJobRunner _runner;
 
-    public FollowUpSchedulerJob(ICampaignSendService sendService, ILogger<FollowUpSchedulerJob> logger)
+    public FollowUpSchedulerJob(TenantJobRunner runner)
     {
-        _sendService = sendService;
-        _logger = logger;
+        _runner = runner;
     }
 
-    [DisableConcurrentExecution(timeoutInSeconds: 280)]
-    public async Task RunAsync()
-    {
-        var result = await _sendService.ProcessFollowUpsAsync();
-        if (result.Considered > 0)
-            _logger.LogInformation(
-                "FollowUpSchedulerJob: considered={Considered} sent={Sent} failed={Failed} skipped={Skipped}",
-                result.Considered, result.Sent, result.Failed, result.Skipped);
-    }
+    [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 280)]
+    public Task RunAsync(Guid tenantId) =>
+        _runner.RunAsync(tenantId, TenantJobTypes.CampaignFollowUps, async (services, cancellationToken) =>
+        {
+            var sendService = services.GetRequiredService<ICampaignSendService>();
+            var result = await sendService.ProcessFollowUpsAsync(cancellationToken: cancellationToken);
+
+            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+        });
 }

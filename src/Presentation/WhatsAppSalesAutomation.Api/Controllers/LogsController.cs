@@ -8,12 +8,17 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
 /// A queryable view over the API's own Serilog file output (logs/log-*.txt) - so a _logger.LogWarning
-/// / LogError / etc. call is readable without opening a multi-megabyte text file by hand. Admin-only:
-/// log lines can carry raw webhook payloads and other internal detail not meant for every role.
+/// / LogError / etc. call is readable without opening a multi-megabyte text file by hand.
+///
+/// PlatformSuperAdmin-only: the log file is global and unscoped by tenant - a single day's file can
+/// carry any tenant's raw webhook payloads, errors, etc. Tenant-scoped SuperAdmin/Admin used to be
+/// allowed here, which was a cross-tenant data leak (any tenant admin could read every other tenant's
+/// log lines); that access will come back as its own tenant-scoped log view later, not by reopening
+/// this endpoint.
 /// </summary>
 [ApiController]
 [Route("api/v1/logs")]
-[Authorize(Roles = AppRoles.SuperAdmin + "," + AppRoles.Admin)]
+[Authorize(Roles = AppRoles.PlatformSuperAdmin)]
 public class LogsController : ControllerBase
 {
     private readonly ILogService _logService;

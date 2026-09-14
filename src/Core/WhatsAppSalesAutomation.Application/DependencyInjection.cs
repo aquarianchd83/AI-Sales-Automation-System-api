@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Auth;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
@@ -14,8 +15,10 @@ using WhatsAppSalesAutomation.Application.LogViewer;
 using WhatsAppSalesAutomation.Application.Media;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Application.Tags;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Application.Webhooks;
 
@@ -34,6 +37,8 @@ public static class DependencyInjection
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<ITenantService, TenantService>();
+        services.AddScoped<ITenantSlugResolver, TenantSlugResolver>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ITagService, TagService>();
@@ -49,6 +54,19 @@ public static class DependencyInjection
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
         services.AddScoped<ILogService, LogService>();
         services.AddScoped<ISettingsService, SettingsService>();
+        services.AddScoped<IPlanLimitsService, PlanLimitsService>();
+
+        // Platform Admin Console (PlatformSuperAdmin-only cross-tenant screens).
+        services.AddScoped<IPlatformAuditService, PlatformAuditService>();
+        services.AddScoped<IPlatformTenantService, PlatformTenantService>();
+        services.AddScoped<IPlatformBillingService, PlatformBillingService>();
+        services.AddScoped<IPlatformUsageService, PlatformUsageService>();
+        services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();
+        services.AddScoped<IPlatformUserSearchService, PlatformUserSearchService>();
+        services.AddScoped<IAnnouncementService, AnnouncementService>();
+        services.AddScoped<IPlatformDashboardService, PlatformDashboardService>();
+        services.AddScoped<IPlatformJobService, PlatformJobService>();
+        services.AddScoped<ITenantJobProvisioner, TenantJobProvisioner>();
 
         return services;
     }

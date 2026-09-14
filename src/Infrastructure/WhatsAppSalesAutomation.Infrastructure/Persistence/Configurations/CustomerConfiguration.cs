@@ -12,7 +12,9 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.HasKey(c => c.Id);
 
         builder.Property(c => c.PhoneNumberE164).IsRequired().HasMaxLength(20);
-        builder.HasIndex(c => c.PhoneNumberE164).IsUnique();
+        // Tenant-scoped, not globally unique: the same phone number can message two different
+        // tenants' WhatsApp Business Accounts.
+        builder.HasIndex(c => new { c.TenantId, c.PhoneNumberE164 }).IsUnique();
 
         builder.Property(c => c.FirstName).HasMaxLength(100);
         builder.Property(c => c.LastName).HasMaxLength(100);
@@ -26,6 +28,8 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             .WithMany(t => t.Customers)
             .UsingEntity(j => j.ToTable("CustomerTagMap"));
 
-        builder.HasQueryFilter(c => !c.IsDeleted);
+        // No HasQueryFilter here: Customer is both ISoftDelete and ITenantOwned, and EF Core only
+        // allows one filter lambda per entity, so the combined (!IsDeleted && TenantId == ...) filter
+        // is built once, reflectively, in ApplicationDbContext.OnModelCreating instead of per-entity.
     }
 }

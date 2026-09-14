@@ -2,11 +2,10 @@ using System.Text;
 using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
-using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -22,10 +21,12 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ITenantContext _tenantContext;
+    private readonly IPlanLimitsService _planLimits;
     private readonly IEmbeddingService _embeddings;
     private readonly IEmbeddingProviderCatalog _embeddingCatalog;
     private readonly IActiveAiProviderAccessor _activeProvider;
-    private readonly AiOptions _aiOptions;
+    private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly IValidator<CreateKnowledgeBaseArticleRequest> _createValidator;
     private readonly IValidator<UpdateKnowledgeBaseArticleRequest> _updateValidator;
     private readonly IValidator<BulkPublishArticlesRequest> _bulkPublishValidator;
@@ -33,20 +34,24 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public KnowledgeBaseService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
+        ITenantContext tenantContext,
+        IPlanLimitsService planLimits,
         IEmbeddingService embeddings,
         IEmbeddingProviderCatalog embeddingCatalog,
         IActiveAiProviderAccessor activeProvider,
-        IOptionsSnapshot<AiOptions> aiOptions,
+        ITenantConfigOverrideProvider tenantConfig,
         IValidator<CreateKnowledgeBaseArticleRequest> createValidator,
         IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
         IValidator<BulkPublishArticlesRequest> bulkPublishValidator)
     {
         _context = context;
         _dateTime = dateTime;
+        _tenantContext = tenantContext;
+        _planLimits = planLimits;
         _embeddings = embeddings;
         _embeddingCatalog = embeddingCatalog;
         _activeProvider = activeProvider;
-        _aiOptions = aiOptions.Value;
+        _tenantConfig = tenantConfig;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
         _bulkPublishValidator = bulkPublishValidator;
@@ -146,6 +151,9 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public async Task<KnowledgeBaseArticleDto> CreateAsync(CreateKnowledgeBaseArticleRequest request, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        if (_tenantContext.TenantId is { } tenantId)
+            await _planLimits.EnsureCanCreateKnowledgeBaseArticleAsync(tenantId, cancellationToken);
 
         var article = new KnowledgeBaseArticle
         {
@@ -377,11 +385,15 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 select c)
             .ToListAsync(cancellationToken);
 
+        // Resolved per call (not once per DI scope) - merges this tenant's Ai:* overrides, if any,
+        // over the platform default. See ITenantConfigOverrideProvider's own doc comment.
+        var aiOptions = await _tenantConfig.GetAiOptionsAsync(cancellationToken);
+
         var scored = candidates
             .Select(c => new RetrievedChunk(c.Id, c.ArticleId, c.ChunkText, CosineSimilarity(queryEmbedding, DeserializeEmbedding(c.Embedding!))))
-            .Where(r => r.RelevanceScore >= _aiOptions.MinRelevanceScore)
+            .Where(r => r.RelevanceScore >= aiOptions.MinRelevanceScore)
             .OrderByDescending(r => r.RelevanceScore)
-            .Take(_aiOptions.KnowledgeBaseTopN)
+            .Take(aiOptions.KnowledgeBaseTopN)
             .ToList();
 
         return scored;

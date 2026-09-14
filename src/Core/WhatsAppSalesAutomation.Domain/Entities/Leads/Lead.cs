@@ -7,8 +7,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Leads;
 /// (mirroring Conversation's one-active-thread rule) - re-engagement after Lost/Won creates a fresh
 /// Lead rather than reopening the old one, so the pipeline board's history stays an honest record of
 /// each attempt.</summary>
-public class Lead : BaseEntity
+public class Lead : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid CustomerId { get; set; }
 
     /// <summary>The campaign that originated this lead, if any - null for leads that started from an

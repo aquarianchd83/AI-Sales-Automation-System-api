@@ -5,8 +5,10 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Ai;
 /// <summary>Join row recording which KnowledgeBaseChunks were retrieved and cited as grounding for one
 /// AiInteraction - the audit trail for "why did the AI say that", and what a future "show sources"
 /// feature in the agent inbox would read.</summary>
-public class AiInteractionSource : BaseEntity
+public class AiInteractionSource : BaseEntity, ITenantOwned
 {
+    public Guid TenantId { get; set; }
+
     public Guid AiInteractionId { get; set; }
 
     public Guid KnowledgeBaseChunkId { get; set; }

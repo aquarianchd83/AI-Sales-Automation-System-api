@@ -4,43 +4,38 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
-/// Real OpenAI client (Chat Completions API), selected via <c>AiProviders:Provider = "OpenAI"</c>.
-/// Forces the record_response function call via <c>tool_choice</c>, same reasoning as
-/// AnthropicAiClient. Never exercised against a live API key in this codebase - see that class's doc
-/// comment for the same caveat.
+/// Real OpenAI client (Chat Completions API). No longer implements <see cref="IAiService"/> directly -
+/// see <see cref="AnthropicAiClient"/>'s own doc comment for why (AiServiceFactory is the caller now).
+/// Forces the record_response function call via <c>tool_choice</c>, same reasoning as AnthropicAiClient.
+/// Never exercised against a live API key in this codebase - see that class's doc comment for the same
+/// caveat.
 /// </summary>
-public class OpenAiAiClient : IAiService
+public class OpenAiAiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
-    private readonly OpenAiSettings _settings;
     private readonly ILogger<OpenAiAiClient> _logger;
 
-    public OpenAiAiClient(HttpClient httpClient, IOptionsSnapshot<AiProviderSettings> settings, ILogger<OpenAiAiClient> logger)
+    public OpenAiAiClient(HttpClient httpClient, ILogger<OpenAiAiClient> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value.OpenAI;
         _logger = logger;
-
-        _httpClient.BaseAddress = new Uri(AiPromptSupport.EnsureTrailingSlash(_settings.BaseUrl));
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.ApiKey);
     }
 
-    public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
+    public async Task<AiReplyResult> GetResponseAsync(TenantAiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var modelUsed = $"OpenAI:{_settings.ChatModel}";
+        var modelUsed = $"OpenAI:{credentials.OpenAiChatModel}";
 
         var payload = new
         {
-            model = _settings.ChatModel,
+            model = credentials.OpenAiChatModel,
             messages = new[]
             {
                 new { role = "system", content = AiPromptSupport.SystemPrompt(context.CustomerName) },
@@ -64,7 +59,14 @@ public class OpenAiAiClient : IAiService
 
         try
         {
-            using var response = await _httpClient.PostAsJsonAsync("chat/completions", payload, JsonOptions, cancellationToken);
+            var uri = new Uri(new Uri(AiPromptSupport.EnsureTrailingSlash(credentials.OpenAiBaseUrl)), "chat/completions");
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+            {
+                Content = JsonContent.Create(payload, options: JsonOptions)
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.OpenAiApiKey);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)

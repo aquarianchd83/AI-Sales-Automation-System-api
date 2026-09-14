@@ -11,19 +11,26 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// <param name="IsList">Bound to a comma-separated string in the DB/UI (e.g. "1,5,15,60,240") but
 /// expanded into IConfiguration's own indexed "Key:0", "Key:1", ... shape so the existing
 /// List&lt;T&gt;/array-typed Options properties keep binding the same way they do from JSON today.</param>
-public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null);
+/// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
+/// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
+/// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
+/// everything else here: WhatsApp/AiProviders already have their own bespoke per-tenant mechanism
+/// (TenantWhatsAppConfig/TenantAiProviderConfig), and MediaStorage is platform infra shared by every
+/// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
+public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null, bool IsTenantOverridable = false);
 
 /// <summary>
-/// Single source of truth for which six appsettings.json sections
-/// (<see cref="Categories"/>) are DB-backed and UI-editable - see the "Move config into DB" plan.
-/// Everything else (ConnectionStrings, Serilog, Jwt, MediaStorage, LogViewer, Seed, AllowedHosts)
-/// is intentionally left out and keeps reading straight from appsettings.json.
+/// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
+/// DB-backed and UI-editable - see the "Move config into DB" plan. Everything else
+/// (ConnectionStrings, Serilog, Jwt, LogViewer, Seed, AllowedHosts) is intentionally left out and
+/// keeps reading straight from appsettings.json - none of it is something an admin would ever want
+/// to change without a deploy alongside it.
 /// </summary>
 public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -58,25 +65,33 @@ public static class AppSettingCatalog
         new("AiProviders:Google:EmbeddingModel", "AiProviders", IsSecret: false),
         new("AiProviders:Google:BaseUrl", "AiProviders", IsSecret: false),
 
-        // Media
-        new("Media:MaxSizeBytes", "Media", IsSecret: false),
-        new("Media:AllowedContentTypes", "Media", IsSecret: false, IsList: true),
+        // Media - tenant-overridable, see IsTenantOverridable's own doc comment.
+        new("Media:MaxSizeBytes", "Media", IsSecret: false, IsTenantOverridable: true),
+        new("Media:AllowedContentTypes", "Media", IsSecret: false, IsList: true, IsTenantOverridable: true),
 
-        // Campaigns
-        new("Campaigns:MinStepMedia", "Campaigns", IsSecret: false),
-        new("Campaigns:MaxStepMedia", "Campaigns", IsSecret: false),
+        // Campaigns - tenant-overridable.
+        new("Campaigns:MinStepMedia", "Campaigns", IsSecret: false, IsTenantOverridable: true),
+        new("Campaigns:MaxStepMedia", "Campaigns", IsSecret: false, IsTenantOverridable: true),
 
-        // Messaging
-        new("Messaging:MaxSendsPerRun", "Messaging", IsSecret: false),
-        new("Messaging:MaxRetryAttempts", "Messaging", IsSecret: false),
-        new("Messaging:RetryBackoffMinutes", "Messaging", IsSecret: false, IsList: true),
-        new("Messaging:CustomerServiceWindowHours", "Messaging", IsSecret: false),
+        // Messaging - tenant-overridable.
+        new("Messaging:MaxSendsPerRun", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:MaxRetryAttempts", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:RetryBackoffMinutes", "Messaging", IsSecret: false, IsList: true, IsTenantOverridable: true),
+        new("Messaging:CustomerServiceWindowHours", "Messaging", IsSecret: false, IsTenantOverridable: true),
 
-        // Ai
-        new("Ai:ConfidenceThreshold", "Ai", IsSecret: false),
-        new("Ai:EscalationIntents", "Ai", IsSecret: false, IsList: true),
-        new("Ai:KnowledgeBaseTopN", "Ai", IsSecret: false),
-        new("Ai:MinRelevanceScore", "Ai", IsSecret: false),
-        new("Ai:ConversationHistoryTurns", "Ai", IsSecret: false),
+        // Ai - tenant-overridable.
+        new("Ai:ConfidenceThreshold", "Ai", IsSecret: false, IsTenantOverridable: true),
+        new("Ai:EscalationIntents", "Ai", IsSecret: false, IsList: true, IsTenantOverridable: true),
+        new("Ai:KnowledgeBaseTopN", "Ai", IsSecret: false, IsTenantOverridable: true),
+        new("Ai:MinRelevanceScore", "Ai", IsSecret: false, IsTenantOverridable: true),
+        new("Ai:ConversationHistoryTurns", "Ai", IsSecret: false, IsTenantOverridable: true),
+
+        // MediaStorage - all three need a restart: Program.cs reads RootPath/PublicBasePath directly
+        // off IConfiguration (not IOptionsSnapshot) to configure static-file-serving middleware once,
+        // at startup, and LocalFileMediaStorageService resolves IOptions<LocalMediaStorageSettings>
+        // (the non-live-reloading variant) at construction - neither observes a later change.
+        new("MediaStorage:RootPath", "MediaStorage", IsSecret: false, Description: "Where uploaded media is written on disk - restart required to take effect."),
+        new("MediaStorage:PublicBasePath", "MediaStorage", IsSecret: false, Description: "URL prefix media is served under - restart required to take effect."),
+        new("MediaStorage:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Scheme+host to prepend so Meta can fetch template media - restart required to take effect."),
     };
 }

@@ -1,38 +1,39 @@
-using Hangfire;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
-/// <summary>Daily check that keeps the WhatsApp Cloud API access token from expiring - see
-/// WhatsAppTokenRefreshService for the actual Meta OAuth exchange. A no-op most days (only actually
-/// calls Meta once the token is within its refresh window), so a daily cadence against a ~60-day
-/// token lifetime is deliberately generous, not tightly timed.</summary>
+/// <summary>
+/// Keeps one tenant's WhatsApp access token from expiring - see TenantWhatsAppTokenRefreshService for
+/// the actual Meta exchange. Registered per tenant (<c>whatsapp-token-refresh:{tenantId}</c>) like every
+/// other job in TenantJobCatalog, so each tenant's refresh has its own schedule, its own last-run
+/// outcome, and can be paused or run on its own from the Platform Admin Console.
+///
+/// Was a single platform-global job until each tenant brought its own token. That version refreshed one
+/// shared WhatsAppAccessTokenState row that no send had read since BYO-WABA, while leaving every
+/// tenant's real token to expire unnoticed.
+///
+/// Daily by default. A no-op most days - Meta is only called once a token is inside its 10-day refresh
+/// window, and never for a token Meta has reported does not expire - so the cadence is generous rather
+/// than tightly timed. A Meta rejection surfaces as a Failed run, counted toward the tenant's consecutive
+/// failures, rather than being logged and forgotten.
+/// </summary>
 public class WhatsAppTokenRefreshJob
 {
-    private readonly IWhatsAppTokenRefreshService _refreshService;
-    private readonly ILogger<WhatsAppTokenRefreshJob> _logger;
+    private readonly TenantJobRunner _runner;
 
-    public WhatsAppTokenRefreshJob(IWhatsAppTokenRefreshService refreshService, ILogger<WhatsAppTokenRefreshJob> logger)
+    public WhatsAppTokenRefreshJob(TenantJobRunner runner)
     {
-        _refreshService = refreshService;
-        _logger = logger;
+        _runner = runner;
     }
 
-    [DisableConcurrentExecution(timeoutInSeconds: 60)]
-    public async Task RunAsync()
-    {
-        try
+    [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 60)]
+    public Task RunAsync(Guid tenantId) =>
+        _runner.RunAsync(tenantId, TenantJobTypes.WhatsAppTokenRefresh, async (services, cancellationToken) =>
         {
-            await _refreshService.RefreshIfNeededAsync();
-        }
-        catch (Exception ex)
-        {
-            // Belt-and-suspenders: WhatsAppTokenRefreshService already catches its own HTTP/JSON
-            // failures internally and just logs, but this job must never throw regardless - an
-            // unhandled exception here would surface as a permanently-failing Hangfire job, which is
-            // worse than a quietly-skipped refresh attempt that tries again tomorrow.
-            _logger.LogError(ex, "WhatsAppTokenRefreshJob failed unexpectedly");
-        }
-    }
+            var refresh = services.GetRequiredService<ITenantWhatsAppTokenRefreshService>();
+            var result = await refresh.RefreshAsync(tenantId, cancellationToken);
+            return result.Summary;
+        });
 }

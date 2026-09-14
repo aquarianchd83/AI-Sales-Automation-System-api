@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -8,6 +9,8 @@ using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
 
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -21,6 +24,8 @@ namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 /// </summary>
 public interface IApplicationDbContext
 {
+    DbSet<Tenant> Tenants { get; }
+
     DbSet<Customer> Customers { get; }
 
     DbSet<CustomerTag> CustomerTags { get; }
@@ -62,6 +67,18 @@ public interface IApplicationDbContext
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }
+
+    DbSet<Plan> Plans { get; }
+
+    DbSet<Subscription> Subscriptions { get; }
+
+    DbSet<Payment> Payments { get; }
+
+    DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
+
+    DbSet<Announcement> Announcements { get; }
+
+    DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
