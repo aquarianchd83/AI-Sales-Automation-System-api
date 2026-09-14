@@ -61,9 +61,8 @@ public interface ITenantWhatsAppConfigProvider
     Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     /// <summary>Cross-tenant, masked connection status for every tenant that has ever saved a config -
-    /// what the Platform Admin Console's WhatsApp Connections screen (spec item #5) lists. Deliberately
-    /// omits any expiry - see <see cref="TenantWhatsAppConnectionSummary"/>'s own doc comment for why
-    /// that column can't be filled in honestly today.</summary>
+    /// what the Platform Admin Console's WhatsApp Connections screen (spec item #5) lists. Omits token
+    /// expiry for now - see <see cref="TenantWhatsAppConnectionSummary"/>'s own doc comment.</summary>
     Task<IReadOnlyList<TenantWhatsAppConnectionSummary>> GetAllConnectionSummariesAsync(CancellationToken cancellationToken = default);
 }
 
@@ -116,13 +115,12 @@ public record UpdateTenantWhatsAppConfigRequest(
     string? AppId = null);
 
 /// <summary>
-/// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Deliberately has no
-/// token-expiry field: BYO-WABA tenant credentials are a long-lived System User token that this
-/// platform's own <c>WhatsAppTokenRefreshService</c>/<c>WhatsAppAccessTokenState</c> does not track -
-/// that mechanism only ever concerned the single pre-multi-tenancy platform-global fallback account,
-/// never a tenant's own Meta App. <see cref="IsConnected"/> is therefore the honest ceiling on what
-/// this system can currently report about a tenant's WABA health - not "is the token still valid
-/// right now against Meta," just "did the tenant finish saving a complete config."
+/// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Has no token-expiry
+/// field yet, although one could now be filled in honestly: each tenant's own refresh job records Meta's
+/// reported expiry on <c>TenantWhatsAppConfig.AccessTokenExpiresAtUtc</c>. Surfacing it here is a
+/// separate change. Until then <see cref="IsConnected"/> is what this reports - not "is the token still
+/// valid right now against Meta," just "did the tenant finish saving a complete config." The Background
+/// Jobs screen's whatsapp-token-refresh row is where a failing or un-refreshable token shows up.
 /// </summary>
 public record TenantWhatsAppConnectionSummary(
     Guid TenantId,

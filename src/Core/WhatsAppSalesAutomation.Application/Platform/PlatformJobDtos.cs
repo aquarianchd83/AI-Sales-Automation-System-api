@@ -74,9 +74,9 @@ public record UpdateTenantJobScheduleRequest
 /// of the recurring runs was theirs.</summary>
 public record PlatformJobTriggerResultDto(string RecurringJobId, string BackgroundJobId);
 
-/// <summary>A recurring job that is not per-tenant - platform-global by nature (see
-/// <c>TenantJobCatalog</c>'s own doc comment on why the WhatsApp token refresh is one). Read-only on
-/// this screen: there is no tenant to scope a schedule edit to.</summary>
+/// <summary>A recurring job that is not per-tenant - platform-global by nature, such as the tenant-job
+/// reconcile pass that keeps every tenant's registrations in step. Read-only on this screen: there is no
+/// tenant to scope a schedule edit to.</summary>
 public record PlatformGlobalJobDto(
     string RecurringJobId,
     string? CronExpression,

@@ -26,18 +26,19 @@ public class TenantWhatsAppConfig : ITenantOwned
 
     public string WhatsAppBusinessAccountId { get; set; } = string.Empty;
 
-    /// <summary>The Meta App this tenant's WABA is connected under. Not a secret. Stored for record-
-    /// keeping/a future per-tenant-App architecture, but NOT what webhook routing actually keys off
-    /// today - Meta subscribes per-App (one platform Meta App under BYO-WABA, see
-    /// AppSettingCatalog's "WhatsApp:AppId" entry), so every tenant's inbound webhooks arrive through
-    /// that one platform App regardless of what's saved here. Same "schema completeness ahead of the
-    /// feature" status as <see cref="WebhookVerifyToken"/>.</summary>
+    /// <summary>The Meta App this tenant's WABA is connected under. Not a secret. The client_id half of
+    /// this tenant's own token refresh (TenantWhatsAppTokenRefreshService) - without it that job reports
+    /// it cannot refresh rather than guessing. Still NOT what webhook routing keys off - Meta subscribes
+    /// per-App (one platform Meta App under BYO-WABA, see AppSettingCatalog's "WhatsApp:AppId" entry),
+    /// so every tenant's inbound webhooks arrive through that one platform App regardless of what's
+    /// saved here.</summary>
     public string? AppId { get; set; }
 
-    /// <summary>Ciphertext (AppSettingsSecretProtection) - never read or written unencrypted. A long-
-    /// lived System User token is expected here; BYO-WABA means auto-refresh is each tenant's own
-    /// Meta App's concern, not something this platform's WhatsAppTokenRefreshService (built for the
-    /// single pre-multi-tenant platform account) attempts on their behalf.</summary>
+    /// <summary>Ciphertext (AppSettingsSecretProtection) - never read or written unencrypted. Kept alive
+    /// by this tenant's own <c>whatsapp-token-refresh:{TenantId}</c> recurring job, which exchanges it
+    /// with Meta using <see cref="AppId"/>/<see cref="AppSecret"/> before it expires and writes the
+    /// fresh token back here - see TenantWhatsAppTokenRefreshService. A never-expiring System User token
+    /// is just as valid here; the job recognises one and stops calling Meta for it.</summary>
     public string? AccessToken { get; set; }
 
     /// <summary>Ciphertext. Verifies X-Hub-Signature-256 on every inbound webhook claiming to be this
@@ -53,6 +54,19 @@ public class TenantWhatsAppConfig : ITenantOwned
     public string ApiVersion { get; set; } = "v19.0";
 
     public string ApiBaseUrl { get; set; } = "https://graph.facebook.com/";
+
+    /// <summary>When Meta says <see cref="AccessToken"/> expires, as of the last successful refresh.
+    /// Read together with <see cref="AccessTokenRefreshedAtUtc"/>, because null means two different
+    /// things: never checked (refreshed-at also null - the next refresh run exchanges it to find out),
+    /// or checked and Meta reported no expiry (refreshed-at set - a permanent System User token, which
+    /// the refresh job then leaves alone instead of calling Meta for it every day).</summary>
+    public DateTime? AccessTokenExpiresAtUtc { get; set; }
+
+    /// <summary>Last successful token exchange with Meta. Deliberately separate from
+    /// <see cref="UpdatedAtUtc"/>/<see cref="UpdatedByUserId"/>, which mean "an operator edited this
+    /// config" - a background refresh is not an edit. Both token-lifetime columns are reset whenever a
+    /// new AccessToken is saved, since they describe the token that was just replaced.</summary>
+    public DateTime? AccessTokenRefreshedAtUtc { get; set; }
 
     /// <summary>True once PhoneNumberId/AccessToken/AppSecret are all non-empty - a simple "is this
     /// tenant's WABA usable" flag for the frontend, not a live Meta connectivity check.</summary>

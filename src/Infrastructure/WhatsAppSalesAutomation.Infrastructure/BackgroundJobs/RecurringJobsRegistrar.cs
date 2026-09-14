@@ -10,9 +10,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 /// registers the per-tenant jobs themselves. Hangfire persists schedules in SQL Server, so this is
 /// idempotent across restarts.
 ///
-/// The four campaign/template jobs are deliberately absent: they are now registered per tenant as
-/// <c>{jobType}:{tenantId}</c> from each tenant's own <c>TenantJobSchedules</c> row - see
-/// <see cref="TenantJobCatalog"/>.
+/// Every per-tenant job is deliberately absent - campaign sends, follow-ups, retries, template sync and
+/// the WhatsApp token refresh are all registered per tenant as <c>{jobType}:{tenantId}</c> from each
+/// tenant's own <c>TenantJobSchedules</c> row. See <see cref="TenantJobCatalog"/>.
 /// </summary>
 public static class RecurringJobsRegistrar
 {
@@ -20,24 +20,22 @@ public static class RecurringJobsRegistrar
     {
         RemoveLegacyGlobalTenantJobs(recurringJobs);
 
-        recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(
-            "whatsapp-token-refresh", job => job.RunAsync(), Cron.Daily());
-
         // Daily, not hourly: nothing normal depends on this pass - every path that changes a tenant's
         // status or schedule syncs Hangfire inline - so it only exists to catch drift, and drift is rare
         // enough that an operator noticing it and pressing "Reconcile now" is the expected trigger. A
         // scheduled pass this infrequent is the backstop for when nobody is looking, not the mechanism.
-        // 00:30 UTC keeps it clear of the token refresh at midnight and of the template syncs at :00.
+        // 00:30 UTC keeps it clear of the per-tenant token refreshes at midnight and the template syncs
+        // at :00.
         recurringJobs.AddOrUpdate<TenantJobReconciliationJob>(
             "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *");
     }
 
     /// <summary>
-    /// Deletes the four pre-per-tenant registrations. Necessary, not tidiness: Hangfire keeps a recurring
-    /// job until something removes it, so on an existing deployment the old global fan-out jobs would
-    /// otherwise keep firing alongside the new per-tenant ones - every tenant's campaigns processed twice
-    /// a minute by two different jobs, with only the idempotency key standing between that and duplicate
-    /// sends.
+    /// Deletes the global registrations the per-tenant jobs replaced. Necessary, not tidiness: Hangfire
+    /// keeps a recurring job until something removes it, so on an existing deployment the old global jobs
+    /// would otherwise keep firing alongside the new per-tenant ones - every tenant's campaigns processed
+    /// twice a minute by two different jobs, with only the idempotency key standing between that and
+    /// duplicate sends, and a leftover global token refresh still calling into code that no longer exists.
     ///
     /// Keyed off the catalog rather than a hard-coded list because the per-tenant ids deliberately reuse
     /// the old global ids as their prefix; <c>RemoveIfExists</c> is a no-op on a fresh database, so this

@@ -147,14 +147,13 @@ public static class DependencyInjection
     {
         services.Configure<WhatsAppSettings>(configuration.GetSection("WhatsApp"));
 
-        // Pre-multi-tenant platform-level token store/refresher - MetaWhatsAppCloudApiClient no longer
-        // reads from this (each tenant supplies their own AccessToken directly on TenantWhatsAppConfig
-        // instead - BYO-WABA means auto-refresh is each tenant's own Meta App's concern). Kept
-        // registered only because WhatsAppTokenRefreshJob (see AddHangfire) still depends on it - and it
-        // stayed platform-global when the other recurring jobs went per-tenant, for the reasons that
-        // job's own doc comment sets out.
-        services.AddScoped<IWhatsAppTokenStore, WhatsAppTokenStore>();
-        services.AddHttpClient<IWhatsAppTokenRefreshService, WhatsAppTokenRefreshService>();
+        // Per-tenant token refresh (WhatsAppTokenRefreshJob). RemoveAllLoggers is a security requirement,
+        // not noise reduction: Meta's exchange takes client_secret and the access token as query
+        // parameters, and IHttpClientFactory's default loggers write each request URL at Information -
+        // a level this app's Serilog config keeps - so every tenant's secrets would otherwise land in the
+        // log files the LogViewer screen serves.
+        services.AddHttpClient<ITenantWhatsAppTokenRefreshService, TenantWhatsAppTokenRefreshService>()
+            .RemoveAllLoggers();
 
         services.AddHttpClient<MetaWhatsAppCloudApiClient>();
         services.AddScoped<SimulatedWhatsAppClient>();

@@ -14,6 +14,7 @@ public static class TenantJobTypes
     public const string CampaignFollowUps = "campaign-follow-ups";
     public const string CampaignSendRetries = "campaign-send-retries";
     public const string WhatsAppTemplateSync = "whatsapp-template-sync";
+    public const string WhatsAppTokenRefresh = "whatsapp-token-refresh";
 }
 
 /// <summary>One per-tenant job as the Platform Admin Console needs to describe it. <see cref="Key"/> is
@@ -28,13 +29,14 @@ public record TenantJobDefinition(
 /// <summary>
 /// The single list of what "per-tenant background jobs" means, shared by everything that has to agree
 /// on it: the provisioner (which rows to create for a new tenant), the scheduler (which CLR job type
-/// each key maps to - see <c>HangfireTenantJobScheduler</c>), the Platform Admin Console's own job
-/// list, and the migration that backfilled existing tenants.
+/// each key maps to - see <c>HangfireTenantJobScheduler</c>), and the Platform Admin Console's own job
+/// list. Adding an entry is all it takes for every tenant to get one: the next reconcile pass (at boot,
+/// on demand, or daily) creates each tenant's schedule row for it and registers it.
 ///
-/// <c>whatsapp-token-refresh</c> is deliberately absent: it refreshes the single platform-level
-/// WhatsAppAccessTokenState row, not anything tenant-shaped - see <c>WhatsAppTokenRefreshJob</c>'s own
-/// doc comment. It stays a global recurring job, and the console lists it separately as such rather
-/// than pretending it can be scheduled per tenant.
+/// <c>whatsapp-token-refresh</c> joined later than the others. It was a single platform-global job until
+/// each tenant brought its own WhatsApp token - see <c>WhatsAppTokenRefreshJob</c>'s own doc comment -
+/// and keeping the same id as its prefix is what lets RecurringJobsRegistrar remove the old global
+/// registration.
 /// </summary>
 public static class TenantJobCatalog
 {
@@ -59,7 +61,12 @@ public static class TenantJobCatalog
             TenantJobTypes.WhatsAppTemplateSync,
             "WhatsApp template sync",
             "Pushes new/changed message templates to Meta and pulls their review status back.",
-            "0 * * * *")
+            "0 * * * *"),
+        new TenantJobDefinition(
+            TenantJobTypes.WhatsAppTokenRefresh,
+            "WhatsApp token refresh",
+            "Exchanges the tenant's Meta access token for a fresh one before it expires. Does nothing for a token Meta reports never expires.",
+            "0 0 * * *")
     };
 
     public static TenantJobDefinition? Find(string jobType) =>

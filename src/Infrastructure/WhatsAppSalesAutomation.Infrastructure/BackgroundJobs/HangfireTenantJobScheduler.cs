@@ -63,8 +63,9 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
         var recurringJobId = TenantJobCatalog.RecurringJobId(jobType, tenantId);
 
         // Deliberately scheduled in UTC (Hangfire's default) rather than the tenant's own timezone: the
-        // per-tenant jobs are all frequent polls (minutely/5-minutely/hourly), where a timezone makes no
-        // difference, and "is this campaign step due yet" is already evaluated in the tenant's timezone
+        // per-tenant jobs are frequent polls (minutely/5-minutely/hourly) plus a daily token refresh whose
+        // 10-day window makes the hour it runs irrelevant, and "is this campaign step due yet" is already
+        // evaluated in the tenant's timezone
         // inside the send service via ITenantTimeZoneProvider. A future job with a genuine time-of-day
         // (a daily digest, say) is where RecurringJobOptions.TimeZone would need to come from the tenant.
         switch (jobType)
@@ -80,6 +81,9 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
                 break;
             case TenantJobTypes.WhatsAppTemplateSync:
                 _recurringJobs.AddOrUpdate<MessageTemplateSyncJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                break;
+            case TenantJobTypes.WhatsAppTokenRefresh:
+                _recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
                 break;
             default:
                 // Reachable only from a schedule row for a job type this build no longer knows about -
@@ -104,6 +108,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             TenantJobTypes.CampaignFollowUps => _backgroundJobs.Enqueue<FollowUpSchedulerJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.CampaignSendRetries => _backgroundJobs.Enqueue<MessageStatusRetryJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTemplateSync => _backgroundJobs.Enqueue<MessageTemplateSyncJob>(job => job.RunAsync(tenantId)),
+            TenantJobTypes.WhatsAppTokenRefresh => _backgroundJobs.Enqueue<WhatsAppTokenRefreshJob>(job => job.RunAsync(tenantId)),
             _ => throw new ArgumentOutOfRangeException(nameof(jobType), jobType, "Not a per-tenant background job.")
         };
     }

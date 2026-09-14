@@ -119,7 +119,16 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         // Null leaves the stored ciphertext untouched (see UpdateTenantWhatsAppConfigRequest's own
         // doc comment); an empty string is the caller's explicit way to clear it.
         if (request.AccessToken is not null)
+        {
             row.AccessToken = request.AccessToken.Length == 0 ? null : protector.Protect(request.AccessToken);
+
+            // The lifetime columns describe the token just replaced, not this one. Left in place, a newly
+            // pasted 60-day token would inherit a previous token's "Meta says it never expires" and the
+            // refresh job would skip it until it silently lapsed. Null/null makes the next run exchange it
+            // and learn its real expiry.
+            row.AccessTokenExpiresAtUtc = null;
+            row.AccessTokenRefreshedAtUtc = null;
+        }
         if (request.AppSecret is not null)
             row.AppSecret = request.AppSecret.Length == 0 ? null : protector.Protect(request.AppSecret);
         if (request.WebhookVerifyToken is not null)

@@ -26,14 +26,15 @@ public class WhatsAppSettings
     public int SimulatedFailureRatePercent { get; set; } = 0;
 
     /// <summary>Meta App Secret, used to verify the X-Hub-Signature-256 HMAC on every inbound webhook
-    /// POST before any of its content is trusted (Phase 4), and as the client_secret half of the
-    /// token-refresh exchange (Phase 6) - genuinely confidential, unlike AppId below.</summary>
+    /// POST before any of its content is trusted (Phase 4) - genuinely confidential, unlike AppId below.
+    /// No longer part of any token refresh: each tenant's token is exchanged with that tenant's own App
+    /// Secret from TenantWhatsAppConfig.</summary>
     public string AppSecret { get; set; } = string.Empty;
 
-    /// <summary>The Meta App's numeric App ID - the client_id half of the OAuth token-exchange call
-    /// WhatsAppTokenRefreshService uses to keep AccessToken from expiring. Not confidential (Meta
-    /// itself treats App IDs as public - they appear client-side in Meta SDKs/Login buttons), unlike
-    /// AppSecret.</summary>
+    /// <summary>The platform Meta App's numeric App ID. Not confidential (Meta itself treats App IDs as
+    /// public - they appear client-side in Meta SDKs/Login buttons), unlike AppSecret. Was the client_id
+    /// of the pre-multi-tenant global token refresh; each tenant's refresh now uses that tenant's own
+    /// TenantWhatsAppConfig.AppId instead.</summary>
     public string AppId { get; set; } = string.Empty;
 
     /// <summary>The value configured in Meta's webhook setup - echoed back on the GET verification

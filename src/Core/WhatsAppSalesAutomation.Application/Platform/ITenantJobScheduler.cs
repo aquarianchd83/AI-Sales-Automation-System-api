@@ -52,8 +52,8 @@ public interface ITenantJobScheduler
     /// registrations behind, and nothing else would ever remove them.</summary>
     IReadOnlyList<string> GetRegisteredTenantJobIds();
 
-    /// <summary>The recurring jobs that are not per-tenant at all (currently just
-    /// <c>whatsapp-token-refresh</c> and the reconcile pass itself), so the console can show them as
-    /// platform-scoped instead of leaving an operator to wonder why they have no tenant.</summary>
+    /// <summary>The recurring jobs that are not per-tenant at all (currently just the reconcile pass
+    /// itself), so the console can show them as platform-scoped instead of leaving an operator to wonder
+    /// why they have no tenant.</summary>
     IReadOnlyList<RecurringJobRegistrationState> GetPlatformJobs();
 }
