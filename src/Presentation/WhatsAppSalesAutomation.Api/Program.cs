@@ -1,6 +1,7 @@
 using Hangfire;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Enrichers.CallerInfo;
 using WhatsAppSalesAutomation.Api.Extensions;
+using WhatsAppSalesAutomation.Api.Logging;
 using WhatsAppSalesAutomation.Api.Middleware;
 using WhatsAppSalesAutomation.Application;
 using WhatsAppSalesAutomation.Application.Platform;
@@ -37,6 +39,11 @@ try
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext();
+
+        // Tags each event with the signed-in user's tenant (the "[t:...]" segment in the output
+        // templates) so the Platform Admin Console's Logs screen can filter by tenant. Background jobs
+        // and the anonymous webhook have no tenant claim and tag themselves via TenantLogScope.
+        configuration.Enrich.With(new TenantLogEnricher(services.GetRequiredService<IHttpContextAccessor>()));
 
         // "LogViewer:EnableModuleLogging" (default on) - stamps every event with the calling
         // class/method (Namespace/Method properties, consumed by the {Namespace}/{Method}

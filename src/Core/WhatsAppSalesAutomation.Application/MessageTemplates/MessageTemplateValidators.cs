@@ -48,6 +48,13 @@ public class UpdateMessageTemplateRequestValidator : AbstractValidator<UpdateMes
         // Only validated when provided - see MessageTemplateService.UpdateAsync for why a rename is
         // rejected outright (MetaTemplateId already set) before this format check would even matter.
         RuleFor(x => x.WhatsAppTemplateName!).ValidWhatsAppTemplateName().When(x => x.WhatsAppTemplateName is not null);
+
+        RuleFor(x => x.Language!).NotEmpty().MaximumLength(10).When(x => x.Language is not null);
+
+        RuleFor(x => x.Category)
+            .Must(c => Enum.TryParse<TemplateCategory>(c, ignoreCase: true, out _))
+            .WithMessage($"Category must be one of: {string.Join(", ", Enum.GetNames<TemplateCategory>())}.")
+            .When(x => x.Category is not null);
     }
 }
 

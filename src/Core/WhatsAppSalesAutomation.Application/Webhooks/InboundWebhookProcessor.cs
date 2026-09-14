@@ -61,6 +61,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         // tenant (the request is anonymous) - this is the first point tenantId, resolved by the
         // caller off Meta's phone_number_id, becomes the ambient tenant for the rest of this scope.
         _tenantContext.SetTenant(tenantId);
+        using var logScope = TenantLogScope.Begin(_logger, tenantId);
 
         var webhookEvent = new WebhookEvent
         {
@@ -82,6 +83,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         // tenant at all (unlike the original request scope, that scope never went through
         // RecordAsync) - tenantId is threaded through explicitly as a job argument for exactly this.
         _tenantContext.SetTenant(tenantId);
+        using var logScope = TenantLogScope.Begin(_logger, tenantId);
 
         var webhookEvent = await _context.WebhookEvents.FirstOrDefaultAsync(w => w.Id == webhookEventId, cancellationToken);
         if (webhookEvent is null)

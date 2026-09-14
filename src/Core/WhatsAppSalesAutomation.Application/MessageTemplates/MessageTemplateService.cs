@@ -86,29 +86,53 @@ public class MessageTemplateService : IMessageTemplateService
 
         var template = await FindOrThrowAsync(id, cancellationToken);
 
-        if (request.WhatsAppTemplateName is not null && request.WhatsAppTemplateName != template.WhatsAppTemplateName)
+        var newName = request.WhatsAppTemplateName ?? template.WhatsAppTemplateName;
+        var newLanguage = request.Language ?? template.Language;
+        var newCategory = request.Category is null
+            ? template.Category
+            : Enum.Parse<TemplateCategory>(request.Category, ignoreCase: true);
+
+        var nameChanged = newName != template.WhatsAppTemplateName;
+        var languageChanged = newLanguage != template.Language;
+        var categoryChanged = newCategory != template.Category;
+
+        if (nameChanged || languageChanged || categoryChanged)
         {
-            // Meta does not allow renaming a template after creation (name/language/category are
-            // fixed at creation time) - once MetaTemplateId is set, this system mirrors that
-            // constraint rather than silently drifting the local name out of sync with what Meta
-            // actually calls it, which SendTemplateMessageAsync relies on matching exactly.
+            // Meta does not allow changing a template's name, language or category after creation -
+            // once MetaTemplateId is set, this system mirrors that constraint rather than silently
+            // drifting the local copy out of sync with what Meta actually has, which
+            // SendTemplateMessageAsync relies on matching exactly.
             if (template.MetaTemplateId is not null)
+            {
+                var changedFields = new[]
+                {
+                    nameChanged ? "name" : null,
+                    languageChanged ? "language" : null,
+                    categoryChanged ? "category" : null
+                }.Where(f => f is not null);
                 throw new ConflictException(
-                    $"'{template.WhatsAppTemplateName}' has already been created on Meta and its name cannot be changed there - create a new template instead of renaming this one.");
+                    $"'{template.WhatsAppTemplateName}' has already been created on Meta and its {string.Join("/", changedFields)} cannot be changed there - create a new template instead.");
+            }
 
-            var nameInUse = await _context.MessageTemplates.AnyAsync(
-                t => t.Id != id && t.WhatsAppTemplateName == request.WhatsAppTemplateName && t.Language == template.Language,
-                cancellationToken);
-            if (nameInUse)
-                throw new ConflictException($"A template named '{request.WhatsAppTemplateName}' already exists for language '{template.Language}'.");
+            if (nameChanged || languageChanged)
+            {
+                var keyInUse = await _context.MessageTemplates.AnyAsync(
+                    t => t.Id != id && t.WhatsAppTemplateName == newName && t.Language == newLanguage,
+                    cancellationToken);
+                if (keyInUse)
+                    throw new ConflictException($"A template named '{newName}' already exists for language '{newLanguage}'.");
+            }
 
-            template.WhatsAppTemplateName = request.WhatsAppTemplateName;
+            template.WhatsAppTemplateName = newName;
+            template.Language = newLanguage;
+            template.Category = newCategory;
         }
 
-        // Editing the wording of an already-approved template is exactly what Meta requires a fresh
-        // review for - a change to Approved content silently staying Approved would let an
-        // unreviewed message go out under an approved template's name.
-        if (template.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Approved && request.BodyText != template.BodyText)
+        // Editing the wording, language or category of an already-approved template is exactly what
+        // Meta requires a fresh review for - a change to Approved content silently staying Approved
+        // would let an unreviewed message go out under an approved template's name.
+        if (template.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Approved
+            && (request.BodyText != template.BodyText || languageChanged || categoryChanged))
             template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
 
         template.BodyText = request.BodyText;
