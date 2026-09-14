@@ -25,8 +25,9 @@ public interface IMessageTemplateService
     /// Phase 1, push (local -&gt; Meta): every active template with no MetaTemplateId yet is created on
     /// Meta; every template whose BodyText has changed since its last successful push (tracked via
     /// LastPushedBodyText) is submitted as an edit. Name/Language/Category are only ever sent once, at
-    /// creation - Meta does not allow changing them afterward, and neither does this system's own
-    /// UpdateAsync, so there is nothing to push for them on a later run. A push failure (e.g. Meta
+    /// creation - Meta does not allow changing them afterward, and this system's own UpdateAsync only
+    /// accepts a change to them before MetaTemplateId is set, so there is nothing to push for them on a
+    /// later run. A push failure (e.g. Meta
     /// rejects an invalid template name) is reported in PushFailures, not thrown - one bad template
     /// must not abort the rest of the cycle.
     ///

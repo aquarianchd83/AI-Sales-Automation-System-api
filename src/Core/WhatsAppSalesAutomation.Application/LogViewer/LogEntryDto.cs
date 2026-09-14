@@ -8,5 +8,16 @@ namespace WhatsAppSalesAutomation.Application.LogViewer;
 /// the method that called it; both are null for lines written before that enricher was added, and for
 /// events whose call frame never entered our own assemblies (e.g. some ASP.NET Core/EF Core/Hangfire
 /// internal logging).
+///
+/// <paramref name="TenantId"/> is the tenant the line was logged on behalf of (see TenantLogScope) -
+/// null for platform-level work with no tenant, and for every line written before tenant tagging was
+/// added. <paramref name="TenantName"/> is looked up at read time, so it is null whenever TenantId is.
 /// </summary>
-public record LogEntryDto(DateTimeOffset Timestamp, string Level, string? Module, string? Method, string Message);
+public record LogEntryDto(
+    DateTimeOffset Timestamp,
+    string Level,
+    string? Module,
+    string? Method,
+    string Message,
+    Guid? TenantId = null,
+    string? TenantName = null);

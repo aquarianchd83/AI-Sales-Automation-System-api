@@ -32,8 +32,18 @@ public record CreateMessageTemplateRequest(
 /// renaming a template after creation, so neither does this system once that has happened. Its main
 /// use is fixing a non-Meta-compliant name (e.g. one entered before this system started validating
 /// the format) before the next sync attempts to push it and fails again.
+///
+/// <paramref name="Language"/> and <paramref name="Category"/> follow the same rule: optional, and a
+/// change is only accepted while MetaTemplateId is still null. Meta treats (name, language) as a
+/// template's identity and the edit path never sends a category, so once the template exists on
+/// Meta the fix is a new template, not an edit.
 /// </summary>
-public record UpdateMessageTemplateRequest(string BodyText, bool IsActive, string? WhatsAppTemplateName = null);
+public record UpdateMessageTemplateRequest(
+    string BodyText,
+    bool IsActive,
+    string? WhatsAppTemplateName = null,
+    string? Language = null,
+    string? Category = null);
 
 /// <summary>
 /// A manual override of a template's review status - independent of MessageTemplateSyncJob's

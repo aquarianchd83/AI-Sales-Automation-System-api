@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -52,6 +53,9 @@ public class TenantJobRunner
         Func<IServiceProvider, CancellationToken, Task<string?>> runForTenantAsync,
         CancellationToken cancellationToken = default)
     {
+        // Tags every line this run logs - the runner's own and the job's - with the tenant, including
+        // the skip message below, which is logged before the tenant context is set.
+        using var logScope = TenantLogScope.Begin(_logger, tenantId);
         using var scope = _scopeFactory.CreateScope();
         var services = scope.ServiceProvider;
         var context = services.GetRequiredService<IApplicationDbContext>();

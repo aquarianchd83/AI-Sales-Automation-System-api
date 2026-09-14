@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -24,20 +25,26 @@ public class PlatformTenantConfigController : ControllerBase
     private readonly ITenantAiConfigProvider _aiConfigProvider;
     private readonly ITenantConfigOverrideProvider _configOverrideProvider;
     private readonly IPlatformAuditService _auditService;
+    private readonly IPlatformJobService _jobService;
     private readonly ICurrentUserService _currentUser;
+    private readonly ILogger<PlatformTenantConfigController> _logger;
 
     public PlatformTenantConfigController(
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
         ITenantAiConfigProvider aiConfigProvider,
         ITenantConfigOverrideProvider configOverrideProvider,
         IPlatformAuditService auditService,
-        ICurrentUserService currentUser)
+        IPlatformJobService jobService,
+        ICurrentUserService currentUser,
+        ILogger<PlatformTenantConfigController> logger)
     {
         _whatsAppConfigProvider = whatsAppConfigProvider;
         _aiConfigProvider = aiConfigProvider;
         _configOverrideProvider = configOverrideProvider;
         _auditService = auditService;
+        _jobService = jobService;
         _currentUser = currentUser;
+        _logger = logger;
     }
 
     /// <summary>Null (not 404) when the tenant has never configured a WABA - a normal state, not a
@@ -56,7 +63,29 @@ public class PlatformTenantConfigController : ControllerBase
             ActorUserId, ActorEmail, PlatformAuditActions.TenantWhatsAppConfigSaved, tenantId,
             details: $"Phone number ID: {result.PhoneNumberId}", cancellationToken: cancellationToken);
 
+        if (!string.IsNullOrEmpty(request.AccessToken) || !string.IsNullOrEmpty(request.AppSecret))
+            await StartTokenRefreshAsync(tenantId, cancellationToken);
+
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Exchanges a newly saved token right away instead of leaving it to the daily scheduled run. A token
+    /// copied from Meta's Graph API Explorer is short-lived (about an hour), and Meta only exchanges a
+    /// token for a 60-day one while it is still valid - by the next midnight run it has already expired
+    /// and can never be refreshed. Goes through the same "Run now" path as the console, so a suspended
+    /// tenant or a paused job is still respected and the run is audited; neither of those fails the save.
+    /// </summary>
+    private async Task StartTokenRefreshAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _jobService.TriggerAsync(tenantId, TenantJobTypes.WhatsAppTokenRefresh, ActorUserId, ActorEmail, cancellationToken);
+        }
+        catch (Exception ex) when (ex is ConflictException or NotFoundException)
+        {
+            _logger.LogWarning("WhatsApp token refresh not started after saving credentials for tenant {TenantId}: {Reason}", tenantId, ex.Message);
+        }
     }
 
     /// <summary>Removes the tenant's WhatsApp config entirely - back to "not connected."</summary>
