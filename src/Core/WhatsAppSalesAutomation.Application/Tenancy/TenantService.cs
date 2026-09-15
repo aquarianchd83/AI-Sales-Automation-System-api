@@ -12,17 +12,20 @@ public class TenantService : ITenantService
     private readonly ITenantContext _tenantContext;
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
+    private readonly IValidator<UpdateTenantBusinessProfileRequest> _updateBusinessProfileValidator;
 
     public TenantService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
-        IValidator<UpdateTenantCountryRequest> updateCountryValidator)
+        IValidator<UpdateTenantCountryRequest> updateCountryValidator,
+        IValidator<UpdateTenantBusinessProfileRequest> updateBusinessProfileValidator)
     {
         _context = context;
         _tenantContext = tenantContext;
         _updateTimezoneValidator = updateTimezoneValidator;
         _updateCountryValidator = updateCountryValidator;
+        _updateBusinessProfileValidator = updateBusinessProfileValidator;
     }
 
     public async Task<TenantPublicDto> GetBySlugAsync(string slug, CancellationToken cancellationToken = default)
@@ -40,7 +43,19 @@ public class TenantService : ITenantService
     public async Task<TenantProfileDto> GetProfileForCurrentTenantAsync(CancellationToken cancellationToken = default)
     {
         var tenant = await GetCurrentTenantAsync(cancellationToken);
-        return ToDto(tenant);
+        return TenantProfileDto.From(tenant);
+    }
+
+    public async Task<TenantProfileDto> UpdateBusinessProfileForCurrentTenantAsync(UpdateTenantBusinessProfileRequest request, CancellationToken cancellationToken = default)
+    {
+        await _updateBusinessProfileValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var tenant = await GetCurrentTenantAsync(cancellationToken);
+        tenant.Name = request.CompanyName.Trim();
+        TenantBusinessDetails.ApplyTo(tenant, request);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return TenantProfileDto.From(tenant);
     }
 
     public async Task<TenantProfileDto> UpdateTimezoneForCurrentTenantAsync(UpdateTenantTimezoneRequest request, CancellationToken cancellationToken = default)
@@ -51,7 +66,7 @@ public class TenantService : ITenantService
         tenant.Timezone = request.Timezone;
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(tenant);
+        return TenantProfileDto.From(tenant);
     }
 
     public async Task<TenantProfileDto> UpdateCountryForCurrentTenantAsync(UpdateTenantCountryRequest request, CancellationToken cancellationToken = default)
@@ -62,7 +77,7 @@ public class TenantService : ITenantService
         tenant.CountryCode = request.CountryCode;
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(tenant);
+        return TenantProfileDto.From(tenant);
     }
 
     private async Task<Tenant> GetCurrentTenantAsync(CancellationToken cancellationToken)
@@ -73,7 +88,4 @@ public class TenantService : ITenantService
         return await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
             ?? throw new NotFoundException(nameof(Tenant), tenantId);
     }
-
-    private static TenantProfileDto ToDto(Tenant tenant) =>
-        new(string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone, tenant.CountryCode);
 }

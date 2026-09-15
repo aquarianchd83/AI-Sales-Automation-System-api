@@ -11,6 +11,11 @@ public interface ITenantService
     /// authenticated Admin request always has one; see <see cref="Common.Interfaces.ITenantContext"/>).</summary>
     Task<TenantProfileDto> GetProfileForCurrentTenantAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Self-service business profile change - company and product names, industry,
+    /// description, contact details and domain keywords. See <see cref="UpdateTenantBusinessProfileRequest"/>'s
+    /// own doc comment.</summary>
+    Task<TenantProfileDto> UpdateBusinessProfileForCurrentTenantAsync(UpdateTenantBusinessProfileRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>Self-service timezone change - see <see cref="UpdateTenantTimezoneRequest"/>'s own
     /// doc comment. A PlatformSuperAdmin can also override this from the Platform Admin Console (see
     /// IPlatformTenantService.UpdateTimezoneAsync) - both paths write the same

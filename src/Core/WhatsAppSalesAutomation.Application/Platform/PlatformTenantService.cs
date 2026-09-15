@@ -163,8 +163,12 @@ public class PlatformTenantService : IPlatformTenantService
             Name = request.CompanyName.Trim(),
             Slug = slug,
             Status = TenantStatus.Trial,
-            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14)
+            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
+            CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            // Same default as self-serve signup - see AuthService.SignUpAsync.
+            Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
         };
+        TenantBusinessDetails.ApplyTo(tenant, request);
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -304,7 +308,7 @@ public class PlatformTenantService : IPlatformTenantService
             actorUserId, actorEmail, PlatformAuditActions.TenantTimezoneUpdated, tenantId,
             details: $"Timezone {previousTimezone ?? "(default)"} -> {request.Timezone}", cancellationToken: cancellationToken);
 
-        return new TenantProfileDto(tenant.Timezone, tenant.CountryCode);
+        return TenantProfileDto.From(tenant);
     }
 
     public async Task<TenantProfileDto> UpdateCountryAsync(
@@ -321,8 +325,7 @@ public class PlatformTenantService : IPlatformTenantService
             actorUserId, actorEmail, PlatformAuditActions.TenantCountryUpdated, tenantId,
             details: $"Country {previousCountry ?? "(none)"} -> {request.CountryCode}", cancellationToken: cancellationToken);
 
-        return new TenantProfileDto(
-            string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone, tenant.CountryCode);
+        return TenantProfileDto.From(tenant);
     }
 
     private async Task<Tenant> GetTenantOrThrowAsync(Guid tenantId, CancellationToken cancellationToken) =>

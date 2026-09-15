@@ -1,9 +1,12 @@
 using FluentValidation;
+using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Tenancy;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
 
 /// <summary>Mirrors TenantSignUpRequestValidator's rules - same shape of request, just operator-
-/// initiated instead of self-serve.</summary>
+/// initiated instead of self-serve - plus the optional business details, validated exactly like the
+/// tenant's own Business Profile.</summary>
 public class CreatePlatformTenantRequestValidator : AbstractValidator<CreatePlatformTenantRequest>
 {
     public CreatePlatformTenantRequestValidator()
@@ -16,5 +19,18 @@ public class CreatePlatformTenantRequestValidator : AbstractValidator<CreatePlat
         RuleFor(x => x.AdminFullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.AdminEmail).NotEmpty().EmailAddress();
         RuleFor(x => x.AdminPassword).NotEmpty().MinimumLength(8);
+
+        // An operator picks these from the console's own lists, so an unsupported value is a mistake
+        // to reject rather than a best-effort input to fall back from (unlike signup's CountryCode).
+        RuleFor(x => x.CountryCode)
+            .Must(code => RegionalPricingCatalog.IsValidCode(code!))
+            .When(x => !string.IsNullOrWhiteSpace(x.CountryCode))
+            .WithMessage("Country must be one of the platform's supported, priced countries.");
+        RuleFor(x => x.Timezone)
+            .Must(TimeZoneCatalog.IsValidId)
+            .When(x => !string.IsNullOrWhiteSpace(x.Timezone))
+            .WithMessage("Timezone must be one of the platform's supported timezone ids.");
+
+        Include(new TenantBusinessDetailsValidator());
     }
 }

@@ -62,10 +62,24 @@ public record OverrideTenantPlanRequest(Guid PlanId);
 /// PlatformSuperAdmin sets <see cref="AdminPassword"/> as a temporary password to hand off, the
 /// same "set it, then share it securely" convention <c>CreateUserRequest</c> already uses for
 /// tenant-scoped user creation.
+///
+/// Everything after <see cref="AdminPassword"/> is optional - the Business details section of the
+/// console's New tenant dialog. CountryCode and Timezone must be supported values when given (Timezone
+/// defaults to TimeZoneCatalog.DefaultId like signup); the business fields follow the same rules and
+/// normalization as the tenant's own Business Profile (see Tenancy.TenantBusinessDetails).
 /// </summary>
 public record CreatePlatformTenantRequest(
     string CompanyName,
     string? Slug,
     string AdminFullName,
     string AdminEmail,
-    string AdminPassword);
+    string AdminPassword,
+    string? CountryCode = null,
+    string? Timezone = null,
+    string? ProductName = null,
+    string? Industry = null,
+    string? BusinessDescription = null,
+    string? WebsiteUrl = null,
+    string? SupportEmail = null,
+    string? SupportPhone = null,
+    IReadOnlyList<string>? DomainKeywords = null) : Tenancy.ITenantBusinessDetails;
