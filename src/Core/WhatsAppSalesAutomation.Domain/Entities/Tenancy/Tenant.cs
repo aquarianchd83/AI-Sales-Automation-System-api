@@ -44,4 +44,25 @@ public class Tenant : BaseEntity
     /// timezones existed, so an existing tenant's campaign scheduling is unaffected until it
     /// explicitly sets one.</summary>
     public string? Timezone { get; set; }
+
+    // ---- Business profile - edited by the tenant's own Admin on the Business Profile page. Stored for
+    // the tenant's own reference; nothing else in the platform reads these yet. <see cref="Name"/> is
+    // the company name. ----
+
+    public string? ProductName { get; set; }
+
+    public string? Industry { get; set; }
+
+    public string? BusinessDescription { get; set; }
+
+    public string? WebsiteUrl { get; set; }
+
+    public string? SupportEmail { get; set; }
+
+    public string? SupportPhone { get; set; }
+
+    /// <summary>Words and phrases describing what the business deals in - trimmed and de-duplicated
+    /// case-insensitively on save. Persisted as a JSON array in one column (see TenantConfiguration);
+    /// never null, empty when none were added.</summary>
+    public List<string> DomainKeywords { get; set; } = new();
 }

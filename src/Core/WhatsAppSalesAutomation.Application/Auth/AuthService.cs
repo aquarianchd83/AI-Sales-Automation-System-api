@@ -72,7 +72,8 @@ public class AuthService : IAuthService
             // form didn't collect one, the same value ITenantTimeZoneProvider would have fallen back
             // to anyway. Keeps the column non-null for every tenant going forward, matching the
             // AddTenantTimezone migration's one-time backfill of pre-existing tenants.
-            Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
+            Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone,
+            ProductName = TenantBusinessDetails.Clean(request.ProductName)
         };
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);

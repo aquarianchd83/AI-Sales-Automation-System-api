@@ -21,6 +21,8 @@ public record LoginRequest(string Email, string Password, string? Slug = null);
 /// time Campaign.ScheduledStartAt is compared against for this tenant (see
 /// ITenantTimeZoneProvider). Omitted falls back to India Standard Time, the same default every
 /// tenant already had before per-tenant timezones existed.</param>
+/// <param name="ProductName">Optional product or brand name - the one business detail signup asks for;
+/// the rest are filled in afterwards on the tenant's Business Profile page.</param>
 public record TenantSignUpRequest(
     string CompanyName,
     string? Slug,
@@ -28,7 +30,8 @@ public record TenantSignUpRequest(
     string Email,
     string Password,
     string? CountryCode = null,
-    string? Timezone = null);
+    string? Timezone = null,
+    string? ProductName = null);
 
 public record RefreshTokenRequest(string RefreshToken);
 
