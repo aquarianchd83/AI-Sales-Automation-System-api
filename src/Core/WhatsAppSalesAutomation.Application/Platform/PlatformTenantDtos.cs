@@ -38,7 +38,13 @@ public record PlatformTenantDetailDto(
     int AiInteractionsThisMonth,
     decimal EstimatedAiSpendThisMonthUsd,
     string Timezone,
-    string? CountryCode);
+    string? CountryCode,
+    // CurrencyCode/CurrencySymbol are this tenant's own, resolved from CountryCode - what the tenant is
+    // quoted in on its own screens, so the console shows their spend the way they see it. Platform-wide
+    // figures (the dashboard) use the operator's currency instead.
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal EstimatedAiSpendThisMonthLocal);
 
 public record ImpersonationSessionDto(
     string AccessToken,

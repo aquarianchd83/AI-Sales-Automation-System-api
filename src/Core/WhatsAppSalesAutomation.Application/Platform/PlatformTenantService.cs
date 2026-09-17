@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -137,6 +138,9 @@ public class PlatformTenantService : IPlatformTenantService
         var estimatedAiSpend = aiInteractionsThisMonth
             .Sum(a => AiSpendEstimator.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens));
 
+        // This tenant's own currency, not the operator's - the figures on this page are all about them.
+        var pricing = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+
         return new PlatformTenantDetailDto(
             tenant.Id, tenant.Name, tenant.Slug, tenant.Status, tenant.CreatedAt, tenant.TrialEndsAtUtc,
             tenant.OwnerUserId, ownerEmail, userCount,
@@ -145,7 +149,10 @@ public class PlatformTenantService : IPlatformTenantService
             messagesSentThisMonth, plan?.MaxMessagesPerMonth,
             aiInteractionsThisMonth.Count, estimatedAiSpend,
             string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone,
-            tenant.CountryCode);
+            tenant.CountryCode,
+            pricing.CurrencyCode,
+            pricing.CurrencySymbol,
+            Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero));
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)

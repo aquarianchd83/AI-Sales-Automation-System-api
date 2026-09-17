@@ -62,6 +62,7 @@ public static class DependencyInjection
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IPlanLimitsService, PlanLimitsService>();
         services.AddScoped<IWhatsAppSpendService, WhatsAppSpendService>();
+        services.AddScoped<ICurrentUserPricingService, CurrentUserPricingService>();
         services.AddScoped<ITenantChargesService, TenantChargesService>();
         services.AddScoped<ILeadDiscoveryService, LeadDiscoveryService>();
         services.AddScoped<ILeadDiscoveryRunService, LeadDiscoveryRunService>();
