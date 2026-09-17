@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917060019_AddDiscoveredLeadCustomerId")]
+    partial class AddDiscoveredLeadCustomerId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1282,73 +1285,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("LeadDiscoveryProfiles", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery.LeadDiscoveryRun", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("CacheReadTokens")
-                        .HasColumnType("int");
-
-                    b.Property<int>("CacheWriteTokens")
-                        .HasColumnType("int");
-
-                    b.Property<int>("CandidatesConsidered")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Duplicates")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("EstimatedCostUsd")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<int>("InputTokens")
-                        .HasColumnType("int");
-
-                    b.Property<int>("LeadsSaved")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("OutputTokens")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("RanAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Rejected")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Rounds")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("WebFetches")
-                        .HasColumnType("int");
-
-                    b.Property<int>("WebSearches")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "RanAtUtc");
-
-                    b.ToTable("LeadDiscoveryRuns", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.Lead", b =>

@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
+using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -67,6 +68,12 @@ public interface IApplicationDbContext
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }
+
+    DbSet<LeadDiscoveryProfile> LeadDiscoveryProfiles { get; }
+
+    DbSet<DiscoveredLead> DiscoveredLeads { get; }
+
+    DbSet<LeadDiscoveryRun> LeadDiscoveryRuns { get; }
 
     DbSet<Plan> Plans { get; }
 

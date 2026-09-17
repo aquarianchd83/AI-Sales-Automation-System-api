@@ -11,6 +11,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
+using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -80,6 +81,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Lead> Leads => Set<Lead>();
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+
+    public DbSet<LeadDiscoveryProfile> LeadDiscoveryProfiles => Set<LeadDiscoveryProfile>();
+
+    public DbSet<DiscoveredLead> DiscoveredLeads => Set<DiscoveredLead>();
+
+    public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
 
     public DbSet<Plan> Plans => Set<Plan>();
 

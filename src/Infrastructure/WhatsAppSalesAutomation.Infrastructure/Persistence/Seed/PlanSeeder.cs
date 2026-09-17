@@ -20,11 +20,11 @@ namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 /// </summary>
 public static class PlanSeeder
 {
-    private static readonly (string Code, string Name, int MaxUsers, int MaxMessagesPerMonth, int MaxCampaigns, int MaxKnowledgeBaseArticles, int PriceMonthlyCents)[] Catalog =
+    private static readonly (string Code, string Name, int MaxUsers, int MaxMessagesPerMonth, int MaxCampaigns, int MaxKnowledgeBaseArticles, int PriceMonthlyCents, int MaxLeadDiscoveryBatchSize)[] Catalog =
     {
-        ("starter", "Starter", 3, 1_000, 5, 20, 2900),
-        ("growth", "Growth", 10, 10_000, 25, 100, 9900),
-        ("scale", "Scale", 50, 100_000, 100, 500, 29900)
+        ("starter", "Starter", 3, 1_000, 5, 20, 2900, 25),
+        ("growth", "Growth", 10, 10_000, 25, 100, 9900, 100),
+        ("scale", "Scale", 50, 100_000, 100, 500, 29900, 250)
     };
 
     public static async Task SeedAsync(IServiceProvider services)
@@ -48,6 +48,7 @@ public static class PlanSeeder
                 MaxMessagesPerMonth = spec.MaxMessagesPerMonth,
                 MaxCampaigns = spec.MaxCampaigns,
                 MaxKnowledgeBaseArticles = spec.MaxKnowledgeBaseArticles,
+                MaxLeadDiscoveryBatchSize = spec.MaxLeadDiscoveryBatchSize,
                 PriceMonthlyCents = spec.PriceMonthlyCents,
                 IsActive = true
             });

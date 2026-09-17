@@ -14,6 +14,7 @@ public record PlanDto(
     int MaxMessagesPerMonth,
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
+    int MaxLeadDiscoveryBatchSize,
     int PriceMonthlyCents,
     string CurrencyCode,
     string CurrencySymbol,

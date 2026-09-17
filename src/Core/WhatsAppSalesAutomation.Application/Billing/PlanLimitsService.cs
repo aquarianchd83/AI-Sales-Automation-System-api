@@ -94,6 +94,9 @@ public class PlanLimitsService : IPlanLimitsService
             throw new PlanLimitExceededException($"Your plan allows up to {plan.MaxKnowledgeBaseArticles} knowledge base articles. Upgrade to add more.");
     }
 
+    public async Task<int?> GetLeadDiscoveryBatchLimitAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        => (await GetPlanAsync(tenantId, cancellationToken))?.MaxLeadDiscoveryBatchSize;
+
     private async Task<int> CountMessagesSentThisMonthAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var now = _dateTime.UtcNow;

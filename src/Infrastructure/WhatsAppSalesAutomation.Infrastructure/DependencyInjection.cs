@@ -186,6 +186,26 @@ public static class DependencyInjection
         services.AddScoped<SimulatedAiClient>();
         services.AddScoped<IAiService, AiServiceFactory>();
 
+        // Lead discovery (LeadDiscoveryJob) runs on the platform's own Anthropic key, not a tenant's - see
+        // LeadDiscoveryAgentSettings. Provider is a startup-time choice, not a per-tenant one like the chat
+        // clients above: "Simulated" invents businesses so the pipeline can be exercised without spending
+        // anything, and every tenant's run uses whichever is configured.
+        var leadDiscoverySection = configuration.GetSection("LeadDiscovery:Agent");
+        services.Configure<LeadDiscoveryAgentSettings>(leadDiscoverySection);
+        var leadDiscoverySettings = leadDiscoverySection.Get<LeadDiscoveryAgentSettings>() ?? new LeadDiscoveryAgentSettings();
+
+        if (string.Equals(leadDiscoverySettings.Provider, "Simulated", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddScoped<ILeadDiscoveryAgent, SimulatedLeadDiscoveryAgent>();
+        }
+        else
+        {
+            // One request can run many web searches and fetches server-side before it responds, far beyond
+            // HttpClient's 100-second default timeout.
+            services.AddHttpClient<ILeadDiscoveryAgent, AnthropicLeadDiscoveryAgent>(
+                client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
+        }
+
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddHttpClient<GoogleEmbeddingClient>();
         services.AddScoped<SimulatedEmbeddingClient>();
@@ -232,6 +252,7 @@ public static class DependencyInjection
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
         services.AddScoped<MessageTemplateSyncJob>();
+        services.AddScoped<LeadDiscoveryJob>();
         services.AddScoped<TenantJobReconciliationJob>();
     }
 }

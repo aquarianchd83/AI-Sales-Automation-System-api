@@ -25,6 +25,12 @@ public class Plan : BaseEntity
 
     public int MaxKnowledgeBaseArticles { get; set; }
 
+    public const int DefaultLeadDiscoveryBatchSize = 25;
+
+    /// <summary>The most new leads one lead discovery run may add for a tenant on this plan - caps the
+    /// tenant's own LeadDiscoveryProfile.BatchSize at run time (see LeadDiscoveryRunService).</summary>
+    public int MaxLeadDiscoveryBatchSize { get; set; } = DefaultLeadDiscoveryBatchSize;
+
     public int PriceMonthlyCents { get; set; }
 
     /// <summary>False retires a plan from new signups/upgrades without deleting it - existing
