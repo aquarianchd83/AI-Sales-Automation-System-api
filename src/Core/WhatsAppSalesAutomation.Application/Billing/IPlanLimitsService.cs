@@ -27,6 +27,12 @@ public interface IPlanLimitsService
 
     Task EnsureCanCreateKnowledgeBaseArticleAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
+    /// <summary>The most new leads one lead discovery run may add for this tenant
+    /// (Plan.MaxLeadDiscoveryBatchSize). Null when no plan applies - the same "no Subscription/PlanId yet
+    /// -> unlimited" treatment as the guards above, which leaves the profile's own validated BatchSize as
+    /// the limit.</summary>
+    Task<int?> GetLeadDiscoveryBatchLimitAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
     /// <summary>Read-only counterpart to <see cref="EnsureCanSendMessageAsync"/> - same "since the
     /// start of the current UTC calendar month" count, same "no Subscription/PlanId yet -> unlimited"
     /// treatment (returned as a null <see cref="TenantMessageUsageDto.MaxMessagesPerMonth"/> rather

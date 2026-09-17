@@ -30,7 +30,7 @@ public class PlatformBillingService : IPlatformBillingService
             .OrderBy(p => p.PriceMonthlyCents)
             .Select(p => new PlatformPlanDto(
                 p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
-                p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.PriceMonthlyCents, p.IsActive))
+                p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive))
             .ToListAsync(cancellationToken);
     }
 
@@ -77,6 +77,7 @@ public class PlatformBillingService : IPlatformBillingService
             MaxMessagesPerMonth = request.MaxMessagesPerMonth,
             MaxCampaigns = request.MaxCampaigns,
             MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles,
+            MaxLeadDiscoveryBatchSize = request.MaxLeadDiscoveryBatchSize ?? Plan.DefaultLeadDiscoveryBatchSize,
             PriceMonthlyCents = request.PriceMonthlyCents,
             IsActive = true
         };
@@ -98,6 +99,9 @@ public class PlatformBillingService : IPlatformBillingService
         plan.MaxMessagesPerMonth = request.MaxMessagesPerMonth;
         plan.MaxCampaigns = request.MaxCampaigns;
         plan.MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles;
+        // Optional, so a client that predates the field leaves it alone rather than zeroing it.
+        if (request.MaxLeadDiscoveryBatchSize is { } maxLeadDiscoveryBatchSize)
+            plan.MaxLeadDiscoveryBatchSize = maxLeadDiscoveryBatchSize;
         plan.PriceMonthlyCents = request.PriceMonthlyCents;
         plan.IsActive = request.IsActive;
 
@@ -120,5 +124,5 @@ public class PlatformBillingService : IPlatformBillingService
 
     private static PlatformPlanDto ToDto(Plan p) => new(
         p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
-        p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.PriceMonthlyCents, p.IsActive);
+        p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive);
 }

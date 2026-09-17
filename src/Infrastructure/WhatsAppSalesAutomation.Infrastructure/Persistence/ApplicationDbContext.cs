@@ -11,6 +11,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
+using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Entities.Media;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -81,6 +82,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
 
+    public DbSet<LeadDiscoveryProfile> LeadDiscoveryProfiles => Set<LeadDiscoveryProfile>();
+
+    public DbSet<DiscoveredLead> DiscoveredLeads => Set<DiscoveredLead>();
+
+    public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
+
     public DbSet<Plan> Plans => Set<Plan>();
 
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
@@ -120,7 +127,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
         // Rename Identity's default AspNet* tables to match the design doc's naming.
-        builder.Entity<ApplicationUser>().ToTable("Users");
+        builder.Entity<ApplicationUser>(user =>
+        {
+            user.ToTable("Users");
+
+            // Bounded rather than nvarchar(max): a timezone is an IANA id and a country is a two-letter code
+            // (see TimeZoneCatalog / RegionalPricingCatalog, which validate both on the way in).
+            user.Property(u => u.Timezone).HasMaxLength(100);
+            user.Property(u => u.CountryCode).HasMaxLength(2);
+        });
         builder.Entity<ApplicationRole>().ToTable("Roles");
         builder.Entity<IdentityUserRole<Guid>>().ToTable("UserRoles");
         builder.Entity<IdentityUserClaim<Guid>>().ToTable("UserClaims");

@@ -71,19 +71,22 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
         switch (jobType)
         {
             case TenantJobTypes.CampaignInitialSends:
-                _recurringJobs.AddOrUpdate<CampaignInitialSenderJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                _recurringJobs.AddOrUpdate<CampaignInitialSenderJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             case TenantJobTypes.CampaignFollowUps:
-                _recurringJobs.AddOrUpdate<FollowUpSchedulerJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                _recurringJobs.AddOrUpdate<FollowUpSchedulerJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             case TenantJobTypes.CampaignSendRetries:
-                _recurringJobs.AddOrUpdate<MessageStatusRetryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                _recurringJobs.AddOrUpdate<MessageStatusRetryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             case TenantJobTypes.WhatsAppTemplateSync:
-                _recurringJobs.AddOrUpdate<MessageTemplateSyncJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                _recurringJobs.AddOrUpdate<MessageTemplateSyncJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             case TenantJobTypes.WhatsAppTokenRefresh:
-                _recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression);
+                _recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
+                break;
+            case TenantJobTypes.LeadDiscovery:
+                _recurringJobs.AddOrUpdate<LeadDiscoveryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             default:
                 // Reachable only from a schedule row for a job type this build no longer knows about -
@@ -109,6 +112,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             TenantJobTypes.CampaignSendRetries => _backgroundJobs.Enqueue<MessageStatusRetryJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTemplateSync => _backgroundJobs.Enqueue<MessageTemplateSyncJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTokenRefresh => _backgroundJobs.Enqueue<WhatsAppTokenRefreshJob>(job => job.RunAsync(tenantId)),
+            TenantJobTypes.LeadDiscovery => _backgroundJobs.Enqueue<LeadDiscoveryJob>(job => job.RunAsync(tenantId)),
             _ => throw new ArgumentOutOfRangeException(nameof(jobType), jobType, "Not a per-tenant background job.")
         };
     }

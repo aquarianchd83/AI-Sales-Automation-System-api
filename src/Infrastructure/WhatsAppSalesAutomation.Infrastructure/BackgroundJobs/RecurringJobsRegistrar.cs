@@ -27,7 +27,7 @@ public static class RecurringJobsRegistrar
         // 00:30 UTC keeps it clear of the per-tenant token refreshes at midnight and the template syncs
         // at :00.
         recurringJobs.AddOrUpdate<TenantJobReconciliationJob>(
-            "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *");
+            "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *", RecurringJobPolicy.SkipMissedOccurrences);
     }
 
     /// <summary>

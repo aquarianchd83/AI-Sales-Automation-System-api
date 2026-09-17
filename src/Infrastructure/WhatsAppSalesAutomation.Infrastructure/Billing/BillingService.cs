@@ -60,7 +60,7 @@ public class BillingService : IBillingService
             .ToListAsync(cancellationToken);
 
         return plans.Select(p => new PlanDto(
-            p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles,
+            p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize,
             p.PriceMonthlyCents, pricing.CurrencyCode, pricing.CurrencySymbol,
             Math.Round(p.PriceMonthlyCents / 100m * pricing.RateToUsd, 2))).ToList();
     }

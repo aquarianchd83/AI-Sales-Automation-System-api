@@ -15,6 +15,7 @@ public static class TenantJobTypes
     public const string CampaignSendRetries = "campaign-send-retries";
     public const string WhatsAppTemplateSync = "whatsapp-template-sync";
     public const string WhatsAppTokenRefresh = "whatsapp-token-refresh";
+    public const string LeadDiscovery = "lead-discovery";
 }
 
 /// <summary>One per-tenant job as the Platform Admin Console needs to describe it. <see cref="Key"/> is
@@ -66,7 +67,12 @@ public static class TenantJobCatalog
             TenantJobTypes.WhatsAppTokenRefresh,
             "WhatsApp token refresh",
             "Exchanges the tenant's Meta access token for a fresh one before it expires. Does nothing for a token Meta reports never expires.",
-            "0 0 * * *")
+            "0 0 * * *"),
+        new TenantJobDefinition(
+            TenantJobTypes.LeadDiscovery,
+            "Lead discovery",
+            "Searches the web for businesses matching the tenant's lead discovery profile, verifies their contact details and saves the qualified, new ones. Does nothing until the tenant enables a profile.",
+            "0 2 * * *")
     };
 
     public static TenantJobDefinition? Find(string jobType) =>

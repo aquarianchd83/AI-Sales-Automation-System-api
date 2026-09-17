@@ -25,6 +25,21 @@ public class ApplicationUser : IdentityUser<Guid>
     /// <summary>Soft "disabled" flag. Deactivated users can no longer authenticate.</summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// The user's own display timezone (an IANA id from TimeZoneCatalog), set on their profile page. Null
+    /// means "never chosen" and reads as the platform default.
+    ///
+    /// Deliberately separate from <c>Tenant.Timezone</c>, which is operational - it decides when a tenant's
+    /// scheduled campaigns actually send. This one is presentation only: which timezone timestamps are
+    /// rendered in for this person. A PlatformSuperAdmin has no tenant at all, so without this there was
+    /// nothing to render their console's timestamps against.
+    /// </summary>
+    public string? Timezone { get; set; }
+
+    /// <summary>The user's own country (a RegionalPricingCatalog code), set on their profile page.
+    /// Informational: unlike <c>Tenant.CountryCode</c> it drives no pricing or currency.</summary>
+    public string? CountryCode { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? LastLoginAt { get; set; }

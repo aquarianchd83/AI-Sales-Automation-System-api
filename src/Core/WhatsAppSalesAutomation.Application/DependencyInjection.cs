@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Account;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Auth;
 using WhatsAppSalesAutomation.Application.Billing;
@@ -10,6 +11,7 @@ using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
+using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.LogViewer;
 using WhatsAppSalesAutomation.Application.Media;
@@ -35,8 +37,12 @@ public static class DependencyInjection
         services.Configure<MessagingOptions>(configuration.GetSection("Messaging"));
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
+        services.Configure<LeadDiscoveryOptions>(configuration.GetSection("LeadDiscovery"));
+        services.Configure<LeadDiscoveryPricingOptions>(configuration.GetSection("LeadDiscovery:Pricing"));
+        services.Configure<WhatsAppPricingOptions>(configuration.GetSection("WhatsApp:Pricing"));
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAccountProfileService, AccountProfileService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<ITenantSlugResolver, TenantSlugResolver>();
         services.AddScoped<IUserService, UserService>();
@@ -55,6 +61,10 @@ public static class DependencyInjection
         services.AddScoped<ILogService, LogService>();
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IPlanLimitsService, PlanLimitsService>();
+        services.AddScoped<IWhatsAppSpendService, WhatsAppSpendService>();
+        services.AddScoped<ITenantChargesService, TenantChargesService>();
+        services.AddScoped<ILeadDiscoveryService, LeadDiscoveryService>();
+        services.AddScoped<ILeadDiscoveryRunService, LeadDiscoveryRunService>();
 
         // Platform Admin Console (PlatformSuperAdmin-only cross-tenant screens).
         services.AddScoped<IPlatformAuditService, PlatformAuditService>();

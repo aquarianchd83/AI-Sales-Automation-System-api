@@ -14,6 +14,7 @@ public record PlanDto(
     int MaxMessagesPerMonth,
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
+    int MaxLeadDiscoveryBatchSize,
     int PriceMonthlyCents,
     string CurrencyCode,
     string CurrencySymbol,
@@ -44,6 +45,48 @@ public record SubscriptionDto(
 /// is null when the tenant has no plan yet (still on trial - see IPlanLimitsService's own doc comment)
 /// and means unlimited, not zero.</summary>
 public record TenantMessageUsageDto(int MessagesSentThisMonth, int? MaxMessagesPerMonth);
+
+/// <summary>One template category's share of a tenant's WhatsApp charges. <paramref name="Category"/> is a
+/// TemplateCategory name (Marketing/Utility/Authentication).</summary>
+public record TenantWhatsAppCategoryChargeDto(
+    string Category,
+    int Messages,
+    decimal RatePerMessageUsd,
+    decimal EstimatedCostUsd,
+    decimal EstimatedCostLocal);
+
+/// <summary>What the tenant's WhatsApp sending cost this month. <paramref name="MessagesSent"/> is every
+/// message in the period (the population the plan allowance is measured against);
+/// <paramref name="BillableMessages"/> is the template sends Meta actually charges for - an inbound message
+/// or a free-form session reply costs nothing.</summary>
+public record TenantWhatsAppChargesDto(
+    int MessagesSent,
+    int BillableMessages,
+    int FreeMessages,
+    decimal EstimatedCostUsd,
+    decimal EstimatedCostLocal,
+    IReadOnlyList<TenantWhatsAppCategoryChargeDto> ByCategory);
+
+/// <summary>What the tenant's lead discovery runs cost this month - the current-month half of what
+/// GET /lead-discovery/spend reports, repeated here so one call fills the Settings page.</summary>
+public record TenantLeadDiscoveryChargesDto(
+    int Runs,
+    int LeadsSaved,
+    decimal EstimatedCostUsd,
+    decimal EstimatedCostLocal);
+
+/// <summary>This calendar month's usage charges for the calling tenant: WhatsApp sending plus lead
+/// discovery. Excludes the plan subscription fee, which is not usage. Every figure is an ESTIMATE priced
+/// from hand-maintained rate tables - see WhatsAppPricingOptions and LeadDiscoveryPricingOptions - so
+/// whatever renders this must say so rather than presenting it as a bill.</summary>
+public record TenantChargesDto(
+    string CurrencyCode,
+    string CurrencySymbol,
+    DateTime PeriodStartUtc,
+    TenantWhatsAppChargesDto WhatsApp,
+    TenantLeadDiscoveryChargesDto LeadDiscovery,
+    decimal TotalEstimatedCostUsd,
+    decimal TotalEstimatedCostLocal);
 
 /// <summary>One row of the calling tenant's payment history (GET /billing/payments) - see
 /// <see cref="Domain.Entities.Billing.Payment"/>'s own doc comment for why every field here is a

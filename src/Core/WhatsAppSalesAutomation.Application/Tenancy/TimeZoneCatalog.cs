@@ -60,4 +60,25 @@ public static class TimeZoneCatalog
     /// TimeZoneInfo.FindSystemTimeZoneById probe, so a stored value is always one this catalog (and
     /// therefore every picker built from it) can actually show back to whoever set it.</summary>
     public static bool IsValidId(string? id) => id is not null && ValidIds.Contains(id);
+
+    /// <summary>The <see cref="TimeZoneInfo"/> for a stored id, never throwing: an unset id, or one the host
+    /// can't resolve (corrupt data, or a host missing tz data), degrades to <see cref="DefaultId"/> rather
+    /// than taking down whatever was scheduling or reporting against it - the same "corrupt/unusable value
+    /// behaves as unset" tolerance AppSettingsStore's own TryUnprotect uses.</summary>
+    public static TimeZoneInfo Resolve(string? timeZoneId)
+    {
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                // Fall through to the default below.
+            }
+        }
+
+        return TimeZoneInfo.FindSystemTimeZoneById(DefaultId);
+    }
 }

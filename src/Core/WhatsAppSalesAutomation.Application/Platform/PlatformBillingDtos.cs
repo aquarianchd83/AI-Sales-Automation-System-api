@@ -14,6 +14,7 @@ public record PlatformPlanDto(
     int MaxMessagesPerMonth,
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
+    int MaxLeadDiscoveryBatchSize,
     int PriceMonthlyCents,
     bool IsActive);
 
@@ -44,7 +45,8 @@ public record CreatePlanRequest(
     int MaxMessagesPerMonth,
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
-    int PriceMonthlyCents);
+    int PriceMonthlyCents,
+    int? MaxLeadDiscoveryBatchSize = null);
 
 /// <summary>Body of PUT one plan. <see cref="IsActive"/> is how a plan is both retired ("Delete" in
 /// the admin UI sets it false) and un-retired - there is no separate reactivate endpoint.</summary>
@@ -55,4 +57,5 @@ public record UpdatePlanRequest(
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
     int PriceMonthlyCents,
-    bool IsActive);
+    bool IsActive,
+    int? MaxLeadDiscoveryBatchSize = null);
