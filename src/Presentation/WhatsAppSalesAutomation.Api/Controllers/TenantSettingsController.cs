@@ -23,17 +23,20 @@ public class TenantSettingsController : ControllerBase
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;
     private readonly ITenantAiConfigProvider _aiConfigProvider;
     private readonly IPlanLimitsService _planLimits;
+    private readonly ITenantChargesService _charges;
     private readonly ITenantContext _tenantContext;
 
     public TenantSettingsController(
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
         ITenantAiConfigProvider aiConfigProvider,
         IPlanLimitsService planLimits,
+        ITenantChargesService charges,
         ITenantContext tenantContext)
     {
         _whatsAppConfigProvider = whatsAppConfigProvider;
         _aiConfigProvider = aiConfigProvider;
         _planLimits = planLimits;
+        _charges = charges;
         _tenantContext = tenantContext;
     }
 
@@ -54,6 +57,12 @@ public class TenantSettingsController : ControllerBase
     [HttpGet("usage")]
     public async Task<ActionResult<TenantMessageUsageDto>> GetUsage(CancellationToken cancellationToken)
         => Ok(await _planLimits.GetMessageUsageAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>This month's usage charges - WhatsApp sending plus lead discovery. Estimates from
+    /// hand-maintained rate tables, not an invoice; see ITenantChargesService's own doc comment.</summary>
+    [HttpGet("charges")]
+    public async Task<ActionResult<TenantChargesDto>> GetCharges(CancellationToken cancellationToken)
+        => Ok(await _charges.GetCurrentMonthAsync(cancellationToken));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated tenant-settings request has no tenant in scope.");

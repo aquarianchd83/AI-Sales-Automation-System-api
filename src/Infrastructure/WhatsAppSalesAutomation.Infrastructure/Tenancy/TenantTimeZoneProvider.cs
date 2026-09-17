@@ -40,23 +40,9 @@ public class TenantTimeZoneProvider : ITenantTimeZoneProvider
                 timeZoneId = stored;
         }
 
-        var timeZone = ResolveTimeZone(timeZoneId);
+        // Resolution (and its fall back to the platform default for an unusable id) lives on the catalog, so
+        // this and TenantMonth can't drift apart on what a stored timezone means.
+        var timeZone = TimeZoneCatalog.Resolve(timeZoneId);
         return TimeZoneInfo.ConvertTimeFromUtc(_dateTime.UtcNow, timeZone);
-    }
-
-    private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-        }
-        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
-        {
-            // A stored id the host can't resolve (corrupt data, or a host missing tz data) degrades
-            // to the platform default rather than throwing and taking down whatever was scheduling
-            // against it - same "corrupt/unusable value behaves as unset" tolerance
-            // AppSettingsStore's own TryUnprotect already uses.
-            return TimeZoneInfo.FindSystemTimeZoneById(TimeZoneCatalog.DefaultId);
-        }
     }
 }
