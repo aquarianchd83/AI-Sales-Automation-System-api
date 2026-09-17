@@ -1,5 +1,6 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -11,27 +12,32 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 public class PlatformBillingService : IPlatformBillingService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ICurrentUserPricingService _pricing;
     private readonly IValidator<CreatePlanRequest> _createValidator;
     private readonly IValidator<UpdatePlanRequest> _updateValidator;
 
     public PlatformBillingService(
         IApplicationDbContext context,
+        ICurrentUserPricingService pricing,
         IValidator<CreatePlanRequest> createValidator,
         IValidator<UpdatePlanRequest> updateValidator)
     {
         _context = context;
+        _pricing = pricing;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
     }
 
     public async Task<IReadOnlyList<PlatformPlanDto>> GetPlansAsync(CancellationToken cancellationToken = default)
     {
-        return await _context.Plans
+        // Materialised before mapping: the local price is a conversion the database knows nothing about.
+        var pricing = await _pricing.GetAsync(cancellationToken);
+
+        var plans = await _context.Plans
             .OrderBy(p => p.PriceMonthlyCents)
-            .Select(p => new PlatformPlanDto(
-                p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
-                p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive))
             .ToListAsync(cancellationToken);
+
+        return plans.Select(p => ToDto(p, pricing)).ToList();
     }
 
     public async Task<PagedResult<PlatformSubscriptionListItemDto>> GetSubscriptionsAsync(PlatformSubscriptionQuery query, CancellationToken cancellationToken = default)
@@ -84,7 +90,7 @@ public class PlatformBillingService : IPlatformBillingService
         _context.Plans.Add(plan);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken));
     }
 
     public async Task<PlatformPlanDto> UpdatePlanAsync(Guid id, UpdatePlanRequest request, CancellationToken cancellationToken = default)
@@ -107,7 +113,7 @@ public class PlatformBillingService : IPlatformBillingService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken));
     }
 
     public async Task DeactivatePlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -122,7 +128,11 @@ public class PlatformBillingService : IPlatformBillingService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private static PlatformPlanDto ToDto(Plan p) => new(
+    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing) => new(
         p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
-        p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive);
+        p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive,
+        pricing.CurrencyCode,
+        pricing.CurrencySymbol,
+        // Two decimals: a plan price is a real amount someone pays, not a fraction-of-a-cent estimate.
+        Math.Round(p.PriceMonthlyCents / 100m * pricing.RateToUsd, 2, MidpointRounding.AwayFromZero));
 }

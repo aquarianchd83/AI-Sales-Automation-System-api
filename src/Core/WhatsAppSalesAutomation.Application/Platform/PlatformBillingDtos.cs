@@ -15,8 +15,15 @@ public record PlatformPlanDto(
     int MaxCampaigns,
     int MaxKnowledgeBaseArticles,
     int MaxLeadDiscoveryBatchSize,
+    // The authored base list price, always USD - what the catalog is stored and edited in.
     int PriceMonthlyCents,
-    bool IsActive);
+    bool IsActive,
+    // The same price quoted in the SIGNED-IN OPERATOR's currency (from their profile country), so the
+    // catalog reads in the money they think in. Display only: PriceMonthlyCents stays the stored value and
+    // the one a create/update request carries, so a rate change never rewrites a plan.
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal PriceMonthlyLocal);
 
 /// <summary>One row of the Subscriptions & Billing screen (spec item #3). <see cref="HasFailedPayment"/>
 /// is derived from <see cref="SubscriptionStatus.PastDue"/> - this system keeps no per-invoice ledger,
