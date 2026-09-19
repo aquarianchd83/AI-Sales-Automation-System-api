@@ -81,6 +81,7 @@ public static class DependencyInjection
         services.AddScoped<IQuotaAlertService, QuotaAlertService>();
         services.AddScoped<ITenantBillingNoticeService, TenantBillingNoticeService>();
         services.AddScoped<ISubscriptionRenewalService, SubscriptionRenewalService>();
+        services.AddScoped<IPlanExpiryNoticeService, PlanExpiryNoticeService>();
         services.AddScoped<ICountryAvailability, CountryAvailability>();
         services.AddScoped<IWhatsAppSpendService, WhatsAppSpendService>();
         services.AddScoped<ICurrentUserPricingService, CurrentUserPricingService>();

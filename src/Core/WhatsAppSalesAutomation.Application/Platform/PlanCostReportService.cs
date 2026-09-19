@@ -71,8 +71,38 @@ public record PlanCostReportDto(
     // Rupees per dollar - what the USD unit costs were converted at, so the page can show a per-unit cost in rupees.
     decimal InrPerUsd);
 
+/// <summary>Asks what a credit pack should cost: its quota type and size, and the margin wanted over what it costs to serve.</summary>
+public record CreditPackCostRequest(QuotaType QuotaType, decimal Units, decimal MarginPercent);
+
+/// <summary>One country's view of a credit pack: what serving it costs there and the price that leaves the wanted margin, both in that
+/// country's currency and in rupees. The price is before tax - tax is added on top at checkout.</summary>
+public record CreditPackCostCountryDto(
+    string CountryCode,
+    string CountryName,
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal CostLocal,
+    decimal SuggestedPriceLocal,
+    decimal CostInr,
+    decimal SuggestedPriceInr);
+
+public record CreditPackCostReportDto(
+    QuotaType QuotaType,
+    decimal Units,
+    decimal MarginPercent,
+    // What one unit costs to serve, in rupees (India's figure - WhatsApp cost varies by country, AI and leads do not).
+    decimal UnitCostInr,
+    decimal TotalCostInr,
+    IReadOnlyList<CreditPackCostCountryDto> Countries,
+    IReadOnlyList<string> Warnings,
+    PlanCostAssumptionsDto Assumptions);
+
 public interface IPlanCostReportService
 {
+    /// <summary>What a credit pack costs to serve and the price that leaves the wanted margin - from the same Configuration charges
+    /// and typical usage a plan is costed with, so the two always agree. Nothing is saved.</summary>
+    Task<CreditPackCostReportDto> BuildCreditPackAsync(CreditPackCostRequest request, CancellationToken cancellationToken = default);
+
     Task<PlanCostDefaultsDto> GetDefaultsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The consolidated cost-and-margin report for a plan that is being designed - nothing is saved.</summary>
@@ -162,6 +192,36 @@ public class PlanCostReportService : IPlanCostReportService
                 BuiltIn.MarketingSharePercent, BuiltIn.UtilitySharePercent, BuiltIn.AuthenticationSharePercent,
                 aiPrompt, aiCompletion, leadInput, leadOutput, leadSearches),
             aiSource, leadSource);
+    }
+
+    public async Task<CreditPackCostReportDto> BuildCreditPackAsync(CreditPackCostRequest request, CancellationToken cancellationToken = default)
+    {
+        var units = Math.Max(0m, request.Units);
+        var margin = Math.Clamp(request.MarginPercent, 0m, 1000m);
+
+        // A credit pack is one quota type in a bigger size, so it is costed as a plan holding only that quota - one calculation.
+        var report = await BuildAsync(new PlanCostReportRequest(new[] { new PlanQuotaInput(request.QuotaType, units) }), cancellationToken);
+
+        var countries = report.Countries
+            .Select(c =>
+            {
+                var region = RegionalPricingCatalog.Resolve(c.CountryCode);
+                // Rounded up to the pence, so rounding can never eat into the margin.
+                var suggested = Math.Ceiling(c.CostLocal * (1m + margin / 100m) * 100m) / 100m;
+                var suggestedInr = Math.Round(suggested / region.RateToUsd * _fx.InrPerUsd, 2, MidpointRounding.AwayFromZero);
+                return new CreditPackCostCountryDto(
+                    c.CountryCode, c.CountryName, c.CurrencyCode, c.CurrencySymbol, c.CostLocal, suggested, c.CostInr, suggestedInr);
+            })
+            .ToList();
+
+        var reference = report.Countries.FirstOrDefault(c => c.CountryCode == "IN") ?? report.Countries.FirstOrDefault();
+        var totalInr = reference?.CostInr ?? 0m;
+
+        // Only what affects the cost: a plan-level "no price set" or "not sold" note means nothing for a pack.
+        var warnings = report.Warnings.Where(w => w.StartsWith("No default") || w.Contains("mix")).ToList();
+
+        return new CreditPackCostReportDto(
+            request.QuotaType, units, margin, units > 0 ? Math.Round(totalInr / units, 6) : 0m, totalInr, countries, warnings, report.Assumptions);
     }
 
     public async Task<PlanCostReportDto> BuildAsync(PlanCostReportRequest request, CancellationToken cancellationToken = default)

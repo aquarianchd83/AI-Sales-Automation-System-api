@@ -112,6 +112,62 @@ public sealed class PlanCostReportTests : IDisposable
         Assert.Equal(1000, report.Assumptions.PromptTokensPerConversation);
     }
 
+    private static readonly CostAssumptionsOptions Typical = new()
+    {
+        MarketingSharePercent = 100, UtilitySharePercent = 0, AuthenticationSharePercent = 0,
+        PromptTokensPerConversation = 1000, CompletionTokensPerConversation = 500,
+        InputTokensPerCandidate = 10_000, OutputTokensPerCandidate = 1_000, WebSearchesPerCandidate = 1m
+    };
+
+    [Fact]
+    public async Task A_credit_pack_is_priced_from_the_configured_charges_plus_the_wanted_margin()
+    {
+        // 1,000 AI conversations at 0.00125 each = .25 = Rs 103.75; with 50% margin: Rs 155.625, rounded up to Rs 155.63.
+        var report = await Service(costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.AiConversations, 1000, 50));
+
+        Assert.Equal(103.75m, report.TotalCostInr);
+        Assert.Equal(0.10375m, report.UnitCostInr);
+        var india = report.Countries.Single(c => c.CountryCode == "IN");
+        Assert.Equal(103.75m, india.CostLocal);
+        Assert.Equal(155.63m, india.SuggestedPriceLocal);
+        Assert.Equal(155.63m, india.SuggestedPriceInr);
+        Assert.Equal(50m, report.MarginPercent);
+
+        // Same cost everywhere for AI, in each country's own currency: the UK's is 1.25 x 0.79 = 0.9875, +50% = 1.48125 -> 1.49.
+        var britain = report.Countries.Single(c => c.CountryCode == "GB");
+        Assert.Equal(0.99m, britain.CostLocal);
+        Assert.Equal(1.49m, britain.SuggestedPriceLocal);
+    }
+
+    [Fact]
+    public async Task Whatsapp_credits_cost_what_meta_charges_in_each_country_and_lead_credits_follow_the_lead_charges()
+    {
+        var whatsApp = await Service(costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.WhatsAppMessages, 1000, 0));
+        Assert.Equal(821.7m, whatsApp.Countries.Single(c => c.CountryCode == "IN").CostLocal);          // 1000 x /usr/bin/bash.0099 x 83
+        Assert.Equal(25m, whatsApp.Countries.Single(c => c.CountryCode == "US").CostLocal);            // 1000 x /usr/bin/bash.025
+        // No margin: the suggested price is just the cost (rounded up to the pence).
+        Assert.Equal(25m, whatsApp.Countries.Single(c => c.CountryCode == "US").SuggestedPriceLocal);
+
+        var leads = await Service(costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.LeadCandidates, 50, 100));
+        Assert.Equal(166m, leads.TotalCostInr);   // 50 x /usr/bin/bash.04 =  = Rs 166
+        Assert.Equal(332m, leads.Countries.Single(c => c.CountryCode == "IN").SuggestedPriceLocal);   // doubled
+    }
+
+    [Fact]
+    public async Task A_credit_pack_calculation_says_when_no_default_model_is_chosen_and_never_goes_negative()
+    {
+        var report = await Service(aiDefault: null, costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.AiConversations, -5, -20));
+
+        Assert.Equal(0m, report.Units);
+        Assert.Equal(0m, report.MarginPercent);
+        Assert.Equal(0m, report.TotalCostInr);
+        Assert.All(report.Countries, c => Assert.Equal(0m, c.SuggestedPriceLocal));
+
+        var noModel = await Service(aiDefault: null, costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.AiConversations, 1000, 50));
+        Assert.Contains(noModel.Warnings, w => w.Contains("No default AI model"));
+        Assert.DoesNotContain(noModel.Warnings, w => w.Contains("No country has a price"));
+    }
+
     [Fact]
     public async Task Whatsapp_cost_follows_the_country_because_meta_prices_by_country()
     {

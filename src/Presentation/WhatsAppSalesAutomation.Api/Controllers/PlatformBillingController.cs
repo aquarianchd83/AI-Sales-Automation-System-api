@@ -120,6 +120,11 @@ public class PlatformBillingController : ControllerBase
     public async Task<ActionResult<PlanCostReportDto>> BuildPlanCostReport([FromBody] PlanCostReportRequest request, CancellationToken cancellationToken)
         => Ok(await _costReport.BuildAsync(request, cancellationToken));
 
+    /// <summary>What a credit pack costs to serve and the price that leaves the wanted margin, from the Configuration charges. Nothing is saved.</summary>
+    [HttpPost("credit-pack-cost")]
+    public async Task<ActionResult<CreditPackCostReportDto>> BuildCreditPackCost([FromBody] CreditPackCostRequest request, CancellationToken cancellationToken)
+        => Ok(await _costReport.BuildCreditPackAsync(request, cancellationToken));
+
     [HttpGet("subscriptions")]
     public async Task<ActionResult<PagedResult<PlatformSubscriptionListItemDto>>> GetSubscriptions(
         [FromQuery] PlatformSubscriptionQuery query, CancellationToken cancellationToken)
