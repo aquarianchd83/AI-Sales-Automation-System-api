@@ -118,6 +118,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
+    public DbSet<PlatformNotification> PlatformNotifications => Set<PlatformNotification>();
+
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();
 
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for

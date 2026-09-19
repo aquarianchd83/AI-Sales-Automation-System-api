@@ -103,6 +103,8 @@ public interface IApplicationDbContext
 
     DbSet<Announcement> Announcements { get; }
 
+    DbSet<PlatformNotification> PlatformNotifications { get; }
+
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
