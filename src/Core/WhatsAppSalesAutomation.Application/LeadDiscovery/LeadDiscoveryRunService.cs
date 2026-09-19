@@ -47,7 +47,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         IQuotaGate quota,
         IDateTimeProvider dateTime,
         IOptions<LeadDiscoveryOptions> options,
-        IOptions<LeadDiscoveryPricingOptions> pricing)
+        IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing)
     {
         _context = context;
         _agent = agent;

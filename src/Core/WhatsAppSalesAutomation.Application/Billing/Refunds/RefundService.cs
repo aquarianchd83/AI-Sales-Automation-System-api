@@ -35,7 +35,7 @@ public class RefundService : IRefundService
         IRefundGateway gateway,
         ITenantNotifier notifier,
         IDateTimeProvider dateTime,
-        IOptions<RefundPolicyOptions> policy)
+        IOptionsSnapshot<RefundPolicyOptions> policy)
     {
         _context = context;
         _ledger = ledger;

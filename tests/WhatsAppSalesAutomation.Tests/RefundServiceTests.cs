@@ -34,7 +34,7 @@ public sealed class RefundServiceTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        _refunds = new RefundService(_db, _ledger, _gateway, _notifier, _clock, Options.Create(new RefundPolicyOptions()));
+        _refunds = new RefundService(_db, _ledger, _gateway, _notifier, _clock, new FixedOptions<RefundPolicyOptions>(new()));
 
         _db.Tenants.Add(_tenant);
         _db.SaveChanges();

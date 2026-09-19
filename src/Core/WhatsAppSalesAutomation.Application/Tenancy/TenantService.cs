@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
@@ -14,13 +15,17 @@ public class TenantService : ITenantService
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
     private readonly IValidator<UpdateTenantBusinessProfileRequest> _updateBusinessProfileValidator;
 
+    private readonly ICountryAvailability _countries;
+
     public TenantService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
-        IValidator<UpdateTenantBusinessProfileRequest> updateBusinessProfileValidator)
+        IValidator<UpdateTenantBusinessProfileRequest> updateBusinessProfileValidator,
+        ICountryAvailability countries)
     {
+        _countries = countries;
         _context = context;
         _tenantContext = tenantContext;
         _updateTimezoneValidator = updateTimezoneValidator;
@@ -74,6 +79,7 @@ public class TenantService : ITenantService
         await _updateCountryValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var tenant = await GetCurrentTenantAsync(cancellationToken);
+        await _countries.EnsureAllowedAsync(request.CountryCode, tenant.CountryCode, cancellationToken);
         tenant.CountryCode = request.CountryCode;
         await _context.SaveChangesAsync(cancellationToken);
 

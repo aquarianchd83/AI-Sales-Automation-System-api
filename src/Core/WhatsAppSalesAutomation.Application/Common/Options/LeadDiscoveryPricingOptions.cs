@@ -47,6 +47,15 @@ public class LeadDiscoveryPricingOptions
     public LeadDiscoveryModelRates Default { get; set; } =
         new() { InputPerMillion = 1m, OutputPerMillion = 5m, CacheReadPerMillion = 0.1m, CacheWritePerMillion = 1.25m };
 
-    public LeadDiscoveryModelRates RatesFor(string? model) =>
-        model is not null && Models.TryGetValue(model, out var rates) ? rates : Default;
+    /// <summary>The model the platform runs, chosen on the Configuration page. A run whose model has no row of its own
+    /// is priced at this model's rates rather than at <see cref="Default"/>. Blank means no choice was made.</summary>
+    public string? DefaultModel { get; set; }
+
+    public LeadDiscoveryModelRates RatesFor(string? model)
+    {
+        if (model is not null && Models.TryGetValue(model, out var rates))
+            return rates;
+
+        return !string.IsNullOrWhiteSpace(DefaultModel) && Models.TryGetValue(DefaultModel, out var chosen) ? chosen : Default;
+    }
 }

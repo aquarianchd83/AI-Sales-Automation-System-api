@@ -18,7 +18,7 @@ public class WhatsAppSpendService : IWhatsAppSpendService
     private readonly IApplicationDbContext _context;
     private readonly WhatsAppPricingOptions _pricing;
 
-    public WhatsAppSpendService(IApplicationDbContext context, IOptions<WhatsAppPricingOptions> pricing)
+    public WhatsAppSpendService(IApplicationDbContext context, IOptionsSnapshot<WhatsAppPricingOptions> pricing)
     {
         _context = context;
         _pricing = pricing.Value;

@@ -11,11 +11,15 @@ public class PlatformDashboardService : IPlatformDashboardService
     private readonly ICurrentUserPricingService _pricing;
     private readonly IDateTimeProvider _dateTime;
 
+    private readonly IAiSpendEstimator _aiSpend;
+
     public PlatformDashboardService(
         IApplicationDbContext context,
         ICurrentUserPricingService pricing,
-        IDateTimeProvider dateTime)
+        IDateTimeProvider dateTime,
+        IAiSpendEstimator aiSpend)
     {
+        _aiSpend = aiSpend;
         _context = context;
         _pricing = pricing;
         _dateTime = dateTime;
@@ -49,7 +53,7 @@ public class PlatformDashboardService : IPlatformDashboardService
             .Select(a => new { a.ModelUsed, a.PromptTokens, a.CompletionTokens })
             .ToListAsync(cancellationToken);
 
-        var estimatedAiSpend = aiInteractions.Sum(a => AiSpendEstimator.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens));
+        var estimatedAiSpend = aiInteractions.Sum(a => _aiSpend.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens));
 
         var webhookFailuresLast24h = await _context.WebhookEvents.IgnoreQueryFilters()
             .CountAsync(w => w.ReceivedAt >= last24h && w.ProcessingStatus == WebhookProcessingStatus.Failed, cancellationToken);

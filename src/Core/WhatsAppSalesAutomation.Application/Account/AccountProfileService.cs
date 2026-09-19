@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Identity;
@@ -17,11 +18,15 @@ public class AccountProfileService : IAccountProfileService
     private readonly ICurrentUserService _currentUser;
     private readonly IValidator<UpdateUserProfileRequest> _updateValidator;
 
+    private readonly ICountryAvailability _countries;
+
     public AccountProfileService(
         UserManager<ApplicationUser> userManager,
         ICurrentUserService currentUser,
-        IValidator<UpdateUserProfileRequest> updateValidator)
+        IValidator<UpdateUserProfileRequest> updateValidator,
+        ICountryAvailability countries)
     {
+        _countries = countries;
         _userManager = userManager;
         _currentUser = currentUser;
         _updateValidator = updateValidator;
@@ -53,6 +58,7 @@ public class AccountProfileService : IAccountProfileService
         user.FullName = request.FullName.Trim();
         user.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
         user.Timezone = request.Timezone;
+        await _countries.EnsureAllowedAsync(request.CountryCode, user.CountryCode, cancellationToken);
         user.CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim();
 
         await ThrowIfFailed(_userManager.UpdateAsync(user));

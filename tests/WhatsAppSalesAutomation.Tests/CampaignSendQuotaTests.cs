@@ -41,7 +41,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        var gate = new QuotaGate(_ledger, Options.Create(new WhatsAppQuotaWeightOptions()), Options.Create(new TrialQuotaOptions()));
+        var gate = new QuotaGate(_ledger, new FixedOptions<WhatsAppQuotaWeightOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
 
         var conversations = DispatchProxy.Create<IConversationService, Stub>();
         ((Stub)(object)conversations).Handler = (m, _) => m.Name == nameof(IConversationService.GetOrCreateActiveConversationIdAsync)

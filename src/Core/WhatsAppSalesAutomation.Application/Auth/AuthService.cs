@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,8 @@ public class AuthService : IAuthService
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
     private readonly IValidator<ChangePasswordRequest> _changePasswordValidator;
 
+    private readonly ICountryAvailability _countries;
+
     public AuthService(
         UserManager<ApplicationUser> userManager,
         IApplicationDbContext context,
@@ -39,8 +42,10 @@ public class AuthService : IAuthService
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
-        IValidator<ChangePasswordRequest> changePasswordValidator)
+        IValidator<ChangePasswordRequest> changePasswordValidator,
+        ICountryAvailability countries)
     {
+        _countries = countries;
         _userManager = userManager;
         _context = context;
         _jwtTokenService = jwtTokenService;
@@ -63,6 +68,8 @@ public class AuthService : IAuthService
             throw new ConflictException($"A user with email '{request.Email}' already exists.");
 
         var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
+
+        await _countries.EnsureAllowedAsync(request.CountryCode, null, cancellationToken);
 
         var tenant = new Tenant
         {

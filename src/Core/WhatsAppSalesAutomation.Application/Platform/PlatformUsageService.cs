@@ -15,12 +15,16 @@ public class PlatformUsageService : IPlatformUsageService
     private readonly IWhatsAppSpendService _whatsAppSpend;
     private readonly IDateTimeProvider _dateTime;
 
+    private readonly IAiSpendEstimator _aiSpend;
+
     public PlatformUsageService(
         IApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
         IWhatsAppSpendService whatsAppSpend,
-        IDateTimeProvider dateTime)
+        IDateTimeProvider dateTime,
+        IAiSpendEstimator aiSpend)
     {
+        _aiSpend = aiSpend;
         _context = context;
         _userManager = userManager;
         _whatsAppSpend = whatsAppSpend;
@@ -97,7 +101,7 @@ public class PlatformUsageService : IPlatformUsageService
             {
                 aiByTenant[tenantAi.Key] = (
                     tenantAi.Count(),
-                    tenantAi.Sum(a => AiSpendEstimator.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens)));
+                    tenantAi.Sum(a => _aiSpend.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens)));
             }
 
             // Priced from the messages themselves, so this row and the tenant's own Settings page agree.

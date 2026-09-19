@@ -24,7 +24,7 @@ public class TenantNotifier : ITenantNotifier
         UserManager<ApplicationUser> userManager,
         IEmailSender email,
         IPlatformWhatsAppSender whatsApp,
-        IOptions<BillingAlertOptions> options,
+        IOptionsSnapshot<BillingAlertOptions> options,
         ILogger<TenantNotifier> logger)
     {
         _context = context;

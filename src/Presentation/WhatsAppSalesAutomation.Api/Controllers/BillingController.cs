@@ -25,6 +25,7 @@ public class BillingController : ControllerBase
     private readonly IRefundService _refunds;
     private readonly ITenantBillingNoticeService _notices;
     private readonly ICurrentUserService _currentUser;
+    private readonly ICountryAvailability _countries;
 
     public BillingController(
         IBillingService billingService,
@@ -32,8 +33,10 @@ public class BillingController : ControllerBase
         IQuotaLedgerService quota,
         IRefundService refunds,
         ITenantBillingNoticeService notices,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ICountryAvailability countries)
     {
+        _countries = countries;
         _quota = quota;
         _refunds = refunds;
         _notices = notices;
@@ -53,8 +56,16 @@ public class BillingController : ControllerBase
 
     [HttpGet("regions")]
     [AllowAnonymous]
-    public async Task<ActionResult<IReadOnlyList<RegionDto>>> GetRegions(CancellationToken cancellationToken)
-        => Ok(await _billingService.GetRegionsAsync(cancellationToken));
+    public async Task<ActionResult<IReadOnlyList<RegionDto>>> GetRegions([FromQuery] string? include, CancellationToken cancellationToken)
+    {
+        // Only the countries the operator has switched on. `include` lets a screen that already has a value (a profile
+        // whose country was switched off later) still show it, so the picker doesn't go blank.
+        var disabled = await _countries.GetDisabledAsync(cancellationToken);
+        var regions = await _billingService.GetRegionsAsync(cancellationToken);
+        return Ok(regions
+            .Where(r => !disabled.Contains(r.CountryCode) || string.Equals(r.CountryCode, include, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+    }
 
     [HttpGet("subscription")]
     [Authorize(Roles = AppRoles.Admin)]

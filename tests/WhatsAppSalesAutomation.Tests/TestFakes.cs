@@ -106,3 +106,13 @@ public static class Fake
         return proxy;
     }
 }
+
+/// <summary>An IOptionsSnapshot over fixed values - what a test hands a service that reads live configuration.</summary>
+public sealed class FixedOptions<T> : Microsoft.Extensions.Options.IOptionsSnapshot<T> where T : class
+{
+    public FixedOptions(T value) => Value = value;
+
+    public T Value { get; }
+
+    public T Get(string? name) => Value;
+}

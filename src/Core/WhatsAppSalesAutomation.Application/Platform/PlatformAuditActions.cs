@@ -37,4 +37,5 @@ public static class PlatformAuditActions
     public const string CreditPackCreated = "CreditPackCreated";
     public const string CreditPackUpdated = "CreditPackUpdated";
     public const string CreditPackDeactivated = "CreditPackDeactivated";
+    public const string ConfigurationUpdated = "ConfigurationUpdated";
 }

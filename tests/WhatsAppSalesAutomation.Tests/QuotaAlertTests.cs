@@ -37,7 +37,7 @@ public sealed class QuotaAlertTests : IDisposable
 
         _ledger = new QuotaLedgerService(_db, _clock);
         // UserManager is only reached when a tenant has neither an alert email nor an owner - not exercised here.
-        var notifier = new TenantNotifier(_db, null!, _email, _whatsApp, Options.Create(new BillingAlertOptions()), NullLogger<TenantNotifier>.Instance);
+        var notifier = new TenantNotifier(_db, null!, _email, _whatsApp, new FixedOptions<BillingAlertOptions>(new()), NullLogger<TenantNotifier>.Instance);
         _alerts = new QuotaAlertService(_db, notifier, _clock);
 
         _db.Tenants.Add(_tenant);

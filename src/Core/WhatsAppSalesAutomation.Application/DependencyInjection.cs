@@ -43,6 +43,8 @@ public static class DependencyInjection
         services.Configure<LeadDiscoveryOptions>(configuration.GetSection("LeadDiscovery"));
         services.Configure<LeadDiscoveryPricingOptions>(configuration.GetSection("LeadDiscovery:Pricing"));
         services.Configure<WhatsAppPricingOptions>(configuration.GetSection("WhatsApp:Pricing"));
+        services.Configure<AiPricingOptions>(configuration.GetSection("Ai:Pricing"));
+        services.AddScoped<IAiSpendEstimator, AiSpendEstimator>();
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountProfileService, AccountProfileService>();
@@ -76,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<IQuotaAlertService, QuotaAlertService>();
         services.AddScoped<ITenantBillingNoticeService, TenantBillingNoticeService>();
         services.AddScoped<ISubscriptionRenewalService, SubscriptionRenewalService>();
+        services.AddScoped<ICountryAvailability, CountryAvailability>();
         services.AddScoped<IWhatsAppSpendService, WhatsAppSpendService>();
         services.AddScoped<ICurrentUserPricingService, CurrentUserPricingService>();
         services.AddScoped<ITenantChargesService, TenantChargesService>();
@@ -86,6 +89,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformAuditService, PlatformAuditService>();
         services.AddScoped<IPlatformTenantService, PlatformTenantService>();
         services.AddScoped<IPlatformBillingService, PlatformBillingService>();
+        services.AddScoped<IPlatformConfigurationService, PlatformConfigurationService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
         services.AddScoped<IPlatformPaymentService, PlatformPaymentService>();
         services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();

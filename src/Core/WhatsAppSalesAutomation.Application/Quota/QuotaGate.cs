@@ -10,7 +10,7 @@ public class QuotaGate : IQuotaGate
     private readonly WhatsAppQuotaWeightOptions _weights;
     private readonly TrialQuotaOptions _trial;
 
-    public QuotaGate(IQuotaLedgerService ledger, IOptions<WhatsAppQuotaWeightOptions> weights, IOptions<TrialQuotaOptions> trial)
+    public QuotaGate(IQuotaLedgerService ledger, IOptionsSnapshot<WhatsAppQuotaWeightOptions> weights, IOptionsSnapshot<TrialQuotaOptions> trial)
     {
         _ledger = ledger;
         _weights = weights.Value;

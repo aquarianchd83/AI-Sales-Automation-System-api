@@ -31,6 +31,9 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IQuotaGate _quota;
     private readonly IQuotaLedgerService _ledger;
 
+    private readonly IAiSpendEstimator _aiSpend;
+    private readonly ICountryAvailability _countries;
+
     public PlatformTenantService(
         IApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
@@ -44,8 +47,12 @@ public class PlatformTenantService : IPlatformTenantService
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
         IPlatformAuditService auditService,
         IQuotaGate quota,
-        IQuotaLedgerService ledger)
+        IQuotaLedgerService ledger,
+        IAiSpendEstimator aiSpend,
+        ICountryAvailability countries)
     {
+        _countries = countries;
+        _aiSpend = aiSpend;
         _quota = quota;
         _ledger = ledger;
         _context = context;
@@ -143,7 +150,7 @@ public class PlatformTenantService : IPlatformTenantService
             .ToListAsync(cancellationToken);
 
         var estimatedAiSpend = aiInteractionsThisMonth
-            .Sum(a => AiSpendEstimator.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens));
+            .Sum(a => _aiSpend.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens));
 
         // This tenant's own currency, not the operator's - the figures on this page are all about them.
         var pricing = RegionalPricingCatalog.Resolve(tenant.CountryCode);
@@ -172,6 +179,8 @@ public class PlatformTenantService : IPlatformTenantService
             throw new ConflictException($"A user with email '{request.AdminEmail}' already exists.");
 
         var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
+
+        await _countries.EnsureAllowedAsync(request.CountryCode, null, cancellationToken);
 
         var tenant = new Tenant
         {
@@ -355,6 +364,7 @@ public class PlatformTenantService : IPlatformTenantService
 
         var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
         var previousCountry = tenant.CountryCode;
+        await _countries.EnsureAllowedAsync(request.CountryCode, previousCountry, cancellationToken);
         tenant.CountryCode = request.CountryCode;
         await _context.SaveChangesAsync(cancellationToken);
 
