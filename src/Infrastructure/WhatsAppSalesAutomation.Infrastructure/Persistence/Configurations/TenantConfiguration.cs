@@ -27,6 +27,8 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(t => t.WebsiteUrl).HasMaxLength(300);
         builder.Property(t => t.SupportEmail).HasMaxLength(256);
         builder.Property(t => t.SupportPhone).HasMaxLength(32);
+        builder.Property(t => t.BillingAlertEmail).HasMaxLength(256);
+        builder.Property(t => t.BillingAlertPhoneE164).HasMaxLength(32);
 
         // A short list only ever read and written whole, so a JSON column rather than a child table. The
         // comparer makes EF detect in-place list edits; an empty column (existing rows) reads as no keywords.

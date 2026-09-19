@@ -34,4 +34,12 @@ public interface IBillingService
     /// <summary>The calling tenant's payment history, most recent first - empty, never null, for a
     /// tenant that has never chosen a plan.</summary>
     Task<IReadOnlyList<PaymentDto>> GetPaymentHistoryForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Active credit packs, priced in the calling tenant's own currency.</summary>
+    Task<IReadOnlyList<CreditPackDto>> GetCreditPacksAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Simulates paying for one credit pack and grants its units (valid 12 months). Allowed at any
+    /// time the tenant has a plan that is not suspended or cancelled - before or after the included quota
+    /// runs out. Throws ConflictException otherwise.</summary>
+    Task<PaymentDto> PurchaseCreditPackAsync(Guid tenantId, Guid packId, CancellationToken cancellationToken = default);
 }

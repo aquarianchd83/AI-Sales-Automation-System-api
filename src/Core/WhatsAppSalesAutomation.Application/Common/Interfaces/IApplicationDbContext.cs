@@ -81,7 +81,23 @@ public interface IApplicationDbContext
 
     DbSet<Payment> Payments { get; }
 
-    DbSet<Invoice> Invoices { get; }
+    DbSet<PlanQuota> PlanQuotas { get; }
+
+    DbSet<CreditPack> CreditPacks { get; }
+
+    DbSet<PlanPrice> PlanPrices { get; }
+
+    DbSet<CreditPackPrice> CreditPackPrices { get; }
+
+    DbSet<QuotaGrant> QuotaGrants { get; }
+
+    DbSet<QuotaLedgerEntry> QuotaLedgerEntries { get; }
+
+    DbSet<QuotaWallet> QuotaWallets { get; }
+
+    DbSet<RefundRequest> RefundRequests { get; }
+
+    DbSet<TenantNotification> TenantNotifications { get; }
 
     DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
 
@@ -90,4 +106,8 @@ public interface IApplicationDbContext
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Drops every tracked entity - used to retry a quota operation after a concurrency
+    /// conflict, when what was read is stale.</summary>
+    void ResetChangeTracker();
 }

@@ -11,6 +11,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.ToTable("Payments");
         builder.HasKey(p => p.Id);
 
+        builder.Property(p => p.Kind).HasConversion<string>().HasMaxLength(20);
         builder.Property(p => p.PlanName).IsRequired().HasMaxLength(100);
         builder.Property(p => p.CurrencyCode).IsRequired().HasMaxLength(3);
         builder.Property(p => p.CurrencySymbol).IsRequired().HasMaxLength(10);

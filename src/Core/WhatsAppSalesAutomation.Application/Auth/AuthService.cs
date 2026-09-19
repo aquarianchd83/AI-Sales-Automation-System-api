@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -21,6 +22,7 @@ public class AuthService : IAuthService
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantSlugResolver _slugResolver;
     private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly IQuotaGate _quota;
     private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
@@ -33,6 +35,7 @@ public class AuthService : IAuthService
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
         ITenantJobProvisioner jobProvisioner,
+        IQuotaGate quota,
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
@@ -44,6 +47,7 @@ public class AuthService : IAuthService
         _dateTime = dateTime;
         _slugResolver = slugResolver;
         _jobProvisioner = jobProvisioner;
+        _quota = quota;
         _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
@@ -101,6 +105,10 @@ public class AuthService : IAuthService
         // Creates this tenant's background job schedules and registers them with Hangfire, so its first
         // campaign can send within the minute rather than waiting for the daily reconcile pass.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
+
+        // A trial tenant has no plan and so no included quota - without this it could not send a message before
+        // paying. The grant expires with the trial.
+        await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);

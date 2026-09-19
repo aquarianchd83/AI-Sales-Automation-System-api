@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -39,7 +40,7 @@ public class CampaignSendService : ICampaignSendService
     private readonly IDateTimeProvider _dateTime;
     private readonly IConversationService _conversations;
     private readonly ITenantContext _tenantContext;
-    private readonly IPlanLimitsService _planLimits;
+    private readonly IQuotaGate _quota;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly ILogger<CampaignSendService> _logger;
@@ -50,7 +51,7 @@ public class CampaignSendService : ICampaignSendService
         IDateTimeProvider dateTime,
         IConversationService conversations,
         ITenantContext tenantContext,
-        IPlanLimitsService planLimits,
+        IQuotaGate quota,
         ITenantConfigOverrideProvider tenantConfig,
         ITenantTimeZoneProvider tenantTimeZone,
         ILogger<CampaignSendService> logger)
@@ -60,7 +61,7 @@ public class CampaignSendService : ICampaignSendService
         _dateTime = dateTime;
         _conversations = conversations;
         _tenantContext = tenantContext;
-        _planLimits = planLimits;
+        _quota = quota;
         _tenantConfig = tenantConfig;
         _tenantTimeZone = tenantTimeZone;
         _logger = logger;
@@ -250,25 +251,6 @@ public class CampaignSendService : ICampaignSendService
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
-        // Checked here, not once per Process*Async batch: a live count against the plan's
-        // MaxMessagesPerMonth limit, one query per message actually about to send rather than one per
-        // batch, in exchange for never overshooting the limit within a single tick - see
-        // IPlanLimitsService's own "no caching for v1" doc comment for why a query this small is an
-        // acceptable v1 cost. PlanLimitExceededException converts into this method's own established
-        // skip idiom rather than propagating - a tenant over budget should look like "nothing left to
-        // send this tick", not fail the whole run for every other candidate in it.
-        if (_tenantContext.TenantId is { } tenantId)
-        {
-            try
-            {
-                await _planLimits.EnsureCanSendMessageAsync(tenantId, cancellationToken);
-            }
-            catch (PlanLimitExceededException)
-            {
-                return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
-            }
-        }
-
         var template = step.MessageTemplateId.HasValue
             ? await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == step.MessageTemplateId, cancellationToken)
             : null;
@@ -278,6 +260,15 @@ public class CampaignSendService : ICampaignSendService
                 "Skipping step {StepNumber} for campaign customer {CampaignCustomerId}: template is missing or not Approved",
                 step.StepNumber, cc.Id);
             // Leave cc exactly where it is - fixing the template lets this step send on the next tick.
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        // Prepaid quota is spent BEFORE the API is called, so a tenant can never send what it hasn't paid for.
+        // Out of quota reads as "nothing left to send this tick" - the customer stays Pending and the campaign
+        // resumes by itself once the tenant buys credits or its plan renews. Keyed per attempt (see QuotaKey).
+        if (_tenantContext.TenantId is { } tenantId &&
+            !await _quota.TryConsumeWhatsAppTemplateAsync(tenantId, template.Category, QuotaKey(idempotencyKey, 1), idempotencyKey, cancellationToken))
+        {
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
@@ -374,9 +365,18 @@ public class CampaignSendService : ICampaignSendService
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
+        // A retry is a new attempt and so a new spend. A message stuck at Queued whose first attempt already
+        // spent (the process died mid-send) hits the same key and is not charged twice.
+        if (!await _quota.TryConsumeWhatsAppTemplateAsync(message.TenantId, template.Category, QuotaKey(message.IdempotencyKey, message.AttemptCount + 1), message.IdempotencyKey, cancellationToken))
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+
         var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, options, cancellationToken);
         return new SendRunResult(1, sent ? 1 : 0, sent ? 0 : 1, 0);
     }
+
+    /// <summary>One quota spend per send attempt: the attempt number is part of the key, so a failed attempt can
+    /// be given back without it colliding with the next attempt's spend.</summary>
+    private static string QuotaKey(string idempotencyKey, int attempt) => $"wa:{idempotencyKey}:{attempt}";
 
     /// <summary>Calls WhatsApp and records the outcome on both the message and, on success, the
     /// campaign customer's progress. Shared by a fresh send and a retry of an existing message.</summary>
@@ -444,6 +444,9 @@ public class CampaignSendService : ICampaignSendService
         {
             message.Status = MessageStatus.Failed;
             message.FailureReason = result.ErrorMessage;
+
+            // Nothing was delivered, so nothing is charged; a retry spends afresh.
+            await _quota.ReleaseAsync(message.TenantId, QuotaKey(message.IdempotencyKey, message.AttemptCount), cancellationToken);
 
             if (message.AttemptCount >= options.MaxRetryAttempts)
             {

@@ -44,7 +44,8 @@ public record PlatformTenantDetailDto(
     // figures (the dashboard) use the operator's currency instead.
     string CurrencyCode,
     string CurrencySymbol,
-    decimal EstimatedAiSpendThisMonthLocal);
+    decimal EstimatedAiSpendThisMonthLocal,
+    bool RefundRequestsEnabled);
 
 public record ImpersonationSessionDto(
     string AccessToken,

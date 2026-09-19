@@ -69,6 +69,44 @@ public class PlatformBillingController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Every credit pack, active and retired - the catalog tenants buy extra quota from.</summary>
+    [HttpGet("credit-packs")]
+    public async Task<ActionResult<IReadOnlyList<PlatformCreditPackDto>>> GetCreditPacks(CancellationToken cancellationToken)
+        => Ok(await _billingService.GetCreditPacksAsync(cancellationToken));
+
+    [HttpPost("credit-packs")]
+    public async Task<ActionResult<PlatformCreditPackDto>> CreateCreditPack([FromBody] CreateCreditPackRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _billingService.CreateCreditPackAsync(request, cancellationToken);
+
+        await _auditService.LogAsync(
+            ActorUserId, ActorEmail, PlatformAuditActions.CreditPackCreated,
+            details: $"Credit pack '{result.Name}' ({result.Units:0.##} {result.QuotaType}, {result.PriceCents} cents)", cancellationToken: cancellationToken);
+
+        return CreatedAtAction(nameof(GetCreditPacks), null, result);
+    }
+
+    [HttpPut("credit-packs/{id:guid}")]
+    public async Task<ActionResult<PlatformCreditPackDto>> UpdateCreditPack(Guid id, [FromBody] UpdateCreditPackRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _billingService.UpdateCreditPackAsync(id, request, cancellationToken);
+
+        await _auditService.LogAsync(
+            ActorUserId, ActorEmail, PlatformAuditActions.CreditPackUpdated,
+            details: $"Credit pack '{result.Name}' ({result.Units:0.##} {result.QuotaType}, {result.PriceCents} cents, {(result.IsActive ? "active" : "retired")})", cancellationToken: cancellationToken);
+
+        return Ok(result);
+    }
+
+    /// <summary>Retires the pack - never a hard delete, so past purchases keep pointing at it.</summary>
+    [HttpDelete("credit-packs/{id:guid}")]
+    public async Task<IActionResult> DeactivateCreditPack(Guid id, CancellationToken cancellationToken)
+    {
+        await _billingService.DeactivateCreditPackAsync(id, cancellationToken);
+        await _auditService.LogAsync(ActorUserId, ActorEmail, PlatformAuditActions.CreditPackDeactivated, details: id.ToString(), cancellationToken: cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("subscriptions")]
     public async Task<ActionResult<PagedResult<PlatformSubscriptionListItemDto>>> GetSubscriptions(
         [FromQuery] PlatformSubscriptionQuery query, CancellationToken cancellationToken)

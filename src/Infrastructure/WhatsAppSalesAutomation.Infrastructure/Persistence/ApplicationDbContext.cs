@@ -94,7 +94,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Payment> Payments => Set<Payment>();
 
-    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<PlanQuota> PlanQuotas => Set<PlanQuota>();
+
+    public DbSet<CreditPack> CreditPacks => Set<CreditPack>();
+
+    public DbSet<PlanPrice> PlanPrices => Set<PlanPrice>();
+
+    public DbSet<CreditPackPrice> CreditPackPrices => Set<CreditPackPrice>();
+
+    public DbSet<QuotaGrant> QuotaGrants => Set<QuotaGrant>();
+
+    public DbSet<QuotaLedgerEntry> QuotaLedgerEntries => Set<QuotaLedgerEntry>();
+
+    public DbSet<QuotaWallet> QuotaWallets => Set<QuotaWallet>();
+
+    public DbSet<RefundRequest> RefundRequests => Set<RefundRequest>();
+
+    public DbSet<TenantNotification> TenantNotifications => Set<TenantNotification>();
+
+    public void ResetChangeTracker() => ChangeTracker.Clear();
 
     public DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries => Set<PlatformAuditLogEntry>();
 

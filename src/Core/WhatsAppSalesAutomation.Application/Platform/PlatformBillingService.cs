@@ -15,17 +15,23 @@ public class PlatformBillingService : IPlatformBillingService
     private readonly ICurrentUserPricingService _pricing;
     private readonly IValidator<CreatePlanRequest> _createValidator;
     private readonly IValidator<UpdatePlanRequest> _updateValidator;
+    private readonly IValidator<CreateCreditPackRequest> _createPackValidator;
+    private readonly IValidator<UpdateCreditPackRequest> _updatePackValidator;
 
     public PlatformBillingService(
         IApplicationDbContext context,
         ICurrentUserPricingService pricing,
         IValidator<CreatePlanRequest> createValidator,
-        IValidator<UpdatePlanRequest> updateValidator)
+        IValidator<UpdatePlanRequest> updateValidator,
+        IValidator<CreateCreditPackRequest> createPackValidator,
+        IValidator<UpdateCreditPackRequest> updatePackValidator)
     {
         _context = context;
         _pricing = pricing;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
+        _createPackValidator = createPackValidator;
+        _updatePackValidator = updatePackValidator;
     }
 
     public async Task<IReadOnlyList<PlatformPlanDto>> GetPlansAsync(CancellationToken cancellationToken = default)
@@ -37,7 +43,10 @@ public class PlatformBillingService : IPlatformBillingService
             .OrderBy(p => p.PriceMonthlyCents)
             .ToListAsync(cancellationToken);
 
-        return plans.Select(p => ToDto(p, pricing)).ToList();
+        var planIds = plans.Select(p => p.Id).ToList();
+        var quotasByPlan = await LoadQuotasAsync(planIds, cancellationToken);
+        var pricesByPlan = await CatalogPricing.LoadPlanPricesAsync(_context, planIds, cancellationToken);
+        return plans.Select(p => ToDto(p, pricing, quotasByPlan.GetValueOrDefault(p.Id), pricesByPlan.GetValueOrDefault(p.Id))).ToList();
     }
 
     public async Task<PagedResult<PlatformSubscriptionListItemDto>> GetSubscriptionsAsync(PlatformSubscriptionQuery query, CancellationToken cancellationToken = default)
@@ -88,9 +97,34 @@ public class PlatformBillingService : IPlatformBillingService
             IsActive = true
         };
         _context.Plans.Add(plan);
+
+        // A plan with no quota rows would sell tenants a subscription with nothing to use, so the quotas are
+        // saved with the plan in the same call rather than left for a second step someone might forget.
+        var quotas = new List<PlanQuota>();
+        foreach (var input in request.IncludedQuotas ?? Array.Empty<PlanQuotaInput>())
+        {
+            if (input.Units <= 0)
+                continue;
+
+            var row = new PlanQuota { PlanId = plan.Id, QuotaType = input.QuotaType, IncludedUnits = input.Units };
+            quotas.Add(row);
+            _context.PlanQuotas.Add(row);
+        }
+
+        var prices = new CountryPrices();
+        foreach (var input in request.CountryPrices ?? Array.Empty<CountryPriceInput>())
+        {
+            if (input.Amount <= 0)
+                continue;
+
+            var code = input.CountryCode.ToUpperInvariant();
+            _context.PlanPrices.Add(new PlanPrice { PlanId = plan.Id, CountryCode = code, Amount = input.Amount });
+            prices[code] = input.Amount;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken));
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
     }
 
     public async Task<PlatformPlanDto> UpdatePlanAsync(Guid id, UpdatePlanRequest request, CancellationToken cancellationToken = default)
@@ -111,9 +145,73 @@ public class PlatformBillingService : IPlatformBillingService
         plan.PriceMonthlyCents = request.PriceMonthlyCents;
         plan.IsActive = request.IsActive;
 
+        var quotas = await _context.PlanQuotas.Where(q => q.PlanId == id).ToListAsync(cancellationToken);
+
+        // Null leaves the quotas alone; a list is the complete new set. Only future allocations change - what a
+        // tenant on this plan already received this period stays exactly as granted.
+        if (request.IncludedQuotas is { } wanted)
+        {
+            foreach (var type in Enum.GetValues<QuotaType>())
+            {
+                var units = wanted.FirstOrDefault(q => q.QuotaType == type)?.Units ?? 0m;
+                var existing = quotas.FirstOrDefault(q => q.QuotaType == type);
+
+                if (units <= 0)
+                {
+                    if (existing is not null)
+                    {
+                        _context.PlanQuotas.Remove(existing);
+                        quotas.Remove(existing);
+                    }
+                }
+                else if (existing is not null)
+                {
+                    existing.IncludedUnits = units;
+                }
+                else
+                {
+                    var row = new PlanQuota { PlanId = id, QuotaType = type, IncludedUnits = units };
+                    _context.PlanQuotas.Add(row);
+                    quotas.Add(row);
+                }
+            }
+        }
+
+        var existingPrices = await _context.PlanPrices.Where(p => p.PlanId == id).ToListAsync(cancellationToken);
+        if (request.CountryPrices is { } wantedPrices)
+        {
+            foreach (var row in existingPrices.ToList())
+            {
+                var wantedPrice = wantedPrices.FirstOrDefault(w => string.Equals(w.CountryCode, row.CountryCode, StringComparison.OrdinalIgnoreCase));
+                if (wantedPrice is null || wantedPrice.Amount <= 0)
+                {
+                    _context.PlanPrices.Remove(row);
+                    existingPrices.Remove(row);
+                }
+                else
+                {
+                    row.Amount = wantedPrice.Amount;
+                }
+            }
+
+            foreach (var input in wantedPrices.Where(w => w.Amount > 0))
+            {
+                if (existingPrices.Any(p => string.Equals(p.CountryCode, input.CountryCode, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                var row = new PlanPrice { PlanId = id, CountryCode = input.CountryCode.ToUpperInvariant(), Amount = input.Amount };
+                _context.PlanPrices.Add(row);
+                existingPrices.Add(row);
+            }
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken));
+        var prices = new CountryPrices();
+        foreach (var row in existingPrices)
+            prices[row.CountryCode] = row.Amount;
+
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
     }
 
     public async Task DeactivatePlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -128,11 +226,137 @@ public class PlatformBillingService : IPlatformBillingService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing) => new(
+    public async Task<IReadOnlyList<PlatformCreditPackDto>> GetCreditPacksAsync(CancellationToken cancellationToken = default)
+    {
+        var pricing = await _pricing.GetAsync(cancellationToken);
+        var packs = await _context.CreditPacks.ToListAsync(cancellationToken);
+        var pricesByPack = await CatalogPricing.LoadPackPricesAsync(_context, packs.Select(p => p.Id).ToList(), cancellationToken);
+
+        return packs
+            .OrderBy(p => p.QuotaType).ThenBy(p => p.Units)
+            .Select(p => ToDto(p, pricing, pricesByPack.GetValueOrDefault(p.Id)))
+            .ToList();
+    }
+
+    public async Task<PlatformCreditPackDto> CreateCreditPackAsync(CreateCreditPackRequest request, CancellationToken cancellationToken = default)
+    {
+        await _createPackValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var pack = new CreditPack
+        {
+            QuotaType = request.QuotaType,
+            Name = request.Name.Trim(),
+            Units = request.Units,
+            PriceCents = request.PriceCents,
+            IsActive = true
+        };
+        _context.CreditPacks.Add(pack);
+
+        var prices = new CountryPrices();
+        foreach (var input in request.CountryPrices ?? Array.Empty<CountryPriceInput>())
+        {
+            if (input.Amount <= 0)
+                continue;
+
+            var code = input.CountryCode.ToUpperInvariant();
+            _context.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = pack.Id, CountryCode = code, Amount = input.Amount });
+            prices[code] = input.Amount;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return ToDto(pack, await _pricing.GetAsync(cancellationToken), prices);
+    }
+
+    public async Task<PlatformCreditPackDto> UpdateCreditPackAsync(Guid id, UpdateCreditPackRequest request, CancellationToken cancellationToken = default)
+    {
+        await _updatePackValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var pack = await _context.CreditPacks.FirstOrDefaultAsync(p => p.Id == id, cancellationToken)
+            ?? throw new NotFoundException(nameof(CreditPack), id);
+
+        pack.Name = request.Name.Trim();
+        pack.Units = request.Units;
+        pack.PriceCents = request.PriceCents;
+        pack.IsActive = request.IsActive;
+
+        var existingPrices = await _context.CreditPackPrices.Where(p => p.CreditPackId == id).ToListAsync(cancellationToken);
+        if (request.CountryPrices is { } wantedPrices)
+        {
+            foreach (var row in existingPrices.ToList())
+            {
+                var wantedPrice = wantedPrices.FirstOrDefault(w => string.Equals(w.CountryCode, row.CountryCode, StringComparison.OrdinalIgnoreCase));
+                if (wantedPrice is null || wantedPrice.Amount <= 0)
+                {
+                    _context.CreditPackPrices.Remove(row);
+                    existingPrices.Remove(row);
+                }
+                else
+                {
+                    row.Amount = wantedPrice.Amount;
+                }
+            }
+
+            foreach (var input in wantedPrices.Where(w => w.Amount > 0))
+            {
+                if (existingPrices.Any(p => string.Equals(p.CountryCode, input.CountryCode, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                var row = new CreditPackPrice { CreditPackId = id, CountryCode = input.CountryCode.ToUpperInvariant(), Amount = input.Amount };
+                _context.CreditPackPrices.Add(row);
+                existingPrices.Add(row);
+            }
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var prices = new CountryPrices();
+        foreach (var row in existingPrices)
+            prices[row.CountryCode] = row.Amount;
+
+        return ToDto(pack, await _pricing.GetAsync(cancellationToken), prices);
+    }
+
+    public async Task DeactivateCreditPackAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var pack = await _context.CreditPacks.FirstOrDefaultAsync(p => p.Id == id, cancellationToken)
+            ?? throw new NotFoundException(nameof(CreditPack), id);
+
+        if (!pack.IsActive)
+            return;
+
+        pack.IsActive = false;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<Dictionary<Guid, List<PlanQuota>>> LoadQuotasAsync(IReadOnlyCollection<Guid> planIds, CancellationToken cancellationToken) =>
+        (await _context.PlanQuotas.Where(q => planIds.Contains(q.PlanId)).ToListAsync(cancellationToken))
+            .GroupBy(q => q.PlanId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+    private static IReadOnlyList<CountryPriceDto> ToCountryPriceDtos(CountryPrices? prices) =>
+        (prices ?? new CountryPrices())
+            .Select(kv => (Pricing: RegionalPricingCatalog.All.FirstOrDefault(r => string.Equals(r.CountryCode, kv.Key, StringComparison.OrdinalIgnoreCase)), kv.Value))
+            .Where(x => x.Pricing is not null)
+            .OrderBy(x => x.Pricing!.CountryName)
+            .Select(x => new CountryPriceDto(x.Pricing!.CountryCode, x.Pricing.CountryName, x.Pricing.CurrencyCode, x.Pricing.CurrencySymbol, x.Value))
+            .ToList();
+
+    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing, IEnumerable<PlanQuota>? quotas, CountryPrices? prices) => new(
         p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
         p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive,
         pricing.CurrencyCode,
         pricing.CurrencySymbol,
-        // Two decimals: a plan price is a real amount someone pays, not a fraction-of-a-cent estimate.
-        Math.Round(p.PriceMonthlyCents / 100m * pricing.RateToUsd, 2, MidpointRounding.AwayFromZero));
+        // The operator's own country's price: an explicit one if set, else the base converted. Two decimals - a
+        // plan price is a real amount someone pays, not a fraction-of-a-cent estimate.
+        CatalogPricing.Local(p.PriceMonthlyCents, pricing, prices),
+        (quotas ?? Array.Empty<PlanQuota>()).OrderBy(q => q.QuotaType).Select(q => new IncludedQuotaDto(q.QuotaType, q.IncludedUnits)).ToList(),
+        ToCountryPriceDtos(prices));
+
+    private static PlatformCreditPackDto ToDto(CreditPack p, RegionalPricing pricing, CountryPrices? prices) => new(
+        p.Id, p.QuotaType, p.Name, p.Units, p.PriceCents, p.IsActive,
+        pricing.CurrencyCode,
+        pricing.CurrencySymbol,
+        CatalogPricing.Local(p.PriceCents, pricing, prices),
+        ToCountryPriceDtos(prices));
 }

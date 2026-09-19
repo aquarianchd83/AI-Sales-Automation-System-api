@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -36,6 +37,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IWhatsAppService _whatsApp;
     private readonly INotificationService _notifications;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
+    private readonly IQuotaGate _quota;
     private readonly ILogger<ConversationOrchestrator> _logger;
 
     public ConversationOrchestrator(
@@ -48,8 +50,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IWhatsAppService whatsApp,
         INotificationService notifications,
         ITenantConfigOverrideProvider tenantConfig,
+        IQuotaGate quota,
         ILogger<ConversationOrchestrator> logger)
     {
+        _quota = quota;
         _context = context;
         _dateTime = dateTime;
         _ai = ai;
@@ -109,6 +113,22 @@ public class ConversationOrchestrator : IConversationOrchestrator
             historyRows.Select(m => new AiConversationTurn(m.Direction, m.Text ?? string.Empty, m.CreatedAt)).ToList(),
             groundingChunks,
             conversation.Summary);
+
+        // Prepaid: one AI conversation is spent before the model is called (the provider bills whether or not the
+        // AI ends up replying or escalating). With none left the customer is handed to a human instead of being
+        // left unanswered. Keyed per inbound message, so a retry of this same run never spends twice.
+        if (!await _quota.TryConsumeAiConversationAsync(conversation.TenantId, $"ai-conv:{inboundMessageId}", inboundMessageId.ToString(), cancellationToken))
+        {
+            conversation.Status = ConversationStatus.Escalated;
+            var noQuotaHandoff = await _handoffs.GetOrCreateOpenHandoffAsync(
+                conversationId,
+                nameof(HandoffTriggerReason.RuleTriggered),
+                "AI conversation quota used up - the tenant needs to buy credits or wait for renewal.",
+                cancellationToken);
+            await _notifications.NotifyNewHandoffAsync(noQuotaHandoff.Id, conversationId, noQuotaHandoff.TriggerReason, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+            return;
+        }
 
         var result = await _ai.GetResponseAsync(context, cancellationToken);
 

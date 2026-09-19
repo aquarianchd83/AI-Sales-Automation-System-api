@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
@@ -27,6 +28,8 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
     private readonly IPlatformAuditService _auditService;
+    private readonly IQuotaGate _quota;
+    private readonly IQuotaLedgerService _ledger;
 
     public PlatformTenantService(
         IApplicationDbContext context,
@@ -39,8 +42,12 @@ public class PlatformTenantService : IPlatformTenantService
         IValidator<CreatePlatformTenantRequest> createValidator,
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
-        IPlatformAuditService auditService)
+        IPlatformAuditService auditService,
+        IQuotaGate quota,
+        IQuotaLedgerService ledger)
     {
+        _quota = quota;
+        _ledger = ledger;
         _context = context;
         _userManager = userManager;
         _whatsAppConfigProvider = whatsAppConfigProvider;
@@ -152,7 +159,8 @@ public class PlatformTenantService : IPlatformTenantService
             tenant.CountryCode,
             pricing.CurrencyCode,
             pricing.CurrencySymbol,
-            Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero));
+            Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero),
+            tenant.RefundRequestsEnabled);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -202,6 +210,7 @@ public class PlatformTenantService : IPlatformTenantService
         // Same reasoning as self-serve signup (see AuthService.SignUpAsync) - the tenant's background
         // jobs exist and are registered from the moment it does.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
+        await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantCreated, tenant.Id, user.Id,
@@ -296,16 +305,26 @@ public class PlatformTenantService : IPlatformTenantService
         subscription.PlanId = plan.Id;
 
         // Self-serve checkout (BillingService.ChoosePlanAsync) stamps the billing period; an override
-        // used to leave it null, giving the tenant a paid plan but no period - and so no invoices.
-        // Only stamped when missing: switching plans mid-period must not restart it.
-        if (subscription.CurrentPeriodStartUtc is null)
+        // used to leave it null, giving the tenant a paid plan but no period. Stamped when missing or already
+        // lapsed - and only then: switching plans mid-period must not restart a period that is still running.
+        var now = _dateTime.UtcNow;
+        if (subscription.CurrentPeriodStartUtc is null || subscription.CurrentPeriodEndUtc is not { } periodEnd || periodEnd <= now)
         {
-            var now = _dateTime.UtcNow;
             subscription.CurrentPeriodStartUtc = now;
             subscription.CurrentPeriodEndUtc = now.AddMonths(1);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // A plan is only worth having if it brings its quota: self-serve checkout and the hourly renewal both
+        // allocate it, so an operator's override must too, or the tenant would hold a plan and be unable to send
+        // anything until its next renewal. A new plan replaces the old one's leftovers (credits are kept); the
+        // grant runs to the end of the period the tenant is already in. No payment backs it - the operator chose it.
+        if (previousPlanId != plan.Id)
+        {
+            await _ledger.ForfeitPlanAllocationsAsync(tenantId, "Plan changed by an operator", cancellationToken);
+            await _ledger.AllocatePlanQuotaAsync(tenantId, plan.Id, now, subscription.CurrentPeriodEndUtc!.Value, null, cancellationToken);
+        }
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantPlanOverridden, tenantId,

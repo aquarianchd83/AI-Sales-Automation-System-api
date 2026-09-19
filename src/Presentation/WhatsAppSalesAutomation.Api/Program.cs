@@ -174,6 +174,7 @@ try
         // The plan catalog signup/billing depend on - real data every environment needs, not a
         // Seed:* gated dev convenience, so this always runs (see PlanSeeder's own doc comment).
         await PlanSeeder.SeedAsync(scope.ServiceProvider);
+        await QuotaCatalogSeeder.SeedAsync(scope.ServiceProvider);
 
         // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
         if (app.Environment.IsDevelopment())

@@ -18,6 +18,21 @@ public record PlanDto(
     int PriceMonthlyCents,
     string CurrencyCode,
     string CurrencySymbol,
+    decimal LocalPriceAmount,
+    IReadOnlyList<IncludedQuotaDto> IncludedQuotas);
+
+/// <summary>Units of one quota type a plan includes each billing period.</summary>
+public record IncludedQuotaDto(Domain.Enums.QuotaType QuotaType, decimal Units);
+
+/// <summary>One purchasable credit pack, priced in the calling tenant's own currency (PriceCents stays base USD).</summary>
+public record CreditPackDto(
+    Guid Id,
+    Domain.Enums.QuotaType QuotaType,
+    string Name,
+    decimal Units,
+    int PriceCents,
+    string CurrencyCode,
+    string CurrencySymbol,
     decimal LocalPriceAmount);
 
 /// <summary>One row of the public region catalog (GET /billing/regions, no auth required) - what the
@@ -101,4 +116,5 @@ public record PaymentDto(
     string CurrencySymbol,
     decimal LocalAmount,
     string Provider,
-    DateTime PaidAtUtc);
+    DateTime PaidAtUtc,
+    string Kind);

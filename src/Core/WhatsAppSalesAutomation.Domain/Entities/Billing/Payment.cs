@@ -1,4 +1,5 @@
 using WhatsAppSalesAutomation.Domain.Common;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Domain.Entities.Billing;
 
@@ -17,7 +18,15 @@ public class Payment : BaseEntity, ITenantOwned
 {
     public Guid TenantId { get; set; }
 
-    public Guid PlanId { get; set; }
+    public PaymentKind Kind { get; set; } = PaymentKind.Subscription;
+
+    /// <summary>Null for a credit-pack purchase, which is not tied to a plan.</summary>
+    public Guid? PlanId { get; set; }
+
+    public Guid? CreditPackId { get; set; }
+
+    /// <summary>For a Refund row: the payment it returns money for. AmountCents/LocalAmount are negative.</summary>
+    public Guid? RefundOfPaymentId { get; set; }
 
     public string PlanName { get; set; } = string.Empty;
 
