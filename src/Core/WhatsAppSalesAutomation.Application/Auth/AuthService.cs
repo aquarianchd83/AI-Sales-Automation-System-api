@@ -1,9 +1,11 @@
+using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -21,10 +23,13 @@ public class AuthService : IAuthService
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantSlugResolver _slugResolver;
     private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly IQuotaGate _quota;
     private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
     private readonly IValidator<ChangePasswordRequest> _changePasswordValidator;
+
+    private readonly ICountryAvailability _countries;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -33,17 +38,21 @@ public class AuthService : IAuthService
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
         ITenantJobProvisioner jobProvisioner,
+        IQuotaGate quota,
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
-        IValidator<ChangePasswordRequest> changePasswordValidator)
+        IValidator<ChangePasswordRequest> changePasswordValidator,
+        ICountryAvailability countries)
     {
+        _countries = countries;
         _userManager = userManager;
         _context = context;
         _jwtTokenService = jwtTokenService;
         _dateTime = dateTime;
         _slugResolver = slugResolver;
         _jobProvisioner = jobProvisioner;
+        _quota = quota;
         _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
@@ -60,6 +69,8 @@ public class AuthService : IAuthService
 
         var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
 
+        await _countries.EnsureAllowedAsync(request.CountryCode, null, cancellationToken);
+
         var tenant = new Tenant
         {
             Name = request.CompanyName,
@@ -67,6 +78,7 @@ public class AuthService : IAuthService
             Status = TenantStatus.Trial,
             TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
             CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null,
             // Unlike CountryCode (no universal default makes sense there), every tenant gets an
             // explicit Timezone from creation - seeded to the platform default (IST) when the signup
             // form didn't collect one, the same value ITenantTimeZoneProvider would have fallen back
@@ -101,6 +113,10 @@ public class AuthService : IAuthService
         // Creates this tenant's background job schedules and registers them with Hangfire, so its first
         // campaign can send within the minute rather than waiting for the daily reconcile pass.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
+
+        // A trial tenant has no plan and so no included quota - without this it could not send a message before
+        // paying. The grant expires with the trial.
+        await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);

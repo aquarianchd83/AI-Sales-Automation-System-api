@@ -11,11 +11,18 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.ToTable("Payments");
         builder.HasKey(p => p.Id);
 
+        builder.Property(p => p.Kind).HasConversion<string>().HasMaxLength(20);
         builder.Property(p => p.PlanName).IsRequired().HasMaxLength(100);
         builder.Property(p => p.CurrencyCode).IsRequired().HasMaxLength(3);
         builder.Property(p => p.CurrencySymbol).IsRequired().HasMaxLength(10);
         builder.Property(p => p.Provider).IsRequired().HasMaxLength(20);
         builder.Property(p => p.LocalAmount).HasColumnType("decimal(18,2)");
+        builder.Property(p => p.TaxLocal).HasColumnType("decimal(18,2)");
+        builder.Property(p => p.TotalLocal).HasColumnType("decimal(18,2)");
+        builder.Property(p => p.AmountInr).HasColumnType("decimal(18,2)");
+        builder.Property(p => p.FxRateToInr).HasColumnType("decimal(18,6)");
+        builder.Property(p => p.CountryCode).HasMaxLength(2);
+        builder.Property(p => p.StateCode).HasMaxLength(5);
 
         // Not unique, unlike Subscription's TenantId index - a tenant accumulates many payments
         // over time, this is just the lookup PlanLimitsService-style code would use to page/filter

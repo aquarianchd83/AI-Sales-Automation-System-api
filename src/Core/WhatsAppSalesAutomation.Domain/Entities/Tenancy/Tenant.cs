@@ -37,6 +37,10 @@ public class Tenant : BaseEntity
     /// unmatched code falls back to USD, never an error.</summary>
     public string? CountryCode { get; set; }
 
+    /// <summary>The tenant's state, where its country's tax splits by state (India: a code from IndianStates). Decides
+    /// CGST + SGST versus IGST on what it pays. Null when unknown or not applicable.</summary>
+    public string? StateCode { get; set; }
+
     /// <summary>IANA timezone id (e.g. "America/New_York", "Asia/Kolkata") - one of
     /// TimeZoneCatalog.All, set at signup or changed later by the tenant's own Admin or a
     /// PlatformSuperAdmin. Null defaults to TimeZoneCatalog.DefaultId (India Standard Time) via
@@ -60,6 +64,18 @@ public class Tenant : BaseEntity
     public string? SupportEmail { get; set; }
 
     public string? SupportPhone { get; set; }
+
+    /// <summary>Switch, set by a PlatformSuperAdmin per tenant: whether this tenant sees a "request a refund"
+    /// option at all. Off by default. The server enforces it - hiding the button is not the control.</summary>
+    public bool RefundRequestsEnabled { get; set; }
+
+    /// <summary>Where billing alerts go, set by the tenant's own admin. Null email falls back to the
+    /// owner's login email; a null phone means no WhatsApp alerts.</summary>
+    public string? BillingAlertEmail { get; set; }
+
+    public string? BillingAlertPhoneE164 { get; set; }
+
+    public bool BillingAlertWhatsAppEnabled { get; set; } = true;
 
     /// <summary>Words and phrases describing what the business deals in - trimmed and de-duplicated
     /// case-insensitively on save. Persisted as a JSON array in one column (see TenantConfiguration);

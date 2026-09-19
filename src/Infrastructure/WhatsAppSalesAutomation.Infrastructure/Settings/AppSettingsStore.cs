@@ -78,6 +78,37 @@ public class AppSettingsStore : IAppSettingsStore
         _reloader.Reload();
     }
 
+    public async Task ReplacePrefixesAsync(
+        IReadOnlyDictionary<string, string?> values, IReadOnlyCollection<string> prefixes, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        if (values.Keys.Any(k => !prefixes.Any(p => k.StartsWith(p, StringComparison.OrdinalIgnoreCase))))
+            throw new ArgumentException("Every key must fall under one of the prefixes being replaced.", nameof(values));
+
+        var stored = await _context.AppSettings.ToListAsync(cancellationToken);
+        var owned = stored.Where(s => prefixes.Any(p => s.Key.StartsWith(p, StringComparison.OrdinalIgnoreCase))).ToList();
+
+        foreach (var row in owned.Where(r => !values.ContainsKey(r.Key)))
+            _context.AppSettings.Remove(row);
+
+        var byKey = owned.ToDictionary(r => r.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in values)
+        {
+            if (!byKey.TryGetValue(key, out var row))
+            {
+                row = new AppSetting { Key = key };
+                _context.AppSettings.Add(row);
+            }
+
+            row.IsSecret = false;
+            row.Value = value;
+            row.UpdatedAtUtc = _dateTime.UtcNow;
+            row.UpdatedByUserId = updatedByUserId;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        _reloader.Reload();
+    }
+
     private static string? TryUnprotect(IDataProtector protector, string value)
     {
         try

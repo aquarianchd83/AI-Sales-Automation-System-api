@@ -3,11 +3,13 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 using TenantSubscription = WhatsAppSalesAutomation.Domain.Entities.Billing.Subscription;
 using Plan = WhatsAppSalesAutomation.Domain.Entities.Billing.Plan;
 using Payment = WhatsAppSalesAutomation.Domain.Entities.Billing.Payment;
+using CreditPack = WhatsAppSalesAutomation.Domain.Entities.Billing.CreditPack;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Billing;
 
@@ -23,13 +25,19 @@ public class BillingService : IBillingService
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly IQuotaLedgerService _quota;
+    private readonly IPricingService _pricing;
 
     public BillingService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
         IDateTimeProvider dateTime,
-        ITenantJobProvisioner jobProvisioner)
+        ITenantJobProvisioner jobProvisioner,
+        IQuotaLedgerService quota,
+        IPricingService pricing)
     {
+        _pricing = pricing;
+        _quota = quota;
         _context = context;
         _tenantContext = tenantContext;
         _dateTime = dateTime;
@@ -44,25 +52,46 @@ public class BillingService : IBillingService
     public async Task<IReadOnlyList<PlanDto>> GetPlansAsync(string? countryCode = null, CancellationToken cancellationToken = default)
     {
         var resolvedCountryCode = countryCode;
+        string? stateCode = null;
         if (resolvedCountryCode is null && _tenantContext.TenantId is { } tenantId)
         {
-            resolvedCountryCode = await _context.Tenants
+            var tenant = await _context.Tenants
                 .Where(t => t.Id == tenantId)
-                .Select(t => t.CountryCode)
+                .Select(t => new { t.CountryCode, t.StateCode })
                 .FirstOrDefaultAsync(cancellationToken);
+            resolvedCountryCode = tenant?.CountryCode;
+            stateCode = tenant?.StateCode;
         }
 
-        var pricing = RegionalPricingCatalog.Resolve(resolvedCountryCode);
+        var region = RegionalPricingCatalog.Resolve(resolvedCountryCode);
 
         var plans = await _context.Plans
             .Where(p => p.IsActive)
             .OrderBy(p => p.PriceMonthlyCents)
             .ToListAsync(cancellationToken);
 
-        return plans.Select(p => new PlanDto(
-            p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize,
-            p.PriceMonthlyCents, pricing.CurrencyCode, pricing.CurrencySymbol,
-            Math.Round(p.PriceMonthlyCents / 100m * pricing.RateToUsd, 2))).ToList();
+        var planIds = plans.Select(p => p.Id).ToList();
+        var pricesByPlan = await CatalogPricing.LoadPlanPricesAsync(_context, planIds, cancellationToken);
+        var quotasByPlan = (await _context.PlanQuotas.Where(q => planIds.Contains(q.PlanId)).ToListAsync(cancellationToken))
+            .GroupBy(q => q.PlanId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<IncludedQuotaDto>)g.OrderBy(q => q.QuotaType).Select(q => new IncludedQuotaDto(q.QuotaType, q.IncludedUnits)).ToList());
+
+        // A plan with no price set for this country is not sold there - it is left out, never shown at a converted price.
+        var result = new List<PlanDto>();
+        foreach (var p in plans)
+        {
+            var quote = _pricing.Quote(pricesByPlan.GetValueOrDefault(p.Id)?.GetValueOrDefault(region.CountryCode), resolvedCountryCode, stateCode);
+            if (quote is null)
+                continue;
+
+            result.Add(new PlanDto(
+                p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize,
+                quote.SubtotalUsdCents, quote.CurrencyCode, quote.CurrencySymbol, quote.Subtotal,
+                quotasByPlan.GetValueOrDefault(p.Id) ?? Array.Empty<IncludedQuotaDto>(),
+                quote.TaxLines, quote.Tax, quote.Total));
+        }
+
+        return result;
     }
 
     public Task<IReadOnlyList<RegionDto>> GetRegionsAsync(CancellationToken cancellationToken = default) =>
@@ -121,21 +150,21 @@ public class BillingService : IBillingService
 
         tenant.Status = TenantStatus.Active;
 
-        var pricing = RegionalPricingCatalog.Resolve(tenant.CountryCode);
-        _context.Payments.Add(new Payment
-        {
-            TenantId = tenantId,
-            PlanId = plan.Id,
-            PlanName = plan.Name,
-            AmountCents = plan.PriceMonthlyCents,
-            CurrencyCode = pricing.CurrencyCode,
-            CurrencySymbol = pricing.CurrencySymbol,
-            LocalAmount = Math.Round(plan.PriceMonthlyCents / 100m * pricing.RateToUsd, 2),
-            Provider = "Simulated",
-            PaidAtUtc = now
-        });
+        var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+        var planPrice = (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken))
+            .GetValueOrDefault(plan.Id)?.GetValueOrDefault(region.CountryCode);
+        var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode)
+            ?? throw new ConflictException("This plan isn't available in your country.");
+        var payment = PaymentFactory.For(tenantId, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id,
+            periodStartUtc: now, periodEndUtc: now.AddMonths(1));
+        _context.Payments.Add(payment);
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // A new paid period replaces the old one: whatever is left of the previous period's included quota
+        // is forfeited so two periods' allowances can never stack. Purchased credits are untouched.
+        await _quota.ForfeitPlanAllocationsAsync(tenantId, "Replaced by a new plan period", cancellationToken);
+        await _quota.AllocatePlanQuotaAsync(tenantId, plan.Id, now, now.AddMonths(1), payment.Id, cancellationToken);
 
         // Subscribing is the one non-operator path that moves a tenant's status, so it re-syncs its
         // background jobs like the Platform Admin Console's own actions do: a tenant that was suspended
@@ -155,7 +184,59 @@ public class BillingService : IBillingService
             .OrderByDescending(p => p.PaidAtUtc)
             .ToListAsync(cancellationToken);
 
-        return payments.Select(p => new PaymentDto(
-            p.Id, p.PlanName, p.AmountCents, p.CurrencyCode, p.CurrencySymbol, p.LocalAmount, p.Provider, p.PaidAtUtc)).ToList();
+        return payments.Select(PaymentDto.From).ToList();
+    }
+
+    public async Task<IReadOnlyList<CreditPackDto>> GetCreditPacksAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var tenant = await _context.Tenants.Where(t => t.Id == tenantId).Select(t => new { t.CountryCode, t.StateCode }).FirstOrDefaultAsync(cancellationToken);
+        var region = RegionalPricingCatalog.Resolve(tenant?.CountryCode);
+
+        var packs = await _context.CreditPacks.Where(p => p.IsActive).ToListAsync(cancellationToken);
+        var pricesByPack = await CatalogPricing.LoadPackPricesAsync(_context, packs.Select(p => p.Id).ToList(), cancellationToken);
+
+        // A pack with no price for this country is not sold there.
+        var result = new List<CreditPackDto>();
+        foreach (var p in packs.OrderBy(p => p.QuotaType).ThenBy(p => p.Units))
+        {
+            var quote = _pricing.Quote(pricesByPack.GetValueOrDefault(p.Id)?.GetValueOrDefault(region.CountryCode), tenant?.CountryCode, tenant?.StateCode);
+            if (quote is null)
+                continue;
+
+            result.Add(new CreditPackDto(p.Id, p.QuotaType, p.Name, p.Units, quote.SubtotalUsdCents, quote.CurrencyCode, quote.CurrencySymbol,
+                quote.Subtotal, quote.TaxLines, quote.Tax, quote.Total));
+        }
+
+        return result;
+    }
+
+    public async Task<PaymentDto> PurchaseCreditPackAsync(Guid tenantId, Guid packId, CancellationToken cancellationToken = default)
+    {
+        var pack = await _context.CreditPacks.FirstOrDefaultAsync(p => p.Id == packId && p.IsActive, cancellationToken)
+            ?? throw new NotFoundException(nameof(CreditPack), packId);
+
+        var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Tenant), tenantId);
+
+        var subscription = await _context.Subscriptions.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
+        var canBuy = subscription is { PlanId: not null } && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.PastDue
+                     && tenant.Status is TenantStatus.Active or TenantStatus.Trial;
+        if (!canBuy)
+            throw new ConflictException("Credits can only be bought while you have an active plan. Choose a plan first.");
+
+        var now = _dateTime.UtcNow;
+        var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+        var packPrice = (await CatalogPricing.LoadPackPricesAsync(_context, new[] { pack.Id }, cancellationToken))
+            .GetValueOrDefault(pack.Id)?.GetValueOrDefault(region.CountryCode);
+        var quote = _pricing.Quote(packPrice, tenant.CountryCode, tenant.StateCode)
+            ?? throw new ConflictException("This credit pack isn't available in your country.");
+        var payment = PaymentFactory.For(tenantId, PaymentKind.CreditPack, pack.Name, quote, now, creditPackId: pack.Id);
+        _context.Payments.Add(payment);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Idempotent per payment id, so a retry after a failure here can never grant twice.
+        await _quota.GrantCreditsAsync(tenantId, pack, payment.Id, now, cancellationToken);
+
+        return PaymentDto.From(payment);
     }
 }

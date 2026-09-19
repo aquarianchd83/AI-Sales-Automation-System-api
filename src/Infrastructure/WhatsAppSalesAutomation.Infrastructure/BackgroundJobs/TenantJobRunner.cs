@@ -4,6 +4,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
+using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
@@ -145,6 +148,8 @@ public class TenantJobRunner
             if (schedule is null)
                 return;
 
+            var previousFailures = schedule.ConsecutiveFailureCount;
+
             schedule.LastRunAtUtc = _dateTime.UtcNow;
             schedule.LastRunOutcome = outcome;
             schedule.LastRunSummary = Truncate(summary);
@@ -159,11 +164,57 @@ public class TenantJobRunner
             };
 
             await context.SaveChangesAsync(cancellationToken);
+
+            await RaisePlatformAlertAsync(scope.ServiceProvider, context, schedule, previousFailures, outcome, cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not record the {JobType} run outcome for tenant {TenantId}", jobType, tenantId);
         }
+    }
+
+    /// <summary>Tells the platform operators when a job has started failing and when it has stopped. Once
+    /// per streak in each direction, never per run: a minutely job that fails for an hour is one alert plus
+    /// one recovery, not sixty. <see cref="PlatformJobAlertRules"/> decides how long a streak has to be.
+    /// The run's own outcome is already saved, and the notifier never throws, so this can only add to it.</summary>
+    private async Task RaisePlatformAlertAsync(
+        IServiceProvider services,
+        IApplicationDbContext context,
+        TenantJobSchedule schedule,
+        int previousFailures,
+        TenantJobRunOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        var threshold = PlatformJobAlertRules.FailureThreshold(schedule.JobType);
+        var isNewFailingStreak = outcome == TenantJobRunOutcome.Failed && schedule.ConsecutiveFailureCount == threshold;
+        var isRecovery = outcome == TenantJobRunOutcome.Succeeded && previousFailures >= threshold;
+        if (!isNewFailingStreak && !isRecovery)
+            return;
+
+        var tenantName = await context.Tenants
+            .Where(t => t.Id == schedule.TenantId)
+            .Select(t => t.Name)
+            .FirstOrDefaultAsync(cancellationToken) ?? "Unknown tenant";
+        var jobName = TenantJobCatalog.All.FirstOrDefault(j => j.Key == schedule.JobType)?.DisplayName ?? schedule.JobType;
+
+        // A streak is identified by when it crossed the threshold - unique per streak, so a later streak on
+        // the same job is a fresh alert rather than being swallowed by the dedupe index.
+        var episode = _dateTime.UtcNow.ToString("O");
+
+        var request = isNewFailingStreak
+            ? new PlatformNotificationRequest(
+                PlatformNotificationKind.JobFailing, PlatformNotificationSeverity.Critical, episode,
+                $"{jobName} is failing for {tenantName}",
+                $"{jobName} has failed {schedule.ConsecutiveFailureCount} run(s) in a row for {tenantName}. " +
+                $"Latest error: {schedule.LastRunSummary ?? "none recorded"}. See Platform > Background jobs.",
+                schedule.TenantId, schedule.JobType)
+            : new PlatformNotificationRequest(
+                PlatformNotificationKind.JobRecovered, PlatformNotificationSeverity.Info, episode,
+                $"{jobName} recovered for {tenantName}",
+                $"{jobName} ran successfully again for {tenantName} after {previousFailures} failed run(s).",
+                schedule.TenantId, schedule.JobType);
+
+        await services.GetRequiredService<IPlatformNotifier>().NotifyAsync(request, cancellationToken);
     }
 
     private static string? Truncate(string? summary)

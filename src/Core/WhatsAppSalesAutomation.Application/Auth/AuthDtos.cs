@@ -31,7 +31,8 @@ public record TenantSignUpRequest(
     string Password,
     string? CountryCode = null,
     string? Timezone = null,
-    string? ProductName = null);
+    string? ProductName = null,
+    string? StateCode = null);
 
 public record RefreshTokenRequest(string RefreshToken);
 

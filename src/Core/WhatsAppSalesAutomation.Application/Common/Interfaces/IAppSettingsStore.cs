@@ -18,4 +18,9 @@ public interface IAppSettingsStore
     /// request/job scope sees the change immediately - no app restart needed (except for the
     /// Provider/EmbeddingProvider keys, which pick their concrete client type at DI-build time).</summary>
     Task UpsertAsync(IReadOnlyDictionary<string, string?> values, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Writes the given rows (plain, non-secret, any key) and deletes every stored row under <paramref name="prefixes"/>
+    /// that is not among them, then reloads the live IConfiguration. For settings whose keys are not fixed in the
+    /// catalog - a per-country or per-model rate table - where the caller owns the whole prefix.</summary>
+    Task ReplacePrefixesAsync(IReadOnlyDictionary<string, string?> values, IReadOnlyCollection<string> prefixes, Guid? updatedByUserId, CancellationToken cancellationToken = default);
 }

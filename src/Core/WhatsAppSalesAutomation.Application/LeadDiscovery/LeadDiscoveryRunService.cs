@@ -3,8 +3,10 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
 
@@ -33,6 +35,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly IApplicationDbContext _context;
     private readonly ILeadDiscoveryAgent _agent;
     private readonly IPlanLimitsService _planLimits;
+    private readonly IQuotaGate _quota;
     private readonly IDateTimeProvider _dateTime;
     private readonly LeadDiscoveryOptions _options;
     private readonly LeadDiscoveryPricingOptions _pricing;
@@ -41,13 +44,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         IApplicationDbContext context,
         ILeadDiscoveryAgent agent,
         IPlanLimitsService planLimits,
+        IQuotaGate quota,
         IDateTimeProvider dateTime,
         IOptions<LeadDiscoveryOptions> options,
-        IOptions<LeadDiscoveryPricingOptions> pricing)
+        IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing)
     {
         _context = context;
         _agent = agent;
         _planLimits = planLimits;
+        _quota = quota;
         _dateTime = dateTime;
         _options = options.Value;
         _pricing = pricing.Value;
@@ -70,6 +75,13 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (batchSize <= 0)
             return "Skipped: the tenant's plan allows no discovered leads per run.";
 
+        // Prepaid: every candidate the agent evaluates is charged - fresh, duplicate or rejected - because the
+        // provider bills the research either way. No candidates left means no run, and no agent call.
+        if (await _quota.GetAvailableAsync(tenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
+            return "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.";
+
+        var runKey = Guid.NewGuid().ToString("N");
+
         var rules = new QualificationRules(
             profile.PhoneRequired, profile.EmailRequired, profile.IndependentBusiness, profile.MinimumLeadScore, profile.RequiredFields);
 
@@ -85,6 +97,14 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         while (stats.Saved < batchSize && stats.Rounds < _options.MaxRounds)
         {
+            // Never ask the agent for more candidates than the tenant can still pay for.
+            var affordable = await _quota.GetAvailableAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
+            if (affordable < 1)
+            {
+                stats.QuotaExhausted = true;
+                break;
+            }
+
             stats.Rounds++;
             var remaining = batchSize - stats.Saved;
 
@@ -92,7 +112,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 profile.TargetBusinessType,
                 profile.Keywords,
                 profile.Locations,
-                Math.Min(remaining, _options.MaxCandidatesPerRound),
+                (int)Math.Min(Math.Min(remaining, _options.MaxCandidatesPerRound), Math.Floor(affordable)),
                 profile.RequiredFields,
                 profile.PhoneRequired,
                 profile.EmailRequired,
@@ -111,6 +131,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             if (result.Candidates.Count == 0)
                 break;
 
+            var rejectedBefore = stats.Rejected;
             var qualified = new List<VerifiedLead>();
             foreach (var assessment in LeadQualification.AssessAll(result.Candidates, result.Evidence, rules))
             {
@@ -124,6 +145,17 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             stats.Duplicates += qualified.Count - fresh.Count;
 
             var toSave = fresh.Take(remaining).ToList();
+
+            // Charged for what was evaluated this round, with the split recorded on the ledger entry so the tenant
+            // can see why 25 candidates cost 25 units when only 12 became leads.
+            await _quota.ConsumeLeadCandidatesAsync(
+                tenantId,
+                result.Candidates.Count,
+                $"lead:{runKey}:r{stats.Rounds}",
+                runKey,
+                $"{result.Candidates.Count} candidates: {toSave.Count} new, {qualified.Count - fresh.Count} duplicate, {stats.Rejected - rejectedBefore} rejected",
+                cancellationToken);
+
             if (toSave.Count == 0)
                 break;
 
@@ -304,6 +336,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         public int Saved { get; set; }
         public int CustomersAdded { get; set; }
         public int Duplicates { get; set; }
+        public bool QuotaExhausted { get; set; }
         public LeadDiscoveryUsage Usage { get; set; } = LeadDiscoveryUsage.None;
 
         public int Rejected => _rejections.Values.Sum();
@@ -319,6 +352,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                           $"inputTokens={Usage.InputTokens} outputTokens={Usage.OutputTokens} " +
                           $"cacheReadTokens={Usage.CacheReadInputTokens} cacheWriteTokens={Usage.CacheCreationInputTokens} " +
                           $"webSearches={Usage.WebSearches} webFetches={Usage.WebFetches}";
+
+            if (QuotaExhausted)
+                summary += " stoppedEarly=quotaExhausted";
 
             return _rejections.Count == 0
                 ? summary

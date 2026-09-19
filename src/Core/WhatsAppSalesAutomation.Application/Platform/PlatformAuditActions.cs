@@ -29,4 +29,13 @@ public static class PlatformAuditActions
     public const string TenantJobScheduleUpdated = "TenantJobScheduleUpdated";
     public const string TenantJobTriggered = "TenantJobTriggered";
     public const string TenantJobsReconciled = "TenantJobsReconciled";
+    public const string TenantQuotaAdjusted = "TenantQuotaAdjusted";
+    public const string RefundApproved = "RefundApproved";
+    public const string RefundRejected = "RefundRejected";
+    public const string RefundIssued = "RefundIssued";
+    public const string RefundRequestsToggled = "RefundRequestsToggled";
+    public const string CreditPackCreated = "CreditPackCreated";
+    public const string CreditPackUpdated = "CreditPackUpdated";
+    public const string CreditPackDeactivated = "CreditPackDeactivated";
+    public const string ConfigurationUpdated = "ConfigurationUpdated";
 }

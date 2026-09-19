@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
@@ -19,6 +20,7 @@ public class ConversationService : IConversationService
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly IValidator<ChangeConversationModeRequest> _modeValidator;
     private readonly IValidator<SendConversationMessageRequest> _sendValidator;
+    private readonly IQuotaGate _quota;
 
     public ConversationService(
         IApplicationDbContext context,
@@ -26,8 +28,10 @@ public class ConversationService : IConversationService
         IWhatsAppService whatsApp,
         ITenantConfigOverrideProvider tenantConfig,
         IValidator<ChangeConversationModeRequest> modeValidator,
-        IValidator<SendConversationMessageRequest> sendValidator)
+        IValidator<SendConversationMessageRequest> sendValidator,
+        IQuotaGate quota)
     {
+        _quota = quota;
         _context = context;
         _dateTime = dateTime;
         _whatsApp = whatsApp;
@@ -187,6 +191,7 @@ public class ConversationService : IConversationService
 
         string resolvedText;
         string? templateName = null;
+        TemplateCategory? templateCategory = null;
         string languageCode = "en";
         IReadOnlyList<string> parameterValues = Array.Empty<string>();
 
@@ -217,8 +222,17 @@ public class ConversationService : IConversationService
             resolvedText = text;
             parameterValues = values;
             templateName = template.WhatsAppTemplateName;
+            templateCategory = template.Category;
             languageCode = template.Language;
         }
+
+        var idempotencyKey = $"agent:{Guid.NewGuid()}";
+
+        // A template send is billable, so it spends prepaid quota first. A free-form reply inside the customer
+        // service window costs nothing and is never gated. Told plainly to the agent - they can see the balance.
+        if (templateCategory is { } category &&
+            !await _quota.TryConsumeWhatsAppTemplateAsync(conversation.TenantId, category, $"wa:{idempotencyKey}:1", idempotencyKey, cancellationToken))
+            throw new ConflictException("Your WhatsApp message quota is used up. Buy credits or wait for your plan to renew to send template messages.");
 
         var message = new Message
         {
@@ -232,7 +246,7 @@ public class ConversationService : IConversationService
             // fresh guid per send is enough: nothing auto-retries an agent-typed message the way the
             // campaign pipeline retries a queued send, so there is no redelivery to stay idempotent
             // against in the first place.
-            IdempotencyKey = $"agent:{Guid.NewGuid()}",
+            IdempotencyKey = idempotencyKey,
             Status = MessageStatus.Queued
         };
         _context.Messages.Add(message);
@@ -254,6 +268,9 @@ public class ConversationService : IConversationService
         {
             message.Status = MessageStatus.Failed;
             message.FailureReason = result.ErrorMessage;
+
+            if (templateCategory is not null)
+                await _quota.ReleaseAsync(conversation.TenantId, $"wa:{idempotencyKey}:1", cancellationToken);
         }
 
         conversation.LastMessageAt = _dateTime.UtcNow;

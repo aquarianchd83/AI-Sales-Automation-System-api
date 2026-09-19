@@ -18,7 +18,29 @@ public record PlanDto(
     int PriceMonthlyCents,
     string CurrencyCode,
     string CurrencySymbol,
-    decimal LocalPriceAmount);
+    decimal LocalPriceAmount,
+    IReadOnlyList<IncludedQuotaDto> IncludedQuotas,
+    // Tax added on top of LocalPriceAmount for the tenant this is quoted to, and what they would pay in all.
+    IReadOnlyList<TaxLineDto> TaxLines,
+    decimal TaxLocal,
+    decimal TotalLocal);
+
+/// <summary>Units of one quota type a plan includes each billing period.</summary>
+public record IncludedQuotaDto(Domain.Enums.QuotaType QuotaType, decimal Units);
+
+/// <summary>One purchasable credit pack, priced in the calling tenant's own currency (PriceCents stays base USD).</summary>
+public record CreditPackDto(
+    Guid Id,
+    Domain.Enums.QuotaType QuotaType,
+    string Name,
+    decimal Units,
+    int PriceCents,
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal LocalPriceAmount,
+    IReadOnlyList<TaxLineDto> TaxLines,
+    decimal TaxLocal,
+    decimal TotalLocal);
 
 /// <summary>One row of the public region catalog (GET /billing/regions, no auth required) - what the
 /// signup page's country picker renders. See RegionalPricingCatalog's own doc comment for why this is
@@ -101,4 +123,31 @@ public record PaymentDto(
     string CurrencySymbol,
     decimal LocalAmount,
     string Provider,
-    DateTime PaidAtUtc);
+    DateTime PaidAtUtc,
+    string Kind,
+    // LocalAmount is the price before tax; the tenant paid TotalLocal. A refund row carries all of these negative.
+    string? CountryCode = null,
+    decimal TaxLocal = 0,
+    decimal TotalLocal = 0,
+    IReadOnlyList<TaxLineDto>? TaxLines = null,
+    decimal AmountInr = 0)
+{
+    public static PaymentDto From(Domain.Entities.Billing.Payment p) => new(
+        p.Id, p.PlanName, p.AmountCents, p.CurrencyCode, p.CurrencySymbol, p.LocalAmount, p.Provider, p.PaidAtUtc, p.Kind.ToString(),
+        p.CountryCode, p.TaxLocal, p.TotalPaidLocal, ParseTaxLines(p.TaxLinesJson), p.AmountInr);
+
+    public static IReadOnlyList<TaxLineDto> ParseTaxLines(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return Array.Empty<TaxLineDto>();
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<TaxLineDto>>(json) ?? new List<TaxLineDto>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Array.Empty<TaxLineDto>();
+        }
+    }
+}

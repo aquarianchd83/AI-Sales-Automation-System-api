@@ -254,5 +254,11 @@ public static class DependencyInjection
         services.AddScoped<MessageTemplateSyncJob>();
         services.AddScoped<LeadDiscoveryJob>();
         services.AddScoped<TenantJobReconciliationJob>();
+        services.AddScoped<SubscriptionMaintenanceJob>();
+        services.AddScoped<QuotaAlertJob>();
+
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpOptions>(configuration.GetSection("Email:Smtp"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IEmailSender, WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpEmailSender>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender, WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>();
     }
 }

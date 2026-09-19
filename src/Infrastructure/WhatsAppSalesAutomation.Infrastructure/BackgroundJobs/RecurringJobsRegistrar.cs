@@ -28,6 +28,16 @@ public static class RecurringJobsRegistrar
         // at :00.
         recurringJobs.AddOrUpdate<TenantJobReconciliationJob>(
             "tenant-job-reconciliation", job => job.RunAsync(), "30 0 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Hourly: renews subscriptions whose paid period has ended and writes off lapsed quota. Idempotent,
+        // so an overlapping or repeated run is harmless.
+        recurringJobs.AddOrUpdate<SubscriptionMaintenanceJob>(
+            "subscription-maintenance", job => job.RunAsync(), "5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Every 15 minutes: low-balance, used-up and credits-expiring alerts. Frequent so a tenant that has just
+        // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
+        recurringJobs.AddOrUpdate<QuotaAlertJob>(
+            "quota-alerts", job => job.RunAsync(), "*/15 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
     }
 
     /// <summary>

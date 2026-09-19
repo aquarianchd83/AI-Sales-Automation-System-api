@@ -59,10 +59,9 @@ public class PlanLimitsService : IPlanLimitsService
 
     public async Task<TenantMessageUsageDto> GetMessageUsageAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var plan = await GetPlanAsync(tenantId, cancellationToken);
         var sentThisMonth = await CountMessagesSentThisMonthAsync(tenantId, cancellationToken);
 
-        return new TenantMessageUsageDto(sentThisMonth, plan?.MaxMessagesPerMonth);
+        return new TenantMessageUsageDto(sentThisMonth, null);
     }
 
     public async Task EnsureCanCreateCampaignAsync(Guid tenantId, CancellationToken cancellationToken = default)

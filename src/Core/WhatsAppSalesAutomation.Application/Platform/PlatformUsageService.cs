@@ -15,12 +15,16 @@ public class PlatformUsageService : IPlatformUsageService
     private readonly IWhatsAppSpendService _whatsAppSpend;
     private readonly IDateTimeProvider _dateTime;
 
+    private readonly IAiSpendEstimator _aiSpend;
+
     public PlatformUsageService(
         IApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
         IWhatsAppSpendService whatsAppSpend,
-        IDateTimeProvider dateTime)
+        IDateTimeProvider dateTime,
+        IAiSpendEstimator aiSpend)
     {
+        _aiSpend = aiSpend;
         _context = context;
         _userManager = userManager;
         _whatsAppSpend = whatsAppSpend;
@@ -66,12 +70,16 @@ public class PlatformUsageService : IPlatformUsageService
         // Spend is measured over each tenant's OWN calendar month (TenantMonth), so a figure here matches
         // what that tenant sees on its own Settings page rather than being cut at UTC midnight. The message
         // and user quota columns above deliberately keep the UTC month PlanLimitsService actually enforces.
-        var timezones = await _context.Tenants.IgnoreQueryFilters()
+        var tenantRegions = await _context.Tenants.IgnoreQueryFilters()
             .Where(t => tenantIds.Contains(t.Id))
-            .Select(t => new { t.Id, t.Timezone })
+            .Select(t => new { t.Id, t.Timezone, t.CountryCode })
             .ToListAsync(cancellationToken);
 
-        var spendStartByTenant = timezones.ToDictionary(t => t.Id, t => TenantMonth.StartUtc(t.Timezone, now));
+        var spendStartByTenant = tenantRegions.ToDictionary(t => t.Id, t => TenantMonth.StartUtc(t.Timezone, now));
+
+        // Each row's money is quoted in that tenant's own currency - see PlatformTenantUsageDto on why the
+        // USD figures remain the comparable ones.
+        var pricingByTenant = tenantRegions.ToDictionary(t => t.Id, t => RegionalPricingCatalog.Resolve(t.CountryCode));
 
         var aiByTenant = new Dictionary<Guid, (int Count, decimal Spend)>();
         var whatsAppByTenant = new Dictionary<Guid, WhatsAppSpend>();
@@ -93,11 +101,11 @@ public class PlatformUsageService : IPlatformUsageService
             {
                 aiByTenant[tenantAi.Key] = (
                     tenantAi.Count(),
-                    tenantAi.Sum(a => AiSpendEstimator.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens)));
+                    tenantAi.Sum(a => _aiSpend.EstimateUsd(a.ModelUsed, a.PromptTokens, a.CompletionTokens)));
             }
 
             // Priced from the messages themselves, so this row and the tenant's own Settings page agree.
-            foreach (var entry in await _whatsAppSpend.GetForTenantsAsync(windowTenantIds, spendStartUtc, cancellationToken))
+            foreach (var entry in await _whatsAppSpend.GetForTenantsAsync(windowTenantIds, spendStartUtc, cancellationToken: cancellationToken))
                 whatsAppByTenant[entry.Key] = entry.Value;
 
             var discoveryRows = await _context.LeadDiscoveryRuns.IgnoreQueryFilters()
@@ -134,18 +142,31 @@ public class PlatformUsageService : IPlatformUsageService
             var (aiCount, aiSpend) = aiByTenant.GetValueOrDefault(t.Id);
             var whatsApp = whatsAppByTenant.GetValueOrDefault(t.Id, WhatsAppSpend.Empty);
             var (discoveryRuns, discoveryLeads, discoverySpend) = discoveryByTenant.GetValueOrDefault(t.Id);
+            var totalSpend = Math.Round(aiSpend + whatsApp.EstimatedCostUsd + discoverySpend, 6, MidpointRounding.AwayFromZero);
+            var pricing = pricingByTenant.GetValueOrDefault(t.Id) ?? RegionalPricingCatalog.UsdDefault;
 
             return new PlatformTenantUsageDto(
                 t.Id, t.Name,
-                messagesSent, plan?.MaxMessagesPerMonth, plan is not null && messagesSent >= plan.MaxMessagesPerMonth,
+                messagesSent, null, false, // no monthly message cap any more: sending is limited by the prepaid balance
                 userCount, plan?.MaxUsers, plan is not null && userCount >= plan.MaxUsers,
                 aiCount, aiSpend,
                 whatsApp.BillableMessages, whatsApp.EstimatedCostUsd,
                 discoveryRuns, discoveryLeads, discoverySpend,
-                Math.Round(aiSpend + whatsApp.EstimatedCostUsd + discoverySpend, 6, MidpointRounding.AwayFromZero),
-                spendStartByTenant.GetValueOrDefault(t.Id, monthStartUtc));
+                totalSpend,
+                spendStartByTenant.GetValueOrDefault(t.Id, monthStartUtc),
+                pricing.CurrencyCode,
+                pricing.CurrencySymbol,
+                ToLocal(aiSpend, pricing),
+                ToLocal(whatsApp.EstimatedCostUsd, pricing),
+                ToLocal(discoverySpend, pricing),
+                ToLocal(totalSpend, pricing));
         }).ToList();
 
         return new PagedResult<PlatformTenantUsageDto>(items, totalCount, query.Page, query.PageSize);
     }
+
+    /// <summary>Six decimal places, the same precision TenantChargesService keeps for the tenant's own copy
+    /// of these figures, so the two screens agree to the cent and below.</summary>
+    private static decimal ToLocal(decimal usd, RegionalPricing pricing) =>
+        Math.Round(usd * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero);
 }

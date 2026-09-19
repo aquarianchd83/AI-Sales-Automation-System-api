@@ -32,11 +32,14 @@ public record WhatsAppSpend(
 /// </summary>
 public interface IWhatsAppSpendService
 {
-    /// <summary>One tenant's spend since <paramref name="fromUtc"/>.</summary>
-    Task<WhatsAppSpend> GetForTenantAsync(Guid tenantId, DateTime fromUtc, CancellationToken cancellationToken = default);
+    /// <summary>One tenant's spend from <paramref name="fromUtc"/> up to <paramref name="toUtc"/>
+    /// (exclusive), or through now when <paramref name="toUtc"/> is omitted - the open-ended window
+    /// every caller before PlatformInvoiceService needed ("since the start of this month, to now").</summary>
+    Task<WhatsAppSpend> GetForTenantAsync(Guid tenantId, DateTime fromUtc, DateTime? toUtc = null, CancellationToken cancellationToken = default);
 
-    /// <summary>The same figures for many tenants at once, for the Platform Admin Console's usage screen.
-    /// A tenant that sent nothing in the period is absent from the result, not a zero row.</summary>
+    /// <summary>The same figures for many tenants at once, for the Platform Admin Console's usage and
+    /// invoices screens. A tenant that sent nothing in the period is absent from the result, not a
+    /// zero row.</summary>
     Task<IReadOnlyDictionary<Guid, WhatsAppSpend>> GetForTenantsAsync(
-        IReadOnlyCollection<Guid> tenantIds, DateTime fromUtc, CancellationToken cancellationToken = default);
+        IReadOnlyCollection<Guid> tenantIds, DateTime fromUtc, DateTime? toUtc = null, CancellationToken cancellationToken = default);
 }

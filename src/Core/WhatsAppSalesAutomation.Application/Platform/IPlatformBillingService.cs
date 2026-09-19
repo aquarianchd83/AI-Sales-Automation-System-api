@@ -24,4 +24,15 @@ public interface IPlatformBillingService
     /// doc comment for why (existing Subscriptions keep referencing it). A no-op, not an error, if
     /// the plan is already retired.</summary>
     Task DeactivatePlanAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Every credit pack, active and retired - unlike the tenant-facing catalog, which lists only active ones.</summary>
+    Task<IReadOnlyList<PlatformCreditPackDto>> GetCreditPacksAsync(CancellationToken cancellationToken = default);
+
+    Task<PlatformCreditPackDto> CreateCreditPackAsync(CreateCreditPackRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Changes what future buyers get and pay. A purchase already made keeps the units and price it was bought at.</summary>
+    Task<PlatformCreditPackDto> UpdateCreditPackAsync(Guid id, UpdateCreditPackRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Retires the pack (IsActive = false) - never a hard delete, so past payments keep pointing at it. A no-op if already retired.</summary>
+    Task DeactivateCreditPackAsync(Guid id, CancellationToken cancellationToken = default);
 }

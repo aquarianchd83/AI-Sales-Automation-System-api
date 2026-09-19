@@ -38,7 +38,16 @@ public record PlatformTenantDetailDto(
     int AiInteractionsThisMonth,
     decimal EstimatedAiSpendThisMonthUsd,
     string Timezone,
-    string? CountryCode);
+    string? CountryCode,
+    // CurrencyCode/CurrencySymbol are this tenant's own, resolved from CountryCode - what the tenant is
+    // quoted in on its own screens, so the console shows their spend the way they see it. Platform-wide
+    // figures (the dashboard) use the operator's currency instead.
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal EstimatedAiSpendThisMonthLocal,
+    bool RefundRequestsEnabled,
+    // The tenant's state where its country's tax splits by state (India); decides CGST + SGST versus IGST.
+    string? StateCode = null);
 
 public record ImpersonationSessionDto(
     string AccessToken,
@@ -82,4 +91,5 @@ public record CreatePlatformTenantRequest(
     string? WebsiteUrl = null,
     string? SupportEmail = null,
     string? SupportPhone = null,
-    IReadOnlyList<string>? DomainKeywords = null) : Tenancy.ITenantBusinessDetails;
+    IReadOnlyList<string>? DomainKeywords = null,
+    string? StateCode = null) : Tenancy.ITenantBusinessDetails;

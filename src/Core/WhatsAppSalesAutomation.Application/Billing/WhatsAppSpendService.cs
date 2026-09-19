@@ -18,20 +18,20 @@ public class WhatsAppSpendService : IWhatsAppSpendService
     private readonly IApplicationDbContext _context;
     private readonly WhatsAppPricingOptions _pricing;
 
-    public WhatsAppSpendService(IApplicationDbContext context, IOptions<WhatsAppPricingOptions> pricing)
+    public WhatsAppSpendService(IApplicationDbContext context, IOptionsSnapshot<WhatsAppPricingOptions> pricing)
     {
         _context = context;
         _pricing = pricing.Value;
     }
 
-    public async Task<WhatsAppSpend> GetForTenantAsync(Guid tenantId, DateTime fromUtc, CancellationToken cancellationToken = default)
+    public async Task<WhatsAppSpend> GetForTenantAsync(Guid tenantId, DateTime fromUtc, DateTime? toUtc = null, CancellationToken cancellationToken = default)
     {
-        var byTenant = await GetForTenantsAsync(new[] { tenantId }, fromUtc, cancellationToken);
+        var byTenant = await GetForTenantsAsync(new[] { tenantId }, fromUtc, toUtc, cancellationToken);
         return byTenant.GetValueOrDefault(tenantId, WhatsAppSpend.Empty);
     }
 
     public async Task<IReadOnlyDictionary<Guid, WhatsAppSpend>> GetForTenantsAsync(
-        IReadOnlyCollection<Guid> tenantIds, DateTime fromUtc, CancellationToken cancellationToken = default)
+        IReadOnlyCollection<Guid> tenantIds, DateTime fromUtc, DateTime? toUtc = null, CancellationToken cancellationToken = default)
     {
         if (tenantIds.Count == 0)
             return new Dictionary<Guid, WhatsAppSpend>();
@@ -42,7 +42,7 @@ public class WhatsAppSpendService : IWhatsAppSpendService
         // memory: the category a template name maps to lives in another table, and the rate it maps to lives
         // in configuration, so neither can be part of the SQL.
         var messages = await _context.Messages.IgnoreQueryFilters()
-            .Where(m => ids.Contains(m.TenantId) && m.CreatedAt >= fromUtc)
+            .Where(m => ids.Contains(m.TenantId) && m.CreatedAt >= fromUtc && (toUtc == null || m.CreatedAt < toUtc.Value))
             .GroupBy(m => new
             {
                 m.TenantId,

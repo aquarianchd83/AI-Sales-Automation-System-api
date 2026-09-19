@@ -16,7 +16,12 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 /// The spend figures are measured from <see cref="SpendPeriodStartUtc"/> - the start of the month in the
 /// TENANT's own timezone (see Tenancy.TenantMonth) - so they match what that tenant sees on its own Settings
 /// page. The quota fields above keep the UTC month, because that is the window PlanLimitsService enforces
-/// the allowance on; the two windows differ by at most a day, around the turn of a month.</summary>
+/// the allowance on; the two windows differ by at most a day, around the turn of a month.
+///
+/// Each row is about one tenant, so the *Local amounts are quoted in THAT TENANT's currency (from its own
+/// country), matching what the tenant is quoted on its own screens. That means a column can mix currencies
+/// and its values are not comparable across rows - the *Usd figures are what to compare or total. The
+/// platform-wide figures on the dashboard use the operator's own currency instead.</summary>
 public record PlatformTenantUsageDto(
     Guid TenantId,
     string TenantName,
@@ -34,4 +39,10 @@ public record PlatformTenantUsageDto(
     int LeadDiscoveryLeadsThisMonth,
     decimal EstimatedLeadDiscoverySpendThisMonthUsd,
     decimal EstimatedTotalSpendThisMonthUsd,
-    DateTime SpendPeriodStartUtc);
+    DateTime SpendPeriodStartUtc,
+    string CurrencyCode,
+    string CurrencySymbol,
+    decimal EstimatedAiSpendThisMonthLocal,
+    decimal EstimatedWhatsAppSpendThisMonthLocal,
+    decimal EstimatedLeadDiscoverySpendThisMonthLocal,
+    decimal EstimatedTotalSpendThisMonthLocal);
