@@ -26,9 +26,9 @@ public record PlatformPlanDto(
     decimal PriceMonthlyLocal);
 
 /// <summary>One row of the Subscriptions & Billing screen (spec item #3). <see cref="HasFailedPayment"/>
-/// is derived from <see cref="SubscriptionStatus.PastDue"/> - this system keeps no per-invoice ledger,
-/// so "failed payments" here means "this tenant's subscription is currently past due," not a
-/// per-invoice history (payments themselves are simulated for now - see
+/// is derived from <see cref="SubscriptionStatus.PastDue"/> rather than read from the Invoices ledger
+/// (Platform.Invoice) - it means "this tenant's subscription is currently past due," not "this tenant
+/// has a Due invoice" (payments themselves are simulated for now - see
 /// Application.Billing.IBillingService's own doc comment).</summary>
 public record PlatformSubscriptionListItemDto(
     Guid TenantId,

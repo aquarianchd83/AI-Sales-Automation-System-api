@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917190100_AddInvoices")]
+    partial class AddInvoices
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -247,9 +250,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<decimal>("AiConversationAmountUsd")
                         .HasColumnType("decimal(18,6)");
 
-                    b.Property<int>("AiInteractionsCount")
-                        .HasColumnType("int");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -268,18 +268,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<decimal>("LeadDiscoveryAmountUsd")
                         .HasColumnType("decimal(18,6)");
-
-                    b.Property<int>("LeadDiscoveryLeadsCount")
-                        .HasColumnType("int");
-
-                    b.Property<int>("LeadDiscoveryRunsCount")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("MessageLimit")
-                        .HasColumnType("int");
-
-                    b.Property<int>("MessagesSentCount")
-                        .HasColumnType("int");
 
                     b.Property<DateTime?>("PaidAtUtc")
                         .HasColumnType("datetime2");
@@ -317,20 +305,11 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("UserCount")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("UserLimit")
-                        .HasColumnType("int");
-
                     b.Property<decimal>("WhatsAppAmountLocal")
                         .HasColumnType("decimal(18,6)");
 
                     b.Property<decimal>("WhatsAppAmountUsd")
                         .HasColumnType("decimal(18,6)");
-
-                    b.Property<int>("WhatsAppBillableMessagesCount")
-                        .HasColumnType("int");
 
                     b.HasKey("Id");
 

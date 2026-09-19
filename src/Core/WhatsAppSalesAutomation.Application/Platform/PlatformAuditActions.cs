@@ -29,4 +29,5 @@ public static class PlatformAuditActions
     public const string TenantJobScheduleUpdated = "TenantJobScheduleUpdated";
     public const string TenantJobTriggered = "TenantJobTriggered";
     public const string TenantJobsReconciled = "TenantJobsReconciled";
+    public const string InvoiceMarkedPaid = "InvoiceMarkedPaid";
 }

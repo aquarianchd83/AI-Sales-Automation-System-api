@@ -81,6 +81,8 @@ public interface IApplicationDbContext
 
     DbSet<Payment> Payments { get; }
 
+    DbSet<Invoice> Invoices { get; }
+
     DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
 
     DbSet<Announcement> Announcements { get; }

@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformTenantService, PlatformTenantService>();
         services.AddScoped<IPlatformBillingService, PlatformBillingService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
+        services.AddScoped<IPlatformInvoiceService, PlatformInvoiceService>();
         services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();
         services.AddScoped<IPlatformUserSearchService, PlatformUserSearchService>();
         services.AddScoped<IAnnouncementService, AnnouncementService>();

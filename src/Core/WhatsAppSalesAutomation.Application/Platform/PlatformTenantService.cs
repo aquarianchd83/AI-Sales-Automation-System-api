@@ -294,6 +294,17 @@ public class PlatformTenantService : IPlatformTenantService
         }
 
         subscription.PlanId = plan.Id;
+
+        // Self-serve checkout (BillingService.ChoosePlanAsync) stamps the billing period; an override
+        // used to leave it null, giving the tenant a paid plan but no period - and so no invoices.
+        // Only stamped when missing: switching plans mid-period must not restart it.
+        if (subscription.CurrentPeriodStartUtc is null)
+        {
+            var now = _dateTime.UtcNow;
+            subscription.CurrentPeriodStartUtc = now;
+            subscription.CurrentPeriodEndUtc = now.AddMonths(1);
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
 
         await _auditService.LogAsync(

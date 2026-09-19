@@ -101,7 +101,7 @@ public class PlatformUsageService : IPlatformUsageService
             }
 
             // Priced from the messages themselves, so this row and the tenant's own Settings page agree.
-            foreach (var entry in await _whatsAppSpend.GetForTenantsAsync(windowTenantIds, spendStartUtc, cancellationToken))
+            foreach (var entry in await _whatsAppSpend.GetForTenantsAsync(windowTenantIds, spendStartUtc, cancellationToken: cancellationToken))
                 whatsAppByTenant[entry.Key] = entry.Value;
 
             var discoveryRows = await _context.LeadDiscoveryRuns.IgnoreQueryFilters()

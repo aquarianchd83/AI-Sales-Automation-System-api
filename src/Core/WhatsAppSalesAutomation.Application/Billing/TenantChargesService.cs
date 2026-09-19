@@ -42,7 +42,7 @@ public class TenantChargesService : ITenantChargesService
         var monthStartUtc = TenantMonth.StartUtc(tenant?.Timezone, _dateTime.UtcNow);
         var pricing = RegionalPricingCatalog.Resolve(tenant?.CountryCode);
 
-        var whatsApp = await _whatsAppSpend.GetForTenantAsync(tenantId, monthStartUtc, cancellationToken);
+        var whatsApp = await _whatsAppSpend.GetForTenantAsync(tenantId, monthStartUtc, cancellationToken: cancellationToken);
 
         // Aggregated with scalar queries rather than one grouped projection - see this codebase's EF Core
         // note about operators chained after a projection.

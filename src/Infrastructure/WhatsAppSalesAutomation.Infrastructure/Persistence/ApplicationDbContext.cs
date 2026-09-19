@@ -94,6 +94,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Payment> Payments => Set<Payment>();
 
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+
     public DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries => Set<PlatformAuditLogEntry>();
 
     public DbSet<Announcement> Announcements => Set<Announcement>();
