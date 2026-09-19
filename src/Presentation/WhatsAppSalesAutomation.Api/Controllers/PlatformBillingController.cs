@@ -20,12 +20,15 @@ public class PlatformBillingController : ControllerBase
     private readonly IPlatformBillingService _billingService;
     private readonly IPlatformAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IPlanCostReportService _costReport;
 
     public PlatformBillingController(
         IPlatformBillingService billingService,
         IPlatformAuditService auditService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IPlanCostReportService costReport)
     {
+        _costReport = costReport;
         _billingService = billingService;
         _auditService = auditService;
         _currentUser = currentUser;
@@ -106,6 +109,16 @@ public class PlatformBillingController : ControllerBase
         await _auditService.LogAsync(ActorUserId, ActorEmail, PlatformAuditActions.CreditPackDeactivated, details: id.ToString(), cancellationToken: cancellationToken);
         return NoContent();
     }
+
+    /// <summary>The usage assumptions the cost report starts from - real averages where the platform has history.</summary>
+    [HttpGet("plan-cost-defaults")]
+    public async Task<ActionResult<PlanCostDefaultsDto>> GetPlanCostDefaults(CancellationToken cancellationToken)
+        => Ok(await _costReport.GetDefaultsAsync(cancellationToken));
+
+    /// <summary>The consolidated cost-and-margin report for a plan being designed. Nothing is saved.</summary>
+    [HttpPost("plan-cost-report")]
+    public async Task<ActionResult<PlanCostReportDto>> BuildPlanCostReport([FromBody] PlanCostReportRequest request, CancellationToken cancellationToken)
+        => Ok(await _costReport.BuildAsync(request, cancellationToken));
 
     [HttpGet("subscriptions")]
     public async Task<ActionResult<PagedResult<PlatformSubscriptionListItemDto>>> GetSubscriptions(

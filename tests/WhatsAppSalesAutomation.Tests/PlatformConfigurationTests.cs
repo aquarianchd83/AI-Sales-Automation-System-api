@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Enums;
 using Xunit;
 
@@ -42,10 +43,12 @@ public class PlatformConfigurationTests
         services.Configure<RefundPolicyOptions>(config.GetSection("Billing:Refunds"));
         services.Configure<BillingAlertOptions>(config.GetSection("Billing:Alerts"));
         services.Configure<TrialQuotaOptions>(config.GetSection("Billing:Trial"));
-        services.Configure<WhatsAppQuotaWeightOptions>(config.GetSection("WhatsApp:QuotaWeights"));
         services.Configure<WhatsAppPricingOptions>(config.GetSection("WhatsApp:Pricing"));
         services.Configure<LeadDiscoveryPricingOptions>(config.GetSection("LeadDiscovery:Pricing"));
         services.Configure<AiPricingOptions>(config.GetSection("Ai:Pricing"));
+        services.Configure<TaxOptions>(config.GetSection("Tax"));
+        services.Configure<FxOptions>(config.GetSection("Fx"));
+        services.Configure<CostAssumptionsOptions>(config.GetSection("Costing"));
         var provider = services.BuildServiceProvider();
 
         return new PlatformConfigurationService(
@@ -53,10 +56,12 @@ public class PlatformConfigurationTests
             provider.GetRequiredService<IOptionsSnapshot<RefundPolicyOptions>>(),
             provider.GetRequiredService<IOptionsSnapshot<BillingAlertOptions>>(),
             provider.GetRequiredService<IOptionsSnapshot<TrialQuotaOptions>>(),
-            provider.GetRequiredService<IOptionsSnapshot<WhatsAppQuotaWeightOptions>>(),
             provider.GetRequiredService<IOptionsSnapshot<WhatsAppPricingOptions>>(),
             provider.GetRequiredService<IOptionsSnapshot<LeadDiscoveryPricingOptions>>(),
-            provider.GetRequiredService<IOptionsSnapshot<AiPricingOptions>>());
+            provider.GetRequiredService<IOptionsSnapshot<AiPricingOptions>>(),
+            provider.GetRequiredService<IOptionsSnapshot<TaxOptions>>(),
+            provider.GetRequiredService<IOptionsSnapshot<FxOptions>>(),
+            provider.GetRequiredService<IOptionsSnapshot<CostAssumptionsOptions>>());
     }
 
     [Fact]
@@ -68,7 +73,6 @@ public class PlatformConfigurationTests
         Assert.Equal(0.10m, config.Refunds.SubscriptionMaxUsageFraction);
         Assert.Equal("billing_alert", config.Alerts.WhatsAppTemplateName);
         Assert.Equal(50m, config.Trial.WhatsAppMessages);
-        Assert.Equal(0.25m, config.QuotaWeights.Utility);
         Assert.Equal(0.0099m, config.Charges.WhatsApp.Countries.Single(c => c.CountryCode == "IN").Marketing);
         Assert.Contains(config.Charges.Ai.Models, m => m.Model == "OpenAI:gpt-5-mini");
         Assert.Contains(config.Charges.LeadDiscovery.Models, m => m.Model == "claude-sonnet-5");
@@ -85,7 +89,6 @@ public class PlatformConfigurationTests
             Refunds = edited.Refunds with { CreditWindowDays = 45, SubscriptionMaxUsageFraction = 0.25m },
             Alerts = new BillingAlertConfigDto("low_balance_v2", "en_US"),
             Trial = new TrialQuotaConfigDto(100m, 75m, 20m),
-            QuotaWeights = new QuotaWeightConfigDto(2m, 0.75m, 0.1m),
             Charges = edited.Charges with
             {
                 WhatsApp = edited.Charges.WhatsApp with
@@ -116,7 +119,6 @@ public class PlatformConfigurationTests
         Assert.Equal("low_balance_v2", reread.Alerts.WhatsAppTemplateName);
         Assert.Equal("en_US", reread.Alerts.WhatsAppTemplateLanguage);
         Assert.Equal(new TrialQuotaConfigDto(100m, 75m, 20m), reread.Trial);
-        Assert.Equal(new QuotaWeightConfigDto(2m, 0.75m, 0.1m), reread.QuotaWeights);
         Assert.Equal(0.0123m, reread.Charges.WhatsApp.Countries.Single(c => c.CountryCode == "IN").Marketing);
         Assert.Equal(12m, reread.Charges.LeadDiscovery.WebSearchPerThousand);
         Assert.Contains(reread.Charges.LeadDiscovery.Models, m => m.Model == "my-model" && m.OutputPerMillion == 15m);
@@ -136,14 +138,21 @@ public class PlatformConfigurationTests
     }
 
     [Fact]
-    public async Task The_weights_and_trial_quota_are_what_the_quota_gate_actually_uses()
+    public void Quota_weights_are_not_a_setting_of_their_own_they_follow_the_message_prices()
     {
-        var weights = new WhatsAppQuotaWeightOptions { Marketing = 2m, Authentication = 0.75m, Utility = 0.1m };
+        var prices = new WhatsAppPricingOptions();   // default row: marketing 0.025, utility 0.004, authentication 0.0135
 
-        Assert.Equal(2m, weights.For(TemplateCategory.Marketing));
-        Assert.Equal(0.75m, weights.For(TemplateCategory.Authentication));
-        Assert.Equal(0.1m, weights.For(TemplateCategory.Utility));
-        await Task.CompletedTask;
+        Assert.Equal(1m, WhatsAppQuotaWeights.For(prices, TemplateCategory.Marketing));
+        Assert.Equal(0.16m, WhatsAppQuotaWeights.For(prices, TemplateCategory.Utility));
+        Assert.Equal(0.54m, WhatsAppQuotaWeights.For(prices, TemplateCategory.Authentication));
+
+        // When Meta's prices move, so do the weights - nothing else to keep in step.
+        prices.Default.Utility = 0.0125m;
+        Assert.Equal(0.5m, WhatsAppQuotaWeights.For(prices, TemplateCategory.Utility));
+
+        // No marketing price to compare against: every send is one unit rather than a divide by zero.
+        prices.Default.Marketing = 0m;
+        Assert.Equal(1m, WhatsAppQuotaWeights.For(prices, TemplateCategory.Utility));
     }
 
     [Fact]
@@ -300,6 +309,97 @@ public class PlatformConfigurationTests
         await availability.EnsureAllowedAsync("GB", "IN");   // moving to an enabled one: allowed
         await availability.EnsureAllowedAsync(null, "IN");
         await availability.EnsureAllowedAsync("", null);
+    }
+
+    [Fact]
+    public async Task Tax_and_the_exchange_rate_are_configurable_and_bind_back_into_what_pricing_reads()
+    {
+        var store = new CapturingStore();
+        var initial = await Service(store).GetAsync();
+        Assert.Equal(18m, initial.Tax!.Countries.Single(c => c.CountryCode == "IN").RatePercent);
+        Assert.Equal("MH", initial.Tax.SupplierStateCode);
+        Assert.Equal(83m, initial.Fx!.InrPerUsd);
+
+        var edited = initial with
+        {
+            Fx = new FxConfigDto(91.5m),
+            Tax = initial.Tax with
+            {
+                SupplierStateCode = "KA",
+                Countries = initial.Tax.Countries.Select(c => c.CountryCode switch
+                {
+                    "IN" => c with { RatePercent = 12m },
+                    "DE" => c with { TaxName = "VAT", RatePercent = 19m },
+                    _ => c
+                }).ToList()
+            }
+        };
+        await Service(store).UpdateAsync(edited, null);
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(store.Saved).Build();
+        var reread = await Service(new CapturingStore(), config).GetAsync();
+
+        Assert.Equal("KA", reread.Tax!.SupplierStateCode);
+        Assert.Equal(12m, reread.Tax.Countries.Single(c => c.CountryCode == "IN").RatePercent);
+        Assert.True(reread.Tax.Countries.Single(c => c.CountryCode == "IN").SplitByState);
+        Assert.Equal(("VAT", 19m), (reread.Tax.Countries.Single(c => c.CountryCode == "DE").TaxName, reread.Tax.Countries.Single(c => c.CountryCode == "DE").RatePercent));
+        Assert.Equal(91.5m, reread.Fx!.InrPerUsd);
+        Assert.All(store.Saved.Keys.Where(k => k.StartsWith("Tax:") || k.StartsWith("Fx:")), k => Assert.Contains(store.Prefixes, p => k.StartsWith(p)));
+    }
+
+    [Theory]
+    [InlineData("state")]
+    [InlineData("rate")]
+    [InlineData("fx")]
+    public async Task Nonsense_tax_and_exchange_settings_are_refused(string problem)
+    {
+        var store = new CapturingStore();
+        var service = Service(store);
+        var good = await service.GetAsync();
+
+        var bad = problem switch
+        {
+            "state" => good with { Tax = good.Tax! with { SupplierStateCode = "ZZ" } },
+            "rate" => good with { Tax = good.Tax! with { Countries = good.Tax!.Countries.Select(c => c with { RatePercent = 150m }).ToList() } },
+            _ => good with { Fx = new FxConfigDto(0m) }
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(bad, null));
+        Assert.Empty(store.Saved);
+    }
+
+    [Fact]
+    public async Task Typical_usage_for_plan_costing_is_configurable_and_binds_back()
+    {
+        var store = new CapturingStore();
+        var initial = await Service(store).GetAsync();
+        Assert.Equal(60m, initial.CostAssumptions!.MarketingSharePercent);
+        Assert.Equal(1500, initial.CostAssumptions.PromptTokensPerConversation);
+
+        var edited = initial with { CostAssumptions = new PlanCostAssumptionsDto(50, 40, 10, 2500, 400, 7000, 900, 0.75m) };
+        await Service(store).UpdateAsync(edited, null);
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(store.Saved).Build();
+        var reread = (await Service(new CapturingStore(), config).GetAsync()).CostAssumptions!;
+        Assert.Equal(new PlanCostAssumptionsDto(50, 40, 10, 2500, 400, 7000, 900, 0.75m), reread);
+        Assert.All(store.Saved.Keys.Where(k => k.StartsWith("Costing:")), k => Assert.Contains(store.Prefixes, p => k.StartsWith(p)));
+
+        var nothingSent = await Service(new CapturingStore()).GetAsync();
+        var untouched = new CapturingStore();
+        await Service(untouched).UpdateAsync(nothingSent with { CostAssumptions = null }, null);
+        Assert.DoesNotContain("Costing:", untouched.Prefixes);
+    }
+
+    [Fact]
+    public async Task Nonsense_typical_usage_is_refused()
+    {
+        var store = new CapturingStore();
+        var service = Service(store);
+        var good = await service.GetAsync();
+
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(good with { CostAssumptions = good.CostAssumptions! with { PromptTokensPerConversation = -1 } }, null));
+        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(good with { CostAssumptions = good.CostAssumptions! with { MarketingSharePercent = 0, UtilitySharePercent = 0, AuthenticationSharePercent = 0 } }, null));
+        Assert.Empty(store.Saved);
     }
 
     [Theory]

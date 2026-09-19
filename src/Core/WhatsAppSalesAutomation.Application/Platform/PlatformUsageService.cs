@@ -147,7 +147,7 @@ public class PlatformUsageService : IPlatformUsageService
 
             return new PlatformTenantUsageDto(
                 t.Id, t.Name,
-                messagesSent, plan?.MaxMessagesPerMonth, plan is not null && messagesSent >= plan.MaxMessagesPerMonth,
+                messagesSent, null, false, // no monthly message cap any more: sending is limited by the prepaid balance
                 userCount, plan?.MaxUsers, plan is not null && userCount >= plan.MaxUsers,
                 aiCount, aiSpend,
                 whatsApp.BillableMessages, whatsApp.EstimatedCostUsd,

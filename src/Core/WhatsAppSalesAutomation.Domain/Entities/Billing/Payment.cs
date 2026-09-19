@@ -42,6 +42,36 @@ public class Payment : BaseEntity, ITenantOwned
     /// RegionalPricingCatalog.Resolve, the same conversion GetPlansAsync already does for display.</summary>
     public decimal LocalAmount { get; set; }
 
+    /// <summary>The tenant's country and state when this was charged - a snapshot, so a later change of either never
+    /// rewrites history. Null on rows from before country-wise pricing.</summary>
+    public string? CountryCode { get; set; }
+
+    public string? StateCode { get; set; }
+
+    /// <summary>Tax added on top of <see cref="LocalAmount"/> (the price before tax), in the tenant's currency.</summary>
+    public decimal TaxLocal { get; set; }
+
+    /// <summary>The individual tax lines as JSON - [{Name, RatePercent, Amount}] - so an invoice can show CGST and SGST apart.</summary>
+    public string? TaxLinesJson { get; set; }
+
+    /// <summary>What the tenant actually paid: <see cref="LocalAmount"/> plus <see cref="TaxLocal"/>. Zero on rows from before
+    /// tax was recorded - read those through <see cref="TotalPaidLocal"/>.</summary>
+    public decimal TotalLocal { get; set; }
+
+    /// <summary>The total in rupees at the exchange rate of the day, for the admin's reports - stored, so a later rate
+    /// change never moves a past figure.</summary>
+    public decimal AmountInr { get; set; }
+
+    /// <summary>INR per one unit of <see cref="CurrencyCode"/> when this was charged.</summary>
+    public decimal FxRateToInr { get; set; }
+
+    /// <summary>The billing period a subscription payment covers.</summary>
+    public DateTime? PeriodStartUtc { get; set; }
+
+    public DateTime? PeriodEndUtc { get; set; }
+
+    public decimal TotalPaidLocal => TotalLocal != 0 ? TotalLocal : LocalAmount;
+
     /// <summary>"Simulated" today; becomes "Razorpay" (or whatever's next) once a real payment
     /// gateway is wired in - this column is what future code branches on, not a schema change.</summary>
     public string Provider { get; set; } = "Simulated";

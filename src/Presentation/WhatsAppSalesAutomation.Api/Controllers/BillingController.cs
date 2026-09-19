@@ -67,6 +67,12 @@ public class BillingController : ControllerBase
             .ToList());
     }
 
+    /// <summary>The states a tenant can pick where its country's tax splits by state (India today). Public, like the regions.</summary>
+    [HttpGet("states")]
+    [AllowAnonymous]
+    public ActionResult<IReadOnlyList<IndianState>> GetStates([FromQuery] string? country)
+        => Ok(IndianStates.AppliesTo(country) ? IndianStates.All : Array.Empty<IndianState>());
+
     [HttpGet("subscription")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<SubscriptionDto?>> GetSubscription(CancellationToken cancellationToken)

@@ -7,13 +7,13 @@ namespace WhatsAppSalesAutomation.Application.Quota;
 public class QuotaGate : IQuotaGate
 {
     private readonly IQuotaLedgerService _ledger;
-    private readonly WhatsAppQuotaWeightOptions _weights;
+    private readonly WhatsAppPricingOptions _pricing;
     private readonly TrialQuotaOptions _trial;
 
-    public QuotaGate(IQuotaLedgerService ledger, IOptionsSnapshot<WhatsAppQuotaWeightOptions> weights, IOptionsSnapshot<TrialQuotaOptions> trial)
+    public QuotaGate(IQuotaLedgerService ledger, IOptionsSnapshot<WhatsAppPricingOptions> pricing, IOptionsSnapshot<TrialQuotaOptions> trial)
     {
         _ledger = ledger;
-        _weights = weights.Value;
+        _pricing = pricing.Value;
         _trial = trial.Value;
     }
 
@@ -27,7 +27,7 @@ public class QuotaGate : IQuotaGate
 
     public async Task<bool> TryConsumeWhatsAppTemplateAsync(Guid tenantId, TemplateCategory category, string operationKey, string referenceId, CancellationToken cancellationToken = default)
     {
-        var weight = _weights.For(category);
+        var weight = WhatsAppQuotaWeights.For(_pricing, category);
         var result = await _ledger.ConsumeAsync(
             new ConsumeRequest(tenantId, QuotaType.WhatsAppMessages, weight, operationKey, "Message", referenceId, category.ToString()), cancellationToken);
         return result.Sufficient;

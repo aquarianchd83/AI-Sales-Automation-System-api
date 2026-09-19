@@ -12,13 +12,16 @@ public class PlatformDashboardService : IPlatformDashboardService
     private readonly IDateTimeProvider _dateTime;
 
     private readonly IAiSpendEstimator _aiSpend;
+    private readonly Common.Options.FxOptions _fx;
 
     public PlatformDashboardService(
         IApplicationDbContext context,
         ICurrentUserPricingService pricing,
         IDateTimeProvider dateTime,
-        IAiSpendEstimator aiSpend)
+        IAiSpendEstimator aiSpend,
+        Microsoft.Extensions.Options.IOptionsSnapshot<Common.Options.FxOptions> fx)
     {
+        _fx = fx.Value;
         _aiSpend = aiSpend;
         _context = context;
         _pricing = pricing;
@@ -40,10 +43,22 @@ public class PlatformDashboardService : IPlatformDashboardService
 
         // MRR: sum of PriceMonthlyCents for every tenant currently Trialing or Active on a plan - see
         // this DTO's own doc comment for why this isn't a true prorated figure.
-        var mrrCents = await _context.Subscriptions.IgnoreQueryFilters()
+        // Each tenant's monthly price is the one set for ITS country, in that currency; every one is turned into rupees at the
+        // platform's own rate so they can be added. A tenant on a plan with no price in its country adds nothing.
+        var live = await _context.Subscriptions.IgnoreQueryFilters()
             .Where(s => s.PlanId != null && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trialing))
-            .Join(_context.Plans, s => s.PlanId, p => p.Id, (s, p) => p.PriceMonthlyCents)
-            .SumAsync(cancellationToken);
+            .Join(_context.Tenants.IgnoreQueryFilters(), s => s.TenantId, t => t.Id, (s, t) => new { PlanId = s.PlanId!.Value, t.CountryCode })
+            .ToListAsync(cancellationToken);
+        var planPrices = await Billing.CatalogPricing.LoadPlanPricesAsync(_context, live.Select(l => l.PlanId).Distinct().ToList(), cancellationToken);
+        var mrrInr = 0m;
+        foreach (var l in live)
+        {
+            var region = RegionalPricing_Resolve(l.CountryCode);
+            var price = planPrices.GetValueOrDefault(l.PlanId)?.GetValueOrDefault(region.CountryCode) ?? 0m;
+            mrrInr += price / region.RateToUsd * _fx.InrPerUsd;
+        }
+
+        var mrrCents = (int)Math.Round(mrrInr / _fx.InrPerUsd * 100m, MidpointRounding.AwayFromZero);
 
         var messagesSentThisMonth = await _context.Messages.IgnoreQueryFilters()
             .CountAsync(m => m.CreatedAt >= monthStartUtc, cancellationToken);
@@ -78,9 +93,11 @@ public class PlatformDashboardService : IPlatformDashboardService
             webhookFailuresLast24h < 20,
             pricing.CurrencyCode,
             pricing.CurrencySymbol,
-            ToLocal(mrrUsd, pricing),
+            Math.Round(mrrInr, 2, MidpointRounding.AwayFromZero),
             ToLocal(estimatedAiSpend, pricing));
     }
+
+    private static Billing.RegionalPricing RegionalPricing_Resolve(string? code) => Billing.RegionalPricingCatalog.Resolve(code);
 
     /// <summary>Six decimal places, the same precision the other estimate-to-local conversions keep (see
     /// TenantChargesService) - a cheap month costs a fraction of a cent, and rounding here would hide it.

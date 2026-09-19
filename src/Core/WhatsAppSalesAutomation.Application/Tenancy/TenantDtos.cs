@@ -25,7 +25,8 @@ public record TenantProfileDto(
     string? SupportPhone,
     IReadOnlyList<string> DomainKeywords,
     string Timezone,
-    string? CountryCode)
+    string? CountryCode,
+    string? StateCode = null)
 {
     /// <summary>Shared by the tenant's self-service endpoints and the Platform Admin Console's
     /// timezone/country overrides, so every path returns the same effective values.</summary>
@@ -39,7 +40,8 @@ public record TenantProfileDto(
         tenant.SupportPhone,
         tenant.DomainKeywords.ToList(),
         string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone,
-        tenant.CountryCode);
+        tenant.CountryCode,
+        tenant.StateCode);
 }
 
 /// <summary>Body of PUT the tenant's own business profile - replaces every business field at once, so
@@ -69,4 +71,4 @@ public record UpdateTenantTimezoneRequest(string Timezone);
 /// RegionalPricingCatalog.All (see UpdateTenantCountryRequestValidator), unlike signup's looser
 /// optional CountryCode. This is what a tenant whose plan is showing the wrong currency (see
 /// RegionalPricingCatalog.Resolve) uses to fix it themselves.</summary>
-public record UpdateTenantCountryRequest(string CountryCode);
+public record UpdateTenantCountryRequest(string CountryCode, string? StateCode = null);

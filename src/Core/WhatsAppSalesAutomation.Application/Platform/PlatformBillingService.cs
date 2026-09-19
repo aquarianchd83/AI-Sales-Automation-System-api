@@ -122,6 +122,7 @@ public class PlatformBillingService : IPlatformBillingService
             prices[code] = input.Amount;
         }
 
+        plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
         return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
@@ -205,11 +206,12 @@ public class PlatformBillingService : IPlatformBillingService
             }
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
-
         var prices = new CountryPrices();
         foreach (var row in existingPrices)
             prices[row.CountryCode] = row.Amount;
+
+        plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
+        await _context.SaveChangesAsync(cancellationToken);
 
         return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
     }
@@ -263,6 +265,7 @@ public class PlatformBillingService : IPlatformBillingService
             prices[code] = input.Amount;
         }
 
+        pack.PriceCents = DeriveBaseCents(pack.PriceCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
         return ToDto(pack, await _pricing.GetAsync(cancellationToken), prices);
@@ -308,11 +311,12 @@ public class PlatformBillingService : IPlatformBillingService
             }
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
-
         var prices = new CountryPrices();
         foreach (var row in existingPrices)
             prices[row.CountryCode] = row.Amount;
+
+        pack.PriceCents = DeriveBaseCents(pack.PriceCents, prices);
+        await _context.SaveChangesAsync(cancellationToken);
 
         return ToDto(pack, await _pricing.GetAsync(cancellationToken), prices);
     }
@@ -334,6 +338,18 @@ public class PlatformBillingService : IPlatformBillingService
             .GroupBy(q => q.PlanId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+    /// <summary>The USD-cents figure older code still reads (list ordering, the legacy Payment column) - taken from India's
+    /// price, else the first country price set, else left as it was. Prices themselves live per country; nothing is sold from this.</summary>
+    private static int DeriveBaseCents(int current, CountryPrices prices)
+    {
+        if (prices.Count == 0)
+            return current;
+
+        var code = prices.ContainsKey("IN") ? "IN" : prices.Keys.OrderBy(k => k).First();
+        var region = RegionalPricingCatalog.Resolve(code);
+        return (int)Math.Round(prices[code] / region.RateToUsd * 100m, MidpointRounding.AwayFromZero);
+    }
+
     private static IReadOnlyList<CountryPriceDto> ToCountryPriceDtos(CountryPrices? prices) =>
         (prices ?? new CountryPrices())
             .Select(kv => (Pricing: RegionalPricingCatalog.All.FirstOrDefault(r => string.Equals(r.CountryCode, kv.Key, StringComparison.OrdinalIgnoreCase)), kv.Value))
@@ -349,7 +365,7 @@ public class PlatformBillingService : IPlatformBillingService
         pricing.CurrencySymbol,
         // The operator's own country's price: an explicit one if set, else the base converted. Two decimals - a
         // plan price is a real amount someone pays, not a fraction-of-a-cent estimate.
-        CatalogPricing.Local(p.PriceMonthlyCents, pricing, prices),
+        prices?.GetValueOrDefault(pricing.CountryCode) ?? 0m,
         (quotas ?? Array.Empty<PlanQuota>()).OrderBy(q => q.QuotaType).Select(q => new IncludedQuotaDto(q.QuotaType, q.IncludedUnits)).ToList(),
         ToCountryPriceDtos(prices));
 
@@ -357,6 +373,6 @@ public class PlatformBillingService : IPlatformBillingService
         p.Id, p.QuotaType, p.Name, p.Units, p.PriceCents, p.IsActive,
         pricing.CurrencyCode,
         pricing.CurrencySymbol,
-        CatalogPricing.Local(p.PriceCents, pricing, prices),
+        prices?.GetValueOrDefault(pricing.CountryCode) ?? 0m,
         ToCountryPriceDtos(prices));
 }

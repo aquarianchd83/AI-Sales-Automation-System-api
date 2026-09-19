@@ -26,6 +26,10 @@ public class CreatePlatformTenantRequestValidator : AbstractValidator<CreatePlat
             .Must(code => RegionalPricingCatalog.IsValidCode(code!))
             .When(x => !string.IsNullOrWhiteSpace(x.CountryCode))
             .WithMessage("Country must be one of the platform's supported, priced countries.");
+        RuleFor(x => x.StateCode)
+            .Must(IndianStates.IsValidCode)
+            .When(x => !string.IsNullOrWhiteSpace(x.StateCode))
+            .WithMessage("Choose one of the listed states.");
         RuleFor(x => x.Timezone)
             .Must(TimeZoneCatalog.IsValidId)
             .When(x => !string.IsNullOrWhiteSpace(x.Timezone))

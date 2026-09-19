@@ -22,6 +22,11 @@ public class UpdateTenantCountryRequestValidator : AbstractValidator<UpdateTenan
             .NotEmpty()
             .Must(RegionalPricingCatalog.IsValidCode)
             .WithMessage("Country must be one of the platform's supported, priced countries.");
+
+        RuleFor(x => x.StateCode)
+            .Must(IndianStates.IsValidCode)
+            .When(x => !string.IsNullOrWhiteSpace(x.StateCode))
+            .WithMessage("Choose one of the listed states.");
     }
 }
 

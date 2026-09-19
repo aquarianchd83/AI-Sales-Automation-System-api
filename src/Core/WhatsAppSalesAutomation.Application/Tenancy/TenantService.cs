@@ -74,6 +74,8 @@ public class TenantService : ITenantService
         return TenantProfileDto.From(tenant);
     }
 
+    private static string? Normalise(string? state) => string.IsNullOrWhiteSpace(state) ? null : state.Trim().ToUpperInvariant();
+
     public async Task<TenantProfileDto> UpdateCountryForCurrentTenantAsync(UpdateTenantCountryRequest request, CancellationToken cancellationToken = default)
     {
         await _updateCountryValidator.ValidateAndThrowAsync(request, cancellationToken);
@@ -81,6 +83,7 @@ public class TenantService : ITenantService
         var tenant = await GetCurrentTenantAsync(cancellationToken);
         await _countries.EnsureAllowedAsync(request.CountryCode, tenant.CountryCode, cancellationToken);
         tenant.CountryCode = request.CountryCode;
+        tenant.StateCode = IndianStates.AppliesTo(request.CountryCode) ? Normalise(request.StateCode) : null;
         await _context.SaveChangesAsync(cancellationToken);
 
         return TenantProfileDto.From(tenant);

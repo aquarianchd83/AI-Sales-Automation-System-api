@@ -41,7 +41,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        var gate = new QuotaGate(_ledger, new FixedOptions<WhatsAppQuotaWeightOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
+        var gate = new QuotaGate(_ledger, new FixedOptions<WhatsAppPricingOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
 
         var conversations = DispatchProxy.Create<IConversationService, Stub>();
         ((Stub)(object)conversations).Handler = (m, _) => m.Name == nameof(IConversationService.GetOrCreateActiveConversationIdAsync)
@@ -127,14 +127,15 @@ public sealed class CampaignSendQuotaTests : IDisposable
     }
 
     [Fact]
-    public async Task A_utility_template_costs_a_quarter_of_a_marketing_one()
+    public async Task A_utility_template_costs_its_price_share_of_a_marketing_one()
     {
         Seed(TemplateCategory.Utility, customers: 1);
         await Fund(1);
 
         await _sender.ProcessInitialSendsAsync();
 
-        Assert.Equal(0.75m, await BalanceAsync());
+        // Utility is 0.004 against marketing's 0.025: 0.16 of a unit, so 1 unit leaves 0.84.
+        Assert.Equal(0.84m, await BalanceAsync());
     }
 
     [Fact]

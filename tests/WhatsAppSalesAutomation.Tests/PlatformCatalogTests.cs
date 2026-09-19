@@ -42,7 +42,7 @@ public sealed class PlatformCatalogTests : IDisposable
             new CreateCreditPackRequestValidator(), new UpdateCreditPackRequestValidator());
 
         var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
-        _tenantBilling = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger);
+        _tenantBilling = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax());
 
         _db.Tenants.Add(_tenant);
         _db.SaveChanges();
@@ -55,7 +55,14 @@ public sealed class PlatformCatalogTests : IDisposable
     }
 
     private static CreatePlanRequest NewPlan(string code, params PlanQuotaInput[] quotas) =>
-        new(code, "Pro", 5, 1000, 5, 20, 5900, 50, quotas);
+        new(code, "Pro", 5, 1000, 5, 20, 5900, 50, quotas, new[] { new CountryPriceInput("IN", 4897m) });
+
+    // Prices are per country: these go in at the price for India, where the test tenant is (USD cents x 83).
+    private static CreateCreditPackRequest Pack(QuotaType type, string name, decimal units, int cents) =>
+        new(type, name, units, cents, new[] { new CountryPriceInput("IN", Math.Round(cents / 100m * 83m, 2)) });
+
+    private static UpdateCreditPackRequest Repack(string name, decimal units, int cents, bool active) =>
+        new(name, units, cents, active, new[] { new CountryPriceInput("IN", Math.Round(cents / 100m * 83m, 2)) });
 
     private async Task<decimal> BalanceAsync(QuotaType type) =>
         (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == type).Balance;
@@ -145,7 +152,7 @@ public sealed class PlatformCatalogTests : IDisposable
     [Fact]
     public async Task A_pack_the_operator_creates_is_priced_in_their_currency_and_offered_to_tenants()
     {
-        var pack = await _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.AiConversations, " 2,000 AI conversations ", 2000, 1500));
+        var pack = await _catalog.CreateCreditPackAsync(Pack(QuotaType.AiConversations, " 2,000 AI conversations ", 2000, 1500));
 
         Assert.Equal("2,000 AI conversations", pack.Name);
         Assert.Equal("INR", pack.CurrencyCode);
@@ -160,10 +167,10 @@ public sealed class PlatformCatalogTests : IDisposable
     public async Task Editing_a_pack_changes_it_for_future_buyers_but_not_for_a_purchase_already_made()
     {
         await _tenantBilling.ChoosePlanAsync(_tenant.Id, (await _catalog.CreatePlanAsync(NewPlan("pro"))).Id);
-        var pack = await _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.AiConversations, "1,000 AI", 1000, 800));
+        var pack = await _catalog.CreateCreditPackAsync(Pack(QuotaType.AiConversations, "1,000 AI", 1000, 800));
         var bought = await _tenantBilling.PurchaseCreditPackAsync(_tenant.Id, pack.Id);
 
-        await _catalog.UpdateCreditPackAsync(pack.Id, new UpdateCreditPackRequest("500 AI", 500, 1200, true));
+        await _catalog.UpdateCreditPackAsync(pack.Id, Repack("500 AI", 500, 1200, true));
 
         Assert.Equal(1000m, await BalanceAsync(QuotaType.AiConversations)); // the credits it bought stay 1,000
         Assert.Equal(800, (await _db.Payments.IgnoreQueryFilters().SingleAsync(p => p.Id == bought.Id)).AmountCents); // at the price it paid
@@ -177,7 +184,7 @@ public sealed class PlatformCatalogTests : IDisposable
     public async Task A_retired_pack_disappears_from_the_tenant_catalog_cannot_be_bought_and_can_come_back()
     {
         await _tenantBilling.ChoosePlanAsync(_tenant.Id, (await _catalog.CreatePlanAsync(NewPlan("pro"))).Id);
-        var pack = await _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.LeadCandidates, "100 leads", 100, 600));
+        var pack = await _catalog.CreateCreditPackAsync(Pack(QuotaType.LeadCandidates, "100 leads", 100, 600));
 
         await _catalog.DeactivateCreditPackAsync(pack.Id);
         await _catalog.DeactivateCreditPackAsync(pack.Id); // already retired - a no-op, not an error
@@ -186,7 +193,7 @@ public sealed class PlatformCatalogTests : IDisposable
         Assert.Contains(await _catalog.GetCreditPacksAsync(), p => p.Id == pack.Id && !p.IsActive); // the operator still sees it
         await Assert.ThrowsAsync<NotFoundException>(() => _tenantBilling.PurchaseCreditPackAsync(_tenant.Id, pack.Id));
 
-        await _catalog.UpdateCreditPackAsync(pack.Id, new UpdateCreditPackRequest("100 leads", 100, 600, true));
+        await _catalog.UpdateCreditPackAsync(pack.Id, Repack("100 leads", 100, 600, true));
         Assert.Contains(await _tenantBilling.GetCreditPacksAsync(_tenant.Id), p => p.Id == pack.Id);
     }
 
@@ -194,7 +201,6 @@ public sealed class PlatformCatalogTests : IDisposable
     public async Task Nonsense_packs_are_refused_and_an_unknown_pack_is_not_found()
     {
         await Assert.ThrowsAsync<ValidationException>(() => _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.AiConversations, "", 100, 100)));
-        await Assert.ThrowsAsync<ValidationException>(() => _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.AiConversations, "Free", 100, 0)));
         await Assert.ThrowsAsync<ValidationException>(() => _catalog.CreateCreditPackAsync(new CreateCreditPackRequest(QuotaType.AiConversations, "Empty", 0, 100)));
         await Assert.ThrowsAsync<ValidationException>(() => _catalog.CreateCreditPackAsync(new CreateCreditPackRequest((QuotaType)99, "Bad type", 100, 100)));
         await Assert.ThrowsAsync<NotFoundException>(() => _catalog.UpdateCreditPackAsync(Guid.NewGuid(), new UpdateCreditPackRequest("x", 1, 1, true)));

@@ -45,7 +45,9 @@ public record PlatformTenantDetailDto(
     string CurrencyCode,
     string CurrencySymbol,
     decimal EstimatedAiSpendThisMonthLocal,
-    bool RefundRequestsEnabled);
+    bool RefundRequestsEnabled,
+    // The tenant's state where its country's tax splits by state (India); decides CGST + SGST versus IGST.
+    string? StateCode = null);
 
 public record ImpersonationSessionDto(
     string AccessToken,
@@ -89,4 +91,5 @@ public record CreatePlatformTenantRequest(
     string? WebsiteUrl = null,
     string? SupportEmail = null,
     string? SupportPhone = null,
-    IReadOnlyList<string>? DomainKeywords = null) : Tenancy.ITenantBusinessDetails;
+    IReadOnlyList<string>? DomainKeywords = null,
+    string? StateCode = null) : Tenancy.ITenantBusinessDetails;

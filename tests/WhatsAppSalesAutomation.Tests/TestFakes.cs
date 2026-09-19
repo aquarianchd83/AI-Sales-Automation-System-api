@@ -116,3 +116,16 @@ public sealed class FixedOptions<T> : Microsoft.Extensions.Options.IOptionsSnaps
 
     public T Get(string? name) => Value;
 }
+
+/// <summary>The pricing service tests share: India's GST at 18%, the platform registered in Maharashtra, 83 rupees a dollar.</summary>
+public static class TestPricing
+{
+    public static WhatsAppSalesAutomation.Application.Billing.PricingService Default() => new(
+        new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.TaxOptions>(new()),
+        new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.FxOptions>(new()));
+
+    /// <summary>The same, with no tax at all - for tests about prices, not tax.</summary>
+    public static WhatsAppSalesAutomation.Application.Billing.PricingService NoTax() => new(
+        new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.TaxOptions>(new() { Countries = new() }),
+        new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.FxOptions>(new()));
+}

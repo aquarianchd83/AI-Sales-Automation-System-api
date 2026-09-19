@@ -37,7 +37,7 @@ public sealed class PlanAndCreditFlowTests : IDisposable
 
         _ledger = new QuotaLedgerService(_db, _clock);
         var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
-        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger);
+        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax());
 
         var audit = Fake.Of<IPlatformAuditService>((m, _) => m.Name == nameof(IPlatformAuditService.LogAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
         // Only what OverridePlanAsync touches is real; the rest of the service is not exercised here.
@@ -49,6 +49,10 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         _db.PlanQuotas.Add(new PlanQuota { PlanId = _starter.Id, QuotaType = QuotaType.AiConversations, IncludedUnits = 500 });
         _db.PlanQuotas.Add(new PlanQuota { PlanId = _growth.Id, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = 3000 });
         _db.CreditPacks.Add(_pack);
+        // Prices are per country; the test tenant is in India (the USD cents above x 83).
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _starter.Id, CountryCode = "IN", Amount = 3237m });
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _growth.Id, CountryCode = "IN", Amount = 8217m });
+        _db.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = _pack.Id, CountryCode = "IN", Amount = 1660m });
         _db.SaveChanges();
     }
 

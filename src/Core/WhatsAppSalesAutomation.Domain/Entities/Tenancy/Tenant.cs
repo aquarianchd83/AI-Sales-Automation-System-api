@@ -37,6 +37,10 @@ public class Tenant : BaseEntity
     /// unmatched code falls back to USD, never an error.</summary>
     public string? CountryCode { get; set; }
 
+    /// <summary>The tenant's state, where its country's tax splits by state (India: a code from IndianStates). Decides
+    /// CGST + SGST versus IGST on what it pays. Null when unknown or not applicable.</summary>
+    public string? StateCode { get; set; }
+
     /// <summary>IANA timezone id (e.g. "America/New_York", "Asia/Kolkata") - one of
     /// TimeZoneCatalog.All, set at signup or changed later by the tenant's own Admin or a
     /// PlatformSuperAdmin. Null defaults to TimeZoneCatalog.DefaultId (India Standard Time) via

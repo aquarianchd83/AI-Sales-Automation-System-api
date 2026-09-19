@@ -78,6 +78,7 @@ public class AuthService : IAuthService
             Status = TenantStatus.Trial,
             TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
             CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null,
             // Unlike CountryCode (no universal default makes sense there), every tenant gets an
             // explicit Timezone from creation - seeded to the platform default (IST) when the signup
             // form didn't collect one, the same value ITenantTimeZoneProvider would have fallen back

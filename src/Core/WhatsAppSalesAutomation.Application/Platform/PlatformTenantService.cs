@@ -160,14 +160,15 @@ public class PlatformTenantService : IPlatformTenantService
             tenant.OwnerUserId, ownerEmail, userCount,
             plan?.Name, subscription?.Status, subscription?.CurrentPeriodEndUtc,
             connection?.IsConnected ?? false,
-            messagesSentThisMonth, plan?.MaxMessagesPerMonth,
+            messagesSentThisMonth, null, // no monthly cap: sending is limited by the prepaid balance
             aiInteractionsThisMonth.Count, estimatedAiSpend,
             string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone,
             tenant.CountryCode,
             pricing.CurrencyCode,
             pricing.CurrencySymbol,
             Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero),
-            tenant.RefundRequestsEnabled);
+            tenant.RefundRequestsEnabled,
+            tenant.StateCode);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -189,6 +190,7 @@ public class PlatformTenantService : IPlatformTenantService
             Status = TenantStatus.Trial,
             TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
             CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
+            StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null,
             // Same default as self-serve signup - see AuthService.SignUpAsync.
             Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
         };
@@ -366,6 +368,7 @@ public class PlatformTenantService : IPlatformTenantService
         var previousCountry = tenant.CountryCode;
         await _countries.EnsureAllowedAsync(request.CountryCode, previousCountry, cancellationToken);
         tenant.CountryCode = request.CountryCode;
+        tenant.StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null;
         await _context.SaveChangesAsync(cancellationToken);
 
         await _auditService.LogAsync(

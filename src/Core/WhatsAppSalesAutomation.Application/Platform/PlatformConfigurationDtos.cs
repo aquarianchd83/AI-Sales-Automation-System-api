@@ -14,7 +14,6 @@ public record BillingAlertConfigDto(string WhatsAppTemplateName, string WhatsApp
 /// <summary>The free quota a trial tenant gets (Billing:Trial).</summary>
 public record TrialQuotaConfigDto(decimal WhatsAppMessages, decimal AiConversations, decimal LeadCandidates);
 
-/// <summary>How many pooled WhatsApp quota units one template send of each category uses (WhatsApp:QuotaWeights).</summary>
 public record QuotaWeightConfigDto(decimal Marketing, decimal Authentication, decimal Utility);
 
 /// <summary>What one WhatsApp template message of each category is charged at, in USD.</summary>
@@ -48,13 +47,29 @@ public record ChargesConfigDto(WhatsAppChargesConfigDto WhatsApp, LeadDiscoveryC
 /// already in it are unaffected.</summary>
 public record CountryConfigDto(string CountryCode, string CountryName, string CurrencyCode, string CurrencySymbol, bool IsEnabled);
 
+/// <summary>The tax a country adds on top of a price. `SplitByState` is India's GST: CGST + SGST inside the platform's own
+/// state, IGST anywhere else. A rate of 0 means no tax.</summary>
+public record TaxCountryConfigDto(string CountryCode, string CountryName, string TaxName, decimal RatePercent, bool SplitByState);
+
+/// <summary>Tax is always added on top. <see cref="SupplierStateCode"/> is the state the platform is registered in - it
+/// decides CGST + SGST versus IGST.</summary>
+public record TaxConfigDto(string SupplierStateCode, IReadOnlyList<TaxCountryConfigDto> Countries);
+
+/// <summary>The one exchange rate set by hand: rupees per US dollar. It turns USD provider costs into rupees and stamps
+/// each payment's INR equivalent. It never changes what a tenant pays.</summary>
+public record FxConfigDto(decimal InrPerUsd);
+
 /// <summary>Everything on the Platform Admin Console's Configuration page. The same shape is read and written: a save
 /// replaces the whole document, so what the operator sees is exactly what is stored.</summary>
 public record PlatformConfigurationDto(
     RefundPolicyConfigDto Refunds,
     BillingAlertConfigDto Alerts,
     TrialQuotaConfigDto Trial,
-    QuotaWeightConfigDto QuotaWeights,
     ChargesConfigDto Charges,
     // Every country the platform prices for, on or off. Null on a save leaves the choice as it is.
-    IReadOnlyList<CountryConfigDto>? Countries = null);
+    IReadOnlyList<CountryConfigDto>? Countries = null,
+    // Null on a save leaves them as they are.
+    TaxConfigDto? Tax = null,
+    FxConfigDto? Fx = null,
+    // Typical usage the plan cost report prices a plan against. Null on a save leaves it as it is.
+    PlanCostAssumptionsDto? CostAssumptions = null);

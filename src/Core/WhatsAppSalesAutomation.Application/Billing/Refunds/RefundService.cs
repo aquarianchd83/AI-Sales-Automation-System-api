@@ -20,6 +20,23 @@ namespace WhatsAppSalesAutomation.Application.Billing.Refunds;
 /// </summary>
 public class RefundService : IRefundService
 {
+    /// <summary>The tax lines of a payment, each scaled to the share of it being refunded.</summary>
+    private static string? ScaleTaxLines(string? json, decimal share)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            var lines = System.Text.Json.JsonSerializer.Deserialize<List<TaxLineDto>>(json) ?? new List<TaxLineDto>();
+            return System.Text.Json.JsonSerializer.Serialize(lines.Select(l => l with { Amount = -Math.Round(l.Amount * share, 2, MidpointRounding.AwayFromZero) }));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     private static readonly RefundStatus[] Open = { RefundStatus.Requested, RefundStatus.Failed };
 
     private readonly IApplicationDbContext _context;
@@ -157,6 +174,9 @@ public class RefundService : IRefundService
         // Paid out. What was held beyond the approved share (a partial approval) goes back to the wallet.
         await _ledger.ReleaseRefundHoldAsync(request.TenantId, request.Id, fraction, cancellationToken);
 
+        var share = payment.LocalAmount > 0 ? refundLocal / payment.LocalAmount : 0m;
+        var refundTax = Math.Round(payment.TaxLocal * share, 2, MidpointRounding.AwayFromZero);
+
         var refund = new Payment
         {
             TenantId = payment.TenantId,
@@ -169,6 +189,14 @@ public class RefundService : IRefundService
             CurrencyCode = payment.CurrencyCode,
             CurrencySymbol = payment.CurrencySymbol,
             LocalAmount = -refundLocal,
+            // The refund returns its share of the tax as well, in the original currency and at the original rate.
+            CountryCode = payment.CountryCode,
+            StateCode = payment.StateCode,
+            TaxLocal = -refundTax,
+            TaxLinesJson = ScaleTaxLines(payment.TaxLinesJson, share),
+            TotalLocal = -(refundLocal + refundTax),
+            FxRateToInr = payment.FxRateToInr,
+            AmountInr = -Math.Round((refundLocal + refundTax) * payment.FxRateToInr, 2, MidpointRounding.AwayFromZero),
             Provider = _gateway.Name,
             PaidAtUtc = now
         };
@@ -199,7 +227,7 @@ public class RefundService : IRefundService
         await _notifier.NotifyAsync(new TenantNotificationRequest(
             request.TenantId, TenantNotificationKind.RefundApproved, null, request.Id.ToString(),
             "Your refund was approved",
-            $"We've refunded {payment.CurrencySymbol}{refundLocal:0.00} for {payment.PlanName}. It goes back to your original payment method.",
+            $"We've refunded {payment.CurrencySymbol}{refundLocal + refundTax:0.00} (including tax) for {payment.PlanName}. It goes back to your original payment method.",
             AlsoWhatsApp: false), cancellationToken);
 
         return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();

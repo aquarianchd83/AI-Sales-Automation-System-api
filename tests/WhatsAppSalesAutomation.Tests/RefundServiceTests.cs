@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using WhatsAppSalesAutomation.Application.Billing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
@@ -47,7 +48,7 @@ public sealed class RefundServiceTests : IDisposable
     }
 
     /// <summary>A bought pack: 1,000 AI conversations for $20 (INR 1,660), with the grant behind it.</summary>
-    private async Task<Payment> BuyPackAsync(DateTime? paidAt = null)
+    private async Task<Payment> BuyPackAsync(DateTime? paidAt = null, bool withTax = false)
     {
         var pack = new CreditPack { QuotaType = QuotaType.AiConversations, Name = "1,000 AI conversations", Units = 1000, PriceCents = 2000 };
         var payment = new Payment
@@ -56,6 +57,16 @@ public sealed class RefundServiceTests : IDisposable
             AmountCents = 2000, CurrencyCode = "INR", CurrencySymbol = "₹", LocalAmount = 1660m,
             Provider = "Simulated", PaidAtUtc = paidAt ?? _clock.UtcNow
         };
+        if (withTax)
+        {
+            // 18% GST on top, charged as one IGST line, in rupees (so 1 rupee = 1 rupee).
+            payment.CountryCode = "IN";
+            payment.TaxLocal = 298.80m;
+            payment.TotalLocal = 1958.80m;
+            payment.TaxLinesJson = "[{\"Name\":\"IGST\",\"RatePercent\":18,\"Amount\":298.80}]";
+            payment.FxRateToInr = 1m;
+            payment.AmountInr = 1958.80m;
+        }
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync();
         await _ledger.GrantCreditsAsync(_tenant.Id, pack, payment.Id, payment.PaidAtUtc);
@@ -119,6 +130,26 @@ public sealed class RefundServiceTests : IDisposable
         Assert.Equal(-1162m, refundRow.LocalAmount);
         Assert.Equal(payment.Id, refundRow.RefundOfPaymentId);
         Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.RefundApproved);
+    }
+
+    [Fact]
+    public async Task A_refund_gives_back_its_share_of_the_tax_too_in_the_original_currency()
+    {
+        var payment = await BuyPackAsync(withTax: true);
+        await SpendAsync(300, "a1");
+        var request = await _refunds.RequestAsync(_tenant.Id, payment.Id, "bought too many", _tenantUser);
+
+        await _refunds.ApproveAsync(request.Id, new ReviewRefundRequest("ok"), _admin);
+
+        var refund = await _db.Payments.IgnoreQueryFilters().SingleAsync(p => p.Kind == PaymentKind.Refund);
+        // 1,400 of 2,000 cents is 70%: 1,162 of the price and 70% of the 298.80 tax.
+        Assert.Equal(-1162m, refund.LocalAmount);
+        Assert.Equal(-209.16m, refund.TaxLocal);
+        Assert.Equal(-1371.16m, refund.TotalLocal);
+        Assert.Equal(-1371.16m, refund.AmountInr);
+        Assert.Equal("IN", refund.CountryCode);
+        Assert.Equal(-209.16m, PaymentDto.From(refund).TaxLines!.Single().Amount);
+        Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.RefundApproved && n.Body.Contains("1371.16"));
     }
 
     [Fact]

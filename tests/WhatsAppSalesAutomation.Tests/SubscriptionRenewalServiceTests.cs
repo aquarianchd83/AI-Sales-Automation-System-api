@@ -30,10 +30,11 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new NoTenant(), new NoUser());
         _db.Database.EnsureCreated();
         _ledger = new QuotaLedgerService(_db, _clock);
-        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock);
+        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock, TestPricing.NoTax());
 
         _db.Tenants.Add(_tenant);
         _db.Plans.Add(_plan);
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _plan.Id, CountryCode = "IN", Amount = 3237m });
         _db.PlanQuotas.Add(new PlanQuota { PlanId = _plan.Id, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = 1000 });
         _db.Subscriptions.Add(new Subscription
         {

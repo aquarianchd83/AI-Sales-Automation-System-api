@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -20,7 +21,13 @@ public record PlatformPaymentListItemDto(
     decimal LocalAmount,
     string Provider,
     DateTime PaidAtUtc,
-    Guid? RefundOfPaymentId);
+    Guid? RefundOfPaymentId,
+    string? CountryCode = null,
+    string? StateCode = null,
+    decimal TaxLocal = 0,
+    decimal TotalLocal = 0,
+    IReadOnlyList<TaxLineDto>? TaxLines = null,
+    decimal AmountInr = 0);
 
 public record PlatformPaymentQuery : PagedRequest
 {
@@ -74,7 +81,8 @@ public class PlatformPaymentService : IPlatformPaymentService
         var items = rows
             .Select(x => new PlatformPaymentListItemDto(
                 x.p.Id, x.p.TenantId, x.t.Name, x.p.Kind.ToString(), x.p.PlanName, x.p.AmountCents,
-                x.p.CurrencyCode, x.p.CurrencySymbol, x.p.LocalAmount, x.p.Provider, x.p.PaidAtUtc, x.p.RefundOfPaymentId))
+                x.p.CurrencyCode, x.p.CurrencySymbol, x.p.LocalAmount, x.p.Provider, x.p.PaidAtUtc, x.p.RefundOfPaymentId,
+                x.p.CountryCode, x.p.StateCode, x.p.TaxLocal, x.p.TotalPaidLocal, PaymentDto.ParseTaxLines(x.p.TaxLinesJson), x.p.AmountInr))
             .ToList();
 
         return new PagedResult<PlatformPaymentListItemDto>(items, totalCount, query.Page, query.PageSize);

@@ -89,7 +89,7 @@ public class CreateCreditPackRequestValidator : AbstractValidator<CreateCreditPa
         RuleFor(x => x.QuotaType).IsInEnum();
         RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
         RuleFor(x => x.Units).GreaterThan(0).LessThanOrEqualTo(PlanQuotaListValidator.MaxUnits);
-        RuleFor(x => x.PriceCents).GreaterThan(0);
+        RuleFor(x => x.PriceCents).GreaterThanOrEqualTo(0);
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
     }
 }
@@ -100,7 +100,7 @@ public class UpdateCreditPackRequestValidator : AbstractValidator<UpdateCreditPa
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
         RuleFor(x => x.Units).GreaterThan(0).LessThanOrEqualTo(PlanQuotaListValidator.MaxUnits);
-        RuleFor(x => x.PriceCents).GreaterThan(0);
+        RuleFor(x => x.PriceCents).GreaterThanOrEqualTo(0);
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
     }
 }

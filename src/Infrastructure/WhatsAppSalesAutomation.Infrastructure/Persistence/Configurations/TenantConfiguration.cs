@@ -19,6 +19,7 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 
         builder.Property(t => t.Status).HasConversion<string>().HasMaxLength(20);
         builder.Property(t => t.CountryCode).HasMaxLength(2);
+        builder.Property(t => t.StateCode).HasMaxLength(5);
         builder.Property(t => t.Timezone).HasMaxLength(50);
 
         builder.Property(t => t.ProductName).HasMaxLength(200);

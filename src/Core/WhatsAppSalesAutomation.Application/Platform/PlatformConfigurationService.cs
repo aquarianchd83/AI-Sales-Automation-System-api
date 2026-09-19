@@ -20,7 +20,7 @@ public interface IPlatformConfigurationService
 /// <summary>
 /// The Configuration page's backend. The numbers themselves are the options classes the billing code already reads
 /// (<see cref="RefundPolicyOptions"/>, <see cref="BillingAlertOptions"/>, <see cref="TrialQuotaOptions"/>,
-/// <see cref="WhatsAppQuotaWeightOptions"/>, and the pricing options for WhatsApp, lead discovery and AI) - this
+/// and the pricing options for WhatsApp, lead discovery and AI) - this
 /// stores edits as AppSettings rows, which the configuration pipeline lets win over appsettings.json, and reloads
 /// so the next request sees them. A built-in default that is never edited keeps applying.
 /// </summary>
@@ -28,7 +28,9 @@ public class PlatformConfigurationService : IPlatformConfigurationService
 {
     private static readonly string[] OwnedPrefixes =
     {
-        "Billing:Refunds:", "Billing:Alerts:", "Billing:Trial:", "WhatsApp:QuotaWeights:",
+        "Billing:Refunds:", "Billing:Alerts:", "Billing:Trial:",
+        // Quota weights used to be edited here; they now follow the message prices. Kept so an old stored value is cleaned up on the next save.
+        "WhatsApp:QuotaWeights:",
         "WhatsApp:Pricing:", "LeadDiscovery:Pricing:", "Ai:Pricing:"
     };
 
@@ -38,10 +40,12 @@ public class PlatformConfigurationService : IPlatformConfigurationService
     private readonly RefundPolicyOptions _refunds;
     private readonly BillingAlertOptions _alerts;
     private readonly TrialQuotaOptions _trial;
-    private readonly WhatsAppQuotaWeightOptions _weights;
     private readonly WhatsAppPricingOptions _whatsAppPricing;
     private readonly LeadDiscoveryPricingOptions _leadPricing;
     private readonly AiPricingOptions _aiPricing;
+    private readonly TaxOptions _tax;
+    private readonly FxOptions _fx;
+    private readonly CostAssumptionsOptions _costing;
 
     public PlatformConfigurationService(
         IAppSettingsStore store,
@@ -50,18 +54,22 @@ public class PlatformConfigurationService : IPlatformConfigurationService
         IOptionsSnapshot<RefundPolicyOptions> refunds,
         IOptionsSnapshot<BillingAlertOptions> alerts,
         IOptionsSnapshot<TrialQuotaOptions> trial,
-        IOptionsSnapshot<WhatsAppQuotaWeightOptions> weights,
         IOptionsSnapshot<WhatsAppPricingOptions> whatsAppPricing,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> leadPricing,
-        IOptionsSnapshot<AiPricingOptions> aiPricing)
+        IOptionsSnapshot<AiPricingOptions> aiPricing,
+        IOptionsSnapshot<TaxOptions> tax,
+        IOptionsSnapshot<FxOptions> fx,
+        IOptionsSnapshot<CostAssumptionsOptions> costing)
     {
+        _costing = costing.Value;
+        _tax = tax.Value;
+        _fx = fx.Value;
         _store = store;
         _countryAvailability = countryAvailability;
         _validator = validator;
         _refunds = refunds.Value;
         _alerts = alerts.Value;
         _trial = trial.Value;
-        _weights = weights.Value;
         _whatsAppPricing = whatsAppPricing.Value;
         _leadPricing = leadPricing.Value;
         _aiPricing = aiPricing.Value;
@@ -92,7 +100,6 @@ public class PlatformConfigurationService : IPlatformConfigurationService
                 _refunds.SubscriptionPeriodDays, _refunds.RequestExpiryDays),
             new BillingAlertConfigDto(_alerts.WhatsAppTemplateName, _alerts.WhatsAppTemplateLanguage),
             new TrialQuotaConfigDto(_trial.WhatsAppMessages, _trial.AiConversations, _trial.LeadCandidates),
-            new QuotaWeightConfigDto(_weights.Marketing, _weights.Authentication, _weights.Utility),
             new ChargesConfigDto(
                 new WhatsAppChargesConfigDto(
                     new WhatsAppCategoryRatesDto(_whatsAppPricing.Default.Marketing, _whatsAppPricing.Default.Utility, _whatsAppPricing.Default.Authentication),
@@ -106,7 +113,19 @@ public class PlatformConfigurationService : IPlatformConfigurationService
                     _aiPricing.Models.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase)
                         .Select(m => new AiModelRatesDto(m.Key.Replace('/', ':'), m.Value.PromptPer1K, m.Value.CompletionPer1K)).ToList(),
                     string.IsNullOrWhiteSpace(_aiPricing.DefaultModel) ? null : _aiPricing.DefaultModel.Replace('/', ':'))),
-            catalog.Select(r => new CountryConfigDto(r.CountryCode, r.CountryName, r.CurrencyCode, r.CurrencySymbol, !disabled.Contains(r.CountryCode))).ToList());
+            catalog.Select(r => new CountryConfigDto(r.CountryCode, r.CountryName, r.CurrencyCode, r.CurrencySymbol, !disabled.Contains(r.CountryCode))).ToList(),
+            new TaxConfigDto(
+                _tax.SupplierStateCode,
+                catalog.Select(r =>
+                {
+                    var rule = _tax.Countries.GetValueOrDefault(r.CountryCode);
+                    return new TaxCountryConfigDto(r.CountryCode, r.CountryName, rule?.Name ?? "Tax", rule?.RatePercent ?? 0m, rule?.SplitByState ?? false);
+                }).ToList()),
+            new FxConfigDto(_fx.InrPerUsd),
+            new PlanCostAssumptionsDto(
+                _costing.MarketingSharePercent, _costing.UtilitySharePercent, _costing.AuthenticationSharePercent,
+                _costing.PromptTokensPerConversation, _costing.CompletionTokensPerConversation,
+                _costing.InputTokensPerCandidate, _costing.OutputTokensPerCandidate, _costing.WebSearchesPerCandidate));
 
         return dto;
     }
@@ -132,9 +151,6 @@ public class PlatformConfigurationService : IPlatformConfigurationService
         Set("Billing:Trial:AiConversations", request.Trial.AiConversations);
         Set("Billing:Trial:LeadCandidates", request.Trial.LeadCandidates);
 
-        Set("WhatsApp:QuotaWeights:Marketing", request.QuotaWeights.Marketing);
-        Set("WhatsApp:QuotaWeights:Authentication", request.QuotaWeights.Authentication);
-        Set("WhatsApp:QuotaWeights:Utility", request.QuotaWeights.Utility);
 
         var whatsApp = request.Charges.WhatsApp;
         SetWhatsAppRates("WhatsApp:Pricing:Default", whatsApp.Default.Marketing, whatsApp.Default.Utility, whatsApp.Default.Authentication);
@@ -153,6 +169,38 @@ public class PlatformConfigurationService : IPlatformConfigurationService
             prefixes.Add(CountryAvailability.DisabledPrefix);
             foreach (var choice in countryChoices.Where(c => !c.IsEnabled))
                 values[$"{CountryAvailability.DisabledPrefix}{choice.CountryCode.ToUpperInvariant()}"] = "true";
+        }
+
+        if (request.Tax is { } taxConfig)
+        {
+            prefixes.Add("Tax:");
+            Set("Tax:SupplierStateCode", taxConfig.SupplierStateCode.Trim().ToUpperInvariant());
+            foreach (var country in taxConfig.Countries)
+            {
+                var key = $"Tax:Countries:{country.CountryCode.ToUpperInvariant()}";
+                Set($"{key}:Name", country.TaxName.Trim());
+                Set($"{key}:RatePercent", country.RatePercent);
+                Set($"{key}:SplitByState", country.SplitByState);
+            }
+        }
+
+        if (request.CostAssumptions is { } costing)
+        {
+            prefixes.Add("Costing:");
+            Set("Costing:MarketingSharePercent", costing.MarketingSharePercent);
+            Set("Costing:UtilitySharePercent", costing.UtilitySharePercent);
+            Set("Costing:AuthenticationSharePercent", costing.AuthenticationSharePercent);
+            Set("Costing:PromptTokensPerConversation", costing.PromptTokensPerConversation);
+            Set("Costing:CompletionTokensPerConversation", costing.CompletionTokensPerConversation);
+            Set("Costing:InputTokensPerCandidate", costing.InputTokensPerCandidate);
+            Set("Costing:OutputTokensPerCandidate", costing.OutputTokensPerCandidate);
+            Set("Costing:WebSearchesPerCandidate", costing.WebSearchesPerCandidate);
+        }
+
+        if (request.Fx is { } fxConfig)
+        {
+            prefixes.Add("Fx:");
+            Set("Fx:InrPerUsd", fxConfig.InrPerUsd);
         }
 
         var lead = request.Charges.LeadDiscovery;
@@ -179,6 +227,11 @@ public class PlatformConfigurationService : IPlatformConfigurationService
         // The options this scope already bound are the old values, so the answer is built from what was just stored.
         return request with
         {
+            Tax = request.Tax is null ? null : request.Tax with
+            {
+                SupplierStateCode = request.Tax.SupplierStateCode.Trim().ToUpperInvariant(),
+                Countries = request.Tax.Countries.Select(c => c with { CountryCode = c.CountryCode.ToUpperInvariant(), CountryName = CountryName(c.CountryCode) }).ToList()
+            },
             Countries = request.Countries?.Select(c => c with { CountryCode = c.CountryCode.ToUpperInvariant(), CountryName = CountryName(c.CountryCode) }).ToList(),
             Charges = request.Charges with
             {
@@ -248,12 +301,6 @@ public class PlatformConfigurationValidator : AbstractValidator<PlatformConfigur
             t.RuleFor(x => x.LeadCandidates).InclusiveBetween(0m, MaxUnits);
         });
 
-        RuleFor(x => x.QuotaWeights).NotNull().ChildRules(w =>
-        {
-            w.RuleFor(x => x.Marketing).InclusiveBetween(0m, 1000m);
-            w.RuleFor(x => x.Authentication).InclusiveBetween(0m, 1000m);
-            w.RuleFor(x => x.Utility).InclusiveBetween(0m, 1000m);
-        });
 
         RuleFor(x => x.Countries!).ChildRules(list =>
         {
@@ -265,6 +312,39 @@ public class PlatformConfigurationValidator : AbstractValidator<PlatformConfigur
                 .WithMessage("Each country can be listed only once.");
             list.RuleFor(x => x).Must(l => l.Any(c => c.IsEnabled)).WithMessage("At least one country must stay enabled.");
         }).When(x => x.Countries is not null);
+
+        RuleFor(x => x.Tax!).ChildRules(t =>
+        {
+            t.RuleFor(x => x.SupplierStateCode).Must(IndianStates.IsValidCode).WithMessage("Choose one of the listed states.");
+            t.RuleForEach(x => x.Countries).ChildRules(c =>
+            {
+                c.RuleFor(x => x.CountryCode).Must(code => code is not null && RegionalPricingCatalog.IsValidCode(code))
+                    .WithMessage("Country is not one the platform prices for.");
+                c.RuleFor(x => x.TaxName).NotEmpty().MaximumLength(20);
+                c.RuleFor(x => x.RatePercent).InclusiveBetween(0m, 100m);
+            });
+            t.RuleFor(x => x.Countries)
+                .Must(l => l.Select(c => c.CountryCode?.ToUpperInvariant()).Distinct().Count() == l.Count)
+                .WithMessage("Each country can be listed only once.");
+        }).When(x => x.Tax is not null);
+
+        RuleFor(x => x.CostAssumptions!).ChildRules(a =>
+        {
+            a.RuleFor(x => x.MarketingSharePercent).InclusiveBetween(0m, 1000m);
+            a.RuleFor(x => x.UtilitySharePercent).InclusiveBetween(0m, 1000m);
+            a.RuleFor(x => x.AuthenticationSharePercent).InclusiveBetween(0m, 1000m);
+            a.RuleFor(x => x.PromptTokensPerConversation).InclusiveBetween(0, 10_000_000);
+            a.RuleFor(x => x.CompletionTokensPerConversation).InclusiveBetween(0, 10_000_000);
+            a.RuleFor(x => x.InputTokensPerCandidate).InclusiveBetween(0, 10_000_000);
+            a.RuleFor(x => x.OutputTokensPerCandidate).InclusiveBetween(0, 10_000_000);
+            a.RuleFor(x => x.WebSearchesPerCandidate).InclusiveBetween(0m, 1000m);
+            a.RuleFor(x => x).Must(x => x.MarketingSharePercent + x.UtilitySharePercent + x.AuthenticationSharePercent > 0)
+                .WithMessage("At least one WhatsApp category needs a share.");
+        }).When(x => x.CostAssumptions is not null);
+
+        RuleFor(x => x.Fx!).ChildRules(f =>
+            f.RuleFor(x => x.InrPerUsd).InclusiveBetween(1m, 1000m).WithMessage("Rupees per dollar must be between 1 and 1000."))
+            .When(x => x.Fx is not null);
 
         RuleFor(x => x.Charges).NotNull().ChildRules(c =>
         {

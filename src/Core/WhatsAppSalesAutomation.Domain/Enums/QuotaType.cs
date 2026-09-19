@@ -5,7 +5,7 @@ namespace WhatsAppSalesAutomation.Domain.Enums;
 public enum QuotaType
 {
     /// <summary>Billable WhatsApp template sends, weighted by template category - see
-    /// WhatsAppQuotaWeightOptions. A pooled quota rather than one per category.</summary>
+    /// the per-category message prices (Application.Quota.WhatsAppQuotaWeights). A pooled quota rather than one per category.</summary>
     WhatsAppMessages = 0,
 
     /// <summary>One AI reply interaction.</summary>

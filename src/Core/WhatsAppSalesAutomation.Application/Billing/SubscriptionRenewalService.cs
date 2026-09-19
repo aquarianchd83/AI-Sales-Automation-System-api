@@ -24,9 +24,11 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
     private readonly IApplicationDbContext _context;
     private readonly IQuotaLedgerService _ledger;
     private readonly IDateTimeProvider _dateTime;
+    private readonly IPricingService _pricing;
 
-    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime)
+    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime, IPricingService pricing)
     {
+        _pricing = pricing;
         _context = context;
         _ledger = ledger;
         _dateTime = dateTime;
@@ -55,22 +57,16 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
                 start = start.AddMonths(1);
             var end = start.AddMonths(1);
 
-            var pricing = RegionalPricingCatalog.Resolve(tenant.CountryCode);
-            var planPrices = (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken)).GetValueOrDefault(plan.Id);
-            var (usdCents, localAmount) = CatalogPricing.Charge(plan.PriceMonthlyCents, pricing, planPrices);
-            var payment = new Payment
-            {
-                TenantId = tenant.Id,
-                Kind = PaymentKind.Subscription,
-                PlanId = plan.Id,
-                PlanName = plan.Name,
-                AmountCents = usdCents,
-                CurrencyCode = pricing.CurrencyCode,
-                CurrencySymbol = pricing.CurrencySymbol,
-                LocalAmount = localAmount,
-                Provider = "Simulated",
-                PaidAtUtc = now
-            };
+            // The price set for the tenant's country today, plus tax. A plan with no price there is not sold there, so it
+            // cannot renew - the subscription is left as it is for the operator to sort out, and tried again next pass.
+            var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+            var planPrice = (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken))
+                .GetValueOrDefault(plan.Id)?.GetValueOrDefault(region.CountryCode);
+            var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode);
+            if (quote is null)
+                continue;
+
+            var payment = PaymentFactory.For(tenant.Id, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id, periodStartUtc: start, periodEndUtc: end);
             _context.Payments.Add(payment);
             subscription.CurrentPeriodStartUtc = start;
             subscription.CurrentPeriodEndUtc = end;

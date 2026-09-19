@@ -1,35 +1,9 @@
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using WhatsAppSalesAutomation.Application.Common.Interfaces;
-using WhatsAppSalesAutomation.Domain.Entities.Identity;
-
 namespace WhatsAppSalesAutomation.Application.Billing;
 
-/// <summary>See <see cref="ICurrentUserPricingService"/>.</summary>
+/// <summary>See <see cref="ICurrentUserPricingService"/>. The platform administrator is always based in India, so every
+/// platform-wide figure is quoted in rupees whoever is signed in - it no longer follows the operator's profile country.</summary>
 public class CurrentUserPricingService : ICurrentUserPricingService
 {
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly ICurrentUserService _currentUser;
-
-    public CurrentUserPricingService(UserManager<ApplicationUser> userManager, ICurrentUserService currentUser)
-    {
-        _userManager = userManager;
-        _currentUser = currentUser;
-    }
-
-    public async Task<RegionalPricing> GetAsync(CancellationToken cancellationToken = default)
-    {
-        if (_currentUser.UserId is not { } userId)
-            return RegionalPricingCatalog.UsdDefault;
-
-        // IgnoreQueryFilters(): ApplicationUser carries a tenant filter, and this has to work for a
-        // PlatformSuperAdmin, who belongs to no tenant.
-        var countryCode = await _userManager.Users.IgnoreQueryFilters()
-            .Where(u => u.Id == userId)
-            .Select(u => u.CountryCode)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        // Never null: an unset or unlisted country falls back to USD, same as every other price here.
-        return RegionalPricingCatalog.Resolve(countryCode);
-    }
+    public Task<RegionalPricing> GetAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(RegionalPricingCatalog.Resolve("IN"));
 }
