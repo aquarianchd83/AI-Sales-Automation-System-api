@@ -546,8 +546,11 @@ public enum HandoffTriggerReason
 }
 ```
 
-> **Enum extend karne ki safety:** `HandoffTriggerReason` DB mein kaise store hota hai, pehle woh
-> verify karna hai. Agar int hai toh naye values append karna safe hai (existing rows ka matlab nahi
+> **Enum extend karne ki safety:** ✅ **Verify ho gaya** — `HumanHandoffConfiguration` ise
+> `HasConversion<string>().HasMaxLength(20)` se store karta hai, yani naye values append karna
+> poori tarah safe hai aur teeno naam 20 chars ke andar hain. (Mool note neeche rakha hai.)
+>
+> `HandoffTriggerReason` DB mein kaise store hota hai, pehle woh verify karna hai. Agar int hai toh naye values append karna safe hai (existing rows ka matlab nahi
 > badalta). Agar string hai (`QuotaType` ki tarah) toh aur bhi safe. Yeh ek **implementation-time
 > check** hai, assumption nahi — migration likhne se pehle
 > `HumanHandoffConfiguration.cs` dekh lena.
@@ -1645,7 +1648,9 @@ LeadScoringRules:
 ```
 
 Weights aur thresholds bilkul maujood `ComputeScoreNumeric` se match karte hain — 30/30/20 aur ±20.
-Yani **seed ke baad koi lead ka score nahi badlega**. Yeh ek testable claim hai, §14 AC-3 dekhein.
+> ⚠️ **Yeh claim implementation mein aadha galat nikla — §18 dekhein.** Field weights bilkul
+> preserve hote hain (30/30/20), par intent ka term nahi: purana heuristic har turn par shuru se
+> recompute karta tha, naya design accumulate karta hai. Sahi claim §18.1 mein likhi hai.
 
 > ⚠️ `Negotiation` intent naye `CustomerIntent` enum mein nahi hai (§9.3 ka note). Agar woh enum mein
 > add nahi hota, toh yeh seed rule kabhi fire nahi karega aur behaviour badal jaayega. Isliye OD-2
@@ -1805,9 +1810,11 @@ AC-2   Given customer ne pehle bata diya "3BHK Mohali mein"
        Then <still_to_learn> mein property_type ya location na ho
        And agent unhe dobara na poochhe
 
-AC-3   Given ek maujood lead jiska Budget/Interest/PurchaseTimeline set hai
-       When M6 seed + M-backfill chalne ke baad score recompute ho
-       Then ScoreNumeric bilkul wahi ho jo pehle tha
+AC-3   Given ek maujood lead jiske teeno fields capture hain
+       When seed + backfill ke baad score recompute ho
+       Then field weights ka yog theek 80 ho (30+30+20), aur band Hot ho
+       # Poora ScoreNumeric tabhi same hoga jab us turn par intent
+       # Negotiation/Complaint na ho - §18.1 dekhein
 
 AC-4   Given model ne ek aisa field_key bheja jo tenant ke schema mein nahi hai
        Then woh field drop ho (V-2), baaki fields store hon, aur run fail na ho
@@ -1907,10 +1914,10 @@ Bahut mamooli.
 | # | Sawaal | Prastavit default | Asar |
 |---|---|---|---|
 | **OD-1** | `WorkingHours` free text ya structured? | Free text (prompt sirf inject karta hai) | Structured chahiye tabhi jab "abhi khule hain?" compute karna ho |
-| **OD-2** | `Negotiation` intent `CustomerIntent` enum mein add karein? | **Haan, add karo** | Nahi karne par maujood `HandoffTriggerReason.Negotiation` mapping aur M6 ka seed rule dead ho jaayenge (§13.2 ka ⚠️) |
-| **OD-3** | `AiOptions.EscalationIntents` ki maujood values naye enum se match karti hain? | **Verify karna hai** | Mismatch = escalation chupchap band ho jaayegi. Yeh sabse khatarnak silent failure hai |
+| ~~**OD-2**~~ | `Negotiation` intent `CustomerIntent` enum mein add karein? | ✅ **RESOLVED — add kar diya** | Enum mein hai, wajah uske doc comment mein likhi hai |
+| **OD-3** | `AiOptions.EscalationIntents` ki maujood values naye enum se match karti hain? | ⚠️ **VERIFIED — ek mismatch hai** | `"ComplexTechnical"` naye enum mein nahi hai (uska successor `Support` hai). Stage 3 se pehle theek karna hai — §18.2 |
 | **OD-4** | Score clamp 0–100 rahe? | Haan | Hatane par `LeadScoreBand` ke 70/40 thresholds meaningless |
-| **OD-5** | `OncePerLead` ka unique index kaise? (§5.9 ka ⚠️) | Contribution row par `IsOnce` flag + filtered index | Repeatable rules ko galti se block na kare |
+| ~~**OD-5**~~ | `OncePerLead` ka unique index kaise? (§5.9 ka ⚠️) | ✅ **RESOLVED — `IsOnce` flag + filtered index** | Waise hi implement hua; test `Repeatable_rule_fires_every_turn_it_matches` isse cover karta hai |
 | **OD-6** | Ek turn mein 1 hi sawaal, ya kabhi 2? | 1 (prompt §6 "one primary question at a time") | 2 allow karne par form jaisa lagne lagta hai |
 | **OD-7** | Model se `lead_score` maangein? | **Nahi** (§3.2) | Maangne par do sources of truth ban jaate hain |
 | **OD-8** | Industry-wise qualification templates kaun banayega? | Product team, Stage 1 ke saath | Iske bina har tenant khali screen se shuru karega |
@@ -1949,6 +1956,109 @@ toh jawab galat hi rahega. **Isliye:**
 **Recommendation:** Phase 7 Stage 1–2 (configuration + scoring) aaj shuru ho sakte hain — unka RAG se
 koi lena-dena nahi. Phase 7 Stage 3 (prompt rewrite) se pehle Phase 6 Stage 1–3 ho jaaye toh
 behtar — warna prompt tune karte waqt yeh pata nahi chalega ki galti prompt ki hai ya retrieval ki.
+
+---
+
+# 18. Implementation notes (Stages 1 and 2)
+
+*Written in English, unlike the rest of this document, because it is a running log of what building
+the design actually found — kept here rather than in a separate file so a reader who reaches a section
+and wonders "did that survive contact with the code?" has the answer in the same place.*
+
+Stages 1 and 2 are implemented. Stage 3 (the prompt rewrite) is not.
+
+## 18.1 The equivalence claim in §13.2 was half wrong
+
+§13.2 and the old AC-3 claimed that after seeding, every existing lead would score **bit-for-bit**
+what it scored before. Only half of that is true, and the half that is false is worth understanding
+before anyone reads a score report across the upgrade.
+
+**Preserved exactly — the field-weight component.** The seeded fields carry 30/30/20, so a lead with
+budget, interest and timeline captured still totals 80 and still bands Hot. `LeadScoringServiceTests`
+pins this.
+
+**Changed — the intent component.** The old `ComputeScoreNumeric` recomputed from scratch on every
+turn, so its ±20 for Negotiation/Complaint applied *only on the turn whose intent matched*. A lead
+that negotiated and then asked an unrelated question silently lost the bonus on the next turn.
+Scoring is now accumulative: contributions are recorded once and summed, so a signal that was earned
+stays earned.
+
+That is a deliberate behaviour change, and on balance a fix — the old behaviour meant a lead's score
+could fall because the customer asked something harmless. But it is a change, and this document
+previously said there was none.
+
+Two consequences worth stating plainly:
+
+- Existing leads keep their stored `ScoreNumeric` until their next AI turn. Nothing recomputes
+  history, so no report changes retroactively.
+- Complaint's −20 now persists for the life of the lead rather than only for the turn it happened on.
+  A tenant that wants a complaint to stop weighing on a lead has to clear it deliberately; there is no
+  automatic decay, and adding one would be a product decision, not a technical one.
+
+## 18.2 OD-3 verified, and it is a real mismatch
+
+`appsettings.json` ships `Ai:EscalationIntents` as
+`[ "Complaint", "HumanRequest", "Negotiation", "ComplexTechnical" ]`.
+
+Against the `CustomerIntent` enum as implemented: the first three match, **`ComplexTechnical` does
+not exist**. Its successor in the prompt's own taxonomy is `Support`, which §9.3 already maps to
+`HandoffTriggerReason.ComplexTechnical`.
+
+This is harmless today — the model still returns free text and the current prompt still suggests the
+old label — and it becomes the silent escalation failure this document warned about the moment
+Stage 3 constrains the model's output to the enum. **The default must change to `Support` in the same
+change that constrains the output, not before** (changing it earlier would stop escalating genuinely
+complex tickets while the model is still emitting the old string).
+
+## 18.3 Design additions the document did not anticipate
+
+**`LeadScoreContribution.SourceKey` is namespaced and 80 chars, not 60.** Nothing stops a tenant
+naming a scoring rule `budget` while also having a `budget` qualification field. Both would have
+written the same `SourceKey`, and the once-per-lead unique index would have silently swallowed one of
+them — the rule or the weight, depending on which was written first. Contributions are now stored as
+`field:{key}` and `rule:{key}`, which needed the extra width. The breakdown endpoint strips the prefix
+before display.
+
+**Field weights are awarded from everything currently known, not only from what the turn captured.**
+The obvious implementation — award a weight when a field is captured — leaves a backfilled value, or
+one an agent typed on the lead screen, worth nothing forever. Recompute instead reconciles: any
+currently-known field without a contribution gets one. This also makes a partially-failed turn
+self-healing.
+
+**The legacy entity path had to start capturing.** Scoring reads `LeadQualificationValue`, but
+`ApplyAiExtractedAttributesAsync` only ever wrote `Lead.Budget`/`Interest`/`PurchaseTimeline`. Without
+mirroring those into captured values, every lead would have scored zero from the day Stage 2 shipped.
+This is Stage 3's capture path pulled forward in miniature, and it is why `UpdateAsync` captures too —
+a value an agent types is as real as one the AI extracted.
+
+**EF does not flush before queries.** Capture stages rows on the change tracker; `RecomputeAsync`
+reads them back with a query. Without an intervening `SaveChanges` the values just captured earn
+nothing until something else rescores the lead. Both call sites now save before scoring.
+
+## 18.4 Hot-lead state exists but nothing reads it yet
+
+`Lead.HotLeadDetectedAt`/`HotLeadReason` are set by scoring (buying intent, a `MarksLeadHot` rule, or
+the score crossing the Hot band). Nothing consumes them until Stage 4 pauses qualification and raises
+the handoff. Setting them early is harmless and means the data is already accurate when that lands.
+
+The flag is stamped once and never cleared by a later, cooler turn — §8.3's rule, enforced in
+`ApplyHotLead`.
+
+## 18.5 Not yet verified
+
+No .NET SDK was available in the environment where Stages 1 and 2 were written. The migration, its
+designer and the model snapshot were hand-written and cross-checked against each other, and
+`LeadScoringServiceTests` covers the scoring rules over real SQLite — but **nothing has been compiled
+and no test has run**. Before trusting any of it:
+
+```
+dotnet build
+dotnet test --filter LeadScoringServiceTests
+dotnet ef migrations add Test    # must produce an EMPTY migration
+```
+
+That last one is the one that matters most: a non-empty result means the hand-written snapshot is out
+of step with the model, and every future migration would be wrong.
 
 ---
 
