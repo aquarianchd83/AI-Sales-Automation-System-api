@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
+using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -24,6 +25,8 @@ public class AuthService : IAuthService
     private readonly ITenantSlugResolver _slugResolver;
     private readonly ITenantJobProvisioner _jobProvisioner;
     private readonly IQuotaGate _quota;
+    private readonly IQualificationAdminService _qualification;
+    private readonly ILeadScoringAdminService _leadScoring;
     private readonly IValidator<TenantSignUpRequest> _signUpValidator;
     private readonly IValidator<LoginRequest> _loginValidator;
     private readonly IValidator<RefreshTokenRequest> _refreshTokenValidator;
@@ -38,6 +41,8 @@ public class AuthService : IAuthService
         IDateTimeProvider dateTime,
         ITenantSlugResolver slugResolver,
         ITenantJobProvisioner jobProvisioner,
+        IQualificationAdminService qualification,
+        ILeadScoringAdminService leadScoring,
         IQuotaGate quota,
         IValidator<TenantSignUpRequest> signUpValidator,
         IValidator<LoginRequest> loginValidator,
@@ -53,6 +58,8 @@ public class AuthService : IAuthService
         _slugResolver = slugResolver;
         _jobProvisioner = jobProvisioner;
         _quota = quota;
+        _qualification = qualification;
+        _leadScoring = leadScoring;
         _signUpValidator = signUpValidator;
         _loginValidator = loginValidator;
         _refreshTokenValidator = refreshTokenValidator;
@@ -117,6 +124,13 @@ public class AuthService : IAuthService
         // A trial tenant has no plan and so no included quota - without this it could not send a message before
         // paying. The grant expires with the trial.
         await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
+
+        // Gives the new tenant a working AI sales agent from its first message: without a qualification
+        // schema the agent has nothing to ask about, and without scoring rules every lead reads Cold.
+        // Both calls are additive and idempotent, so a tenant that later configures its own is
+        // unaffected, and a retry of this signup cannot double-seed.
+        await _qualification.SeedDefaultsAsync(tenant.Id, cancellationToken);
+        await _leadScoring.SeedDefaultsAsync(tenant.Id, cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);

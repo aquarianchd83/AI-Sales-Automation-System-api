@@ -82,6 +82,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
 
+    public DbSet<QualificationField> QualificationFields => Set<QualificationField>();
+
+    public DbSet<LeadQualificationValue> LeadQualificationValues => Set<LeadQualificationValue>();
+
+    public DbSet<LeadScoringRule> LeadScoringRules => Set<LeadScoringRule>();
+
+    public DbSet<LeadScoreContribution> LeadScoreContributions => Set<LeadScoreContribution>();
+
     public DbSet<LeadDiscoveryProfile> LeadDiscoveryProfiles => Set<LeadDiscoveryProfile>();
 
     public DbSet<DiscoveredLead> DiscoveredLeads => Set<DiscoveredLead>();

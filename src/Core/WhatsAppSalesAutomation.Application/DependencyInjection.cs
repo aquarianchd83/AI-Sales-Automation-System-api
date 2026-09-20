@@ -65,6 +65,8 @@ public static class DependencyInjection
         services.AddScoped<IHandoffService, HandoffService>();
         services.AddScoped<IInboundWebhookProcessor, InboundWebhookProcessor>();
         services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<IQualificationAdminService, QualificationAdminService>();
+        services.AddScoped<ILeadScoringAdminService, LeadScoringAdminService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
         services.AddScoped<ILogService, LogService>();

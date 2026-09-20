@@ -43,4 +43,23 @@ public class AiInteraction : BaseEntity, ITenantOwned
     public int? CompletionTokens { get; set; }
 
     public int LatencyMs { get; set; }
+
+    /// <summary>The qualification FieldKeys this turn actually captured, as a JSON array. Lets the AI
+    /// performance report answer "how many turns does qualification really take" without joining
+    /// through LeadQualificationValue.</summary>
+    public string? CapturedFieldKeysJson { get; set; }
+
+    /// <summary>The field the agent asked for in this turn, if any. Paired with
+    /// <see cref="CapturedFieldKeysJson"/> this is what shows whether asking works: a field asked
+    /// three turns running and never captured is a badly phrased question, not a stubborn customer.</summary>
+    public string? AskedFieldKey { get; set; }
+
+    /// <summary>What the model reported, before code decided anything. Kept separate from
+    /// <see cref="ActionTaken"/> so an audit can tell "the model said buying intent and we agreed"
+    /// from "the model said it and our rules overrode it".</summary>
+    public bool BuyingIntentReported { get; set; }
+
+    public bool HumanRequestReported { get; set; }
+
+    public bool OptOutReported { get; set; }
 }

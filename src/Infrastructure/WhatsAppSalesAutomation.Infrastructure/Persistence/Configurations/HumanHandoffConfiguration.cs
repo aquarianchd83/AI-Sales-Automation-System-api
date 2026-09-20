@@ -14,6 +14,7 @@ public class HumanHandoffConfiguration : IEntityTypeConfiguration<HumanHandoff>
         builder.Property(h => h.TriggerReason).HasConversion<string>().HasMaxLength(20);
         builder.Property(h => h.Status).HasConversion<string>().HasMaxLength(20);
         builder.Property(h => h.Notes).HasMaxLength(2000);
+        builder.Property(h => h.SummaryJson).HasColumnType("nvarchar(max)");
 
         builder.HasIndex(h => h.Status);
 

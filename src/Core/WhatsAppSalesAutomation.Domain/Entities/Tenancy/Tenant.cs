@@ -65,6 +65,26 @@ public class Tenant : BaseEntity
 
     public string? SupportPhone { get; set; }
 
+    /// <summary>Where the business operates, as a customer would understand it, e.g. "Mohali, Punjab"
+    /// or "Pan-India (online)". Free text rather than derived from <see cref="CountryCode"/>/
+    /// <see cref="StateCode"/>: those exist for tax and pricing, and neither answers "where are you
+    /// based?" in a form that belongs in a sales reply.</summary>
+    public string? BusinessLocation { get; set; }
+
+    /// <summary>Working hours as prose, e.g. "Mon-Sat 10am-7pm IST, Sunday closed". Free text because
+    /// nothing computes against it - it is injected into the AI sales agent's business context and
+    /// read by a human. Answering "are we open right now?" would need a structured shape instead.</summary>
+    public string? WorkingHours { get; set; }
+
+    /// <summary>The outcome this tenant's AI sales agent steers conversations toward. Shapes the
+    /// closing move it offers a customer who is ready to act, so a clinic gets "book a demo" and a
+    /// builder gets "schedule a site visit".</summary>
+    public ConversationGoal AiConversationGoal { get; set; } = ConversationGoal.Enquiry;
+
+    /// <summary>Whether the AI may say anything to a customer about how they are assessed or ranked.
+    /// Off by default: a lead score is internal, and a customer told they scored 42 is a customer lost.</summary>
+    public bool AiMayDiscloseLeadScore { get; set; }
+
     /// <summary>Switch, set by a PlatformSuperAdmin per tenant: whether this tenant sees a "request a refund"
     /// option at all. Off by default. The server enforces it - hiding the button is not the control.</summary>
     public bool RefundRequestsEnabled { get; set; }

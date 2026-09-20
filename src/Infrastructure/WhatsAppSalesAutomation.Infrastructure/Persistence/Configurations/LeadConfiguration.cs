@@ -17,12 +17,19 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.Property(l => l.Budget).HasMaxLength(200);
         builder.Property(l => l.Interest).HasMaxLength(500);
         builder.Property(l => l.PurchaseTimeline).HasMaxLength(200);
+        builder.Property(l => l.CurrentIntent).HasMaxLength(40);
+        builder.Property(l => l.HotLeadReason).HasMaxLength(200);
         builder.Property(l => l.RowVersion).IsRowVersion();
 
         // Not unique: history is kept across Won/Lost, matching Conversation's rule - only Application
         // logic enforces "at most one non-terminal Lead per customer" when creating new ones.
         builder.HasIndex(l => l.CustomerId);
         builder.HasIndex(l => l.Stage);
+
+        // Filtered: the hot-lead queue is a small slice of a large table, and the pipeline board's
+        // "needs attention" view reads exactly this.
+        builder.HasIndex(l => new { l.TenantId, l.HotLeadDetectedAt })
+            .HasFilter("[HotLeadDetectedAt] IS NOT NULL");
 
         builder.HasOne<Customer>()
             .WithMany()

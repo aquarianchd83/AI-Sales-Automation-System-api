@@ -21,4 +21,11 @@ public class HumanHandoff : BaseEntity, ITenantOwned
     public DateTime? ResolvedAt { get; set; }
 
     public string? Notes { get; set; }
+
+    /// <summary>The structured briefing for whoever picks this up: requirement, captured
+    /// qualification, what is still unknown, score with its breakdown, intent, and why the agent
+    /// stepped back. Serialized at handoff time rather than rendered on view, because it records what
+    /// the agent knew at that moment - the lead keeps changing afterwards, and a regenerated summary
+    /// would quietly describe a different situation than the one that triggered the handoff.</summary>
+    public string? SummaryJson { get; set; }
 }

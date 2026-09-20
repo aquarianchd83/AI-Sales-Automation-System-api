@@ -181,6 +181,12 @@ try
         // own doc comment).
         await FaqSeeder.SeedAsync(scope.ServiceProvider);
 
+        // Default qualification schema and scoring rules for every tenant, plus the backfill that
+        // moves each lead's existing Budget/Interest/PurchaseTimeline into the new value rows - without
+        // that, an upgraded tenant's agent would re-ask customers for what it was already told. Always
+        // runs, insert-only, converges on every boot (see QualificationSeeder's own doc comment).
+        await QualificationSeeder.SeedAsync(scope.ServiceProvider);
+
         // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
         if (app.Environment.IsDevelopment())
             await DevDataSeeder.SeedAsync(scope.ServiceProvider);

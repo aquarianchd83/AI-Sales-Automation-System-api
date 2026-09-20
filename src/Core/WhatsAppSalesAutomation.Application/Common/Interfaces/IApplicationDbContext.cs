@@ -69,6 +69,14 @@ public interface IApplicationDbContext
 
     DbSet<LeadActivity> LeadActivities { get; }
 
+    DbSet<QualificationField> QualificationFields { get; }
+
+    DbSet<LeadQualificationValue> LeadQualificationValues { get; }
+
+    DbSet<LeadScoringRule> LeadScoringRules { get; }
+
+    DbSet<LeadScoreContribution> LeadScoreContributions { get; }
+
     DbSet<LeadDiscoveryProfile> LeadDiscoveryProfiles { get; }
 
     DbSet<DiscoveredLead> DiscoveredLeads { get; }
