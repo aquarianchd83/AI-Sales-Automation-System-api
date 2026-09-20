@@ -234,6 +234,20 @@ public class ConversationOrchestrator : IConversationOrchestrator
         };
         _context.AiInteractions.Add(interaction);
 
+        // One row per failed check, not a list on the turn. What anyone asks of these is aggregate -
+        // which check fires most, is it rising since the prompt changed - and a joined-up string
+        // answers that only by being read back out and split again.
+        foreach (var failure in validated.Failures)
+        {
+            _context.AiInteractionValidationFailures.Add(new AiInteractionValidationFailure
+            {
+                AiInteractionId = interaction.Id,
+                Code = failure.Code,
+                Blocking = failure.Blocking,
+                Detail = Truncate(failure.Detail, MaxValidationDetailChars)
+            });
+        }
+
         foreach (var citedChunkId in validated.CitedChunkIds)
         {
             var snippet = groundingChunks.FirstOrDefault(g => g.ChunkId == citedChunkId);
@@ -307,6 +321,15 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         await _context.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>Matches AiInteractionValidationFailure.Detail's column. The detail is there to read a
+    /// handful of examples from, not to match on, so losing the tail of a long one costs nothing.</summary>
+    private const int MaxValidationDetailChars = 500;
+
+    private static string? Truncate(string? text, int max) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : text.Length <= max ? text
+        : text[..max];
 
     /// <summary>The tenant's business as the prompt needs it. Read per turn rather than cached: it
     /// changes rarely, but a tenant who has just corrected their working hours should not have to wait
