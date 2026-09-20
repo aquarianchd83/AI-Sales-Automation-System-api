@@ -32,4 +32,13 @@ public class AiOptions
     /// <summary>How many of the most recent messages in a conversation are included as history context
     /// for one AI turn. Bounds prompt size/cost; older context lives in Conversation.Summary instead.</summary>
     public int ConversationHistoryTurns { get; set; } = 10;
+
+    /// <summary>0.0-1.0. A qualification value the model extracted below this confidence is stored (so
+    /// the audit trail keeps what it claimed) but does not count as known: it earns no score, and the
+    /// agent still asks for that field properly. A half-understood budget in the CRM is worse than an
+    /// unanswered one, because nobody knows to doubt it.
+    ///
+    /// Values a human entered, and values backfilled from the pre-configurable Lead.Budget/Interest/
+    /// PurchaseTimeline columns, are recorded at 1.0 and so are never affected by this.</summary>
+    public double MinFieldExtractionConfidence { get; set; } = 0.6;
 }

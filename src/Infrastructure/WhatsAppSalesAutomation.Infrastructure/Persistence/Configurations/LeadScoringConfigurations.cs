@@ -28,7 +28,7 @@ public class LeadScoreContributionConfiguration : IEntityTypeConfiguration<LeadS
         builder.ToTable("LeadScoreContributions");
         builder.HasKey(c => c.Id);
 
-        builder.Property(c => c.SourceKey).IsRequired().HasMaxLength(60);
+        builder.Property(c => c.SourceKey).IsRequired().HasMaxLength(80);
         builder.Property(c => c.DisplayName).IsRequired().HasMaxLength(100);
 
         builder.HasIndex(c => new { c.LeadId, c.AppliedAt });

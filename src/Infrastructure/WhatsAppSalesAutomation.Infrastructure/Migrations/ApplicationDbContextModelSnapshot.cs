@@ -1701,8 +1701,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<string>("SourceKey")
                         .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");

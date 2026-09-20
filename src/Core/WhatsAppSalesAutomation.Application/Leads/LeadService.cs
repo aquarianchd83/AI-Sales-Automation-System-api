@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -13,17 +14,20 @@ public class LeadService : ILeadService
 {
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _dateTime;
+    private readonly ILeadScoringService _scoring;
     private readonly IValidator<UpdateLeadRequest> _updateValidator;
     private readonly IValidator<AddLeadActivityRequest> _activityValidator;
 
     public LeadService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
+        ILeadScoringService scoring,
         IValidator<UpdateLeadRequest> updateValidator,
         IValidator<AddLeadActivityRequest> activityValidator)
     {
         _context = context;
         _dateTime = dateTime;
+        _scoring = scoring;
         _updateValidator = updateValidator;
         _activityValidator = activityValidator;
     }
@@ -114,6 +118,20 @@ public class LeadService : ILeadService
         if (request.Interest is not null) lead.Interest = request.Interest;
         if (request.PurchaseTimeline is not null) lead.PurchaseTimeline = request.PurchaseTimeline;
 
+        // A value an agent typed is as real as one the AI extracted, so it is captured the same way and
+        // earns the same field weight. Confidence 1.0: a human is not guessing.
+        // Flushed before scoring: RecomputeAsync reads captured values back from the database, and EF
+        // does not flush pending inserts before a query - without this the value just entered would
+        // earn nothing until something else rescored the lead.
+        if (await CaptureMirroredValuesAsync(
+                lead, request.Budget, request.Interest, request.PurchaseTimeline,
+                confidence: 1.0, capturedByUserId: updatedByUserId, capturedFromMessageId: null, cancellationToken))
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        await RescoreAsync(lead, new ScoringSignals(DetectedIntent: lead.CurrentIntent), cancellationToken);
+
         lead.LastActivityAt = now;
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -200,13 +218,24 @@ public class LeadService : ILeadService
         if (!string.IsNullOrWhiteSpace(entities.Interest)) lead.Interest = entities.Interest;
         if (!string.IsNullOrWhiteSpace(entities.PurchaseTimeline)) lead.PurchaseTimeline = entities.PurchaseTimeline;
 
-        var newScoreNumeric = ComputeScoreNumeric(lead, detectedIntent);
-        if (newScoreNumeric != lead.ScoreNumeric)
+        // Mirror the three legacy entities into qualification values so they earn their configured field
+        // weights: scoring reads captured values, not these columns, so without this the columns would
+        // still be set and the lead would score zero. Confidence 1.0 because this path has no per-field
+        // confidence to report and these values were accepted unconditionally before - anything lower
+        // would change the old outcome.
+        //
+        // Saved before scoring, which reads them back from the database (EF does not flush pending
+        // inserts before a query). If this save lands and a later step in the turn fails, the values are
+        // still on record and the next rescore picks them up, because field weights are awarded from
+        // everything currently known rather than only from what this turn captured.
+        if (await CaptureMirroredValuesAsync(
+                lead, entities.Budget, entities.Interest, entities.PurchaseTimeline,
+                confidence: 1.0, capturedByUserId: null, capturedFromMessageId: null, cancellationToken))
         {
-            AddActivity(lead, LeadActivityType.ScoreChanged, lead.ScoreNumeric.ToString(), newScoreNumeric.ToString(), null, null);
-            lead.ScoreNumeric = newScoreNumeric;
-            lead.Score = BandFor(newScoreNumeric);
+            await _context.SaveChangesAsync(cancellationToken);
         }
+
+        await RescoreAsync(lead, new ScoringSignals(DetectedIntent: detectedIntent), cancellationToken);
 
         // New == Qualifying as soon as the AI has extracted anything at all - "we're talking about
         // requirements now", not yet "Qualified" which stays a human/business judgement call rather
@@ -224,32 +253,108 @@ public class LeadService : ILeadService
     }
 
     /// <summary>
-    /// Deliberately simple, fully deterministic first-pass heuristic rather than a model-scored one:
-    /// +30 for each of Budget/Interest/PurchaseTimeline being known (completeness signals genuine
-    /// qualification progress), +/-20 for an intent that itself signals strong buying interest
-    /// (Negotiation) or a reason to distrust the signal (Complaint). Capped to keep ScoreNumeric a
-    /// stable 0-100 scale regardless of how many turns a conversation has had. Revisit if/when real
-    /// usage data suggests better weights.
+    /// Recomputes the score from the tenant's configured rules and field weights, and records a
+    /// LeadActivity when it actually moves.
+    ///
+    /// The activity row is written here rather than inside the scoring service because it is a lead
+    /// history concern, and because only this layer knows whether the change came from an agent or
+    /// from an AI turn - the scoring service is given signals, not an actor.
     /// </summary>
-    private static int ComputeScoreNumeric(Lead lead, string? detectedIntent)
+    private async Task RescoreAsync(Lead lead, ScoringSignals signals, CancellationToken cancellationToken)
     {
-        var score = 0;
-        if (!string.IsNullOrWhiteSpace(lead.Budget)) score += 30;
-        if (!string.IsNullOrWhiteSpace(lead.Interest)) score += 30;
-        if (!string.IsNullOrWhiteSpace(lead.PurchaseTimeline)) score += 20;
+        var previous = lead.ScoreNumeric;
 
-        if (string.Equals(detectedIntent, "Negotiation", StringComparison.OrdinalIgnoreCase)) score += 20;
-        else if (string.Equals(detectedIntent, "Complaint", StringComparison.OrdinalIgnoreCase)) score -= 20;
+        var result = await _scoring.RecomputeAsync(lead.Id, signals, cancellationToken);
 
-        return Math.Clamp(score, 0, 100);
+        if (result.ScoreNumeric != previous)
+            AddActivity(lead, LeadActivityType.ScoreChanged, previous.ToString(), result.ScoreNumeric.ToString(), null, null);
     }
 
-    private static LeadScoreBand BandFor(int scoreNumeric) => scoreNumeric switch
+    /// <summary>
+    /// Writes the three well-known qualification values that mirror Lead.Budget/Interest/
+    /// PurchaseTimeline, superseding any current value for the same field.
+    ///
+    /// A null argument means "this turn said nothing about it" and leaves the existing value alone -
+    /// the same merge-don't-erase rule the columns themselves follow. A value the field's own type
+    /// rejects is skipped rather than stored: the column keeps it (so nothing regresses relative to
+    /// the old behaviour) but it earns no points, which is the honest outcome for a value we could not
+    /// make sense of.
+    /// </summary>
+    private async Task<bool> CaptureMirroredValuesAsync(
+        Lead lead,
+        string? budget,
+        string? interest,
+        string? purchaseTimeline,
+        double confidence,
+        Guid? capturedByUserId,
+        Guid? capturedFromMessageId,
+        CancellationToken cancellationToken)
     {
-        >= 70 => LeadScoreBand.Hot,
-        >= 40 => LeadScoreBand.Warm,
-        _ => LeadScoreBand.Cold
-    };
+        var incoming = new (string Key, string? Value)[]
+        {
+            (QualificationDefaults.BudgetKey, budget),
+            (QualificationDefaults.InterestKey, interest),
+            (QualificationDefaults.PurchaseTimelineKey, purchaseTimeline)
+        }
+        .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+        .ToList();
+
+        if (incoming.Count == 0)
+            return false;
+
+        var keys = incoming.Select(x => x.Key).ToList();
+
+        var fields = await _context.QualificationFields
+            .Where(f => f.IsActive && keys.Contains(f.FieldKey))
+            .ToListAsync(cancellationToken);
+
+        if (fields.Count == 0)
+            return false;
+
+        var captured = false;
+
+        var current = await _context.LeadQualificationValues
+            .Where(v => v.LeadId == lead.Id && !v.IsSuperseded && keys.Contains(v.FieldKey))
+            .ToListAsync(cancellationToken);
+
+        foreach (var (key, value) in incoming)
+        {
+            var field = fields.FirstOrDefault(f => string.Equals(f.FieldKey, key, StringComparison.OrdinalIgnoreCase));
+            if (field is null)
+                continue;
+
+            var normalized = QualificationValueNormalizer.Normalize(field, value!);
+            if (!normalized.IsAccepted)
+                continue;
+
+            var existing = current.FirstOrDefault(v => string.Equals(v.FieldKey, key, StringComparison.OrdinalIgnoreCase));
+
+            // Unchanged answers are left alone. Superseding a row with an identical one would churn
+            // the capture history and make "the customer changed their mind" unreadable.
+            if (existing is not null && string.Equals(existing.RawValue, normalized.RawValue, StringComparison.Ordinal))
+                continue;
+
+            if (existing is not null)
+                existing.IsSuperseded = true;
+
+            _context.LeadQualificationValues.Add(new LeadQualificationValue
+            {
+                TenantId = lead.TenantId,
+                LeadId = lead.Id,
+                FieldId = field.Id,
+                FieldKey = field.FieldKey,
+                RawValue = normalized.RawValue,
+                NormalizedValue = normalized.NormalizedValue,
+                CapturedFromMessageId = capturedFromMessageId,
+                CapturedByUserId = capturedByUserId,
+                ExtractionConfidence = confidence
+            });
+
+            captured = true;
+        }
+
+        return captured;
+    }
 
     private void RecordFieldChangeIfDifferent(Lead lead, string fieldName, string? oldValue, string? newValue, Guid? createdBy)
     {

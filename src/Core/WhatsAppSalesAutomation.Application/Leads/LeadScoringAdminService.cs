@@ -199,7 +199,8 @@ public class LeadScoringAdminService : ILeadScoringAdminService
             lead.HotLeadReason,
             lead.HotLeadDetectedAt,
             contributions
-                .Select(c => new LeadScoreContributionDto(c.SourceKey, c.DisplayName, c.Points, c.AppliedAt))
+                .Select(c => new LeadScoreContributionDto(
+                    LeadScoringService.StripPrefix(c.SourceKey), c.DisplayName, c.Points, c.AppliedAt))
                 .ToList());
     }
 

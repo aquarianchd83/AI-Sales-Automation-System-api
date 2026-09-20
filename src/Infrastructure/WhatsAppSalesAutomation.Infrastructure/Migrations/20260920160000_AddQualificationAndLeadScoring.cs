@@ -214,7 +214,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     LeadId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     RuleId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                    SourceKey = table.Column<string>(type: "nvarchar(60)", maxLength: 60, nullable: false),
+                    SourceKey = table.Column<string>(type: "nvarchar(80)", maxLength: 80, nullable: false),
                     DisplayName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     Points = table.Column<int>(type: "int", nullable: false),
                     IsOnce = table.Column<bool>(type: "bit", nullable: false),

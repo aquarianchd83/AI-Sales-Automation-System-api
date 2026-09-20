@@ -22,8 +22,13 @@ public class LeadScoreContribution : BaseEntity, ITenantOwned
     /// <see cref="QualificationField.ScoreWeight"/> rather than a rule.</summary>
     public Guid? RuleId { get; set; }
 
-    /// <summary>The rule's RuleKey, or the field's FieldKey for a field-weight contribution.
-    /// Denormalized so a breakdown stays readable after the rule or field is deleted.</summary>
+    /// <summary>Namespaced source identifier: "rule:{RuleKey}" for a scoring rule, "field:{FieldKey}"
+    /// for a field weight. The prefix is what keeps the two apart - a tenant is free to name a scoring
+    /// rule "budget" while also having a "budget" qualification field, and without it those two would
+    /// collide on the once-per-lead unique index and silently suppress one another.
+    ///
+    /// Denormalized rather than resolved through RuleId so a breakdown stays readable after the rule
+    /// or field it came from is gone.</summary>
     public string SourceKey { get; set; } = string.Empty;
 
     /// <summary>Human-facing label as it was when this fired.</summary>
