@@ -107,6 +107,10 @@ public interface IApplicationDbContext
 
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
+    DbSet<Flowchart> Flowcharts { get; }
+
+    DbSet<FaqEntry> FaqEntries { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Drops every tracked entity - used to retry a quota operation after a concurrency

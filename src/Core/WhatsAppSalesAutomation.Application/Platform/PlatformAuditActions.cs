@@ -38,4 +38,10 @@ public static class PlatformAuditActions
     public const string CreditPackUpdated = "CreditPackUpdated";
     public const string CreditPackDeactivated = "CreditPackDeactivated";
     public const string ConfigurationUpdated = "ConfigurationUpdated";
+    public const string FlowchartCreated = "FlowchartCreated";
+    public const string FlowchartUpdated = "FlowchartUpdated";
+    public const string FlowchartDeleted = "FlowchartDeleted";
+    public const string FaqEntryCreated = "FaqEntryCreated";
+    public const string FaqEntryUpdated = "FaqEntryUpdated";
+    public const string FaqEntryDeleted = "FaqEntryDeleted";
 }
