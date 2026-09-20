@@ -67,6 +67,19 @@ public sealed class PlatformNotificationTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_removes_the_row_and_ignores_an_unknown_id()
+    {
+        var row = Row(null, "a");
+        _db.PlatformNotifications.Add(row);
+        await _db.SaveChangesAsync();
+
+        await _service.DeleteAsync(row.Id);
+        await _service.DeleteAsync(Guid.NewGuid());
+
+        Assert.Empty(await _service.GetRecentAsync());
+    }
+
+    [Fact]
     public async Task The_same_episode_cannot_be_stored_twice()
     {
         var tenantId = Guid.NewGuid();

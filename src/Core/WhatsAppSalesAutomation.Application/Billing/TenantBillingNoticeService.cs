@@ -33,6 +33,10 @@ public interface ITenantBillingNoticeService
     Task<IReadOnlyList<TenantNotificationDto>> ListAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     Task AcknowledgeAsync(Guid tenantId, Guid notificationId, CancellationToken cancellationToken = default);
+
+    Task AcknowledgeAllAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(Guid tenantId, Guid notificationId, CancellationToken cancellationToken = default);
 }
 
 public partial class TenantBillingNoticeService : ITenantBillingNoticeService
@@ -103,6 +107,27 @@ public partial class TenantBillingNoticeService : ITenantBillingNoticeService
             return;
 
         notification.AcknowledgedAtUtc = _dateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AcknowledgeAllAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var now = _dateTime.UtcNow;
+        var open = await _context.TenantNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == tenantId && n.AcknowledgedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var n in open)
+            n.AcknowledgedAtUtc = now;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteAsync(Guid tenantId, Guid notificationId, CancellationToken cancellationToken = default)
+    {
+        var notification = await _context.TenantNotifications.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(n => n.Id == notificationId && n.TenantId == tenantId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Domain.Entities.Billing.TenantNotification), notificationId);
+
+        _context.TenantNotifications.Remove(notification);
         await _context.SaveChangesAsync(cancellationToken);
     }
 

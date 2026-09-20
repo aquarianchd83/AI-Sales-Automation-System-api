@@ -135,6 +135,22 @@ public class BillingController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("notifications/acknowledge-all")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<IActionResult> AcknowledgeAllNotifications(CancellationToken cancellationToken)
+    {
+        await _notices.AcknowledgeAllAsync(RequireTenantId(), cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("notifications/{notificationId:guid}")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<IActionResult> DeleteNotification(Guid notificationId, CancellationToken cancellationToken)
+    {
+        await _notices.DeleteAsync(RequireTenantId(), notificationId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("alert-settings")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<BillingAlertSettingsDto>> GetAlertSettings(CancellationToken cancellationToken)
