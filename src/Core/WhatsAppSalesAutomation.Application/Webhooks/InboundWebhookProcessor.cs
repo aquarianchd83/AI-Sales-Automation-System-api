@@ -13,13 +13,6 @@ namespace WhatsAppSalesAutomation.Application.Webhooks;
 
 public class InboundWebhookProcessor : IInboundWebhookProcessor
 {
-    /// <summary>Case-insensitive, exact-match (after trim) - deliberately not a substring match, so
-    /// "please stop calling me" is not mistaken for an opt-out.</summary>
-    private static readonly HashSet<string> OptOutKeywords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "stop", "unsubscribe", "unsub", "cancel", "opt out", "optout", "quit"
-    };
-
     /// <summary>How many times a status update referencing an unknown message is retried (see
     /// ApplyStatusUpdateAsync/ProcessAsync) before giving up. The race this covers - our own send
     /// finishing its SaveChangesAsync a beat after Meta's webhook for it arrives - normally resolves
@@ -266,11 +259,20 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             customer.DeletedAt = null;
         }
 
-        var isOptOut = !string.IsNullOrWhiteSpace(inbound.TextBody) && OptOutKeywords.Contains(inbound.TextBody.Trim());
+        // Layers 1 and 2 - the deterministic ones. Layer 3 (the model's own reading) runs later, in
+        // the orchestrator, and only for messages that get that far. See OptOutDetector.
+        var optOutSource = OptOutDetector.Detect(inbound.TextBody);
+        var isOptOut = optOutSource is not null;
+
         if (isOptOut && customer.OptInStatus != OptInStatus.OptedOut)
         {
             customer.OptInStatus = OptInStatus.OptedOut;
             customer.OptOutTimestamp = _dateTime.UtcNow;
+            customer.OptOutSource = optOutSource;
+
+            _logger.LogInformation(
+                "Customer {CustomerId} opted out via {OptOutSource} on an inbound message",
+                customer.Id, optOutSource);
         }
 
         var conversationId = await _conversations.GetOrCreateActiveConversationIdAsync(customer.Id, cancellationToken);

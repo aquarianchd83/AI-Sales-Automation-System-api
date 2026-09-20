@@ -266,6 +266,10 @@ public class CustomerService : ICustomerService
 
         customer.OptInStatus = OptInStatus.OptedOut;
         customer.OptOutTimestamp = _dateTime.UtcNow;
+        // A person did this, not a keyword or the model. The distinction is the whole point of the
+        // field: a compliance review asking "did they really ask us to stop?" reads a Manual opt-out
+        // very differently from an AiDetected one.
+        customer.OptOutSource = OptOutSource.Manual;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -336,7 +340,8 @@ public class CustomerService : ICustomerService
                 OptInStatus = consent.Status,
                 OptInTimestamp = consent.OptInTimestamp,
                 OptInSource = consent.Source,
-                OptOutTimestamp = consent.OptOutTimestamp
+                OptOutTimestamp = consent.OptOutTimestamp,
+                OptOutSource = consent.Status == OptInStatus.OptedOut ? OptOutSource.Manual : null
             };
 
             foreach (var tagName in row.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase))

@@ -20,6 +20,7 @@ public class AiInteractionConfiguration : IEntityTypeConfiguration<AiInteraction
         builder.Property(a => a.ModelUsed).IsRequired().HasMaxLength(100);
         builder.Property(a => a.CapturedFieldKeysJson).HasColumnType("nvarchar(max)");
         builder.Property(a => a.AskedFieldKey).HasMaxLength(60);
+        builder.Property(a => a.DetectedLanguage).HasMaxLength(20);
 
         builder.HasIndex(a => a.ConversationId);
 
