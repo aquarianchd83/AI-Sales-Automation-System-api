@@ -176,6 +176,11 @@ try
         await PlanSeeder.SeedAsync(scope.ServiceProvider);
         await QuotaCatalogSeeder.SeedAsync(scope.ServiceProvider);
 
+        // The Content Management System's starter FAQ catalog - real customer-facing content every
+        // environment needs, not a Seed:* gated dev convenience, so this always runs (see FaqSeeder's
+        // own doc comment).
+        await FaqSeeder.SeedAsync(scope.ServiceProvider);
+
         // Sample data for exploring the schema. No-ops unless Seed:DummyData is true.
         if (app.Environment.IsDevelopment())
             await DevDataSeeder.SeedAsync(scope.ServiceProvider);
