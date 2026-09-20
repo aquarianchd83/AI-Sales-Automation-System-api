@@ -22,10 +22,11 @@ public class AiInteraction : BaseEntity, ITenantOwned
     /// <summary>0.0-1.0. Compared against <c>AiOptions.ConfidenceThreshold</c> to decide auto-reply vs escalate.</summary>
     public double ConfidenceScore { get; set; }
 
-    /// <summary>Structured extraction (budget/interest/timeline, etc.) as the provider returned it -
-    /// kept as raw JSON rather than dedicated columns since the extracted attribute set is expected to
-    /// evolve with prompt/provider changes; the Application layer's Lead service reads specific keys
-    /// out of it when updating a Lead.</summary>
+    /// <summary>The qualification values this turn ACCEPTED, as raw JSON - not what the provider
+    /// claimed. A claim about a field the tenant does not have, or a value its type rejects, is
+    /// dropped before it reaches here, so this is a record of what was believed rather than what was
+    /// asserted. Raw JSON rather than dedicated columns because the field set is per-tenant now and
+    /// changes without a migration.</summary>
     public string? ExtractedEntitiesJson { get; set; }
 
     /// <summary>The reply text the AI generated, whether or not it was actually sent (escalated turns

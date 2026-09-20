@@ -41,4 +41,15 @@ public class AiOptions
     /// Values a human entered, and values backfilled from the pre-configurable Lead.Budget/Interest/
     /// PurchaseTimeline columns, are recorded at 1.0 and so are never affected by this.</summary>
     public double MinFieldExtractionConfidence { get; set; } = 0.6;
+
+    /// <summary>How many still-unknown qualification fields the agent is shown per turn. Three, not
+    /// all of them: handing the model a list of twelve open fields is an invitation to work through
+    /// them, and the order was already decided in code - the rest would only spend tokens. The model
+    /// is separately told to ask at most one.</summary>
+    public int MaxFieldsToAsk { get; set; } = 3;
+
+    /// <summary>Whether a lead turning hot raises a handoff on its own. On by default: a customer who
+    /// has said they are ready to buy is the one conversation a human most wants to take. A tenant
+    /// that would rather let the agent close can turn it off.</summary>
+    public bool HandoffOnHotLead { get; set; } = true;
 }

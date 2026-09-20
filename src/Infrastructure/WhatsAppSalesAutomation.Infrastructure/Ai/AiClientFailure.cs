@@ -15,7 +15,10 @@ internal static class AiClientFailure
 {
     public static AiReplyResult Result(string modelUsed, TimeSpan elapsed, string? existingSummary) => new(
         ResponseText: string.Empty,
-        DetectedIntent: "ProviderError",
+        // Unknown, not "ProviderError": intents are a closed enum now, and a value outside it would
+        // simply fail to parse everywhere downstream. Zero confidence is what actually drives the
+        // escalation here, not the label.
+        DetectedIntent: nameof(WhatsAppSalesAutomation.Domain.Enums.CustomerIntent.Unknown),
         ConfidenceScore: 0,
         ExtractedEntities: new AiExtractedEntities(null, null, null),
         UpdatedSummary: existingSummary ?? string.Empty,

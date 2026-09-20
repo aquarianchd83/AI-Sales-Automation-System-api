@@ -86,6 +86,8 @@ public static class AppSettingCatalog
         new("Ai:MinRelevanceScore", "Ai", IsSecret: false, IsTenantOverridable: true),
         new("Ai:ConversationHistoryTurns", "Ai", IsSecret: false, IsTenantOverridable: true),
         new("Ai:MinFieldExtractionConfidence", "Ai", IsSecret: false, IsTenantOverridable: true),
+        new("Ai:MaxFieldsToAsk", "Ai", IsSecret: false, IsTenantOverridable: true),
+        new("Ai:HandoffOnHotLead", "Ai", IsSecret: false, IsTenantOverridable: true),
 
         // MediaStorage - all three need a restart: Program.cs reads RootPath/PublicBasePath directly
         // off IConfiguration (not IOptionsSnapshot) to configure static-file-serving middleware once,

@@ -38,8 +38,20 @@ public class AnthropicAiClient
         var payload = new
         {
             model = credentials.AnthropicModel,
-            max_tokens = 1024,
-            system = AiPromptSupport.SystemPrompt(context.CustomerName),
+            max_tokens = 1536,
+            // System prompt and tool schema are sent as cacheable blocks. Both are stable for a
+            // given tenant across every conversation and every turn (see AiPromptSupport's doc
+            // comment), so this prefix is a cache hit on all but the first call - which is what keeps
+            // the much larger prompt from costing more than the thirteen-line one it replaced.
+            system = new[]
+            {
+                new
+                {
+                    type = "text",
+                    text = AiPromptSupport.SystemPrompt(context),
+                    cache_control = new { type = "ephemeral" }
+                }
+            },
             messages = new[] { new { role = "user", content = AiPromptSupport.BuildUserMessage(context) } },
             tools = new[]
             {
@@ -47,7 +59,8 @@ public class AnthropicAiClient
                 {
                     name = AiPromptSupport.ToolName,
                     description = AiPromptSupport.ToolDescription,
-                    input_schema = AiPromptSupport.ToolInputSchema()
+                    input_schema = AiPromptSupport.ToolInputSchema(context.SchemaFields),
+                    cache_control = new { type = "ephemeral" }
                 }
             },
             tool_choice = new { type = "tool", name = AiPromptSupport.ToolName }
@@ -82,6 +95,10 @@ public class AnthropicAiClient
             }
 
             var toolResult = toolUse.Input.Value.Deserialize<ToolResultPayload>(JsonOptions) ?? new ToolResultPayload();
+
+            _logger.LogDebug(
+                "Anthropic conversation {ConversationId}: {CachedTokens} of {InputTokens} input tokens served from cache",
+                context.ConversationId, parsed?.Usage?.CacheReadInputTokens ?? 0, parsed?.Usage?.InputTokens ?? 0);
 
             return toolResult.ToAiReplyResult(modelUsed, parsed?.Usage?.InputTokens, parsed?.Usage?.OutputTokens, stopwatch.Elapsed, context.ExistingSummary);
         }
@@ -120,5 +137,11 @@ public class AnthropicAiClient
 
         [JsonPropertyName("output_tokens")]
         public int OutputTokens { get; set; }
+
+        /// <summary>Tokens served from the prompt cache. Logged rather than stored: if this sits at
+        /// zero in production the cacheable prefix has been broken by something conversation-specific
+        /// leaking into it, and that is worth noticing early.</summary>
+        [JsonPropertyName("cache_read_input_tokens")]
+        public int CacheReadInputTokens { get; set; }
     }
 }

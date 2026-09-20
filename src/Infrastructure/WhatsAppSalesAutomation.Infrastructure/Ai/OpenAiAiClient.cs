@@ -38,7 +38,7 @@ public class OpenAiAiClient
             model = credentials.OpenAiChatModel,
             messages = new[]
             {
-                new { role = "system", content = AiPromptSupport.SystemPrompt(context.CustomerName) },
+                new { role = "system", content = AiPromptSupport.SystemPrompt(context) },
                 new { role = "user", content = AiPromptSupport.BuildUserMessage(context) }
             },
             tools = new[]
@@ -50,7 +50,7 @@ public class OpenAiAiClient
                     {
                         name = AiPromptSupport.ToolName,
                         description = AiPromptSupport.ToolDescription,
-                        parameters = AiPromptSupport.ToolInputSchema()
+                        parameters = AiPromptSupport.ToolInputSchema(context.SchemaFields)
                     }
                 }
             },

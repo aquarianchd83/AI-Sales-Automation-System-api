@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Quota;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -38,6 +39,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly INotificationService _notifications;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly IQuotaGate _quota;
+    private readonly IQualificationPlanner _qualification;
+    private readonly ILeadScoringService _scoring;
+    private readonly IAiReplyValidator _validator;
     private readonly ILogger<ConversationOrchestrator> _logger;
 
     public ConversationOrchestrator(
@@ -51,6 +55,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         INotificationService notifications,
         ITenantConfigOverrideProvider tenantConfig,
         IQuotaGate quota,
+        IQualificationPlanner qualification,
+        ILeadScoringService scoring,
+        IAiReplyValidator validator,
         ILogger<ConversationOrchestrator> logger)
     {
         _quota = quota;
@@ -63,6 +70,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _whatsApp = whatsApp;
         _notifications = notifications;
         _tenantConfig = tenantConfig;
+        _qualification = qualification;
+        _scoring = scoring;
+        _validator = validator;
         _logger = logger;
     }
 
@@ -106,13 +116,33 @@ public class ConversationOrchestrator : IConversationOrchestrator
             .ToListAsync(cancellationToken);
         historyRows.Reverse(); // oldest first, for a natural reading order in the prompt
 
+        // The lead is resolved before the AI call now, not after: the qualification plan cannot be
+        // built without it, and the plan is what the prompt is shaped around. A side effect is that a
+        // lead now exists even when the AI never runs (no quota, provider down) - which is the more
+        // honest record anyway: someone who messaged us is a lead whether or not our model was up.
+        var leadId = await _leads.GetOrCreateActiveLeadIdAsync(customerId, campaignId: null, cancellationToken);
+        var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
+
+        var business = await BuildBusinessProfileAsync(conversation.TenantId, cancellationToken);
+
+        // Hot leads stop being asked questions. Enforced by withholding the questions from the prompt
+        // rather than by instructing the model not to use them.
+        var qualificationPaused = lead?.HotLeadDetectedAt is not null;
+        var plan = await _qualification.PlanAsync(leadId, qualificationPaused, cancellationToken);
+
         var context = new AiConversationContext(
             conversationId,
             customer.FullName,
             inboundMessage.Text ?? string.Empty,
             historyRows.Select(m => new AiConversationTurn(m.Direction, m.Text ?? string.Empty, m.CreatedAt)).ToList(),
             groundingChunks,
-            conversation.Summary);
+            conversation.Summary,
+            business,
+            plan.SchemaFields,
+            plan.Known,
+            plan.ToAsk,
+            qualificationPaused,
+            customer.PreferredLanguage);
 
         // Prepaid: one AI conversation is spent before the model is called (the provider bills whether or not the
         // AI ends up replying or escalating). With none left the customer is handed to a human instead of being
@@ -132,30 +162,79 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         var result = await _ai.GetResponseAsync(context, cancellationToken);
 
-        var escalate = result.ConfidenceScore < options.ConfidenceThreshold ||
-            options.EscalationIntents.Any(i => string.Equals(i, result.DetectedIntent, StringComparison.OrdinalIgnoreCase));
+        // Nothing the model returned is trusted yet. Everything below works from the validated view.
+        var validated = _validator.Validate(result, context);
+
+        if (validated.HasFailures)
+        {
+            _logger.LogWarning(
+                "AI reply validation for conversation {ConversationId} raised: {Failures}",
+                conversationId, validated.FailureSummary);
+        }
+
+        // Opt-out is handled before anything else the turn might do. A customer who asked us to stop
+        // is owed that first, and a promotional reply sent alongside the acknowledgement would be the
+        // exact thing they asked us not to do.
+        if (validated.OptOutRequested && customer.OptInStatus != OptInStatus.OptedOut)
+        {
+            customer.OptInStatus = OptInStatus.OptedOut;
+            customer.OptOutTimestamp = _dateTime.UtcNow;
+            customer.OptOutSource = OptOutSource.AiDetected;
+
+            _logger.LogInformation(
+                "AI detected an opt-out from customer {CustomerId} on conversation {ConversationId}",
+                customerId, conversationId);
+        }
+
+        var accepted = await _qualification.CaptureAsync(
+            leadId, inboundMessageId, validated.ExtractedFields, cancellationToken);
+
+        var score = await _scoring.RecomputeAsync(
+            leadId,
+            new ScoringSignals(
+                validated.DetectedIntent,
+                validated.BuyingIntentDetected,
+                inboundMessage.Text,
+                AiInteractionId: null),
+            cancellationToken);
+
+        // Escalation is decided here, from validated signals and computed state - never from the
+        // model's own sense of whether it did well.
+        var escalate =
+            validated.ConfidenceScore < options.ConfidenceThreshold
+            || options.EscalationIntents.Any(i => string.Equals(i, validated.DetectedIntent, StringComparison.OrdinalIgnoreCase))
+            || validated.HumanRequested
+            || !validated.CanSend
+            || (score.IsHot && options.HandoffOnHotLead);
 
         var interaction = new AiInteraction
         {
             ConversationId = conversationId,
             InboundMessageId = inboundMessageId,
-            DetectedIntent = result.DetectedIntent,
-            ConfidenceScore = result.ConfidenceScore,
-            ExtractedEntitiesJson = JsonSerializer.Serialize(result.ExtractedEntities),
-            ProposedResponseText = result.ResponseText,
+            DetectedIntent = validated.DetectedIntent,
+            ConfidenceScore = validated.ConfidenceScore,
+            // The accepted fields, not what the model claimed - an audit of what was believed is
+            // more useful than an audit of what was asserted.
+            ExtractedEntitiesJson = JsonSerializer.Serialize(accepted),
+            ProposedResponseText = validated.ResponseText,
             ActionTaken = escalate ? AiActionTaken.Escalated : AiActionTaken.Replied,
             ModelUsed = result.ModelUsed,
             PromptTokens = result.PromptTokens,
             CompletionTokens = result.CompletionTokens,
-            LatencyMs = result.LatencyMs
+            LatencyMs = result.LatencyMs,
+            CapturedFieldKeysJson = JsonSerializer.Serialize(accepted.Select(a => a.FieldKey)),
+            AskedFieldKey = validated.AskedFieldKey,
+            BuyingIntentReported = validated.BuyingIntentDetected,
+            HumanRequestReported = validated.HumanRequested,
+            OptOutReported = validated.OptOutRequested
         };
         _context.AiInteractions.Add(interaction);
 
-        foreach (var citedChunkId in result.CitedChunkIds)
+        foreach (var citedChunkId in validated.CitedChunkIds)
         {
             var snippet = groundingChunks.FirstOrDefault(g => g.ChunkId == citedChunkId);
             if (snippet is null)
-                continue; // defensive - a provider should only cite ids it was actually given
+                continue; // defensive - the validator already dropped ids this turn was not given
 
             _context.AiInteractionSources.Add(new AiInteractionSource
             {
@@ -165,34 +244,110 @@ public class ConversationOrchestrator : IConversationOrchestrator
             });
         }
 
-        conversation.AiConfidenceLast = result.ConfidenceScore;
-        conversation.LastDetectedIntent = result.DetectedIntent;
-        conversation.Summary = result.UpdatedSummary;
+        conversation.AiConfidenceLast = validated.ConfidenceScore;
+        conversation.LastDetectedIntent = validated.DetectedIntent;
+        conversation.Summary = validated.UpdatedSummary;
+        if (Enum.TryParse<LeadScoreBand>(score.Band, ignoreCase: true, out var parsedBand))
+            conversation.LastLeadScore = parsedBand;
 
-        // CampaignId null - this Lead originates from an inbound conversation, not a campaign. A
-        // customer who already has a Lead from a campaign keeps using that same non-terminal Lead
-        // (GetOrCreateActiveLeadIdAsync's own rule), so this does not fork a second Lead for someone
-        // who first came in via a campaign and is now just replying to it.
-        var leadId = await _leads.GetOrCreateActiveLeadIdAsync(customerId, campaignId: null, cancellationToken);
-        var lead = await _leads.ApplyAiExtractedAttributesAsync(leadId, result.ExtractedEntities, result.DetectedIntent, cancellationToken);
-        conversation.LastLeadScore = Enum.Parse<LeadScoreBand>(lead.Score, ignoreCase: true);
+        UpdatePreferredLanguage(customer, validated.DetectedLanguage, historyRows.Count);
 
         if (escalate)
         {
             conversation.Status = ConversationStatus.Escalated;
 
-            var triggerReason = MapIntentToTriggerReason(result.DetectedIntent);
-            var notes = $"AI escalation - intent '{result.DetectedIntent ?? "none"}', confidence {result.ConfidenceScore:P0}.";
-            var handoff = await _handoffs.GetOrCreateOpenHandoffAsync(conversationId, triggerReason.ToString(), notes, cancellationToken);
+            var triggerReason = PickTriggerReason(validated, score);
+            var handoff = await _handoffs.GetOrCreateOpenHandoffAsync(
+                conversationId, triggerReason.ToString(), BuildHandoffNote(validated, score, plan), cancellationToken);
 
             await _notifications.NotifyNewHandoffAsync(handoff.Id, conversationId, handoff.TriggerReason, cancellationToken);
         }
+        else if (validated.OptOutRequested)
+        {
+            // Nothing promotional goes to someone who just asked us to stop. The opt-out itself was
+            // already applied above; staying silent is the whole point.
+            _logger.LogInformation(
+                "Suppressed AI reply on conversation {ConversationId} because the customer opted out.",
+                conversationId);
+        }
         else
         {
-            await SendAiReplyAsync(conversation, customer, inboundMessageId, result.ResponseText, cancellationToken);
+            await SendAiReplyAsync(conversation, customer, inboundMessageId, validated.ResponseText, cancellationToken);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>The tenant's business as the prompt needs it. Read per turn rather than cached: it
+    /// changes rarely, but a tenant who has just corrected their working hours should not have to wait
+    /// for a cache to expire before the agent stops quoting the old ones.</summary>
+    private async Task<AiBusinessProfile> BuildBusinessProfileAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken);
+
+        return tenant is null
+            // Defensive only: a conversation always has a tenant. A bare profile keeps the agent
+            // answering from the knowledge base rather than failing the turn outright.
+            ? new AiBusinessProfile("the business", null, null, null, null, null, null, ConversationGoal.Enquiry, false)
+            : new AiBusinessProfile(
+                tenant.Name,
+                tenant.Industry,
+                tenant.BusinessLocation,
+                tenant.WebsiteUrl,
+                tenant.WorkingHours,
+                tenant.ProductName,
+                tenant.BusinessDescription,
+                tenant.AiConversationGoal,
+                tenant.AiMayDiscloseLeadScore);
+    }
+
+    /// <summary>
+    /// Updates the customer's saved language only once they have used the same one across more than a
+    /// single turn.
+    ///
+    /// Updating on one turn would be wrong in the common case: someone who usually writes Hindi and
+    /// replies "ok" once would have every future message pinned to English.
+    /// </summary>
+    private static void UpdatePreferredLanguage(Customer customer, string? detected, int historyCount)
+    {
+        if (string.IsNullOrWhiteSpace(detected) || historyCount == 0)
+            return;
+
+        if (string.Equals(customer.PreferredLanguage, detected, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Only set it when there was nothing there. Changing an established preference needs more
+        // evidence than one turn, and the prompt already tells the agent to match the latest message
+        // regardless of what is stored - so the stored value is a hint, not the thing that decides.
+        if (string.IsNullOrWhiteSpace(customer.PreferredLanguage))
+            customer.PreferredLanguage = detected;
+    }
+
+    /// <summary>A one-line note for the agent picking this up. Short by design - the full briefing is
+    /// Stage 4's job; this keeps the existing Notes field useful in the meantime.</summary>
+    private static string BuildHandoffNote(ValidatedReply validated, LeadScoreResult score, QualificationPlan plan)
+    {
+        var parts = new List<string>
+        {
+            $"intent '{validated.DetectedIntent}'",
+            $"confidence {validated.ConfidenceScore:P0}",
+            $"score {score.ScoreNumeric} ({score.Band})",
+            $"qualified {plan.CapturedCount}/{plan.TotalCount}"
+        };
+
+        if (score.IsHot && !string.IsNullOrWhiteSpace(score.HotReason))
+            parts.Add($"HOT - {score.HotReason}");
+
+        if (validated.HumanRequested)
+            parts.Add("customer asked for a person");
+
+        if (!validated.CanSend)
+            parts.Add($"reply blocked ({validated.FailureSummary})");
+
+        if (!string.IsNullOrWhiteSpace(validated.AgentNote))
+            parts.Add(validated.AgentNote);
+
+        return "AI escalation - " + string.Join("; ", parts);
     }
 
     /// <summary>
@@ -246,12 +401,31 @@ public class ConversationOrchestrator : IConversationOrchestrator
         }
     }
 
-    private static HandoffTriggerReason MapIntentToTriggerReason(string? detectedIntent) => detectedIntent?.ToLowerInvariant() switch
+    /// <summary>Why a human is being brought in, in the order that matters to whoever reads the queue:
+    /// an explicit request first, then a customer ready to buy, then the intent, then the catch-all.</summary>
+    private static HandoffTriggerReason PickTriggerReason(ValidatedReply validated, LeadScoreResult score)
     {
-        "complaint" => HandoffTriggerReason.Complaint,
-        "negotiation" => HandoffTriggerReason.Negotiation,
-        "complextechnical" => HandoffTriggerReason.ComplexTechnical,
-        "humanrequest" => HandoffTriggerReason.CustomerRequested,
-        _ => HandoffTriggerReason.LowConfidence
-    };
+        if (validated.HumanRequested)
+            return HandoffTriggerReason.CustomerRequested;
+
+        if (score.IsHot)
+            return HandoffTriggerReason.HotLead;
+
+        if (!validated.CanSend)
+            return HandoffTriggerReason.CannotAnswer;
+
+        return Enum.TryParse<CustomerIntent>(validated.DetectedIntent, ignoreCase: true, out var intent)
+            ? intent switch
+            {
+                CustomerIntent.Complaint => HandoffTriggerReason.Complaint,
+                CustomerIntent.HumanRequest => HandoffTriggerReason.CustomerRequested,
+                CustomerIntent.Negotiation => HandoffTriggerReason.Negotiation,
+                CustomerIntent.Support => HandoffTriggerReason.ComplexTechnical,
+                CustomerIntent.PurchaseIntent or CustomerIntent.Booking or CustomerIntent.DemoRequest
+                    or CustomerIntent.AppointmentRequest or CustomerIntent.SiteVisit
+                    => HandoffTriggerReason.HotLead,
+                _ => HandoffTriggerReason.LowConfidence
+            }
+            : HandoffTriggerReason.LowConfidence;
+    }
 }

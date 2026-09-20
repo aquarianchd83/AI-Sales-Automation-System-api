@@ -36,7 +36,7 @@ public class GoogleAiClient
 
         var payload = new
         {
-            system_instruction = new { parts = new[] { new { text = AiPromptSupport.SystemPrompt(context.CustomerName) } } },
+            system_instruction = new { parts = new[] { new { text = AiPromptSupport.SystemPrompt(context) } } },
             contents = new[] { new { role = "user", parts = new[] { new { text = AiPromptSupport.BuildUserMessage(context) } } } },
             tools = new[]
             {
@@ -48,7 +48,7 @@ public class GoogleAiClient
                         {
                             name = AiPromptSupport.ToolName,
                             description = AiPromptSupport.ToolDescription,
-                            parameters = AiPromptSupport.ToolInputSchema()
+                            parameters = AiPromptSupport.ToolInputSchema(context.SchemaFields)
                         }
                     }
                 }

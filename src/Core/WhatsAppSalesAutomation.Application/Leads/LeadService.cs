@@ -203,55 +203,6 @@ public class LeadService : ILeadService
         return lead.Id;
     }
 
-    public async Task<LeadDto> ApplyAiExtractedAttributesAsync(Guid leadId, AiExtractedEntities entities, string? detectedIntent, CancellationToken cancellationToken = default)
-    {
-        var lead = await FindOrThrowAsync(leadId, cancellationToken);
-        var now = _dateTime.UtcNow;
-
-        // Merge only - a later turn not mentioning budget again must not erase an earlier answer.
-        // CreatedBy null marks these as system/AI-driven, distinct from an agent's manual UpdateAsync.
-        RecordFieldChangeIfDifferent(lead, "Budget", lead.Budget, entities.Budget, null);
-        RecordFieldChangeIfDifferent(lead, "Interest", lead.Interest, entities.Interest, null);
-        RecordFieldChangeIfDifferent(lead, "PurchaseTimeline", lead.PurchaseTimeline, entities.PurchaseTimeline, null);
-
-        if (!string.IsNullOrWhiteSpace(entities.Budget)) lead.Budget = entities.Budget;
-        if (!string.IsNullOrWhiteSpace(entities.Interest)) lead.Interest = entities.Interest;
-        if (!string.IsNullOrWhiteSpace(entities.PurchaseTimeline)) lead.PurchaseTimeline = entities.PurchaseTimeline;
-
-        // Mirror the three legacy entities into qualification values so they earn their configured field
-        // weights: scoring reads captured values, not these columns, so without this the columns would
-        // still be set and the lead would score zero. Confidence 1.0 because this path has no per-field
-        // confidence to report and these values were accepted unconditionally before - anything lower
-        // would change the old outcome.
-        //
-        // Saved before scoring, which reads them back from the database (EF does not flush pending
-        // inserts before a query). If this save lands and a later step in the turn fails, the values are
-        // still on record and the next rescore picks them up, because field weights are awarded from
-        // everything currently known rather than only from what this turn captured.
-        if (await CaptureMirroredValuesAsync(
-                lead, entities.Budget, entities.Interest, entities.PurchaseTimeline,
-                confidence: 1.0, capturedByUserId: null, capturedFromMessageId: null, cancellationToken))
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
-        await RescoreAsync(lead, new ScoringSignals(DetectedIntent: detectedIntent), cancellationToken);
-
-        // New == Qualifying as soon as the AI has extracted anything at all - "we're talking about
-        // requirements now", not yet "Qualified" which stays a human/business judgement call rather
-        // than something the AI decides unilaterally.
-        if (lead.Stage == LeadStage.New && (lead.Budget is not null || lead.Interest is not null || lead.PurchaseTimeline is not null))
-        {
-            AddActivity(lead, LeadActivityType.StageChanged, lead.Stage.ToString(), LeadStage.Qualifying.ToString(), null, null);
-            lead.Stage = LeadStage.Qualifying;
-        }
-
-        lead.LastActivityAt = now;
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return await GetByIdAsync(leadId, cancellationToken);
-    }
-
     /// <summary>
     /// Recomputes the score from the tenant's configured rules and field weights, and records a
     /// LeadActivity when it actually moves.
