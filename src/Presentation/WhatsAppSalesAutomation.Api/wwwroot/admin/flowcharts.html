@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowcharts admin</title>
+<style>
+  :root {
+    --bg: #f5f5f3; --card: #ffffff; --border: #e2e0da; --text: #24231f; --muted: #6b6a63;
+    --accent: #2563eb; --accent-bg: #eaf1ff; --green: #15803d; --green-bg: #e8f6ec;
+    --gray-bg: #f0efe9; --gray-text: #6b6a63; --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); background: var(--card); display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  #whoami { font-size: 13px; color: var(--muted); }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  #login-panel { max-width: 360px; margin: 60px auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 28px; }
+  #login-panel h2 { margin: 0 0 16px; font-size: 16px; }
+  #login-panel label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  #login-panel input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+  #login-panel button { margin-top: 18px; width: 100%; padding: 10px; border: none; border-radius: 6px; background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
+  #login-panel button:hover { opacity: 0.92; }
+  #login-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  .toolbar { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+  .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--card); }
+  .toolbar button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 13px; cursor: pointer; }
+  .toolbar button:hover { background: var(--gray-bg); }
+  .toolbar .primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--gray-bg); font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .title { font-weight: 600; }
+  .description-preview { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .category { color: var(--muted); font-size: 12px; }
+
+  .status-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .status-Published { background: var(--green-bg); color: var(--green); }
+  .status-Draft { background: var(--gray-bg); color: var(--gray-text); }
+  .status-Archived { background: #fdecea; color: var(--danger); }
+
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row-actions button { padding: 5px 11px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; }
+  .row-actions button:hover { background: var(--gray-bg); }
+  .row-actions button.danger { color: var(--danger); border-color: #f3c9c4; }
+
+  #empty-state, #load-error { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; }
+  #load-error { color: var(--danger); }
+  [hidden] { display: none !important; }
+
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+  #form-panel { width: 100%; max-width: 640px; background: var(--card); border-radius: 10px; padding: 24px; }
+  #form-panel h2 { margin: 0 0 16px; font-size: 16px; }
+  #form-panel label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 4px; }
+  #form-panel input, #form-panel textarea, #form-panel select { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit; }
+  #form-panel textarea { resize: vertical; }
+  #field-diagram { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #form-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #form-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+  #form-actions button { padding: 9px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  #form-cancel { background: var(--card); border: 1px solid var(--border); }
+  #form-save { background: var(--accent); color: #fff; border: none; }
+  #form-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Flowcharts admin</h1>
+  <div id="whoami" hidden></div>
+</header>
+
+<main>
+  <section id="login-panel">
+    <h2>Sign in</h2>
+    <label for="login-email">Email</label>
+    <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <button id="login-button" type="button">Sign in</button>
+    <div id="login-error"></div>
+  </section>
+
+  <section id="app-panel" hidden>
+    <div class="toolbar">
+      <select id="status-filter">
+        <option value="">All statuses</option>
+        <option value="Draft">Draft</option>
+        <option value="Published">Published</option>
+        <option value="Archived">Archived</option>
+      </select>
+      <button id="refresh-button" type="button">Refresh</button>
+      <button id="new-button" type="button" class="primary" style="margin-left:auto;">New flowchart</button>
+      <button id="logout-button" type="button">Sign out</button>
+    </div>
+
+    <table id="flowcharts-table" hidden>
+      <thead>
+        <tr>
+          <th>Flowchart</th>
+          <th>Category</th>
+          <th>Status</th>
+          <th>Order</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="flowcharts-body"></tbody>
+    </table>
+
+    <div id="empty-state" hidden>No flowcharts match this filter.</div>
+    <div id="load-error" hidden></div>
+  </section>
+</main>
+
+<div id="overlay" hidden>
+  <div id="form-panel">
+    <h2 id="form-title">New flowchart</h2>
+    <label for="field-title">Title</label>
+    <input id="field-title" type="text" maxlength="200">
+    <label for="field-description">Description (optional)</label>
+    <textarea id="field-description" rows="2" maxlength="2000"></textarea>
+    <label for="field-category">Category (optional)</label>
+    <input id="field-category" type="text" maxlength="100">
+    <label for="field-diagram">Diagram JSON</label>
+    <textarea id="field-diagram" rows="8">{}</textarea>
+    <div id="form-hint">The nodes/edges the flowchart builder produces - stored and served back as-is.</div>
+    <label for="field-order">Display order</label>
+    <input id="field-order" type="number" value="0">
+    <label for="field-status" id="field-status-label" hidden>Status</label>
+    <select id="field-status" hidden>
+      <option value="Draft">Draft</option>
+      <option value="Published">Published</option>
+      <option value="Archived">Archived</option>
+    </select>
+    <div id="form-error"></div>
+    <div id="form-actions">
+      <button id="form-cancel" type="button">Cancel</button>
+      <button id="form-save" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var API_BASE = window.location.origin;
+  var state = { accessToken: null, refreshToken: null, flowcharts: [], editingId: null };
+
+  var el = {
+    loginPanel: document.getElementById('login-panel'),
+    appPanel: document.getElementById('app-panel'),
+    whoami: document.getElementById('whoami'),
+    loginEmail: document.getElementById('login-email'),
+    loginPassword: document.getElementById('login-password'),
+    loginButton: document.getElementById('login-button'),
+    loginError: document.getElementById('login-error'),
+    statusFilter: document.getElementById('status-filter'),
+    refreshButton: document.getElementById('refresh-button'),
+    newButton: document.getElementById('new-button'),
+    logoutButton: document.getElementById('logout-button'),
+    table: document.getElementById('flowcharts-table'),
+    body: document.getElementById('flowcharts-body'),
+    emptyState: document.getElementById('empty-state'),
+    loadError: document.getElementById('load-error'),
+    overlay: document.getElementById('overlay'),
+    formTitle: document.getElementById('form-title'),
+    fieldTitle: document.getElementById('field-title'),
+    fieldDescription: document.getElementById('field-description'),
+    fieldCategory: document.getElementById('field-category'),
+    fieldDiagram: document.getElementById('field-diagram'),
+    fieldOrder: document.getElementById('field-order'),
+    fieldStatusLabel: document.getElementById('field-status-label'),
+    fieldStatus: document.getElementById('field-status'),
+    formError: document.getElementById('form-error'),
+    formCancel: document.getElementById('form-cancel'),
+    formSave: document.getElementById('form-save')
+  };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function loadSession() {
+    try {
+      var raw = sessionStorage.getItem('flowchartAdminSession');
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      state.accessToken = parsed.accessToken;
+      state.refreshToken = parsed.refreshToken;
+      state.email = parsed.email;
+    } catch (e) { /* corrupt/blocked storage - just start logged out */ }
+  }
+
+  function saveSession() {
+    try {
+      sessionStorage.setItem('flowchartAdminSession', JSON.stringify({
+        accessToken: state.accessToken, refreshToken: state.refreshToken, email: state.email
+      }));
+    } catch (e) { /* private browsing etc - session just won't survive a reload */ }
+  }
+
+  function clearSession() {
+    state.accessToken = null; state.refreshToken = null; state.email = null;
+    try { sessionStorage.removeItem('flowchartAdminSession'); } catch (e) {}
+  }
+
+  function showLoggedOut(message) {
+    clearSession();
+    el.loginPanel.hidden = false;
+    el.appPanel.hidden = true;
+    el.whoami.hidden = true;
+    if (message) el.loginError.textContent = message;
+  }
+
+  function showLoggedIn() {
+    el.loginPanel.hidden = true;
+    el.appPanel.hidden = false;
+    el.whoami.hidden = false;
+    el.whoami.textContent = state.email || '';
+  }
+
+  // Wraps fetch with the bearer token and a single silent refresh-token retry on 401 - an admin
+  // page left open across a 15-minute access token expiry (see Jwt:AccessTokenMinutes) shouldn't
+  // force a re-login for every click.
+  function api(path, options) {
+    options = options || {};
+    options.headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + state.accessToken });
+
+    return fetch(API_BASE + path, options).then(function (res) {
+      if (res.status !== 401) return res;
+
+      return fetch(API_BASE + '/api/v1/auth/refresh-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: state.refreshToken })
+      }).then(function (refreshRes) {
+        if (!refreshRes.ok) { showLoggedOut('Session expired - please sign in again.'); throw new Error('unauthorized'); }
+        return refreshRes.json();
+      }).then(function (tokens) {
+        state.accessToken = tokens.accessToken;
+        state.refreshToken = tokens.refreshToken;
+        saveSession();
+        options.headers['Authorization'] = 'Bearer ' + state.accessToken;
+        return fetch(API_BASE + path, options);
+      });
+    });
+  }
+
+  function login() {
+    el.loginError.textContent = '';
+    var email = el.loginEmail.value.trim();
+    var password = el.loginPassword.value;
+    if (!email || !password) { el.loginError.textContent = 'Enter both email and password.'; return; }
+
+    el.loginButton.disabled = true;
+    fetch(API_BASE + '/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.status === 401 ? 'Incorrect email or password.' : 'Sign-in failed (' + res.status + ').');
+      return res.json();
+    }).then(function (data) {
+      state.accessToken = data.accessToken;
+      state.refreshToken = data.refreshToken;
+      state.email = data.user && data.user.email ? data.user.email : email;
+      el.loginPassword.value = '';
+      saveSession();
+      showLoggedIn();
+      loadFlowcharts();
+    }).catch(function (err) {
+      el.loginError.textContent = err.message || 'Sign-in failed.';
+    }).finally(function () {
+      el.loginButton.disabled = false;
+    });
+  }
+
+  function logout() {
+    var refreshToken = state.refreshToken;
+    showLoggedOut();
+    if (refreshToken) {
+      fetch(API_BASE + '/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshToken })
+      }).catch(function () { /* best-effort - the token is already discarded client-side */ });
+    }
+  }
+
+  function loadFlowcharts() {
+    el.loadError.hidden = true;
+    el.emptyState.hidden = true;
+
+    api('/api/v1/platform/flowcharts')
+      .then(function (res) {
+        if (!res.ok) throw new Error('Failed to load flowcharts (' + res.status + ').');
+        return res.json();
+      })
+      .then(function (data) {
+        state.flowcharts = data || [];
+        renderFlowcharts();
+      })
+      .catch(function (err) {
+        el.table.hidden = true;
+        el.loadError.hidden = false;
+        el.loadError.textContent = err.message || 'Failed to load flowcharts.';
+      });
+  }
+
+  function visibleFlowcharts() {
+    var status = el.statusFilter.value;
+    return status ? state.flowcharts.filter(function (f) { return f.status === status; }) : state.flowcharts;
+  }
+
+  function renderFlowcharts() {
+    var flowcharts = visibleFlowcharts();
+    if (flowcharts.length === 0) {
+      el.table.hidden = true;
+      el.emptyState.hidden = false;
+      return;
+    }
+
+    el.emptyState.hidden = true;
+    el.table.hidden = false;
+
+    el.body.innerHTML = flowcharts.map(function (f) {
+      return '<tr>' +
+        '<td><div class="title">' + escapeHtml(f.title) + '</div>' +
+          (f.description ? '<div class="description-preview">' + escapeHtml(f.description) + '</div>' : '') + '</td>' +
+        '<td class="category">' + (f.category ? escapeHtml(f.category) : '-') + '</td>' +
+        '<td><span class="status-pill status-' + f.status + '">' + f.status + '</span></td>' +
+        '<td>' + f.displayOrder + '</td>' +
+        '<td class="row-actions">' +
+          '<button type="button" class="edit-btn" data-id="' + f.id + '">Edit</button>' +
+          '<button type="button" class="delete-btn danger" data-id="' + f.id + '">Delete</button>' +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function openForm(flowchart) {
+    state.editingId = flowchart ? flowchart.id : null;
+    el.formTitle.textContent = flowchart ? 'Edit flowchart' : 'New flowchart';
+    el.fieldTitle.value = flowchart ? flowchart.title : '';
+    el.fieldDescription.value = flowchart && flowchart.description ? flowchart.description : '';
+    el.fieldCategory.value = flowchart && flowchart.category ? flowchart.category : '';
+    el.fieldDiagram.value = flowchart ? flowchart.diagramJson : '{}';
+    el.fieldOrder.value = flowchart ? flowchart.displayOrder : 0;
+    el.fieldStatus.value = flowchart ? flowchart.status : 'Draft';
+    el.fieldStatusLabel.hidden = !flowchart;
+    el.fieldStatus.hidden = !flowchart;
+    el.formError.textContent = '';
+    el.overlay.hidden = false;
+  }
+
+  function closeForm() {
+    el.overlay.hidden = true;
+  }
+
+  function saveForm() {
+    var title = el.fieldTitle.value.trim();
+    var diagramJson = el.fieldDiagram.value.trim() || '{}';
+    if (!title) { el.formError.textContent = 'Title is required.'; return; }
+    try { JSON.parse(diagramJson); } catch (e) { el.formError.textContent = 'Diagram JSON is not valid JSON.'; return; }
+
+    var description = el.fieldDescription.value.trim() || null;
+    var category = el.fieldCategory.value.trim() || null;
+    var displayOrder = parseInt(el.fieldOrder.value, 10) || 0;
+
+    var isEdit = !!state.editingId;
+    var body = isEdit
+      ? { title: title, description: description, category: category, diagramJson: diagramJson, status: el.fieldStatus.value, displayOrder: displayOrder }
+      : { title: title, description: description, category: category, diagramJson: diagramJson, displayOrder: displayOrder };
+
+    el.formSave.disabled = true;
+    api(isEdit ? '/api/v1/platform/flowcharts/' + state.editingId : '/api/v1/platform/flowcharts', {
+      method: isEdit ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      if (!res.ok) throw new Error('Save failed (' + res.status + ').');
+      closeForm();
+      return loadFlowcharts();
+    }).catch(function (err) {
+      el.formError.textContent = err.message || 'Save failed.';
+    }).finally(function () {
+      el.formSave.disabled = false;
+    });
+  }
+
+  function deleteFlowchart(id) {
+    if (!confirm('Delete this flowchart? This cannot be undone.')) return;
+    api('/api/v1/platform/flowcharts/' + id, { method: 'DELETE' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Delete failed (' + res.status + ').');
+        return loadFlowcharts();
+      })
+      .catch(function (err) { alert(err.message || 'Delete failed.'); });
+  }
+
+  el.body.addEventListener('click', function (e) {
+    var editBtn = e.target.closest('.edit-btn');
+    if (editBtn) {
+      var flowchart = state.flowcharts.filter(function (x) { return x.id === editBtn.getAttribute('data-id'); })[0];
+      if (flowchart) openForm(flowchart);
+      return;
+    }
+    var deleteBtn = e.target.closest('.delete-btn');
+    if (deleteBtn) deleteFlowchart(deleteBtn.getAttribute('data-id'));
+  });
+
+  el.loginButton.addEventListener('click', login);
+  el.loginPassword.addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+  el.logoutButton.addEventListener('click', logout);
+  el.refreshButton.addEventListener('click', loadFlowcharts);
+  el.newButton.addEventListener('click', function () { openForm(null); });
+  el.statusFilter.addEventListener('change', renderFlowcharts);
+  el.formCancel.addEventListener('click', closeForm);
+  el.formSave.addEventListener('click', saveForm);
+  el.overlay.addEventListener('click', function (e) { if (e.target === el.overlay) closeForm(); });
+
+  loadSession();
+  if (state.accessToken) { showLoggedIn(); loadFlowcharts(); } else { showLoggedOut(); }
+})();
+</script>
+
+</body>
+</html>
