@@ -33,4 +33,11 @@ public class PlatformNotificationsController : ControllerBase
         await _notifications.AcknowledgeAllAsync(cancellationToken);
         return NoContent();
     }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        await _notifications.DeleteAsync(id, cancellationToken);
+        return NoContent();
+    }
 }

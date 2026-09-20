@@ -26,6 +26,8 @@ public interface IPlatformNotificationService
     Task AcknowledgeAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task AcknowledgeAllAsync(CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 public class PlatformNotificationService : IPlatformNotificationService
@@ -76,6 +78,16 @@ public class PlatformNotificationService : IPlatformNotificationService
         var open = await _context.PlatformNotifications.Where(n => n.AcknowledgedAtUtc == null).ToListAsync(cancellationToken);
         foreach (var n in open)
             n.AcknowledgedAtUtc = now;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var row = await _context.PlatformNotifications.FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
+        if (row is null)
+            return;
+
+        _context.PlatformNotifications.Remove(row);
         await _context.SaveChangesAsync(cancellationToken);
     }
 }
