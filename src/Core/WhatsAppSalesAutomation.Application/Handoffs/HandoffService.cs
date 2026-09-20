@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
@@ -100,22 +101,38 @@ public class HandoffService : IHandoffService
         return await GetByIdAsync(id, cancellationToken);
     }
 
-    public async Task<HandoffDto> GetOrCreateOpenHandoffAsync(Guid conversationId, string triggerReason, string? notes, CancellationToken cancellationToken = default)
+    public async Task<HandoffDto> GetOrCreateOpenHandoffAsync(
+        Guid conversationId,
+        string triggerReason,
+        string? notes,
+        HandoffSummary? summary = null,
+        CancellationToken cancellationToken = default)
     {
-        var existingId = await _context.HumanHandoffs
+        var existing = await _context.HumanHandoffs
             .Where(h => h.ConversationId == conversationId && h.Status != HandoffStatus.Resolved)
             .OrderByDescending(h => h.CreatedAt)
-            .Select(h => (Guid?)h.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (existingId.HasValue)
-            return await GetByIdAsync(existingId.Value, cancellationToken);
+        if (existing is not null)
+        {
+            // Refresh the briefing but keep TriggerReason and Notes. Those say why the conversation
+            // entered the queue; the briefing says what is true now, and an agent about to pick this
+            // up is better served by the second being current than by the first being preserved twice.
+            if (summary is not null)
+            {
+                existing.SummaryJson = Serialize(summary);
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            return await GetByIdAsync(existing.Id, cancellationToken);
+        }
 
         var handoff = new HumanHandoff
         {
             ConversationId = conversationId,
             TriggerReason = Enum.Parse<HandoffTriggerReason>(triggerReason, ignoreCase: true),
-            Notes = notes
+            Notes = notes,
+            SummaryJson = summary is null ? null : Serialize(summary)
         };
         _context.HumanHandoffs.Add(handoff);
         await _context.SaveChangesAsync(cancellationToken);
@@ -162,9 +179,34 @@ public class HandoffService : IHandoffService
         row.Handoff.AssignedAt,
         row.Handoff.ResolvedAt,
         row.Handoff.Notes,
-        row.Handoff.CreatedAt);
+        row.Handoff.CreatedAt,
+        Deserialize(row.Handoff.SummaryJson));
 
     private record HandoffRow(HumanHandoff Handoff, Customer Customer);
+
+    private static readonly JsonSerializerOptions SummaryJsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    private static string Serialize(HandoffSummary summary) =>
+        JsonSerializer.Serialize(summary, SummaryJsonOptions);
+
+    /// <summary>Unreadable stored JSON reads as "no briefing" rather than failing the request. A
+    /// handoff whose card cannot render is still a handoff an agent needs to see, and the alternative
+    /// is a queue that 500s because one old row has a shape this build no longer understands.</summary>
+    private static HandoffSummary? Deserialize(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<HandoffSummary>(json, SummaryJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static FluentValidation.ValidationException Invalid(string property, string message) =>
         new(new[] { new FluentValidation.Results.ValidationFailure(property, message) });

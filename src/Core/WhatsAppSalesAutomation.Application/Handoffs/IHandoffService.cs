@@ -19,6 +19,16 @@ public interface IHandoffService
     /// The conversation's current non-Resolved handoff if one exists, otherwise a freshly created
     /// Pending one. Used by InboundWebhookProcessor so a chatty customer's follow-up messages do not
     /// spawn a new queue entry for every message while one is already open.
+    ///
+    /// <paramref name="summary"/> is the agent's briefing. On an existing open handoff it REPLACES the
+    /// stored one, because a later escalation means the situation changed and a briefing describing
+    /// three turns ago is worse than none. TriggerReason and Notes are left alone in that case - they
+    /// record why the conversation entered the queue, which does not change.
     /// </summary>
-    Task<HandoffDto> GetOrCreateOpenHandoffAsync(Guid conversationId, string triggerReason, string? notes, CancellationToken cancellationToken = default);
+    Task<HandoffDto> GetOrCreateOpenHandoffAsync(
+        Guid conversationId,
+        string triggerReason,
+        string? notes,
+        HandoffSummary? summary = null,
+        CancellationToken cancellationToken = default);
 }

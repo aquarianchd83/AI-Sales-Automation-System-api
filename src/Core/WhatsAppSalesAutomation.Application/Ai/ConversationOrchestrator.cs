@@ -35,6 +35,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IKnowledgeBaseService _knowledgeBase;
     private readonly ILeadService _leads;
     private readonly IHandoffService _handoffs;
+    private readonly IHandoffSummaryBuilder _handoffSummary;
     private readonly IWhatsAppService _whatsApp;
     private readonly INotificationService _notifications;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
@@ -51,6 +52,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IKnowledgeBaseService knowledgeBase,
         ILeadService leads,
         IHandoffService handoffs,
+        IHandoffSummaryBuilder handoffSummary,
         IWhatsAppService whatsApp,
         INotificationService notifications,
         ITenantConfigOverrideProvider tenantConfig,
@@ -67,6 +69,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _knowledgeBase = knowledgeBase;
         _leads = leads;
         _handoffs = handoffs;
+        _handoffSummary = handoffSummary;
         _whatsApp = whatsApp;
         _notifications = notifications;
         _tenantConfig = tenantConfig;
@@ -154,7 +157,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 conversationId,
                 nameof(HandoffTriggerReason.RuleTriggered),
                 "AI conversation quota used up - the tenant needs to buy credits or wait for renewal.",
-                cancellationToken);
+                cancellationToken: cancellationToken);
             await _notifications.NotifyNewHandoffAsync(noQuotaHandoff.Id, conversationId, noQuotaHandoff.TriggerReason, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
             return;
@@ -257,8 +260,34 @@ public class ConversationOrchestrator : IConversationOrchestrator
             conversation.Status = ConversationStatus.Escalated;
 
             var triggerReason = PickTriggerReason(validated, score);
+
+            // Built before the handoff row, and from this turn's own numbers: score.NewContributions
+            // are still on the change tracker at this point, so the builder is handed them rather than
+            // left to query a table that does not yet contain them.
+            var summary = await _handoffSummary.BuildAsync(
+                leadId,
+                conversationId,
+                new HandoffTurnContext(
+                    triggerReason,
+                    validated.DetectedIntent,
+                    validated.AgentNote,
+                    // Only set when validation is what stopped the reply. An escalation on low
+                    // confidence or on an escalation intent is not a blocked reply, and saying so
+                    // would send the agent looking for a fault that is not there.
+                    validated.CanSend ? null : validated.FailureSummary,
+                    score.ScoreNumeric,
+                    score.Band,
+                    score.IsHot,
+                    score.HotReason,
+                    score.NewContributions.Select(c => new HandoffScoreLine(c.DisplayName, c.Points)).ToList()),
+                cancellationToken);
+
             var handoff = await _handoffs.GetOrCreateOpenHandoffAsync(
-                conversationId, triggerReason.ToString(), BuildHandoffNote(validated, score, plan), cancellationToken);
+                conversationId,
+                triggerReason.ToString(),
+                BuildHandoffNote(validated, score, plan),
+                summary,
+                cancellationToken);
 
             await _notifications.NotifyNewHandoffAsync(handoff.Id, conversationId, handoff.TriggerReason, cancellationToken);
         }
@@ -323,8 +352,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
             customer.PreferredLanguage = detected;
     }
 
-    /// <summary>A one-line note for the agent picking this up. Short by design - the full briefing is
-    /// Stage 4's job; this keeps the existing Notes field useful in the meantime.</summary>
+    /// <summary>The one-line version, for the queue list where there is room for a sentence and not a
+    /// card. The full briefing goes to <see cref="HandoffSummary"/>; this stays because a list row that
+    /// reads "AI escalation" and nothing else makes an agent open every item to triage any of them.</summary>
     private static string BuildHandoffNote(ValidatedReply validated, LeadScoreResult score, QualificationPlan plan)
     {
         var parts = new List<string>
@@ -395,7 +425,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 conversation.Id,
                 nameof(HandoffTriggerReason.RuleTriggered),
                 $"AI reply failed to send: {result.ErrorMessage}",
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             await _notifications.NotifyNewHandoffAsync(handoff.Id, conversation.Id, handoff.TriggerReason, cancellationToken);
         }
