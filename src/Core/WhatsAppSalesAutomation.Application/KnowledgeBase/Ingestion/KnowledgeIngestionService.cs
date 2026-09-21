@@ -25,6 +25,22 @@ public interface IKnowledgeIngestionService
     /// since running it again would change nothing.</summary>
     Task<KnowledgeIngestionJob> QueueIndexingAsync(Guid articleId, bool securityReviewed = false, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Indexes the article's current version NOW, inside the calling request, and returns the finished
+    /// job. Unlike <see cref="QueueIndexingAsync"/> it always re-runs, even over a Completed job: this
+    /// is the explicit "publish" action, which has always re-embedded, and a user pressing it after a
+    /// provider change expects that to take effect.
+    ///
+    /// Refuses (Conflict) only when the same version is genuinely mid-run - a state older than
+    /// <see cref="StaleRunMinutes"/> is treated as a crashed run and overridden, so a job that died
+    /// cannot block publishing forever.
+    /// </summary>
+    Task<KnowledgeIngestionJob> IndexNowAsync(Guid articleId, bool securityReviewed = false, CancellationToken cancellationToken = default);
+
+    /// <summary>The most recent job for the article's highest version, or null if it was never indexed
+    /// by this pipeline. What an admin reads to learn why an article is not live, or what to check.</summary>
+    Task<KnowledgeIngestionJobDto?> GetLatestJobAsync(Guid articleId, CancellationToken cancellationToken = default);
+
     /// <summary>The pipeline itself. Never throws for a content or provider problem - those become the
     /// job's state - so a background-job runner does not retry work whose failure is already recorded.</summary>
     Task RunAsync(Guid jobId, bool securityReviewed = false, CancellationToken cancellationToken = default);
@@ -41,8 +57,35 @@ public interface IKnowledgeIngestionService
 /// Resumable: staged chunks and the last completed index are kept on failure, so a provider outage
 /// at chunk 480 of 500 costs the remaining 20 on retry, not all 500.
 /// </summary>
+/// <summary>What an admin sees about an article's indexing. The security findings are parsed rather than
+/// passed as JSON so a client can show the sentences that tripped the scan.</summary>
+public sealed record KnowledgeIngestionJobDto(
+    Guid Id,
+    Guid ArticleId,
+    int ArticleVersionNumber,
+    string State,
+    string? ReasonCode,
+    string? Detail,
+    bool RequiresSecurityReview,
+    IReadOnlyList<InjectionFinding> SecurityFindings,
+    int ChunkCount,
+    string? VerificationNotes,
+    int Attempts,
+    DateTime? StartedAt,
+    DateTime? CompletedAt);
+
 public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
 {
+    /// <summary>A job sitting in a running state for longer than this is assumed to have crashed.</summary>
+    public const int StaleRunMinutes = 15;
+
+    private static readonly HashSet<KnowledgeIngestionState> RunningStates = new()
+    {
+        KnowledgeIngestionState.Validating, KnowledgeIngestionState.Extracting, KnowledgeIngestionState.Cleaning,
+        KnowledgeIngestionState.Enriching, KnowledgeIngestionState.Chunking, KnowledgeIngestionState.Embedding,
+        KnowledgeIngestionState.Indexing, KnowledgeIngestionState.Verifying
+    };
+
     private readonly IApplicationDbContext _context;
     private readonly IEmbeddingService _embeddings;
     private readonly IEmbeddingProviderCatalog _catalog;
@@ -128,6 +171,81 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         await _context.SaveChangesAsync(cancellationToken);
         _queue.Enqueue(job.Id, article.TenantId, securityReviewed);
         return job;
+    }
+
+    public async Task<KnowledgeIngestionJob> IndexNowAsync(
+        Guid articleId, bool securityReviewed = false, CancellationToken cancellationToken = default)
+    {
+        var article = await _context.KnowledgeBaseArticles.FirstOrDefaultAsync(a => a.Id == articleId, cancellationToken)
+            ?? throw new NotFoundException(nameof(KnowledgeBaseArticle), articleId);
+
+        if (article.Status is not (KnowledgeArticleStatus.Approved or KnowledgeArticleStatus.Published))
+            throw new ConflictException($"Only Approved or Published articles are indexed; this one is {article.Status}.");
+
+        var job = await _context.KnowledgeIngestionJobs
+            .FirstOrDefaultAsync(j => j.ArticleId == articleId && j.ArticleVersionNumber == article.VersionNumber, cancellationToken);
+
+        if (job is null)
+        {
+            job = new KnowledgeIngestionJob
+            {
+                TenantId = article.TenantId,
+                ArticleId = article.Id,
+                ArticleVersionNumber = article.VersionNumber
+            };
+            _context.KnowledgeIngestionJobs.Add(job);
+        }
+        else
+        {
+            var lastTouched = job.UpdatedAt ?? job.CreatedAt;
+            if (RunningStates.Contains(job.State) && _clock.UtcNow - lastTouched < TimeSpan.FromMinutes(StaleRunMinutes))
+                throw new ConflictException("This article is already being indexed. Try again in a moment.");
+
+            // A fresh run over the same version. LastCompletedChunkIndex is left alone: a Failed job
+            // resumes from it, and for a Completed one it is only informational.
+            job.State = KnowledgeIngestionState.Queued;
+            job.ReasonCode = null;
+            job.Detail = null;
+            job.RequiresSecurityReview = false;
+            job.SecurityFindingsJson = null;
+            job.VerificationNotes = null;
+            job.CompletedAt = null;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await RunAsync(job.Id, securityReviewed, cancellationToken);
+
+        // RunAsync mutates this same tracked instance, so it already reflects the outcome.
+        return job;
+    }
+
+    public async Task<KnowledgeIngestionJobDto?> GetLatestJobAsync(Guid articleId, CancellationToken cancellationToken = default)
+    {
+        var job = await _context.KnowledgeIngestionJobs.AsNoTracking()
+            .Where(j => j.ArticleId == articleId)
+            .OrderByDescending(j => j.ArticleVersionNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (job is null)
+            return null;
+
+        IReadOnlyList<InjectionFinding> findings = Array.Empty<InjectionFinding>();
+        if (!string.IsNullOrWhiteSpace(job.SecurityFindingsJson))
+        {
+            try
+            {
+                findings = JsonSerializer.Deserialize<List<InjectionFinding>>(job.SecurityFindingsJson) ?? new List<InjectionFinding>();
+            }
+            catch (JsonException)
+            {
+                // Findings are diagnostic; unreadable ones must not break the status read.
+            }
+        }
+
+        return new KnowledgeIngestionJobDto(
+            job.Id, job.ArticleId, job.ArticleVersionNumber, job.State.ToString(), job.ReasonCode, job.Detail,
+            job.RequiresSecurityReview, findings, job.ChunkCount, job.VerificationNotes, job.Attempts,
+            job.StartedAt, job.CompletedAt);
     }
 
     // ── The pipeline ─────────────────────────────────────────────────────────────────────

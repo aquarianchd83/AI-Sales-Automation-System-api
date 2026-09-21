@@ -167,4 +167,16 @@ public class KnowledgeServicesWiringTests
         Assert.Contains(AppRoles.SalesManager, roles);
         Assert.DoesNotContain(AppRoles.SalesAgent, roles);
     }
+
+    [Fact]
+    public void The_kb_service_and_the_upload_service_resolve_now_that_publish_depends_on_ingestion()
+    {
+        // KnowledgeBaseService gained a constructor dependency on the ingestion service; this is the
+        // test that would fail at startup rather than at the first Publish click if it were unresolvable.
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IKnowledgeBaseService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IKnowledgeUploadService>());
+    }
 }

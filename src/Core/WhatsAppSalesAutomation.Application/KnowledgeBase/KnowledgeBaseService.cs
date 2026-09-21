@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -31,6 +32,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     private readonly IValidator<CreateKnowledgeBaseArticleRequest> _createValidator;
     private readonly IValidator<UpdateKnowledgeBaseArticleRequest> _updateValidator;
     private readonly IValidator<BulkPublishArticlesRequest> _bulkPublishValidator;
+    private readonly IKnowledgeIngestionService _ingestion;
 
     public KnowledgeBaseService(
         IApplicationDbContext context,
@@ -43,7 +45,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         ITenantConfigOverrideProvider tenantConfig,
         IValidator<CreateKnowledgeBaseArticleRequest> createValidator,
         IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
-        IValidator<BulkPublishArticlesRequest> bulkPublishValidator)
+        IValidator<BulkPublishArticlesRequest> bulkPublishValidator,
+        IKnowledgeIngestionService ingestion)
     {
         _context = context;
         _dateTime = dateTime;
@@ -56,6 +59,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         _createValidator = createValidator;
         _updateValidator = updateValidator;
         _bulkPublishValidator = bulkPublishValidator;
+        _ingestion = ingestion;
     }
 
     public async Task<PagedResult<KnowledgeBaseArticleDto>> GetPagedAsync(PagedRequest request, string? status = null, CancellationToken cancellationToken = default)
@@ -231,7 +235,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, string? provider = null, CancellationToken cancellationToken = default)
+    public async Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, string? provider = null, bool securityReviewed = false, CancellationToken cancellationToken = default)
     {
         // Validated before the article lookup, same ordering as PublishToModelAsync - a bad/keyless
         // provider name should 400 without a wasted round-trip to load the article first.
@@ -257,7 +261,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         var article = await FindOrThrowAsync(id, cancellationToken);
 
         if (targetProvider is null)
-            await MarkChunkedAndPublishedAsync(article, approvedByUserId, cancellationToken);
+            await PublishThroughIngestionAsync(article, approvedByUserId, securityReviewed, cancellationToken);
         else
             await EmbedSingleProviderAsync(article, targetProvider, cancellationToken);
 
@@ -410,7 +414,12 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         var candidates = await (
                 from c in _context.KnowledgeBaseChunks
                 join a in _context.KnowledgeBaseArticles on c.ArticleId equals a.Id
+                // IsActive: a re-index stages its replacement chunks INACTIVE and swaps them in at the end,
+                // so without this a stale or half-built staged set would be scored alongside the live one.
+                // TenantId != null: chunks are now scoped-or-global, and a GLOBAL article is platform
+                // support knowledge - it must never be quoted to a tenant's customers in a sales chat.
                 where a.Status == KnowledgeArticleStatus.Published && c.Embedding != null
+                    && c.IsActive && c.TenantId != null
                     && (!modelFilterApplies || _context.KnowledgeBaseArticleModelPublications.Any(p => p.ArticleId == a.Id && p.Provider == parsedProvider))
                 select c)
             .ToListAsync(cancellationToken);
@@ -429,28 +438,124 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         return scored;
     }
 
-    /// <summary>Chunks/embeds (via ReembedAsync) and sets Status = Published - shared by PublishAsync
-    /// and PublishToModelAsync's "first time this article goes live" branch.</summary>
-    private async Task MarkChunkedAndPublishedAsync(KnowledgeBaseArticle article, Guid approvedByUserId, CancellationToken cancellationToken)
+    /// <summary>Publishes for the "first time this article goes live" branch of PublishToModelAsync -
+    /// the same pipeline as the explicit Publish action, without a security-review override.</summary>
+    private Task MarkChunkedAndPublishedAsync(KnowledgeBaseArticle article, Guid approvedByUserId, CancellationToken cancellationToken) =>
+        PublishThroughIngestionAsync(article, approvedByUserId, securityReviewed: false, cancellationToken);
+
+    /// <summary>
+    /// The full publish: mark the article Published, then chunk, embed and index it through the Phase 6
+    /// ingestion pipeline, inside this request.
+    ///
+    /// Replaces the earlier in-line chunk-and-embed. The differences that matter: chunks are built
+    /// structure-aware instead of by paragraph length, content is scanned for prompt-injection before
+    /// anything is embedded, and the old chunks are swapped for the new in one transaction - so a
+    /// provider failing half-way now leaves the PREVIOUS index serving instead of a half-embedded
+    /// article.
+    ///
+    /// The article is marked Published first because the pipeline only indexes Approved or Published
+    /// content and the database refuses a Published row without an approver - so the approval fields
+    /// have to exist before it runs. If indexing then does not complete, every field is put back and the
+    /// user gets the reason: an article must never be left saying "Published" with nothing indexed.
+    /// </summary>
+    private async Task PublishThroughIngestionAsync(
+        KnowledgeBaseArticle article, Guid approvedByUserId, bool securityReviewed, CancellationToken cancellationToken)
     {
-        await ReembedAsync(article, cancellationToken);
+        var before = (article.Status, article.ApprovedBy, article.ApprovedAt, article.PublishedBy, article.PublishedAt, article.ReviewDueAt, article.EffectiveFrom);
 
         article.Status = KnowledgeArticleStatus.Published;
         article.ApprovedBy = approvedByUserId;
 
         // CK_KBArticles_PublishedHasApprover refuses a Published row without BOTH an approver and an
-        // approval time, so ApprovedAt is not optional bookkeeping here - the save fails without it.
+        // approval time.
         var publishedAt = _dateTime.UtcNow;
         article.ApprovedAt = article.ApprovedAt ?? publishedAt;
         article.PublishedBy = approvedByUserId;
         article.PublishedAt = publishedAt;
 
         // Only defaulted, never overwritten: an article deliberately future-dated by its author must
-        // keep that date through a publish, which is the entire point of an effective window.
+        // keep that date through a publish, which is the point of an effective window.
         if (article.EffectiveFrom == default)
             article.EffectiveFrom = publishedAt;
 
         article.ReviewDueAt = publishedAt.AddDays(KnowledgeAuthority.ReviewIntervalDays(article.SourceType));
+        await _context.SaveChangesAsync(cancellationToken);
+
+        KnowledgeIngestionJob job;
+        try
+        {
+            job = await _ingestion.IndexNowAsync(article.Id, securityReviewed, cancellationToken);
+        }
+        catch
+        {
+            Restore(article, before);
+            await _context.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+
+        if (job.State == KnowledgeIngestionState.Completed)
+            return;
+
+        Restore(article, before);
+        await _context.SaveChangesAsync(CancellationToken.None);
+        throw Invalid("publish", DescribeUnfinishedIndexing(job));
+    }
+
+    private static void Restore(
+        KnowledgeBaseArticle article,
+        (KnowledgeArticleStatus Status, Guid? ApprovedBy, DateTime? ApprovedAt, Guid? PublishedBy, DateTime? PublishedAt, DateTime? ReviewDueAt, DateTime EffectiveFrom) before)
+    {
+        article.Status = before.Status;
+        article.ApprovedBy = before.ApprovedBy;
+        article.ApprovedAt = before.ApprovedAt;
+        article.PublishedBy = before.PublishedBy;
+        article.PublishedAt = before.PublishedAt;
+        article.ReviewDueAt = before.ReviewDueAt;
+        article.EffectiveFrom = before.EffectiveFrom;
+    }
+
+    /// <summary>A sentence a person can act on for each way indexing can stop short of Completed. The
+    /// findings' excerpts are included because "flagged" on a long article is not actionable - the
+    /// sentence that tripped the scan is.</summary>
+    private static string DescribeUnfinishedIndexing(KnowledgeIngestionJob job)
+    {
+        string Excerpts()
+        {
+            if (string.IsNullOrWhiteSpace(job.SecurityFindingsJson))
+                return string.Empty;
+
+            try
+            {
+                var found = JsonSerializer.Deserialize<List<InjectionFinding>>(job.SecurityFindingsJson) ?? new();
+                var shown = found.Where(f => f.Severity >= InjectionSeverity.Flag).Take(3).Select(f => "\"" + f.Excerpt.Trim() + "\"");
+                var text = string.Join("; ", shown);
+                return text.Length == 0 ? string.Empty : " Found: " + text + ".";
+            }
+            catch (JsonException)
+            {
+                return string.Empty;
+            }
+        }
+
+        return job.State switch
+        {
+            KnowledgeIngestionState.AwaitingApproval =>
+                "This article contains wording that needs a security review before it can be published - it reads like an " +
+                "instruction to the AI." + Excerpts() + " If it is genuine content, review it and publish again with " +
+                "securityReviewed=true.",
+
+            KnowledgeIngestionState.Rejected when job.ReasonCode == "InjectionBlocked" =>
+                "This article was not published: it contains text that tries to give the AI instructions or a different " +
+                "role, which is never allowed in knowledge content." + Excerpts(),
+
+            KnowledgeIngestionState.Rejected =>
+                $"This article could not be published: {job.Detail ?? job.ReasonCode}",
+
+            KnowledgeIngestionState.Failed =>
+                $"Indexing failed ({job.ReasonCode}): {job.Detail} The article was not published; you can try again.",
+
+            _ => $"Indexing did not complete (it stopped in state {job.State}). The article was not published."
+        };
     }
 
     /// <summary>The targeted-publish half of PublishAsync's merged behavior - see its own doc comment.

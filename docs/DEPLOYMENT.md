@@ -137,6 +137,29 @@ resolved per tenant - so today it is embedded by the `Simulated` provider only, 
 provider will not retrieve it. The job records this in its `VerificationNotes` rather than failing. Until
 that is resolved, treat platform-authored knowledge as not yet live for real-provider tenants.
 
+### Publishing and uploading
+
+The KB screen's **Publish** now runs the ingestion pipeline inline (chunk, scan, embed, swap), so the
+response still arrives when indexing is done. It differs from the old publish in three ways worth knowing:
+
+- **A failed publish leaves the article as it was.** If indexing fails or the content is refused, the
+  article goes back to its previous status and the user gets a 400 explaining why - it is never left
+  "Published" with nothing indexed, and a previously published version keeps serving.
+- **Content that reads like an instruction to the AI is refused.** Tool-invocation and role-assumption
+  wording is blocked outright. Milder wording ("ignore previous instructions") is refused until the caller
+  publishes again with `?securityReviewed=true`, having read the quoted sentence in the error.
+- **Publish always re-embeds**, even an unchanged article, as it always has.
+
+`POST /api/v1/knowledge-base/articles/upload` (multipart: `file`, optional `title`, `category`,
+`sourceType`) creates a **draft** from a .md, .txt, .html, .docx or .pdf up to 10 MB. Nothing is published
+by an upload. The response carries a quality score; a low one (PDFs especially) means read it before
+publishing. `GET /api/v1/knowledge-base/articles/{id}/indexing` reports the latest indexing run, its
+security findings and any post-index warnings.
+
+Note: the sales AI's retrieval was tightened at the same time. It now ignores inactive (staged) chunks and
+platform-owned (GLOBAL) knowledge, so a re-index in progress can never leak stale text into a reply and
+platform support content is never quoted to a tenant's customers.
+
 ### Reranker
 
 ```json
