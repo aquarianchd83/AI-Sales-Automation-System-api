@@ -179,4 +179,19 @@ public class KnowledgeServicesWiringTests
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<IKnowledgeBaseService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<IKnowledgeUploadService>());
     }
+
+    [Fact]
+    public void The_platform_embedder_resolves_and_the_platform_controller_is_superadmin_only()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.Common.Interfaces.IPlatformEmbeddingService>());
+
+        var authorize = typeof(WhatsAppSalesAutomation.Api.Controllers.PlatformKnowledgeController)
+            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), inherit: true)
+            .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+            .Single();
+        Assert.Equal(WhatsAppSalesAutomation.Domain.Constants.AppRoles.PlatformSuperAdmin, authorize.Roles);
+    }
 }

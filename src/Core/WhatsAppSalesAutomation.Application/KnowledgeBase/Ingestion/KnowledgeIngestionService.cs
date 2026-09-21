@@ -97,6 +97,13 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<KnowledgeIngestionService> _logger;
     private readonly IKnowledgeRetrievalService? _retrieval;
+    private readonly IPlatformEmbeddingService? _platformEmbedder;
+
+    /// <summary>The embedder for the run in progress: the platform's for a GLOBAL article, the ambient
+    /// tenant's otherwise. Chosen once at the start of each run from the ARTICLE, never from whoever
+    /// happens to be in scope - a platform article published by a SuperAdmin, re-indexed by a job, or
+    /// simulated as some tenant must all land in the same, platform-owned vector space.</summary>
+    private IEmbeddingService _embedder;
 
     public KnowledgeIngestionService(
         IApplicationDbContext context,
@@ -111,7 +118,8 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         ILogger<KnowledgeIngestionService> logger,
         // Optional: the smoke check needs retrieval, but indexing must not depend on it. A null here
         // just skips that one check.
-        IKnowledgeRetrievalService? retrieval = null)
+        IKnowledgeRetrievalService? retrieval = null,
+        IPlatformEmbeddingService? platformEmbedder = null)
     {
         _context = context;
         _embeddings = embeddings;
@@ -124,6 +132,8 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         _clock = clock;
         _logger = logger;
         _retrieval = retrieval;
+        _platformEmbedder = platformEmbedder;
+        _embedder = embeddings;
     }
 
     // ── Queueing ─────────────────────────────────────────────────────────────────────────
@@ -287,6 +297,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         await SetStateAsync(job, KnowledgeIngestionState.Validating, ct);
 
         var article = await _context.KnowledgeBaseArticles.FirstOrDefaultAsync(a => a.Id == job.ArticleId, ct);
+        _embedder = article is { TenantId: null } && _platformEmbedder is not null ? _platformEmbedder : _embeddings;
         if (article is null)
         {
             await FinishAsync(job, KnowledgeIngestionState.Rejected, "ArticleGone", "The article no longer exists.", ct);
@@ -341,8 +352,8 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         var metrics = StructureAwareChunker.Measure(drafts, ChunkingParameters.For(article.SourceType));
         job.MetricsJson = JsonSerializer.Serialize(metrics);
         job.ChunkCount = drafts.Count;
-        job.EmbeddingProvider = _embeddings.ProviderName;
-        job.EmbeddingModel = _embeddings.ModelName;
+        job.EmbeddingProvider = _embedder.ProviderName;
+        job.EmbeddingModel = _embedder.ModelName;
 
         // ── Staging (inactive) ──
         var staged = await StageChunksAsync(article, drafts, ct);
@@ -390,8 +401,8 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
             if (byIndex.TryGetValue(draft.Index, out var candidate)
                 && candidate.Embedding is not null
                 && candidate.EmbeddingInput == draft.EmbeddingInput
-                && candidate.EmbeddingProvider == _embeddings.ProviderName
-                && candidate.EmbeddingModel == _embeddings.ModelName)
+                && candidate.EmbeddingProvider == _embedder.ProviderName
+                && candidate.EmbeddingModel == _embedder.ModelName)
             {
                 reused.Add(candidate.Id);
                 if (draft.AtomicGroupId is { } fresh)
@@ -434,24 +445,28 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
             return;
 
         var batches = EmbeddingBatcher.PlanBatches(pending.Select(c => _tokens.Count(c.EmbeddingInput)).ToList());
-        var others = _catalog.AllProviders
-            .Where(p => p.IsAvailable && p.ProviderName != _embeddings.ProviderName)
-            .ToList();
+        // A platform article is embedded in ONE space, the platform's. The "every other available
+        // provider" fan-out exists so a tenant on a different provider still has vectors to search; for
+        // platform content that job is done by embedding the QUESTION in the platform's space instead,
+        // so fanning out here would only cost the platform money for vectors nobody reads.
+        var others = article.TenantId is null
+            ? new List<IEmbeddingService>()
+            : _catalog.AllProviders.Where(p => p.IsAvailable && p.ProviderName != _embedder.ProviderName).ToList();
 
         foreach (var batch in batches)
         {
             var members = batch.Select(i => pending[i]).ToList();
             var texts = members.Select(c => c.EmbeddingInput).ToList();
 
-            var vectors = await _batcher.EmbedBatchAsync(_embeddings, texts, ct);
+            var vectors = await _batcher.EmbedBatchAsync(_embedder, texts, ct);
 
             // The store writes the active provider's vector to wherever retrieval will read it.
             await _vectors.UpsertAsync(
-                members.Select((c, i) => new ChunkVector(c.Id, vectors[i], _embeddings.ProviderName, _embeddings.ModelName)).ToList(), ct);
+                members.Select((c, i) => new ChunkVector(c.Id, vectors[i], _embedder.ProviderName, _embedder.ModelName)).ToList(), ct);
 
             for (var i = 0; i < members.Count; i++)
             {
-                _context.KnowledgeBaseChunkEmbeddings.Add(NewEmbeddingRow(members[i], _embeddings, vectors[i]));
+                _context.KnowledgeBaseChunkEmbeddings.Add(NewEmbeddingRow(members[i], _embedder, vectors[i]));
             }
 
             // Every OTHER available provider is embedded too, so a tenant whose active provider
@@ -530,7 +545,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         // in a space no real tenant's queries share, and it will silently never be retrieved for them.
         // Not a failure (local development legitimately runs Simulated everywhere), but it must never
         // be quiet: this is the note an admin reads to find out why platform articles do not surface.
-        if (article.TenantId is null && _embeddings.ProviderName == "Simulated")
+        if (article.TenantId is null && _embedder.ProviderName == "Simulated")
         {
             notes.Add("GLOBAL article embedded with the Simulated provider: tenants using a real embedding " +
                       "provider will not retrieve it until platform-level embedding credentials exist.");

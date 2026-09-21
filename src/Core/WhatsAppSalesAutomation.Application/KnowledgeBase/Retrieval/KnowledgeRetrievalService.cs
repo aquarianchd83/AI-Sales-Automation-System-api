@@ -30,6 +30,7 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
 
     private readonly IApplicationDbContext _context;
     private readonly IEmbeddingService _embeddings;
+    private readonly IPlatformEmbeddingService? _platform;
     private readonly IVectorStore _vectors;
     private readonly IKeywordSearchStore _keywords;
     private readonly IReranker _reranker;
@@ -51,7 +52,9 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
         ITokenCounter tokens,
         IDateTimeProvider clock,
         IOptions<SupportRagOptions> options,
-        ILogger<KnowledgeRetrievalService> logger)
+        ILogger<KnowledgeRetrievalService> logger,
+        // Optional so retrieval still works, tenant-only, where no platform embedder is registered.
+        IPlatformEmbeddingService? platform = null)
     {
         _context = context;
         _embeddings = embeddings;
@@ -64,6 +67,7 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
         _clock = clock;
         _options = options.Value;
         _logger = logger;
+        _platform = platform;
     }
 
     public async Task<KnowledgeRetrievalResult> RetrieveAsync(KnowledgeRetrievalRequest request, CancellationToken cancellationToken = default)
@@ -99,6 +103,15 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
             EmbeddingModel = _embeddings.ModelName
         };
 
+        // The filter for the platform's own embedding space, or null when there is nothing separate to
+        // search: no platform embedder, or the tenant already embeds in the platform's space (in which
+        // case the tenant's own leg already covers GLOBAL chunks and a second leg would find the same ones).
+        var platformFilter = _platform is not null &&
+                             (!string.Equals(_platform.ProviderName, _embeddings.ProviderName, StringComparison.OrdinalIgnoreCase) ||
+                              !string.Equals(_platform.ModelName, _embeddings.ModelName, StringComparison.OrdinalIgnoreCase))
+            ? filter with { EmbeddingProvider = _platform.ProviderName, EmbeddingModel = _platform.ModelName, GlobalOnly = true }
+            : null;
+
         // ── Both legs, for every query ──
         var lists = new List<RankedList>();
         var vectorScores = new Dictionary<Guid, double>();
@@ -111,18 +124,43 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
             var (vector, hit) = await EmbedAsync(tenantId, query.Text, cancellationToken);
             embeddingCacheHit &= hit;
 
+            var vectorHits = new List<VectorHit>();
+
             if (vector.Length > 0)
             {
-                var hits = await _vectors.SearchAsync(vector, filter, _options.VectorTopN, cancellationToken);
-                lists.Add(new RankedList("vector:" + query.Name, query.Weight * vectorWeight, hits.Select(h => h.ChunkId).ToList()));
-                foreach (var h in hits)
-                    vectorScores[h.ChunkId] = Math.Max(vectorScores.GetValueOrDefault(h.ChunkId), h.Similarity);
+                vectorHits.AddRange(await _vectors.SearchAsync(vector, filter, _options.VectorTopN, cancellationToken));
             }
             else
             {
                 // An empty vector is the provider failing. That leg is skipped, not zero-scored: the
                 // keyword leg still runs, and a degraded answer is honest where an invented one is not.
                 _logger.LogWarning("No embedding for query {Query}; vector leg skipped.", query.Name);
+            }
+
+            // Platform-authored knowledge lives in the PLATFORM's embedding space, which is only the
+            // same as the tenant's if they happen to use the same model. When it is not, the question
+            // has to be embedded a second time, in the platform's space, to be comparable with it.
+            // That second embedding is the platform's cost, not the tenant's.
+            if (platformFilter is not null)
+            {
+                var (platformVector, platformHit) = await EmbedPlatformAsync(tenantId, query.Text, cancellationToken);
+                embeddingCacheHit &= platformHit;
+
+                if (platformVector.Length > 0)
+                    vectorHits.AddRange(await _vectors.SearchAsync(platformVector, platformFilter, _options.VectorTopN, cancellationToken));
+                else
+                    _logger.LogWarning("No platform embedding for query {Query}; platform vector leg skipped.", query.Name);
+            }
+
+            if (vectorHits.Count > 0)
+            {
+                // ONE ranked vector list per query, best similarity first, however many spaces fed it.
+                // Two separate lists would each count toward the fusion ceiling although a chunk can
+                // only ever appear in one of them, deflating every normalized score.
+                var ranked = vectorHits.OrderByDescending(h => h.Similarity).ThenBy(h => h.ChunkId).ToList();
+                lists.Add(new RankedList("vector:" + query.Name, query.Weight * vectorWeight, ranked.Select(h => h.ChunkId).ToList()));
+                foreach (var h in ranked)
+                    vectorScores[h.ChunkId] = Math.Max(vectorScores.GetValueOrDefault(h.ChunkId), h.Similarity);
             }
 
             if (_options.KeywordTopN > 0)
@@ -279,6 +317,23 @@ public sealed class KnowledgeRetrievalService : IKnowledgeRetrievalService
 
         // Never cache a failure: an empty vector cached for 30 minutes would turn one transient
         // provider error into half an hour of no vector search.
+        if (vector.Length > 0)
+            _cache.Set(key, vector, EmbeddingTtl);
+
+        return (vector, false);
+    }
+
+    /// <summary>Same as <see cref="EmbedAsync"/>, for the platform's embedder. Cached under the tenant like
+    /// every other key: a question can contain a tenant's private detail, so its embedding is not shared
+    /// across tenants even though the model is the platform's.</summary>
+    private async Task<(float[] Vector, bool CacheHit)> EmbedPlatformAsync(Guid? tenantId, string text, CancellationToken cancellationToken)
+    {
+        var key = RetrievalCacheKeys.Embedding(tenantId, "platform:" + _platform!.ProviderName, _platform.ModelName, text);
+        if (_cache.TryGet<float[]>(key, out var cached) && cached is { Length: > 0 })
+            return (cached, true);
+
+        var vector = EmbeddingBatcher.Normalize(await _platform.GetEmbeddingAsync(text, cancellationToken));
+
         if (vector.Length > 0)
             _cache.Set(key, vector, EmbeddingTtl);
 

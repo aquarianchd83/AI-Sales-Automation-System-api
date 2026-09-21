@@ -191,6 +191,20 @@ into answering from whatever it found.
 question, optionally as a given tenant, bypassing the result cache, and returns every stage's
 diagnostics. Each call is audited - who and which tenant, **not** the query text.
 
+### Platform knowledge base (GLOBAL articles)
+
+Articles a PlatformSuperAdmin writes under **Knowledge Base** in the platform portal
+(`/api/v1/platform/knowledge/articles`) are GLOBAL: every tenant's support agent can answer from them
+(refund policy, buying credits, plan limits). Tenants cannot see or edit them in their own Knowledge Base.
+
+* **The platform pays to embed them**, using the `AiProviders` settings (`EmbeddingProvider`, default
+  OpenAI `text-embedding-3-small`) - not any tenant's key. Each tenant question that needs platform
+  content is embedded a second time in the platform's space when it differs from the tenant's own.
+* If the provider's API key is missing, the platform falls back to the Simulated embedder and tenants on a
+  real provider will **not** find these articles. `GET /api/v1/platform/knowledge/embedding-status`
+  reports this and the screen shows it as a banner. Add the key, then run **Re-index**.
+* Changing `EmbeddingProvider`/model puts existing platform chunks in a different space: re-index afterwards.
+
 ---
 
 ## 3b. Audit log and reports

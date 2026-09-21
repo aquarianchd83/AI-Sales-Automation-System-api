@@ -58,7 +58,11 @@ public class KnowledgeBaseArticle : BaseEntity, ISoftDelete, ITenantScopedOrGlob
     /// directly; it follows <see cref="TenantId"/>. EF Core writes it through the private setter when
     /// materializing a row, and whichever of the two it happens to set second, the result agrees -
     /// the database guarantees the pair was consistent when it was written.</summary>
-    public TenantKnowledgeScope TenantScope { get; private set; } = TenantKnowledgeScope.Tenant;
+    ///
+    /// The default is Global because the default TenantId is null. The setter above only runs when
+    /// TenantId is ASSIGNED, so a new platform article - which never assigns it - would otherwise start
+    /// as "tenant-scoped with no tenant" and be refused by CK_KBArticles_ScopeMatchesTenant.
+    public TenantKnowledgeScope TenantScope { get; private set; } = TenantKnowledgeScope.Global;
 
     /// <summary>Stable, human-readable identity that survives versioning. Every version of
     /// "refund-policy-india" shares this key; only one of them has <see cref="IsCurrentVersion"/>

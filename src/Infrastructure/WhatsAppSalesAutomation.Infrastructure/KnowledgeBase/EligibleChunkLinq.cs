@@ -27,6 +27,7 @@ internal static class EligibleChunkLinq
                           // filter: IVectorStore's contract is that the RetrievalFilter is applied by
                           // the store, so isolation cannot depend on whatever scope built it.
                           && (c.TenantId == null || c.TenantId == filter.TenantId)
+                          && (!filter.GlobalOnly || c.TenantId == null)
                           && c.EffectiveFrom <= filter.NowUtc
                           && (c.EffectiveTo == null || c.EffectiveTo > filter.NowUtc)
                           && (c.CountryCode == null || c.CountryCode == filter.TenantCountryCode)

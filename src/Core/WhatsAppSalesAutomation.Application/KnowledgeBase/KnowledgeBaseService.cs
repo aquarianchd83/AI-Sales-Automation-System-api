@@ -33,6 +33,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     private readonly IValidator<UpdateKnowledgeBaseArticleRequest> _updateValidator;
     private readonly IValidator<BulkPublishArticlesRequest> _bulkPublishValidator;
     private readonly IKnowledgeIngestionService _ingestion;
+    private readonly KnowledgeMetadataSyncService _metadataSync;
 
     public KnowledgeBaseService(
         IApplicationDbContext context,
@@ -46,7 +47,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         IValidator<CreateKnowledgeBaseArticleRequest> createValidator,
         IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
         IValidator<BulkPublishArticlesRequest> bulkPublishValidator,
-        IKnowledgeIngestionService ingestion)
+        IKnowledgeIngestionService ingestion,
+        KnowledgeMetadataSyncService metadataSync)
     {
         _context = context;
         _dateTime = dateTime;
@@ -60,13 +62,28 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         _updateValidator = updateValidator;
         _bulkPublishValidator = bulkPublishValidator;
         _ingestion = ingestion;
+        _metadataSync = metadataSync;
     }
+
+    /// <summary>
+    /// The articles THIS caller manages: a tenant's own, or - for a PlatformSuperAdmin, who has no
+    /// tenant - the platform's GLOBAL ones.
+    ///
+    /// Narrower than the ambient query filter on purpose. That filter is "own OR global" so that
+    /// retrieval can read platform knowledge for every tenant, but a management screen built on it would
+    /// list platform articles in every tenant's own Knowledge Base, invite them to edit rows they cannot
+    /// write, and expose platform content the tenant was never meant to browse.
+    /// </summary>
+    private IQueryable<KnowledgeBaseArticle> Managed() =>
+        _tenantContext.TenantId is { } tenantId
+            ? _context.KnowledgeBaseArticles.Where(a => a.TenantId == tenantId)
+            : _context.KnowledgeBaseArticles.Where(a => a.TenantId == null);
 
     public async Task<PagedResult<KnowledgeBaseArticleDto>> GetPagedAsync(PagedRequest request, string? status = null, CancellationToken cancellationToken = default)
     {
         // Anonymous-type projection - see LeadService.GetPagedAsync's comment for why this matters.
         var query =
-            from a in _context.KnowledgeBaseArticles
+            from a in Managed()
             select new
             {
                 Article = a,
@@ -376,7 +393,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
     public async Task ReindexAsync(CancellationToken cancellationToken = default)
     {
-        var published = await _context.KnowledgeBaseArticles
+        var published = await Managed()
             .Where(a => a.Status == KnowledgeArticleStatus.Published)
             .ToListAsync(cancellationToken);
 
@@ -385,11 +402,44 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             var isStale = !await _context.KnowledgeBaseChunks
                 .AnyAsync(c => c.ArticleId == article.Id && c.EmbeddedFromArticleVersion == article.VersionNumber, cancellationToken);
 
-            if (isStale)
-                await ReembedAsync(article, cancellationToken);
+            if (!isStale)
+                continue;
+
+            // Through the ingestion pipeline, not the old in-line re-embed: that one embeds with the
+            // ambient tenant's provider, which for a platform re-index means the Simulated stand-in.
+            // The pipeline chooses the embedder from the article, so platform articles stay in the
+            // platform's space.
+            try
+            {
+                await _ingestion.IndexNowAsync(article.Id, securityReviewed: false, cancellationToken);
+            }
+            catch (ConflictException)
+            {
+                // Already being indexed by something else; nothing to do for this one.
+            }
+        }
+    }
+
+    public async Task<KnowledgeBaseArticleDto> DeprecateAsync(Guid id, string note, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(note))
+            throw Invalid("note", "A reason is required - \"no longer true\" is not useful to the next person without \"because\".");
+
+        var article = await FindOrThrowAsync(id, cancellationToken);
+
+        if (article.Status is not (KnowledgeArticleStatus.Deprecated or KnowledgeArticleStatus.Archived))
+        {
+            article.Status = KnowledgeArticleStatus.Deprecated;
+            article.LifecycleNote = note.Trim().Length > 1000 ? note.Trim()[..1000] : note.Trim();
+            article.LastUpdatedAt = _dateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+
+            // The chunks carry their own copy of the article's status, and retrieval filters on THAT
+            // copy - so without this the article would say Deprecated while its text kept being served.
+            await _metadataSync.SyncAsync(article.Id, cancellationToken);
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        return await GetByIdAsync(id, cancellationToken);
     }
 
     public async Task<IReadOnlyList<RetrievedChunk>> RetrieveRelevantChunksAsync(string query, CancellationToken cancellationToken = default)
@@ -915,7 +965,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     }
 
     private async Task<KnowledgeBaseArticle> FindOrThrowAsync(Guid id, CancellationToken cancellationToken) =>
-        await _context.KnowledgeBaseArticles.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
+        await Managed().FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
             ?? throw new NotFoundException(nameof(KnowledgeBaseArticle), id);
 
     private static FluentValidation.ValidationException Invalid(string property, string message) =>

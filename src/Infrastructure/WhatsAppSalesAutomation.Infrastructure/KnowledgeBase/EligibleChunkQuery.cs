@@ -26,6 +26,7 @@ internal static class EligibleChunkQuery
       AND  c.IsCurrentArticleVersion = 1
       -- TENANT ISOLATION. This clause is the reason this fragment is not duplicated anywhere.
       AND  (c.TenantId IS NULL OR c.TenantId = @TenantId)
+      AND  (@GlobalOnly = 0 OR c.TenantId IS NULL)
       -- TIME WINDOW
       AND  c.EffectiveFrom <= @NowUtc
       AND  (c.EffectiveTo IS NULL OR c.EffectiveTo > @NowUtc)
@@ -52,6 +53,7 @@ internal static class EligibleChunkQuery
     public static SqlParameter[] Parameters(RetrievalFilter filter) => new[]
     {
         Nullable("@TenantId", filter.TenantId),
+        new SqlParameter("@GlobalOnly", filter.GlobalOnly ? 1 : 0),
         new SqlParameter("@NowUtc", filter.NowUtc),
         Nullable("@TenantCountry", filter.TenantCountryCode),
         new SqlParameter("@TicketLanguage", filter.TicketLanguageCode),

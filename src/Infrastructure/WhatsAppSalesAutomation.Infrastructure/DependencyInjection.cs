@@ -257,6 +257,9 @@ public static class DependencyInjection
         // registrations against the same concrete clients - see IEmbeddingProviderCatalog's own doc
         // comment for why KnowledgeBaseService needs both.
         services.AddScoped<IEmbeddingService, TenantEmbeddingService>();
+
+        // The platform's own embedder, for platform-authored (GLOBAL) knowledge - see the type's doc.
+        services.AddScoped<IPlatformEmbeddingService, PlatformEmbeddingService>();
         services.AddScoped<IEmbeddingProviderCatalog, TenantEmbeddingProviderCatalog>();
     }
 

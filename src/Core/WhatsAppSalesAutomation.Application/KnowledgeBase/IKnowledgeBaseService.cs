@@ -49,6 +49,11 @@ public interface IKnowledgeBaseService
     /// reported rather than aborting the rest of the batch.</summary>
     Task<BulkPublishArticlesResultDto> BulkPublishAsync(BulkPublishArticlesRequest request, Guid approvedByUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>Retires a Published article: it leaves retrieval immediately but stays readable, with the
+    /// <paramref name="note"/> explaining why (required). Idempotent for an article already Deprecated or
+    /// Archived.</summary>
+    Task<KnowledgeBaseArticleDto> DeprecateAsync(Guid id, string note, CancellationToken cancellationToken = default);
+
     /// <summary>Makes this article eligible for retrieval when <paramref name="provider"/> (one of
     /// AiModelProvider's names, case-insensitive - "OpenAI"/"Google"/"Anthropic") is the active chat
     /// model - see KnowledgeBaseArticleModelPublication's doc comment. If the article is still Draft,

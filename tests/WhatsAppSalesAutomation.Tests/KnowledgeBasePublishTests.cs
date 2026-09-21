@@ -69,7 +69,7 @@ public sealed class KnowledgeBasePublishTests : IDisposable
                     ? Task.FromResult(new AiOptions { MinRelevanceScore = 0, KnowledgeBaseTopN = 10 })
                     : throw new NotImplementedException(m.Name)),
             new CreateKnowledgeBaseArticleRequestValidator(), new UpdateKnowledgeBaseArticleRequestValidator(),
-            new BulkPublishArticlesRequestValidator(), _ingestion);
+            new BulkPublishArticlesRequestValidator(), _ingestion, new KnowledgeMetadataSyncService(_db));
     }
 
     private async Task<Guid> Draft(string content = Clean, string title = "Refund policy")
@@ -355,6 +355,7 @@ public sealed class KnowledgeBasePublishTests : IDisposable
         public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, string? provider = null, bool securityReviewed = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<BulkPublishArticlesResultDto> BulkPublishAsync(BulkPublishArticlesRequest request, Guid approvedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<KnowledgeBaseArticleDto> DeprecateAsync(Guid id, string note, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<KnowledgeBaseArticleDto> PublishToModelAsync(Guid id, string provider, Guid publishedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<KnowledgeBaseArticleDto> UnpublishFromModelAsync(Guid id, string provider, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task ReindexAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

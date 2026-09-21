@@ -87,6 +87,12 @@ public record RetrievalFilter
 
     public string? EmbeddingModel { get; init; }
 
+    /// <summary>Only platform-owned (GLOBAL) chunks. Set on the retrieval leg that searches the platform's
+    /// own embedding space, so that leg cannot return a tenant's chunks that merely happen to share
+    /// it - they are already covered by the tenant's own leg, and returning them twice would only be
+    /// noise for fusion to sort out.</summary>
+    public bool GlobalOnly { get; init; }
+
     /// <summary>Restricts to one article. Only used by diagnostics - "why did this article not come
     /// back" is otherwise unanswerable without reading the whole candidate set.</summary>
     public Guid? ArticleId { get; init; }
