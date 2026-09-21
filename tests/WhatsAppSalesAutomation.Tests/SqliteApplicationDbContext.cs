@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Common;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -54,18 +55,25 @@ public sealed class SqliteApplicationDbContext : ApplicationDbContext
     {
         base.OnModelCreating(builder);
 
-        // SQLite never generates a rowversion, so the wallet's concurrency token is stored as supplied.
-        // That means these tests cover the ledger rules, not the optimistic-concurrency race itself,
-        // which only SQL Server can exercise.
-        builder.Entity<WhatsAppSalesAutomation.Domain.Entities.Billing.QuotaWallet>()
-            .Property(w => w.RowVersion).ValueGeneratedNever().IsConcurrencyToken(false);
-        builder.Entity<WhatsAppSalesAutomation.Domain.Entities.Campaigns.CampaignCustomer>()
-            .Property(c => c.RowVersion).ValueGeneratedNever().IsConcurrencyToken(false);
-
         foreach (var property in builder.Model.GetEntityTypes().SelectMany(e => e.GetProperties()))
         {
             if (property.GetColumnType() is { } columnType && columnType.StartsWith("nvarchar(max)", StringComparison.OrdinalIgnoreCase))
                 property.SetColumnType("TEXT");
+
+            // SQLite never generates a rowversion, so every concurrency token is stored as supplied.
+            // That means these tests cover the entity rules, not the optimistic-concurrency race
+            // itself, which only SQL Server can exercise.
+            //
+            // Applied by walking the model rather than naming entities one at a time. The hand-listed
+            // version covered QuotaWallet and CampaignCustomer, and then Lead.RowVersion arrived in
+            // Phase 7 and was never added here - which failed every test that inserts a Lead with
+            // "NOT NULL constraint failed: Leads.RowVersion", a message pointing at the test harness
+            // rather than at the entity that actually changed. A loop cannot fall behind.
+            if (property.IsConcurrencyToken && property.ClrType == typeof(byte[]))
+            {
+                property.ValueGenerated = ValueGenerated.Never;
+                property.IsConcurrencyToken = false;
+            }
         }
     }
 }

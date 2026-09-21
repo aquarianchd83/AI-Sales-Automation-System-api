@@ -2,7 +2,9 @@ using System.Text;
 using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Webhooks;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
@@ -23,6 +25,10 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 [ApiController]
 [Route("api/v1/webhooks/whatsapp")]
 [AllowAnonymous]
+// Deliberately the loosest of the three budgets - see RateLimitOptions.Webhook. A 429 returned to
+// Meta is a message this platform never receives, so the limit here exists to bound an abusive
+// caller hammering a public URL, not to shape legitimate delivery traffic.
+[EnableRateLimiting(RateLimitingServiceExtensions.WebhookPolicy)]
 public class WebhooksController : ControllerBase
 {
     private readonly IInboundWebhookProcessor _processor;

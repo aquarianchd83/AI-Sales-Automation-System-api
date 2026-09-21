@@ -2,6 +2,8 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Application.Auth;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
@@ -9,6 +11,10 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 [ApiController]
 [Route("api/v1/auth")]
 [Authorize]
+// The whole controller, not just the anonymous actions: change-password is as much a credential
+// endpoint as login is, and an attacker with a stolen token guessing a current password is exactly
+// the case a per-IP budget should cover.
+[EnableRateLimiting(RateLimitingServiceExtensions.AuthPolicy)]
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;

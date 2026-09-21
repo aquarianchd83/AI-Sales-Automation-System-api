@@ -14,6 +14,7 @@ using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Api.Logging;
 using WhatsAppSalesAutomation.Api.Middleware;
 using WhatsAppSalesAutomation.Application;
+using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
@@ -103,6 +104,12 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerDocumentation();
 
+    // Fixed-window limits on the auth, webhook and general API surfaces - see RateLimitOptions for
+    // why those three are bucketed separately. Configured from "RateLimiting", not from the
+    // AppSettings table, deliberately: see that type's doc comment.
+    builder.Services.AddRateLimiting(builder.Configuration);
+    builder.Services.Configure<SecurityHeaderOptions>(builder.Configuration.GetSection("SecurityHeaders"));
+
     var app = builder.Build();
 
    // if (app.Environment.IsDevelopment())
@@ -112,6 +119,12 @@ try
    // }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+    // Outermost header writer, so it also covers the error responses ExceptionHandlingMiddleware
+    // produces and the static files served further down. It registers an OnStarting callback rather
+    // than writing immediately - see SecurityHeadersMiddleware for why that ordering matters.
+    app.UseMiddleware<SecurityHeadersMiddleware>();
+
     app.UseSerilogRequestLogging();
 
     // Must run before UseHttpsRedirection: a TLS-terminating tunnel (ngrok, or any reverse proxy)
@@ -126,6 +139,11 @@ try
     });
     app.UseHttpsRedirection();
     app.UseCors(TenantCorsPolicy);
+
+    // After UseForwardedHeaders (so the per-IP partitions see the real client, not the tunnel) and
+    // after UseCors (so a rejected request still carries the CORS headers the browser needs to read
+    // the 429 - without them the Angular app sees an opaque network error instead).
+    app.UseRateLimiter();
 
     // Serves uploaded campaign media under MediaStorage:PublicBasePath. Local disk only, per
     // LocalFileMediaStorageService - swap for a cloud provider's own public URLs and this goes away.
