@@ -10,9 +10,13 @@ public class CreateKnowledgeBaseArticleRequestValidator : AbstractValidator<Crea
         RuleFor(x => x.Title).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Category).MaximumLength(100);
         RuleFor(x => x.Content).NotEmpty();
+        // Any defined source type parses here; whether the CALLER may author it is a separate,
+        // tenancy-dependent question that KnowledgeBaseService.CreateAsync answers - a validator has
+        // no tenant context, and a rule that silently depended on one would be the wrong kind of
+        // subtle. See KnowledgeAuthority.GlobalOnly.
         RuleFor(x => x.SourceType)
-            .Must(s => Enum.TryParse<KnowledgeBaseSourceType>(s, ignoreCase: true, out _))
-            .WithMessage($"SourceType must be one of: {string.Join(", ", Enum.GetNames<KnowledgeBaseSourceType>())}.");
+            .Must(s => Enum.TryParse<KnowledgeSourceType>(s, ignoreCase: true, out _))
+            .WithMessage($"SourceType must be one of: {string.Join(", ", Enum.GetNames<KnowledgeSourceType>())}.");
     }
 }
 

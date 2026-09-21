@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
@@ -66,6 +67,21 @@ public interface IApplicationDbContext
     DbSet<KnowledgeBaseChunkEmbedding> KnowledgeBaseChunkEmbeddings { get; }
 
     DbSet<KnowledgeBaseArticleModelPublication> KnowledgeBaseArticleModelPublications { get; }
+
+    /// <summary>Append-only publish snapshots - see KnowledgeBaseArticleVersion's doc comment.</summary>
+    DbSet<KnowledgeBaseArticleVersion> KnowledgeBaseArticleVersions { get; }
+
+    DbSet<KnowledgeIngestionJob> KnowledgeIngestionJobs { get; }
+
+    /// <summary>The tenant's append-only audit trail. Written only by AuditTrailSaveChangesInterceptor;
+    /// exposed here so it can be read.</summary>
+    DbSet<AuditLog> AuditLogs { get; }
+
+    /// <summary>Tenant users, for resolving display names in reports and the audit log. The interface's
+    /// usual rule is to reach Identity through UserManager; that is right for creating and changing
+    /// users, but a read-only name lookup through a UserManager is only ceremony, and would make these
+    /// services untestable without standing up Identity.</summary>
+    DbSet<ApplicationUser> Users { get; }
 
     DbSet<Lead> Leads { get; }
 

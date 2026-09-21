@@ -14,6 +14,7 @@ public class TenantContext : ITenantContext
     private readonly ICurrentUserService _currentUserService;
     private Guid? _overrideTenantId;
     private bool _hasOverride;
+    private bool _platformScope;
 
     public TenantContext(ICurrentUserService currentUserService)
     {
@@ -22,11 +23,20 @@ public class TenantContext : ITenantContext
 
     public Guid? TenantId => _hasOverride ? _overrideTenantId : _currentUserService.TenantId;
 
-    public bool IsPlatformSuperAdmin => _currentUserService.Roles.Contains(AppRoles.PlatformSuperAdmin);
+    public bool IsPlatformSuperAdmin => _platformScope || _currentUserService.Roles.Contains(AppRoles.PlatformSuperAdmin);
 
     public void SetTenant(Guid tenantId)
     {
         _overrideTenantId = tenantId;
         _hasOverride = true;
+    }
+
+    public void EnterPlatformScope()
+    {
+        // No tenant AND platform rights: the same shape a SuperAdmin request has, which is what the
+        // scoped-or-global query filter and the stamping interceptor already know how to treat.
+        _overrideTenantId = null;
+        _hasOverride = true;
+        _platformScope = true;
     }
 }

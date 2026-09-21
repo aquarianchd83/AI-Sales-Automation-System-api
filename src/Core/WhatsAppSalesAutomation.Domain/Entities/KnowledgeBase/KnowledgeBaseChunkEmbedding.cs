@@ -15,9 +15,12 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// RetrieveRelevantChunksAsync's cosine similarity actually reads, so retrieval logic did not need to
 /// change when this table was added. This table is the full record; the chunk's own columns are a
 /// convenience cache of "the one row retrieval currently cares about".</summary>
-public class KnowledgeBaseChunkEmbedding : BaseEntity, ITenantOwned
+public class KnowledgeBaseChunkEmbedding : BaseEntity, ITenantScopedOrGlobal
 {
-    public Guid TenantId { get; set; }
+    /// <summary>NULL = GLOBAL, following the chunk and the article above it. Scoped-or-global rather
+    /// than tenant-owned for the same reason they are: the embeddings of a platform article have to
+    /// be readable by every tenant, and a non-nullable TenantId cannot express that.</summary>
+    public Guid? TenantId { get; set; }
 
     public Guid ChunkId { get; set; }
 

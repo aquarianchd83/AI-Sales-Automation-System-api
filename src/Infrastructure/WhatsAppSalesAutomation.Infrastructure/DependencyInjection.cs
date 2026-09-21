@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using WhatsAppSalesAutomation.Application.Billing;
@@ -17,6 +18,8 @@ using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Billing;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Logging;
+using WhatsAppSalesAutomation.Application.KnowledgeBase;
+using WhatsAppSalesAutomation.Infrastructure.KnowledgeBase;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
 using WhatsAppSalesAutomation.Infrastructure.Realtime;
@@ -33,6 +36,7 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.AddScoped<AuditTrailSaveChangesInterceptor>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();
@@ -42,12 +46,51 @@ public static class DependencyInjection
             options.UseSqlServer(
                 configuration.GetConnectionString("DefaultConnection"),
                 sql => sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName));
+            // The audit interceptor is FIRST, and the order matters: it adds AuditLog rows to the change
+            // tracker during SavingChanges, and the two interceptors after it then timestamp and
+            // tenant-stamp those rows like any other. Registered later, they would already have run.
             options.AddInterceptors(
+                sp.GetRequiredService<AuditTrailSaveChangesInterceptor>(),
                 sp.GetRequiredService<AuditableEntitySaveChangesInterceptor>(),
                 sp.GetRequiredService<TenantStampingSaveChangesInterceptor>());
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());
+
+        // Which vector store answers retrieval is decided once, at startup, by probing the server -
+        // see SqlServerVectorCapability for why a probe rather than a version comparison, and why a
+        // logged fallback rather than EC-22's hard failure. Singleton because the answer cannot
+        // change without a server upgrade and a restart; the stores themselves are scoped, since
+        // they hold the request's DbContext.
+        services.AddSingleton<IVectorStoreCapability>(sp => new SqlServerVectorCapability(
+            configuration.GetConnectionString("DefaultConnection")!,
+            sp.GetRequiredService<ILogger<SqlServerVectorCapability>>()));
+
+        // PDF needs a library the Application layer does not carry, so it registers its own extractor
+        // into the same IDocumentFormatExtractor set DocumentTextExtractor composes.
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IDocumentFormatExtractor, PdfDocumentExtractor>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IKnowledgeIngestionQueue, HangfireKnowledgeIngestionQueue>();
+        services.AddScoped<KnowledgeIndexingJob>();
+
+        // Keyword leg: Full-Text where the server has it and the index exists, BM25 in the application
+        // otherwise. Probed once, logged loudly - same shape and reasoning as the vector store above.
+        services.AddSingleton<IKeywordSearchCapability>(sp => new SqlServerFullTextCapability(
+            configuration.GetConnectionString("DefaultConnection")!,
+            sp.GetRequiredService<ILogger<SqlServerFullTextCapability>>()));
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IKeywordSearchStore>(sp =>
+            sp.GetRequiredService<IKeywordSearchCapability>().SupportsFullText
+                ? new SqlServerFullTextKeywordStore(sp.GetRequiredService<ApplicationDbContext>())
+                : new Bm25KeywordStore(sp.GetRequiredService<ApplicationDbContext>()));
+
+        services.AddMemoryCache();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IRetrievalCache, MemoryRetrievalCache>();
+
+        // Typed client, so the reranker gets an HttpClient with the platform's standard handler chain.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IReranker, CohereReranker>();
+
+        services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<IVectorStoreCapability>().SupportsNativeVectors
+            ? new SqlServerVectorStore(sp.GetRequiredService<ApplicationDbContext>())
+            : new JsonColumnVectorStore(sp.GetRequiredService<ApplicationDbContext>()));
 
         services.AddIdentityCore<ApplicationUser>(options =>
             {
@@ -214,6 +257,9 @@ public static class DependencyInjection
         // registrations against the same concrete clients - see IEmbeddingProviderCatalog's own doc
         // comment for why KnowledgeBaseService needs both.
         services.AddScoped<IEmbeddingService, TenantEmbeddingService>();
+
+        // The platform's own embedder, for platform-authored (GLOBAL) knowledge - see the type's doc.
+        services.AddScoped<IPlatformEmbeddingService, PlatformEmbeddingService>();
         services.AddScoped<IEmbeddingProviderCatalog, TenantEmbeddingProviderCatalog>();
     }
 

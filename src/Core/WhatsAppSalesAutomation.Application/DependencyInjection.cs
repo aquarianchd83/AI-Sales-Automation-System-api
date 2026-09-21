@@ -50,6 +50,39 @@ public static class DependencyInjection
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<IAiSpendEstimator, AiSpendEstimator>();
 
+        // Phase 6 ingestion. The chunker and counter are stateless; the batcher and services are
+        // scoped because the batcher carries a per-run circuit-breaker counter that must not leak
+        // between unrelated jobs.
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.ITokenCounter,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.HeuristicTokenCounter>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.StructureAwareChunker>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.EmbeddingBatcher>(_ =>
+            new WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.EmbeddingBatcher());
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IDocumentFormatExtractor,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.TextDocumentExtractor>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IDocumentFormatExtractor,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.HtmlDocumentExtractor>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IDocumentFormatExtractor,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.DocxDocumentExtractor>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.DocumentTextExtractor>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IKnowledgeIngestionService,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.KnowledgeIngestionService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.KnowledgeMetadataSyncService>();
+
+        // Phase 6 retrieval. Options bound here; the stores, cache and reranker are Infrastructure's.
+        services.Configure<SupportRagOptions>(configuration.GetSection("SupportRag"));
+        services.Configure<RerankerOptions>(configuration.GetSection("Reranker:Cohere"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IKnowledgeRetrievalService,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.KnowledgeRetrievalService>();
+
+        services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IKnowledgeRetrievalSimulator,
+            WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.KnowledgeRetrievalSimulator>();
+
+        services.AddScoped<WhatsAppSalesAutomation.Application.Audit.IAuditLogService, WhatsAppSalesAutomation.Application.Audit.AuditLogService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Reports.IReportService, WhatsAppSalesAutomation.Application.Reports.ReportService>();
+
+        services.AddScoped<IKnowledgeUploadService, KnowledgeUploadService>();
+
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountProfileService, AccountProfileService>();
         services.AddScoped<ITenantService, TenantService>();

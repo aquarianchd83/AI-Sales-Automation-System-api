@@ -23,4 +23,8 @@ public interface ICurrentUserService
     /// the support session. Null for a normal login, including a normal PlatformSuperAdmin session.
     /// </summary>
     Guid? ImpersonatorUserId { get; }
+
+    /// <summary>The caller's IP as the app sees it (after forwarded-header processing), for the audit
+    /// trail. Null outside an HTTP request. A default member so existing test fakes keep compiling.</summary>
+    string? IpAddress => null;
 }

@@ -44,4 +44,11 @@ public static class PlatformAuditActions
     public const string FaqEntryCreated = "FaqEntryCreated";
     public const string FaqEntryUpdated = "FaqEntryUpdated";
     public const string FaqEntryDeleted = "FaqEntryDeleted";
+    public const string KnowledgeRetrievalSimulated = "KnowledgeRetrievalSimulated";
+    public const string KnowledgeArticleCreated = "KnowledgeArticleCreated";
+    public const string KnowledgeArticleUpdated = "KnowledgeArticleUpdated";
+    public const string KnowledgeArticlePublished = "KnowledgeArticlePublished";
+    public const string KnowledgeArticleDeprecated = "KnowledgeArticleDeprecated";
+    public const string KnowledgeArticleDeleted = "KnowledgeArticleDeleted";
+    public const string KnowledgeReindexed = "KnowledgeReindexed";
 }

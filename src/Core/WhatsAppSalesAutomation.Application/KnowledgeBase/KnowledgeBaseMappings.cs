@@ -15,11 +15,11 @@ public static class KnowledgeBaseMappings
         IReadOnlyList<ArticleEmbeddingProviderDto>? embeddedProviders = null) => new(
         article.Id,
         article.Title,
-        article.Category,
+        article.Category.ToString(),
         article.SourceType.ToString(),
         article.Content,
         article.Status.ToString(),
-        article.Version,
+        article.VersionNumber,
         article.ApprovedBy,
         chunkCount,
         article.CreatedAt,

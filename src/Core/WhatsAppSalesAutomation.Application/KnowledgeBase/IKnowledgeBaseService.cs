@@ -37,12 +37,22 @@ public interface IKnowledgeBaseService
     /// model", not a content review. Throws a FluentValidation.ValidationException if the provider
     /// name doesn't match a known IEmbeddingService, or if that provider has no API key configured.
     /// </summary>
-    Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, string? provider = null, CancellationToken cancellationToken = default);
+    ///
+    /// <paramref name="securityReviewed"/>: the caller has read the security findings on this article and
+    /// allows it to be published anyway. Without it, an article whose content trips the injection scan's
+    /// review-level rules is refused with the excerpts that tripped it; blocked-level content is refused
+    /// regardless.
+    Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, Guid approvedByUserId, string? provider = null, bool securityReviewed = false, CancellationToken cancellationToken = default);
 
     /// <summary>Publishes several articles in one call - each one still runs PublishAsync's full
     /// re-chunk/re-embed individually (this is not a bulk UPDATE), but a not-found or failed id is
     /// reported rather than aborting the rest of the batch.</summary>
     Task<BulkPublishArticlesResultDto> BulkPublishAsync(BulkPublishArticlesRequest request, Guid approvedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Retires a Published article: it leaves retrieval immediately but stays readable, with the
+    /// <paramref name="note"/> explaining why (required). Idempotent for an article already Deprecated or
+    /// Archived.</summary>
+    Task<KnowledgeBaseArticleDto> DeprecateAsync(Guid id, string note, CancellationToken cancellationToken = default);
 
     /// <summary>Makes this article eligible for retrieval when <paramref name="provider"/> (one of
     /// AiModelProvider's names, case-insensitive - "OpenAI"/"Google"/"Anthropic") is the active chat
