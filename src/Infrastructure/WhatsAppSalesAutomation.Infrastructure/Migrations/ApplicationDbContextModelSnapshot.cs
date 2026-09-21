@@ -151,6 +151,16 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("AskedFieldKey")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<bool>("BuyingIntentReported")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("CapturedFieldKeysJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("CompletionTokens")
                         .HasColumnType("int");
 
@@ -167,8 +177,15 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("DetectedLanguage")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("ExtractedEntitiesJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("HumanRequestReported")
+                        .HasColumnType("bit");
 
                     b.Property<Guid>("InboundMessageId")
                         .HasColumnType("uniqueidentifier");
@@ -181,6 +198,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("OptOutReported")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("PromptTokens")
                         .HasColumnType("int");
 
@@ -192,26 +212,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("AskedFieldKey")
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<bool>("BuyingIntentReported")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("CapturedFieldKeysJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("HumanRequestReported")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("OptOutReported")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("DetectedLanguage")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
 
                     b.HasKey("Id");
 
@@ -1180,6 +1180,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("SummaryJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1190,9 +1193,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("SummaryJson")
-                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -1245,6 +1245,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("OptInTimestamp")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("OptOutSource")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<DateTime?>("OptOutTimestamp")
                         .HasColumnType("datetime2");
 
@@ -1266,10 +1270,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("OptOutSource")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
 
                     b.HasKey("Id");
 
@@ -1476,16 +1476,45 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AppliesToVersionMax")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("AppliesToVersionMin")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid?>("ApprovedBy")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ArticleKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("AuthorityRank")
+                        .HasColumnType("int");
+
                     b.Property<string>("Category")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CountryCode")
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -1493,21 +1522,80 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsCurrentVersion")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<string>("SourceType")
+                    b.Property<string>("Keywords")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("LanguageCode")
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<DateTime?>("LastUpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LastUpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LifecycleNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProductModule")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PublishedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReviewDueAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.Property<string>("Status")
                         .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("SubCategory")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("SupersedesArticleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TenantScope")
+                        .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -1517,14 +1605,38 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("Version")
+                    b.Property<int>("VersionNumber")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status");
+                    b.HasIndex("TenantId", "ContentHash")
+                        .HasDatabaseName("IX_KBArticles_Dedup")
+                        .HasFilter("[IsCurrentVersion] = 1 AND [IsDeleted] = 0");
 
-                    b.ToTable("KnowledgeBaseArticles", (string)null);
+                    b.HasIndex("Status", "ReviewDueAt", "EffectiveTo")
+                        .HasDatabaseName("IX_KBArticles_Lifecycle")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "ArticleKey", "LanguageCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_KBArticles_CurrentVersion")
+                        .HasFilter("[IsCurrentVersion] = 1 AND [IsDeleted] = 0");
+
+                    b.ToTable("KnowledgeBaseArticles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_KBArticles_AuthorityRange", "[AuthorityRank] BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_KBArticles_EffectiveWindow", "[EffectiveTo] IS NULL OR [EffectiveTo] > [EffectiveFrom]");
+
+                            t.HasCheckConstraint("CK_KBArticles_PriorityRange", "[Priority] BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_KBArticles_PublishedHasApprover", "[Status] <> 'Published' OR ([ApprovedBy] IS NOT NULL AND [ApprovedAt] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_KBArticles_ScopeMatchesTenant", "([TenantScope] = 'Global' AND [TenantId] IS NULL) OR ([TenantScope] = 'Tenant' AND [TenantId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_KBArticles_TenantAuthority", "[TenantId] IS NULL OR [AuthorityRank] <= 30");
+                        });
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseArticleModelPublication", b =>
@@ -1550,7 +1662,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("PublishedBy")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("TenantId")
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -1564,6 +1676,78 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("KnowledgeBaseArticleModelPublications", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseArticleVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ApprovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ApprovedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ArticleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ArticleKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ChangeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PublishedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArticleId", "VersionNumber")
+                        .HasDatabaseName("IX_KBArticleVersions_Article");
+
+                    b.HasIndex("TenantId", "ArticleKey", "VersionNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_KBArticleVersions_KeyVersion");
+
+                    b.ToTable("KnowledgeBaseArticleVersions", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunk", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1573,6 +1757,23 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid>("ArticleId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ArticleStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("AtomicGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AtomicGroupSequence")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("AtomicGroupTotal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("AuthorityRank")
+                        .HasColumnType("int");
+
                     b.Property<int>("ChunkIndex")
                         .HasColumnType("int");
 
@@ -1580,13 +1781,34 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ContextHeader")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CountryCode")
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveTo")
                         .HasColumnType("datetime2");
 
                     b.Property<int>("EmbeddedFromArticleVersion")
                         .HasColumnType("int");
 
                     b.Property<string>("Embedding")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("EmbeddingDimensions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EmbeddingInput")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EmbeddingModel")
@@ -1597,7 +1819,31 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<Guid>("TenantId")
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsCurrentArticleVersion")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LanguageCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("ProductModule")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("SearchText")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("TokenCount")
@@ -1606,11 +1852,33 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<long?>("VersionMaxNumeric")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("VersionMinNumeric")
+                        .HasColumnType("bigint");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ArticleId");
+                    b.HasIndex("ArticleId", "ChunkIndex")
+                        .HasDatabaseName("IX_KBChunks_Article");
 
-                    b.ToTable("KnowledgeBaseChunks", (string)null);
+                    b.HasIndex("AtomicGroupId", "AtomicGroupSequence")
+                        .HasDatabaseName("IX_KBChunks_AtomicGroup")
+                        .HasFilter("[AtomicGroupId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ArticleStatus", "IsActive", "IsCurrentArticleVersion", "LanguageCode")
+                        .HasDatabaseName("IX_KBChunks_Retrieval")
+                        .HasFilter("[IsActive] = 1");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "ArticleStatus", "IsActive", "IsCurrentArticleVersion", "LanguageCode"), new[] { "ArticleId", "AuthorityRank", "ProductModule", "CountryCode", "EffectiveFrom", "EffectiveTo", "AtomicGroupId", "ChunkIndex" });
+
+                    b.ToTable("KnowledgeBaseChunks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_KBChunks_AtomicGroupComplete", "([AtomicGroupId] IS NULL AND [AtomicGroupSequence] IS NULL AND [AtomicGroupTotal] IS NULL) OR ([AtomicGroupId] IS NOT NULL AND [AtomicGroupSequence] IS NOT NULL AND [AtomicGroupTotal] IS NOT NULL AND [AtomicGroupSequence] BETWEEN 1 AND [AtomicGroupTotal])");
+
+                            t.HasCheckConstraint("CK_KBChunks_AuthorityRange", "[AuthorityRank] BETWEEN 0 AND 100");
+                        });
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunkEmbedding", b =>
@@ -1639,7 +1907,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<Guid>("TenantId")
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -1653,265 +1921,86 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("KnowledgeBaseChunkEmbeddings", (string)null);
                 });
 
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadQualificationValue", b =>
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeIngestionJob", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("CapturedByUserId")
+                    b.Property<Guid>("ArticleId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("CapturedFromMessageId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<int>("ArticleVersionNumber")
+                        .HasColumnType("int");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
 
-                    b.Property<double>("ExtractionConfidence")
-                        .HasColumnType("float");
+                    b.Property<int>("ChunkCount")
+                        .HasColumnType("int");
 
-                    b.Property<Guid>("FieldId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("FieldKey")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<bool>("IsSuperseded")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("LeadId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("NormalizedValue")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("RawValue")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FieldId");
-
-                    b.HasIndex("LeadId", "FieldKey")
-                        .IsUnique()
-                        .HasFilter("[IsSuperseded] = 0");
-
-                    b.HasIndex("LeadId", "IsSuperseded");
-
-                    b.ToTable("LeadQualificationValues", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadScoreContribution", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("AppliedAt")
+                    b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
+                    b.Property<string>("Detail")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("EmbeddingModel")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<bool>("IsOnce")
-                        .HasColumnType("bit");
+                    b.Property<string>("EmbeddingProvider")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
-                    b.Property<Guid>("LeadId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Points")
+                    b.Property<int>("LastCompletedChunkIndex")
                         .HasColumnType("int");
 
-                    b.Property<Guid?>("RuleId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SourceKey")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("TriggeredByInteractionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RuleId");
-
-                    b.HasIndex("LeadId", "AppliedAt");
-
-                    b.HasIndex("LeadId", "SourceKey")
-                        .IsUnique()
-                        .HasFilter("[IsOnce] = 1");
-
-                    b.ToTable("LeadScoreContributions", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadScoringRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastUpdatedBy")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("MarksLeadHot")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("MatchValue")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<bool>("OncePerLead")
-                        .HasColumnType("bit");
-
-                    b.Property<int>("Points")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RuleKey")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<string>("RuleType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "IsActive", "SortOrder");
-
-                    b.HasIndex("TenantId", "RuleKey")
-                        .IsUnique();
-
-                    b.ToTable("LeadScoringRules", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.QualificationField", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AllowedValuesJson")
+                    b.Property<string>("MetricsJson")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<bool>("RequiresSecurityReview")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SecurityFindingsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("StartedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("DataType")
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("FieldKey")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsRequired")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastUpdatedBy")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Question")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<int>("ScoreWeight")
-                        .HasColumnType("int");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("ValidationPattern")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                    b.Property<string>("VerificationNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "FieldKey")
+                    b.HasIndex("ArticleId", "ArticleVersionNumber")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
+                        .HasDatabaseName("UX_KBIngestionJobs_ArticleVersion");
 
-                    b.HasIndex("TenantId", "IsActive", "Priority", "SortOrder")
-                        .HasFilter("[IsDeleted] = 0");
+                    b.HasIndex("State", "CreatedAt")
+                        .HasDatabaseName("IX_KBIngestionJobs_State");
 
-                    b.ToTable("QualificationFields", (string)null);
+                    b.ToTable("KnowledgeIngestionJobs", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery.DiscoveredLead", b =>
@@ -2167,8 +2256,19 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("CurrentIntent")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("HotLeadDetectedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("HotLeadReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Interest")
                         .HasMaxLength(500)
@@ -2205,17 +2305,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("CurrentIntent")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<DateTime?>("HotLeadDetectedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("HotLeadReason")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.HasKey("Id");
 
@@ -2272,6 +2361,267 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("LeadId");
 
                     b.ToTable("LeadActivities", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadQualificationValue", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapturedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapturedFromMessageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("ExtractionConfidence")
+                        .HasColumnType("float");
+
+                    b.Property<Guid>("FieldId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<bool>("IsSuperseded")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("LeadId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("NormalizedValue")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RawValue")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FieldId");
+
+                    b.HasIndex("LeadId", "FieldKey")
+                        .IsUnique()
+                        .HasFilter("[IsSuperseded] = 0");
+
+                    b.HasIndex("LeadId", "IsSuperseded");
+
+                    b.ToTable("LeadQualificationValues", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadScoreContribution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AppliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsOnce")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("LeadId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Points")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("RuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TriggeredByInteractionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RuleId");
+
+                    b.HasIndex("LeadId", "AppliedAt");
+
+                    b.HasIndex("LeadId", "SourceKey")
+                        .IsUnique()
+                        .HasFilter("[IsOnce] = 1");
+
+                    b.ToTable("LeadScoreContributions", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadScoringRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastUpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("MarksLeadHot")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MatchValue")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("OncePerLead")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Points")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RuleKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("RuleType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "RuleKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "IsActive", "SortOrder");
+
+                    b.ToTable("LeadScoringRules", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.QualificationField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AllowedValuesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DataType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("FieldKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastUpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("ScoreWeight")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ValidationPattern")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "FieldKey")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "IsActive", "Priority", "SortOrder")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("QualificationFields", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Media.MediaAsset", b =>
@@ -2803,6 +3153,14 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AiConversationGoal")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("AiMayDiscloseLeadScore")
+                        .HasColumnType("bit");
+
                     b.Property<string>("BillingAlertEmail")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
@@ -2817,6 +3175,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<string>("BusinessDescription")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("BusinessLocation")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("CountryCode")
                         .HasMaxLength(2)
@@ -2884,18 +3246,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("WebsiteUrl")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("AiConversationGoal")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<bool>("AiMayDiscloseLeadScore")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("BusinessLocation")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
@@ -3394,16 +3744,16 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.LeadQualificationValue", b =>
                 {
-                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Leads.Lead", null)
-                        .WithMany("QualificationValues")
-                        .HasForeignKey("LeadId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Leads.QualificationField", null)
                         .WithMany()
                         .HasForeignKey("FieldId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Leads.Lead", null)
+                        .WithMany("QualificationValues")
+                        .HasForeignKey("LeadId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

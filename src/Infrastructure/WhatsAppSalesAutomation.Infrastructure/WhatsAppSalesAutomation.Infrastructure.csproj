@@ -13,6 +13,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- So the test project can exercise internals directly - JsonColumnVectorStore.CosineSimilarity
+         and the EligibleChunkQuery SQL fragment - rather than those being made public purely to be
+         testable. Both are implementation detail behind IVectorStore and should stay that way. -->
+    <InternalsVisibleTo Include="WhatsAppSalesAutomation.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8">
       <PrivateAssets>all</PrivateAssets>
@@ -28,6 +35,7 @@
     <PackageReference Include="Cronos" Version="0.8.4" />
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageReference Include="Hangfire.SqlServer" Version="1.8.14" />
+    <PackageReference Include="PdfPig" Version="0.1.9" />
   </ItemGroup>
 
   <ItemGroup>

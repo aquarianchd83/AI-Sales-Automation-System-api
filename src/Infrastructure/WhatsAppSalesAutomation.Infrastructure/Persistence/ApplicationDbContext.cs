@@ -79,6 +79,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<KnowledgeBaseArticleModelPublication> KnowledgeBaseArticleModelPublications => Set<KnowledgeBaseArticleModelPublication>();
 
+    public DbSet<KnowledgeBaseArticleVersion> KnowledgeBaseArticleVersions => Set<KnowledgeBaseArticleVersion>();
+
+    public DbSet<KnowledgeIngestionJob> KnowledgeIngestionJobs => Set<KnowledgeIngestionJob>();
+
     public DbSet<Lead> Leads => Set<Lead>();
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
@@ -206,16 +210,35 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     /// </summary>
     private void ApplyTenantQueryFilters(ModelBuilder builder)
     {
-        var setFilterMethod = typeof(ApplicationDbContext)
+        var setOwnedFilterMethod = typeof(ApplicationDbContext)
             .GetMethod(nameof(SetTenantOwnedFilter), BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var setScopedOrGlobalFilterMethod = typeof(ApplicationDbContext)
+            .GetMethod(nameof(SetTenantScopedOrGlobalFilter), BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         foreach (var entityType in builder.Model.GetEntityTypes())
         {
             var clrType = entityType.ClrType;
-            if (!typeof(ITenantOwned).IsAssignableFrom(clrType))
-                continue;
+            var isOwned = typeof(ITenantOwned).IsAssignableFrom(clrType);
+            var isScopedOrGlobal = typeof(ITenantScopedOrGlobal).IsAssignableFrom(clrType);
 
-            setFilterMethod.MakeGenericMethod(clrType).Invoke(this, new object[] { builder });
+            // EF Core keeps only the LAST HasQueryFilter registered for an entity and discards the
+            // earlier one without a word. An entity implementing both interfaces would therefore get
+            // exactly one of the two filters, chosen by the iteration order of this loop - and if the
+            // ITenantOwned one lost, every GLOBAL row would become invisible; if it won, a tenant
+            // would never see platform knowledge. Both are silent. Fail the model build instead.
+            if (isOwned && isScopedOrGlobal)
+            {
+                throw new InvalidOperationException(
+                    $"{clrType.Name} implements both {nameof(ITenantOwned)} and {nameof(ITenantScopedOrGlobal)}. " +
+                    "An entity must pick one: EF Core allows a single query filter per entity and silently " +
+                    "keeps the last one registered, so the other interface's isolation rule would not be " +
+                    $"enforced. Remove {nameof(ITenantOwned)} if the entity can be platform-owned (TenantId NULL).");
+            }
+
+            if (isOwned)
+                setOwnedFilterMethod.MakeGenericMethod(clrType).Invoke(this, new object[] { builder });
+            else if (isScopedOrGlobal)
+                setScopedOrGlobalFilterMethod.MakeGenericMethod(clrType).Invoke(this, new object[] { builder });
         }
 
         builder.Entity<ApplicationUser>().HasQueryFilter(u =>
@@ -232,6 +255,34 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         else
         {
             builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == _tenantContext.TenantId);
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="ITenantScopedOrGlobal"/> filter: a row is visible when it belongs to the current
+    /// tenant OR to the platform (TenantId NULL). The plain equality used for
+    /// <see cref="ITenantOwned"/> cannot express this, because <c>NULL = @tenantId</c> is never true -
+    /// which is the entire reason the second interface exists.
+    ///
+    /// Note what this means for a PlatformSuperAdmin, whose <c>TenantId</c> is null: the second branch
+    /// collapses to <c>e.TenantId == null</c>, so they see GLOBAL rows and no tenant's private ones.
+    /// That is the correct default - a SuperAdmin editing platform knowledge should not be shown one
+    /// tenant's private articles mixed in - and platform-wide listings remain separate, explicit,
+    /// audited <c>IgnoreQueryFilters()</c> endpoints exactly as for tenant-owned data.
+    /// </summary>
+    private void SetTenantScopedOrGlobalFilter<TEntity>(ModelBuilder builder)
+        where TEntity : class, ITenantScopedOrGlobal
+    {
+        if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+        {
+            builder.Entity<TEntity>().HasQueryFilter(e =>
+                (e.TenantId == null || e.TenantId == _tenantContext.TenantId)
+                && !EF.Property<bool>(e, nameof(ISoftDelete.IsDeleted)));
+        }
+        else
+        {
+            builder.Entity<TEntity>().HasQueryFilter(e =>
+                e.TenantId == null || e.TenantId == _tenantContext.TenantId);
         }
     }
 }

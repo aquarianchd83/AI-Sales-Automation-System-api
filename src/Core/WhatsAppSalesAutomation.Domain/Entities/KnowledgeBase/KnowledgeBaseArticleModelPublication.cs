@@ -11,9 +11,11 @@ namespace WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 /// with a unique index. Independent of KnowledgeBaseArticle.Status: Status still just means "has
 /// embedded chunks"; this is an additional eligibility layer on top, not a replacement for it.
 /// </summary>
-public class KnowledgeBaseArticleModelPublication : BaseEntity, ITenantOwned
+public class KnowledgeBaseArticleModelPublication : BaseEntity, ITenantScopedOrGlobal
 {
-    public Guid TenantId { get; set; }
+    /// <summary>NULL = GLOBAL, following the article. A platform article published to a given chat
+    /// model is published for every tenant at once, which a tenant-owned row could not say.</summary>
+    public Guid? TenantId { get; set; }
 
     public Guid ArticleId { get; set; }
 

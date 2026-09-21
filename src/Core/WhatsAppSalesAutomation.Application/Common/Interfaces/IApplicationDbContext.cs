@@ -67,6 +67,11 @@ public interface IApplicationDbContext
 
     DbSet<KnowledgeBaseArticleModelPublication> KnowledgeBaseArticleModelPublications { get; }
 
+    /// <summary>Append-only publish snapshots - see KnowledgeBaseArticleVersion's doc comment.</summary>
+    DbSet<KnowledgeBaseArticleVersion> KnowledgeBaseArticleVersions { get; }
+
+    DbSet<KnowledgeIngestionJob> KnowledgeIngestionJobs { get; }
+
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }

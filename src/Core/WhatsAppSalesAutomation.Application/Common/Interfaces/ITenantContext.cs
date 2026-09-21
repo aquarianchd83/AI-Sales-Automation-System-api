@@ -23,4 +23,20 @@ public interface ITenantContext
     bool IsPlatformSuperAdmin { get; }
 
     void SetTenant(Guid tenantId);
+
+    /// <summary>
+    /// Runs the rest of this scope AS the platform, for a background job that maintains GLOBAL
+    /// (TenantId NULL) data - e.g. indexing a platform policy article. Such a job has no tenant claim
+    /// and no JWT, so without this the stamping interceptor correctly refuses its writes: NULL means
+    /// "platform-owned" and must never be a default for an unattributed write.
+    ///
+    /// Deliberately an explicit call rather than "no tenant means platform": the interceptor's whole
+    /// safety property is that forgetting SetTenant fails loudly. Only code that means to act as the
+    /// platform says so, and grep finds every such place.
+    ///
+    /// The default implementation throws, so a test fake or alternative context that does not
+    /// support it fails loudly instead of silently granting platform rights.
+    /// </summary>
+    void EnterPlatformScope() =>
+        throw new NotSupportedException($"{GetType().Name} does not support platform scope.");
 }

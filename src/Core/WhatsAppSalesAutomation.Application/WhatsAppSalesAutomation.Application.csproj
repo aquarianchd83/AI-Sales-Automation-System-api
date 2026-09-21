@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lets tests reach the few pure helpers deliberately kept internal (QueryExpander.BuildCanonical,
+         EvidenceGate.Tier) rather than widening them to public purely to be testable. -->
+    <InternalsVisibleTo Include="WhatsAppSalesAutomation.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../WhatsAppSalesAutomation.Domain/WhatsAppSalesAutomation.Domain.csproj" />
   </ItemGroup>
 

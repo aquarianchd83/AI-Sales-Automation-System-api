@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -81,8 +82,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (!Enum.TryParse<KnowledgeBaseArticleStatus>(status, ignoreCase: true, out var parsedStatus))
-                throw Invalid("status", $"Status must be one of: {string.Join(", ", Enum.GetNames<KnowledgeBaseArticleStatus>())}.");
+            if (!Enum.TryParse<KnowledgeArticleStatus>(status, ignoreCase: true, out var parsedStatus))
+                throw Invalid("status", $"Status must be one of: {string.Join(", ", Enum.GetNames<KnowledgeArticleStatus>())}.");
 
             query = query.Where(x => x.Article.Status == parsedStatus);
         }
@@ -155,14 +156,40 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         if (_tenantContext.TenantId is { } tenantId)
             await _planLimits.EnsureCanCreateKnowledgeBaseArticleAsync(tenantId, cancellationToken);
 
+        var sourceType = Enum.Parse<KnowledgeSourceType>(request.SourceType, ignoreCase: true);
+        var isGlobal = _tenantContext.TenantId is null && _tenantContext.IsPlatformSuperAdmin;
+
+        // A tenant may only author the one source type that carries no platform authority. Checked
+        // here as well as by TenantStampingSaveChangesInterceptor and the CK_KBArticles_* constraints,
+        // because this is the layer that can say WHY - a check constraint can only say no.
+        if (!isGlobal && !KnowledgeAuthority.IsAuthorableByTenant(sourceType))
+        {
+            throw Invalid("sourceType",
+                $"{sourceType} is platform knowledge and can only be authored by a PlatformSuperAdmin. " +
+                $"Tenant articles are {nameof(KnowledgeSourceType.AdminConfiguredArticle)}.");
+        }
+
         var article = new KnowledgeBaseArticle
         {
+            ArticleKey = await GenerateArticleKeyAsync(request.Title, cancellationToken),
+            // TenantId deliberately left unset: the stamping interceptor assigns it (and, through
+            // it, TenantScope) from the ambient tenant, or leaves it NULL for a SuperAdmin authoring
+            // platform knowledge. Setting it here would just be a second opinion on the same thing.
             Title = request.Title.Trim(),
-            Category = request.Category?.Trim(),
+            Category = ParseCategory(request.Category),
+            // The pre-Phase-6 free-text category has no home in the enum, so the author's own wording
+            // is kept here rather than discarded - SubCategory is free text for exactly this reason.
+            SubCategory = request.Category?.Trim(),
             Content = request.Content,
-            SourceType = Enum.Parse<KnowledgeBaseSourceType>(request.SourceType, ignoreCase: true),
-            Status = KnowledgeBaseArticleStatus.Draft,
-            Version = 1
+            ContentHash = ComputeContentHash(request.Content),
+            SourceType = sourceType,
+            AuthorityRank = KnowledgeAuthority.RankFor(sourceType, isGlobal),
+            Status = KnowledgeArticleStatus.Draft,
+            VersionNumber = 1,
+            IsCurrentVersion = true,
+            // A Draft is not retrievable regardless, and PublishAsync overwrites this with the real
+            // publish time - so "now" here only means "no future-dating was asked for".
+            EffectiveFrom = _dateTime.UtcNow
         };
         _context.KnowledgeBaseArticles.Add(article);
         await _context.SaveChangesAsync(cancellationToken);
@@ -177,14 +204,17 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         var article = await FindOrThrowAsync(id, cancellationToken);
 
         article.Title = request.Title.Trim();
-        article.Category = request.Category?.Trim();
+        article.Category = ParseCategory(request.Category);
+        article.SubCategory = request.Category?.Trim();
+        article.LastUpdatedAt = _dateTime.UtcNow;
 
         // Only bump Version (and so only invalidate existing chunks as stale) if Content actually
         // changed - editing just the Category/Title should not force a re-embed.
         if (request.Content != article.Content)
         {
             article.Content = request.Content;
-            article.Version++;
+            article.ContentHash = ComputeContentHash(request.Content);
+            article.VersionNumber++;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -258,7 +288,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         // Only chunk/embed if this article has never been published at all - toggling a model
         // badge on an already-Published article shouldn't silently trigger a re-embed (that stays
         // an explicit action via PublishAsync/BulkPublishAsync/ReindexAsync).
-        if (article.Status != KnowledgeBaseArticleStatus.Published)
+        if (article.Status != KnowledgeArticleStatus.Published)
             await MarkChunkedAndPublishedAsync(article, publishedByUserId, cancellationToken);
 
         var existing = await _context.KnowledgeBaseArticleModelPublications
@@ -343,13 +373,13 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     public async Task ReindexAsync(CancellationToken cancellationToken = default)
     {
         var published = await _context.KnowledgeBaseArticles
-            .Where(a => a.Status == KnowledgeBaseArticleStatus.Published)
+            .Where(a => a.Status == KnowledgeArticleStatus.Published)
             .ToListAsync(cancellationToken);
 
         foreach (var article in published)
         {
             var isStale = !await _context.KnowledgeBaseChunks
-                .AnyAsync(c => c.ArticleId == article.Id && c.EmbeddedFromArticleVersion == article.Version, cancellationToken);
+                .AnyAsync(c => c.ArticleId == article.Id && c.EmbeddedFromArticleVersion == article.VersionNumber, cancellationToken);
 
             if (isStale)
                 await ReembedAsync(article, cancellationToken);
@@ -380,7 +410,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         var candidates = await (
                 from c in _context.KnowledgeBaseChunks
                 join a in _context.KnowledgeBaseArticles on c.ArticleId equals a.Id
-                where a.Status == KnowledgeBaseArticleStatus.Published && c.Embedding != null
+                where a.Status == KnowledgeArticleStatus.Published && c.Embedding != null
                     && (!modelFilterApplies || _context.KnowledgeBaseArticleModelPublications.Any(p => p.ArticleId == a.Id && p.Provider == parsedProvider))
                 select c)
             .ToListAsync(cancellationToken);
@@ -405,8 +435,22 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     {
         await ReembedAsync(article, cancellationToken);
 
-        article.Status = KnowledgeBaseArticleStatus.Published;
+        article.Status = KnowledgeArticleStatus.Published;
         article.ApprovedBy = approvedByUserId;
+
+        // CK_KBArticles_PublishedHasApprover refuses a Published row without BOTH an approver and an
+        // approval time, so ApprovedAt is not optional bookkeeping here - the save fails without it.
+        var publishedAt = _dateTime.UtcNow;
+        article.ApprovedAt = article.ApprovedAt ?? publishedAt;
+        article.PublishedBy = approvedByUserId;
+        article.PublishedAt = publishedAt;
+
+        // Only defaulted, never overwritten: an article deliberately future-dated by its author must
+        // keep that date through a publish, which is the entire point of an effective window.
+        if (article.EffectiveFrom == default)
+            article.EffectiveFrom = publishedAt;
+
+        article.ReviewDueAt = publishedAt.AddDays(KnowledgeAuthority.ReviewIntervalDays(article.SourceType));
     }
 
     /// <summary>The targeted-publish half of PublishAsync's merged behavior - see its own doc comment.
@@ -422,7 +466,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         // comment for why an edit alone does not re-chunk. Re-embedding stale chunk text would
         // silently produce a vector for outdated content, so this re-chunks fresh first, exactly like
         // ReembedAsync would - the difference is only which provider(s) get embedded afterward.
-        var isStale = chunks.Count > 0 && !chunks.Any(c => c.EmbeddedFromArticleVersion == article.Version);
+        var isStale = chunks.Count > 0 && !chunks.Any(c => c.EmbeddedFromArticleVersion == article.VersionNumber);
 
         if (chunks.Count == 0 || isStale)
         {
@@ -443,18 +487,11 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             var index = 0;
             foreach (var text in ChunkContent(article.Content))
             {
-                var chunk = new KnowledgeBaseChunk
-                {
-                    ArticleId = article.Id,
-                    ChunkIndex = index++,
-                    ChunkText = text,
-                    TokenCount = text.Length / 4,
-                    EmbeddedFromArticleVersion = article.Version
-                };
+                var chunk = NewChunk(article, index++, text);
                 _context.KnowledgeBaseChunks.Add(chunk);
                 chunks.Add(chunk);
             }
-            article.Status = KnowledgeBaseArticleStatus.Published;
+            article.Status = KnowledgeArticleStatus.Published;
         }
 
         // Batch-fetch targetProvider's existing rows for these chunks (an earlier targeted publish,
@@ -532,16 +569,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         var index = 0;
         foreach (var text in chunkTexts)
         {
-            var chunk = new KnowledgeBaseChunk
-            {
-                ArticleId = article.Id,
-                ChunkIndex = index++,
-                ChunkText = text,
-                // Rough estimate (~4 chars/token in English), not a real tokenizer - good enough for
-                // the "roughly how big is this chunk" signal this column exists for.
-                TokenCount = text.Length / 4,
-                EmbeddedFromArticleVersion = article.Version
-            };
+            var chunk = NewChunk(article, index++, text);
 
             // Embed via every available provider, not just the currently active one, so the admin UI
             // can show which AI models this content has actually been embedded for - see
@@ -655,6 +683,130 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             return 0;
 
         return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
+    }
+
+    /// <summary>
+    /// Builds a chunk with every field the Phase 6 schema requires, so the two call sites that create
+    /// chunks cannot drift apart on what "a complete chunk" means - which they had already started to,
+    /// one of them carrying a comment the other did not.
+    ///
+    /// ContextHeader/EmbeddingInput/SearchText are filled from the article here rather than left to
+    /// the ingestion pipeline: this is the legacy sales-RAG path, and a chunk it writes still has to
+    /// satisfy the same NOT NULL columns as one the Phase 6 pipeline writes. The header it produces is
+    /// the simple breadcrumb form; the structure-aware pipeline builds a richer one.
+    /// </summary>
+    private static KnowledgeBaseChunk NewChunk(KnowledgeBaseArticle article, int chunkIndex, string text)
+    {
+        var header = BuildContextHeader(article);
+
+        return new KnowledgeBaseChunk
+        {
+            ArticleId = article.Id,
+            ChunkIndex = chunkIndex,
+            ContextHeader = header,
+            ChunkText = text,
+            EmbeddingInput = header + "\n\n" + text,
+            // Keywords appear twice - that repetition IS the 2x keyword field boost, achieved without
+            // maintaining a second full-text index. See KnowledgeBaseChunk.SearchText.
+            SearchText = string.Join(" ", new[] { header, text, article.Keywords, article.Keywords }
+                .Where(part => !string.IsNullOrWhiteSpace(part))),
+            // Rough estimate (~4 chars/token in English), not a real tokenizer - good enough for
+            // the "roughly how big is this chunk" signal this column exists for.
+            TokenCount = text.Length / 4,
+            EmbeddedFromArticleVersion = article.VersionNumber,
+            IsActive = true,
+
+            // Denormalized from the article so the retrieval filter never needs a join. A snapshot,
+            // not a live mirror - see KnowledgeBaseChunk's own doc comment.
+            TenantId = article.TenantId,
+            AuthorityRank = article.AuthorityRank,
+            ProductModule = article.ProductModule,
+            SourceType = article.SourceType,
+            LanguageCode = article.LanguageCode,
+            CountryCode = article.CountryCode,
+            ArticleStatus = article.Status,
+            EffectiveFrom = article.EffectiveFrom,
+            EffectiveTo = article.EffectiveTo,
+            IsCurrentArticleVersion = article.IsCurrentVersion
+        };
+    }
+
+    /// <summary>The breadcrumb + applicability line prepended to every chunk so it reads on its own
+    /// once retrieval has torn it out of its article - "Billing > Refunds (en, IN)". Without it a
+    /// chunk that says "this does not apply" is indistinguishable from one that says it about
+    /// something else entirely.</summary>
+    private static string BuildContextHeader(KnowledgeBaseArticle article)
+    {
+        var breadcrumb = string.Join(" > ", new[]
+            {
+                article.Category.ToString(),
+                article.SubCategory,
+                article.Title
+            }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+
+        var applicability = article.CountryCode is null
+            ? article.LanguageCode
+            : article.LanguageCode + ", " + article.CountryCode;
+
+        return breadcrumb + " (" + applicability + ")";
+    }
+
+    /// <summary>SHA-256 of the content with line endings and trailing whitespace normalized, as
+    /// lowercase hex. Normalizing first is what makes the hash useful: the same article pasted from a
+    /// Windows editor and a Unix one is the same article, and a duplicate check that said otherwise
+    /// would be noise nobody acts on.</summary>
+    private static string ComputeContentHash(string content)
+    {
+        var normalized = content.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+        var bytes = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>Best-effort map from the pre-Phase-6 free-text category onto the enum, falling back to
+    /// GettingStarted. The original string is never lost - CreateAsync/UpdateAsync keep it in
+    /// SubCategory - so a miss here costs a retrieval-time filter bucket, not the author's words.</summary>
+    private static KnowledgeCategory ParseCategory(string? category) =>
+        !string.IsNullOrWhiteSpace(category) &&
+        Enum.TryParse<KnowledgeCategory>(category.Trim().Replace(" ", string.Empty), ignoreCase: true, out var parsed)
+            ? parsed
+            : KnowledgeCategory.GettingStarted;
+
+    /// <summary>
+    /// A URL-safe slug of the title, made unique within the article's scope.
+    ///
+    /// ArticleKey is the identity a citation survives on, so it has to be stable and unique per
+    /// (TenantId, ArticleKey, LanguageCode) - UX_KBArticles_CurrentVersion enforces the uniqueness,
+    /// and hitting that as a 500 on save would be a poor way to find out. The numeric suffix loop is
+    /// the boring, predictable way to resolve a collision; querying with IgnoreQueryFilters is
+    /// deliberately NOT done here, so a tenant cannot discover another tenant's article keys by
+    /// watching which suffixes it gets handed.
+    /// </summary>
+    private async Task<string> GenerateArticleKeyAsync(string title, CancellationToken cancellationToken)
+    {
+        var slug = new string(title.Trim().ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray());
+
+        while (slug.Contains("--"))
+            slug = slug.Replace("--", "-");
+
+        slug = slug.Trim('-');
+
+        if (slug.Length == 0)
+            slug = "article";
+        else if (slug.Length > 180)
+            slug = slug[..180].TrimEnd('-');   // 200-char column, leaving room for a suffix
+
+        var candidate = slug;
+        var suffix = 2;
+        while (await _context.KnowledgeBaseArticles.AnyAsync(a => a.ArticleKey == candidate, cancellationToken))
+        {
+            candidate = slug + "-" + suffix;
+            suffix++;
+        }
+
+        return candidate;
     }
 
     private async Task<KnowledgeBaseArticle> FindOrThrowAsync(Guid id, CancellationToken cancellationToken) =>
