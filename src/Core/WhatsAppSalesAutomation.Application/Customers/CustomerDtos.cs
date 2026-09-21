@@ -11,6 +11,10 @@ public record CustomerDto(
     DateTime? OptInTimestamp,
     string? OptInSource,
     DateTime? OptOutTimestamp,
+    /// <summary>Which of the four detection paths produced the opt-out - ExactKeyword, PhrasePattern,
+    /// AiDetected or Manual. Null for an opt-out recorded before the field existed. Surfaced because
+    /// the field exists to answer a compliance question, and one nobody can read answers nothing.</summary>
+    string? OptOutSource,
     string? PreferredLanguage,
     Guid? AssignedAgentId,
     IReadOnlyList<string> Tags,

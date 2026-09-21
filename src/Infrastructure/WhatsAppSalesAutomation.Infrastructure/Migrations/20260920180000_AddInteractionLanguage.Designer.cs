@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260920180000_AddInteractionLanguage")]
+    partial class AddInteractionLanguage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -253,45 +256,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("KnowledgeBaseChunkId");
 
                     b.ToTable("AiInteractionSources", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Ai.AiInteractionValidationFailure", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("AiInteractionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("Blocking")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Detail")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AiInteractionId");
-
-                    b.HasIndex("Code", "CreatedAt");
-
-                    b.ToTable("AiInteractionValidationFailures", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.CreditPack", b =>
@@ -3263,15 +3227,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("KnowledgeBaseChunkId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Ai.AiInteractionValidationFailure", b =>
-                {
-                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Ai.AiInteraction", null)
-                        .WithMany()
-                        .HasForeignKey("AiInteractionId")
-                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

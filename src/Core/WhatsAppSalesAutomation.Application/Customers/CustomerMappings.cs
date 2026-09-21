@@ -15,6 +15,7 @@ public static class CustomerMappings
         customer.OptInTimestamp,
         customer.OptInSource,
         customer.OptOutTimestamp,
+        customer.OptOutSource?.ToString(),
         customer.PreferredLanguage,
         customer.AssignedAgentId,
         customer.Tags.Select(t => t.Name).ToList(),

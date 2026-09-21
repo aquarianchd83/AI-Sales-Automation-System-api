@@ -69,6 +69,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<AiInteraction> AiInteractions => Set<AiInteraction>();
 
     public DbSet<AiInteractionSource> AiInteractionSources => Set<AiInteractionSource>();
+    public DbSet<AiInteractionValidationFailure> AiInteractionValidationFailures => Set<AiInteractionValidationFailure>();
 
     public DbSet<KnowledgeBaseArticle> KnowledgeBaseArticles => Set<KnowledgeBaseArticle>();
 

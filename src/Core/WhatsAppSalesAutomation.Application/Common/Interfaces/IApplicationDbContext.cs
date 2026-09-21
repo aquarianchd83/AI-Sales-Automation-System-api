@@ -57,6 +57,8 @@ public interface IApplicationDbContext
 
     DbSet<AiInteractionSource> AiInteractionSources { get; }
 
+    DbSet<AiInteractionValidationFailure> AiInteractionValidationFailures { get; }
+
     DbSet<KnowledgeBaseArticle> KnowledgeBaseArticles { get; }
 
     DbSet<KnowledgeBaseChunk> KnowledgeBaseChunks { get; }

@@ -229,9 +229,24 @@ public class ConversationOrchestrator : IConversationOrchestrator
             AskedFieldKey = validated.AskedFieldKey,
             BuyingIntentReported = validated.BuyingIntentDetected,
             HumanRequestReported = validated.HumanRequested,
-            OptOutReported = validated.OptOutRequested
+            OptOutReported = validated.OptOutRequested,
+            DetectedLanguage = validated.DetectedLanguage
         };
         _context.AiInteractions.Add(interaction);
+
+        // One row per failed check, not a list on the turn. What anyone asks of these is aggregate -
+        // which check fires most, is it rising since the prompt changed - and a joined-up string
+        // answers that only by being read back out and split again.
+        foreach (var failure in validated.Failures)
+        {
+            _context.AiInteractionValidationFailures.Add(new AiInteractionValidationFailure
+            {
+                AiInteractionId = interaction.Id,
+                Code = failure.Code,
+                Blocking = failure.Blocking,
+                Detail = Truncate(failure.Detail, MaxValidationDetailChars)
+            });
+        }
 
         foreach (var citedChunkId in validated.CitedChunkIds)
         {
@@ -253,7 +268,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         if (Enum.TryParse<LeadScoreBand>(score.Band, ignoreCase: true, out var parsedBand))
             conversation.LastLeadScore = parsedBand;
 
-        UpdatePreferredLanguage(customer, validated.DetectedLanguage, historyRows.Count);
+        await UpdatePreferredLanguageAsync(customer, conversationId, interaction.Id, validated.DetectedLanguage, cancellationToken);
 
         if (escalate)
         {
@@ -307,6 +322,15 @@ public class ConversationOrchestrator : IConversationOrchestrator
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>Matches AiInteractionValidationFailure.Detail's column. The detail is there to read a
+    /// handful of examples from, not to match on, so losing the tail of a long one costs nothing.</summary>
+    private const int MaxValidationDetailChars = 500;
+
+    private static string? Truncate(string? text, int max) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : text.Length <= max ? text
+        : text[..max];
+
     /// <summary>The tenant's business as the prompt needs it. Read per turn rather than cached: it
     /// changes rarely, but a tenant who has just corrected their working hours should not have to wait
     /// for a cache to expire before the agent stops quoting the old ones.</summary>
@@ -331,24 +355,43 @@ public class ConversationOrchestrator : IConversationOrchestrator
     }
 
     /// <summary>
-    /// Updates the customer's saved language only once they have used the same one across more than a
-    /// single turn.
+    /// Updates the customer's saved language only once they have used the same one on two turns
+    /// running.
     ///
-    /// Updating on one turn would be wrong in the common case: someone who usually writes Hindi and
-    /// replies "ok" once would have every future message pinned to English.
+    /// One turn is not evidence. Someone who writes Hindi throughout and answers "ok" once would have
+    /// every future message pinned to English by a single-turn rule - and the saved preference
+    /// reaches the prompt, so a wrong one is not harmless. Two consecutive turns is cheap to check
+    /// and gets that case right.
+    ///
+    /// The stored value stays a hint either way: the prompt tells the agent to match whatever the
+    /// customer actually wrote in the latest message, whatever the preference says.
     /// </summary>
-    private static void UpdatePreferredLanguage(Customer customer, string? detected, int historyCount)
+    private async Task UpdatePreferredLanguageAsync(
+        Customer customer,
+        Guid conversationId,
+        Guid currentInteractionId,
+        string? detected,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(detected) || historyCount == 0)
+        if (string.IsNullOrWhiteSpace(detected))
             return;
 
         if (string.Equals(customer.PreferredLanguage, detected, StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Only set it when there was nothing there. Changing an established preference needs more
-        // evidence than one turn, and the prompt already tells the agent to match the latest message
-        // regardless of what is stored - so the stored value is a hint, not the thing that decides.
-        if (string.IsNullOrWhiteSpace(customer.PreferredLanguage))
+        // Excluding this turn's own row explicitly rather than relying on it being unsaved. It is
+        // unsaved - it was only added to the change tracker above, and EF does not flush before a
+        // query - but a rule that silently depends on that would break the day anything upstream
+        // saves earlier, and it would break by confirming a language against itself.
+        var previous = await _context.AiInteractions
+            .Where(i => i.ConversationId == conversationId
+                && i.Id != currentInteractionId
+                && i.DetectedLanguage != null)
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => i.DetectedLanguage)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.Equals(previous, detected, StringComparison.OrdinalIgnoreCase))
             customer.PreferredLanguage = detected;
     }
 

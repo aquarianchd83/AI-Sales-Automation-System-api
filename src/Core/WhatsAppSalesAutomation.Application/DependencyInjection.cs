@@ -73,6 +73,7 @@ public static class DependencyInjection
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
         services.AddScoped<IAiReplyValidator, AiReplyValidator>();
         services.AddScoped<IConversationOrchestrator, ConversationOrchestrator>();
+        services.AddScoped<IAgentPerformanceService, AgentPerformanceService>();
         services.AddScoped<ILogService, LogService>();
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IPlanLimitsService, PlanLimitsService>();
