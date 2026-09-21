@@ -1,7 +1,13 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using WhatsAppSalesAutomation.Api.Controllers;
 using WhatsAppSalesAutomation.Application;
+using WhatsAppSalesAutomation.Application.Audit;
+using WhatsAppSalesAutomation.Application.Reports;
+using WhatsAppSalesAutomation.Domain.Constants;
+using WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion;
@@ -129,5 +135,36 @@ public class KnowledgeServicesWiringTests
 
         Assert.NotSame(a, b);
         Assert.Same(a, first.ServiceProvider.GetRequiredService<EmbeddingBatcher>());
+    }
+
+    [Fact]
+    public void The_audit_and_report_services_resolve_and_the_interceptor_is_scoped()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditLogService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IReportService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<AuditTrailSaveChangesInterceptor>());
+    }
+
+    [Fact]
+    public void The_audit_log_is_admin_only_because_it_names_staff_and_their_ip_addresses()
+    {
+        var roles = typeof(AuditLogsController).GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>().Select(a => a.Roles).Single();
+
+        Assert.Equal(AppRoles.Admin, roles);
+    }
+
+    [Fact]
+    public void Reports_are_open_to_admins_and_sales_managers_but_not_sales_agents()
+    {
+        var roles = typeof(ReportsController).GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>().Select(a => a.Roles).Single()!.Split(',');
+
+        Assert.Contains(AppRoles.Admin, roles);
+        Assert.Contains(AppRoles.SalesManager, roles);
+        Assert.DoesNotContain(AppRoles.SalesAgent, roles);
     }
 }

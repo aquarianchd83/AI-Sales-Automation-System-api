@@ -78,6 +78,9 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.IKnowledgeRetrievalSimulator,
             WhatsAppSalesAutomation.Application.KnowledgeBase.Retrieval.KnowledgeRetrievalSimulator>();
 
+        services.AddScoped<WhatsAppSalesAutomation.Application.Audit.IAuditLogService, WhatsAppSalesAutomation.Application.Audit.AuditLogService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Reports.IReportService, WhatsAppSalesAutomation.Application.Reports.ReportService>();
+
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountProfileService, AccountProfileService>();
         services.AddScoped<ITenantService, TenantService>();

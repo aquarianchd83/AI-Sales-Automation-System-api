@@ -45,4 +45,17 @@ public class CurrentUserService : ICurrentUserService
             return Guid.TryParse(value, out var id) ? id : null;
         }
     }
+
+    public string? IpAddress
+    {
+        get
+        {
+            var remote = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress;
+            if (remote is null)
+                return null;
+
+            // An IPv4 client on a dual-stack socket arrives as ::ffff:a.b.c.d; record the plain form.
+            return remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4().ToString() : remote.ToString();
+        }
+    }
 }

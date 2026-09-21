@@ -36,6 +36,7 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+        services.AddScoped<AuditTrailSaveChangesInterceptor>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();
@@ -45,7 +46,11 @@ public static class DependencyInjection
             options.UseSqlServer(
                 configuration.GetConnectionString("DefaultConnection"),
                 sql => sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName));
+            // The audit interceptor is FIRST, and the order matters: it adds AuditLog rows to the change
+            // tracker during SavingChanges, and the two interceptors after it then timestamp and
+            // tenant-stamp those rows like any other. Registered later, they would already have run.
             options.AddInterceptors(
+                sp.GetRequiredService<AuditTrailSaveChangesInterceptor>(),
                 sp.GetRequiredService<AuditableEntitySaveChangesInterceptor>(),
                 sp.GetRequiredService<TenantStampingSaveChangesInterceptor>());
         });

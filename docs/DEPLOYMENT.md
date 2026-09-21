@@ -170,6 +170,29 @@ diagnostics. Each call is audited - who and which tenant, **not** the query text
 
 ---
 
+## 3b. Audit log and reports
+
+`GET /api/v1/audit-logs` (Admin) is the tenant's audit trail; `GET /api/v1/reports/{campaign-performance,
+lead-funnel,agent-performance,ai-performance}?days=30` (Admin, SalesManager) are the reports.
+
+**The audit trail records an allow-list, not every change.** `AuditedEntityCatalog` names the entity types
+and the specific properties recorded (lead stage/score/assignee, campaign status, conversation mode,
+handoff status, customer opt-in state, knowledge-article lifecycle). Phone numbers, names, emails, message
+text and article bodies are deliberately never recorded. Extending it is one line, and the default for
+anything not listed is that it is not recorded.
+
+**The table is append-only and there is no retention job yet.** The application refuses to modify or delete
+a row, and nothing purges old ones, so `AuditLogs` grows without bound. Volume is one small row per
+audited change, which is modest, but plan a retention policy before it matters - it will need a deliberate
+job that bypasses the append-only guard, not a manual `DELETE` at 2am.
+
+Changes made by a background job, the AI agent or a webhook are recorded with no actor (`PerformedBy` null),
+and changes made through an impersonated support session record the platform user in `ImpersonatedBy`.
+Recorded IPs are the address the application sees, so they are only meaningful with forwarded headers
+configured correctly (section 5).
+
+---
+
 ## 4. Wildcard DNS and CORS
 
 Tenants are reached at `acme.<domain>`, `globex.<domain>`, … from **one** frontend deployment behind a

@@ -10,6 +10,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
@@ -82,6 +83,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<KnowledgeBaseArticleVersion> KnowledgeBaseArticleVersions => Set<KnowledgeBaseArticleVersion>();
 
     public DbSet<KnowledgeIngestionJob> KnowledgeIngestionJobs => Set<KnowledgeIngestionJob>();
+
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     public DbSet<Lead> Leads => Set<Lead>();
 
