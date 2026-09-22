@@ -48,4 +48,17 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// <summary>Any further qualification criteria in plain language, handed to the agent as written. JSON
     /// array column.</summary>
     public List<string> AdditionalCriteria { get; set; } = new();
+
+    /// <summary>When true, and <see cref="SourceCampaignId"/> is set, every customer this profile's
+    /// lead-discovery job discovers is automatically cloned into a same-day execution campaign and
+    /// enrolled - see AutoCampaignEnrollmentService. False by default: existing tenants keep doing
+    /// nothing extra with a freshly discovered customer until they opt into this.</summary>
+    public bool AutoCampaignEnabled { get; set; }
+
+    /// <summary>The existing, tenant-owned Campaign to clone content/schedule from when auto-enrolling a
+    /// discovered customer. A plain Guid, not a foreign key - same cross-aggregate-reference convention as
+    /// <see cref="DiscoveredLead.CustomerId"/>. Required whenever <see cref="AutoCampaignEnabled"/> is true;
+    /// AutoCampaignEnrollmentService re-validates it is still an existing, non-Stopped campaign at
+    /// enrollment time rather than trusting it stays valid forever.</summary>
+    public Guid? SourceCampaignId { get; set; }
 }

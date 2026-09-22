@@ -37,6 +37,11 @@ public static class LeadDiscoveryLimits
 }
 
 /// <param name="PlanMaxBatchSize">The tenant's plan cap on new leads per run; null when no plan applies.</param>
+/// <param name="SourceCampaignName">The configured source campaign's current name, or null when
+/// <paramref name="SourceCampaignId"/> is unset or no longer resolves to an existing campaign - the UI's
+/// cue to show a "campaign no longer exists" warning instead of a blank dropdown.</param>
+/// <param name="SourceCampaignStatus">The source campaign's current Status (e.g. "Running", "Stopped"),
+/// or null under the same conditions as <paramref name="SourceCampaignName"/>.</param>
 public record LeadDiscoveryProfileDto(
     bool IsEnabled,
     string TargetBusinessType,
@@ -50,10 +55,16 @@ public record LeadDiscoveryProfileDto(
     bool IndependentBusiness,
     int MinimumLeadScore,
     IReadOnlyList<string> AdditionalCriteria,
+    bool AutoCampaignEnabled,
+    Guid? SourceCampaignId,
+    string? SourceCampaignName,
+    string? SourceCampaignStatus,
     DateTime? UpdatedAt);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
-/// LeadDiscoveryFields names, in any case.</summary>
+/// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
+/// existing, non-Stopped campaign whenever <paramref name="AutoCampaignEnabled"/> is true - see
+/// SaveLeadDiscoveryProfileRequestValidator/LeadDiscoveryService.SaveProfileAsync.</summary>
 public record SaveLeadDiscoveryProfileRequest(
     bool IsEnabled,
     string TargetBusinessType,
@@ -65,7 +76,9 @@ public record SaveLeadDiscoveryProfileRequest(
     bool EmailRequired = false,
     bool IndependentBusiness = false,
     int MinimumLeadScore = 60,
-    IReadOnlyList<string>? AdditionalCriteria = null);
+    IReadOnlyList<string>? AdditionalCriteria = null,
+    bool AutoCampaignEnabled = false,
+    Guid? SourceCampaignId = null);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's
@@ -126,3 +139,20 @@ public record DiscoveredLeadDto(
     /// <summary>The CRM customer created for this business, or null when it had no usable phone number.</summary>
     Guid? CustomerId,
     DateTime DiscoveredAt);
+
+/// <summary>One auto-campaign enrollment outcome for one discovered customer - the admin-facing audit
+/// trail behind LeadDiscoveryProfile.AutoCampaignEnabled. <paramref name="Status"/> is "Started",
+/// "Skipped" or "Failed"; <paramref name="Reason"/> explains a Skipped or Failed row.</summary>
+public record AutoCampaignEnrollmentDto(
+    Guid Id,
+    Guid DiscoveredLeadId,
+    string? BusinessName,
+    Guid CustomerId,
+    Guid? SourceCampaignId,
+    string? SourceCampaignName,
+    Guid? ExecutionCampaignId,
+    string? ExecutionCampaignName,
+    DateTime ExecutionDateLocal,
+    string Status,
+    string? Reason,
+    DateTime CreatedAt);

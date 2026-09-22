@@ -5,7 +5,9 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Tenancy;
+using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
 
@@ -39,8 +41,9 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         var tenantId = CurrentTenantId();
         var profile = await _context.LeadDiscoveryProfiles.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
         var planLimit = await _planLimits.GetLeadDiscoveryBatchLimitAsync(tenantId, cancellationToken);
+        var (sourceCampaignName, sourceCampaignStatus) = await ResolveSourceCampaignAsync(tenantId, profile?.SourceCampaignId, cancellationToken);
 
-        return ToDto(profile ?? new LeadDiscoveryProfile(), planLimit);
+        return ToDto(profile ?? new LeadDiscoveryProfile(), planLimit, sourceCampaignName, sourceCampaignStatus);
     }
 
     public async Task<LeadDiscoveryProfileDto> SaveProfileAsync(SaveLeadDiscoveryProfileRequest request, CancellationToken cancellationToken = default)
@@ -51,6 +54,29 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         var planLimit = await _planLimits.GetLeadDiscoveryBatchLimitAsync(tenantId, cancellationToken);
         if (request.BatchSize > planLimit)
             throw new PlanLimitExceededException($"Your plan allows up to {planLimit} discovered leads per run. Upgrade to raise the batch size.");
+
+        // Only an existing, non-Stopped campaign may be the source - re-checked here (not just in the
+        // UI) because this is the one place a request could turn auto campaign on with a stale or
+        // never-real campaign id. The syntactic "enabled with nothing selected" case is already caught
+        // by SaveLeadDiscoveryProfileRequestValidator above.
+        string? sourceCampaignName = null;
+        string? sourceCampaignStatus = null;
+        if (request.AutoCampaignEnabled)
+        {
+            var sourceCampaignId = request.SourceCampaignId!.Value;
+            var sourceCampaign = await _context.Campaigns.AsNoTracking()
+                .Where(c => c.Id == sourceCampaignId && c.TenantId == tenantId)
+                .Select(c => new { c.Name, c.Status })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (sourceCampaign is null)
+                throw new NotFoundException(nameof(Campaign), sourceCampaignId);
+            if (sourceCampaign.Status == CampaignStatus.Stopped)
+                throw new ConflictException($"Campaign '{sourceCampaign.Name}' is Stopped and cannot be used as an auto campaign source.");
+
+            sourceCampaignName = sourceCampaign.Name;
+            sourceCampaignStatus = sourceCampaign.Status.ToString();
+        }
 
         var profile = await _context.LeadDiscoveryProfiles.FirstOrDefaultAsync(cancellationToken);
         if (profile is null)
@@ -74,10 +100,12 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.IndependentBusiness = request.IndependentBusiness;
         profile.MinimumLeadScore = request.MinimumLeadScore;
         profile.AdditionalCriteria = TenantBusinessDetails.NormalizeKeywords(request.AdditionalCriteria);
+        profile.AutoCampaignEnabled = request.AutoCampaignEnabled;
+        profile.SourceCampaignId = request.SourceCampaignId;
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(profile, planLimit);
+        return ToDto(profile, planLimit, sourceCampaignName, sourceCampaignStatus);
     }
 
     public async Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(PagedRequest request, int? minScore = null, CancellationToken cancellationToken = default)
@@ -119,6 +147,47 @@ public class LeadDiscoveryService : ILeadDiscoveryService
 
         return new PagedResult<LeadDiscoveryRunDto>(
             runs.Select(r => ToDto(r, pricing)).ToList(), totalCount, request.Page, request.PageSize);
+    }
+
+    public async Task<PagedResult<AutoCampaignEnrollmentDto>> GetAutoCampaignEnrollmentsAsync(PagedRequest request, CancellationToken cancellationToken = default)
+    {
+        var query = _context.AutoCampaignEnrollments.AsNoTracking();
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var page = await query
+            .OrderByDescending(e => e.CreatedAt)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        var leadIds = page.Select(e => e.DiscoveredLeadId).Distinct().ToList();
+        var campaignIds = page.SelectMany(e => new[] { e.SourceCampaignId, e.ExecutionCampaignId })
+            .OfType<Guid>().Distinct().ToList();
+
+        var businessNamesByLeadId = await _context.DiscoveredLeads.AsNoTracking()
+            .Where(l => leadIds.Contains(l.Id))
+            .ToDictionaryAsync(l => l.Id, l => l.BusinessName, cancellationToken);
+
+        var campaignNamesById = await _context.Campaigns.AsNoTracking()
+            .Where(c => campaignIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
+
+        var items = page.Select(e => new AutoCampaignEnrollmentDto(
+            e.Id,
+            e.DiscoveredLeadId,
+            businessNamesByLeadId.GetValueOrDefault(e.DiscoveredLeadId),
+            e.CustomerId,
+            e.SourceCampaignId,
+            e.SourceCampaignId is { } srcId ? campaignNamesById.GetValueOrDefault(srcId) : null,
+            e.ExecutionCampaignId,
+            e.ExecutionCampaignId is { } execId ? campaignNamesById.GetValueOrDefault(execId) : null,
+            e.ExecutionDateLocal,
+            e.Status.ToString(),
+            e.Reason,
+            e.CreatedAt)).ToList();
+
+        return new PagedResult<AutoCampaignEnrollmentDto>(items, totalCount, request.Page, request.PageSize);
     }
 
     public async Task<LeadDiscoverySpendDto> GetSpendAsync(CancellationToken cancellationToken = default)
@@ -179,9 +248,27 @@ public class LeadDiscoveryService : ILeadDiscoveryService
     private Guid CurrentTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Lead discovery requires a tenant in scope.");
 
-    private static LeadDiscoveryProfileDto ToDto(LeadDiscoveryProfile p, int? planLimit) => new(
+    /// <summary>Both null when <paramref name="sourceCampaignId"/> is null or no longer resolves to an
+    /// existing campaign for this tenant - the UI's cue to show a "campaign no longer exists" warning
+    /// rather than a blank name.</summary>
+    private async Task<(string? Name, string? Status)> ResolveSourceCampaignAsync(
+        Guid tenantId, Guid? sourceCampaignId, CancellationToken cancellationToken)
+    {
+        if (sourceCampaignId is not { } id)
+            return (null, null);
+
+        var campaign = await _context.Campaigns.AsNoTracking()
+            .Where(c => c.Id == id && c.TenantId == tenantId)
+            .Select(c => new { c.Name, c.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return campaign is null ? (null, null) : (campaign.Name, campaign.Status.ToString());
+    }
+
+    private static LeadDiscoveryProfileDto ToDto(LeadDiscoveryProfile p, int? planLimit, string? sourceCampaignName, string? sourceCampaignStatus) => new(
         p.IsEnabled, p.TargetBusinessType, p.Keywords, p.Locations, p.BatchSize, planLimit, p.RequiredFields,
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
+        p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
         p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(

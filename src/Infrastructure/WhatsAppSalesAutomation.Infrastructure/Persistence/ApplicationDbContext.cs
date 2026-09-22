@@ -104,6 +104,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
 
+    public DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments => Set<AutoCampaignEnrollment>();
+
     public DbSet<Plan> Plans => Set<Plan>();
 
     public DbSet<Subscription> Subscriptions => Set<Subscription>();

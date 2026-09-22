@@ -231,9 +231,9 @@ public class CampaignSendService : ICampaignSendService
         }
 
         // IgnoreQueryFilters not needed: a soft-deleted customer simply will not be found, and
-        // "not found" is handled the same as "not opted in" below.
+        // "not found" is handled the same as "opted out" below.
         var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == cc.CustomerId, cancellationToken);
-        if (customer is null || customer.OptInStatus != OptInStatus.OptedIn)
+        if (customer is null || customer.OptInStatus == OptInStatus.OptedOut)
         {
             cc.Status = CampaignCustomerStatus.OptedOut;
             cc.StoppedReason = "Customer is not opted in";
@@ -241,6 +241,15 @@ public class CampaignSendService : ICampaignSendService
             await _context.SaveChangesAsync(cancellationToken);
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
+
+        // A customer who has never decided (PendingOptIn) is left exactly where cc already is -
+        // Pending/AwaitingResponse - rather than terminally OptedOut: they may still opt in, at which
+        // point this same step becomes sendable on a later tick. Previously unreachable, since
+        // CampaignService.SetAudienceAsync only ever attached OptedIn customers; now reachable because
+        // AutoCampaignEnrollmentService attaches a discovered customer the moment they're found, before
+        // anyone has recorded their consent.
+        if (customer.OptInStatus == OptInStatus.PendingOptIn)
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
 
         var idempotencyKey = BuildIdempotencyKey(cc.Id, step.StepNumber);
         var alreadyQueued = await _context.Messages.AnyAsync(m => m.IdempotencyKey == idempotencyKey, cancellationToken);

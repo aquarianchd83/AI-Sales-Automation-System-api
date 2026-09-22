@@ -48,4 +48,12 @@ public class LeadDiscoveryController : ControllerBase
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<LeadDiscoverySpendDto>> GetSpend(CancellationToken cancellationToken)
         => Ok(await _leadDiscoveryService.GetSpendAsync(cancellationToken));
+
+    /// <summary>Auto-campaign enrollment outcomes (Started/Skipped/Failed) for discovered customers,
+    /// newest first. Admin-only, like the profile it configures.</summary>
+    [HttpGet("auto-campaign-history")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<AutoCampaignEnrollmentDto>>> GetAutoCampaignHistory(
+        [FromQuery] PagedRequest request, CancellationToken cancellationToken)
+        => Ok(await _leadDiscoveryService.GetAutoCampaignEnrollmentsAsync(request, cancellationToken));
 }

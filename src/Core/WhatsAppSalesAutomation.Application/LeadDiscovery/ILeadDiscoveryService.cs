@@ -23,6 +23,11 @@ public interface ILeadDiscoveryService
     /// <summary>This calendar month's and all-time discovery spend for the calling tenant, in USD and in the
     /// tenant's own currency.</summary>
     Task<LeadDiscoverySpendDto> GetSpendAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Auto-campaign enrollment outcomes (Started/Skipped/Failed) for discovered customers,
+    /// newest first - the admin-facing audit trail behind AutoCampaignEnabled. Only rows written while
+    /// the feature was enabled exist here - see AutoCampaignEnrollmentService's own remarks.</summary>
+    Task<PagedResult<AutoCampaignEnrollmentDto>> GetAutoCampaignEnrollmentsAsync(PagedRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One lead discovery run for one tenant - what the per-tenant lead-discovery job executes.</summary>
