@@ -1,7 +1,7 @@
 namespace WhatsAppSalesAutomation.Domain.Enums;
 
 /// <summary>What happened when a discovered customer was run through auto-campaign enrollment - see
-/// AutoCampaignEnrollmentService and Entities.Campaigns.AutoCampaignEnrollment.</summary>
+/// Entities.Campaigns.AutoCampaignEnrollment (legacy, no longer written).</summary>
 public enum AutoCampaignEnrollmentStatus
 {
     /// <summary>Cloned/reused an execution campaign and attached the customer to it.</summary>

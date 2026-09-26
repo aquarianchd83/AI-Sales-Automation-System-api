@@ -17,4 +17,19 @@ public class LeadDiscoveryOptions
 
     /// <summary>How many previously discovered businesses are listed to the agent as already known.</summary>
     public int MaxKnownBusinessesInPrompt { get; set; } = 200;
+
+    /// <summary>How long one acquisition or renewal of the tenant+profile lock is valid for. Must comfortably
+    /// exceed <see cref="LockHeartbeatSeconds"/>, so one missed heartbeat does not lose the lock.</summary>
+    public int LockLeaseSeconds { get; set; } = 600;
+
+    /// <summary>How often the background heartbeat renews the lock while an execution runs. 0 disables the
+    /// heartbeat, leaving renewal to the processing checkpoints.</summary>
+    public int LockHeartbeatSeconds { get; set; } = 120;
+
+    /// <summary>A processing checkpoint renews inline when less than this is left on the lease.</summary>
+    public int LockRenewWhenRemainingSeconds { get; set; } = 240;
+
+    /// <summary>How many automatic retries (on subsequent scheduled runs) an execution with unfinished work
+    /// gets. A manual retry from Lead Discovery History is always allowed.</summary>
+    public int MaxRetryAttempts { get; set; } = 3;
 }

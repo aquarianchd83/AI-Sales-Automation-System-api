@@ -24,17 +24,21 @@ public interface ILeadDiscoveryService
     /// tenant's own currency.</summary>
     Task<LeadDiscoverySpendDto> GetSpendAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Auto-campaign enrollment outcomes (Started/Skipped/Failed) for discovered customers,
-    /// newest first - the admin-facing audit trail behind AutoCampaignEnabled. Only rows written while
-    /// the feature was enabled exist here - see AutoCampaignEnrollmentService's own remarks.</summary>
+    /// <summary>Legacy auto-campaign enrollment outcomes (Started/Skipped/Failed), newest first - recorded
+    /// before Lead Discovery History replaced them, and no longer written. See ILeadDiscoveryHistoryService.</summary>
     Task<PagedResult<AutoCampaignEnrollmentDto>> GetAutoCampaignEnrollmentsAsync(PagedRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One lead discovery run for one tenant - what the per-tenant lead-discovery job executes.</summary>
 public interface ILeadDiscoveryRunService
 {
-    /// <summary>Discovers, qualifies and saves up to the effective batch size of new leads. Returns the
-    /// one-line summary recorded on the tenant's job schedule. A tenant with no enabled profile, or no
-    /// Anthropic API key, is skipped with a summary saying so rather than failing.</summary>
+    /// <summary>Resumes any RetryPending executions (automatic retry), then discovers, qualifies and saves up
+    /// to the effective batch size of new leads and runs the Auto-Campaign steps - each as a recorded
+    /// execution. Returns the one-line summary recorded on the tenant's job schedule. A tenant with no enabled
+    /// profile, or no Anthropic API key, is skipped with a summary saying so rather than failing.</summary>
     Task<string> RunForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Resumes one retryable execution as a new execution (manual retry). Returns its summary, or a
+    /// "Skipped:" line when the execution is not retryable.</summary>
+    Task<string> RetryExecutionAsync(Guid tenantId, Guid executionId, CancellationToken cancellationToken = default);
 }

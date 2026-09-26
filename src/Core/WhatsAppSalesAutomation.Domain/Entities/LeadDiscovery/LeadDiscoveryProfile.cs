@@ -49,16 +49,17 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// array column.</summary>
     public List<string> AdditionalCriteria { get; set; } = new();
 
-    /// <summary>When true, and <see cref="SourceCampaignId"/> is set, every customer this profile's
-    /// lead-discovery job discovers is automatically cloned into a same-day execution campaign and
-    /// enrolled - see AutoCampaignEnrollmentService. False by default: existing tenants keep doing
-    /// nothing extra with a freshly discovered customer until they opt into this.</summary>
+    /// <summary>When true, and <see cref="SourceCampaignId"/> is set, Auto-Campaign is configured: each
+    /// execution that creates new customers gets one campaign per processing date, named
+    /// "&lt;Source Campaign Name&gt; - YYYY-MM-DD", built from the source campaign's templates and with those
+    /// customers mapped to it - see LeadDiscoveryRunService. False by default.</summary>
     public bool AutoCampaignEnabled { get; set; }
 
-    /// <summary>The existing, tenant-owned Campaign to clone content/schedule from when auto-enrolling a
-    /// discovered customer. A plain Guid, not a foreign key - same cross-aggregate-reference convention as
-    /// <see cref="DiscoveredLead.CustomerId"/>. Required whenever <see cref="AutoCampaignEnabled"/> is true;
-    /// AutoCampaignEnrollmentService re-validates it is still an existing, non-Stopped campaign at
-    /// enrollment time rather than trusting it stays valid forever.</summary>
+    /// <summary>The referred campaign - the whole Auto-Campaign configuration: its steps are the templates
+    /// (sequence, delays, message text and variables, media) and its schedule is the sending time. Only its
+    /// own steps are ever used; nothing else from the tenant's template library. A plain Guid, not a foreign
+    /// key - same cross-aggregate-reference convention as <see cref="DiscoveredLead.CustomerId"/>. Required
+    /// whenever <see cref="AutoCampaignEnabled"/> is true; re-validated as an existing, non-Stopped campaign
+    /// every time it is used.</summary>
     public Guid? SourceCampaignId { get; set; }
 }

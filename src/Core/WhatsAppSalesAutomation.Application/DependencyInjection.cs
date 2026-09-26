@@ -8,6 +8,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Campaigns;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Customers;
@@ -128,7 +129,8 @@ public static class DependencyInjection
         services.AddScoped<ITenantChargesService, TenantChargesService>();
         services.AddScoped<ILeadDiscoveryService, LeadDiscoveryService>();
         services.AddScoped<ILeadDiscoveryRunService, LeadDiscoveryRunService>();
-        services.AddScoped<IAutoCampaignEnrollmentService, AutoCampaignEnrollmentService>();
+        services.AddScoped<ILeadDiscoveryHistoryService, LeadDiscoveryHistoryService>();
+        services.AddSingleton<IApplicationInstance, ApplicationInstance>();
 
         // Platform Admin Console (PlatformSuperAdmin-only cross-tenant screens).
         services.AddScoped<IPlatformAuditService, PlatformAuditService>();

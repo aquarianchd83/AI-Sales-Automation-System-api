@@ -8,10 +8,9 @@ namespace WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 /// implicitly "Qualified".
 ///
 /// Each one is also added to the CRM as a <see cref="Entities.Customers.Customer"/> (<see cref="CustomerId"/>)
-/// with its opt-in status left at the PendingOptIn default and no consent fields written: consent is recorded
-/// by a person, and CampaignSendService only ever sends to OptedIn customers, so a discovered business cannot
-/// be messaged until someone opts it in. This row is kept alongside the customer as the discovery record -
-/// where the business was found, what was verified, and how it scored.
+/// with WhatsApp consent set to OptedIn (OptInSource "Lead discovery"), in the same transaction as this row -
+/// see LeadDiscoveryRunService. This row is kept alongside the customer as the discovery record - where the
+/// business was found, what was verified, and how it scored.
 ///
 /// Contact details are only kept when the pipeline could check them against a page it actually retrieved:
 /// <see cref="Phone"/> must appear on a fetched page (<see cref="PhoneSourceUrl"/>), and so must

@@ -15,10 +15,12 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class LeadDiscoveryController : ControllerBase
 {
     private readonly ILeadDiscoveryService _leadDiscoveryService;
+    private readonly ILeadDiscoveryHistoryService _historyService;
 
-    public LeadDiscoveryController(ILeadDiscoveryService leadDiscoveryService)
+    public LeadDiscoveryController(ILeadDiscoveryService leadDiscoveryService, ILeadDiscoveryHistoryService historyService)
     {
         _leadDiscoveryService = leadDiscoveryService;
+        _historyService = historyService;
     }
 
     [HttpGet("profile")]
@@ -56,4 +58,25 @@ public class LeadDiscoveryController : ControllerBase
     public async Task<ActionResult<PagedResult<AutoCampaignEnrollmentDto>>> GetAutoCampaignHistory(
         [FromQuery] PagedRequest request, CancellationToken cancellationToken)
         => Ok(await _leadDiscoveryService.GetAutoCampaignEnrollmentsAsync(request, cancellationToken));
+
+    /// <summary>Lead Discovery History: every execution, grouped by processing date (newest first), with its
+    /// customer, Auto-Campaign, template, mapping, retry and lock status. Paged by date. Admin-only.</summary>
+    [HttpGet("history")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<LeadDiscoveryHistoryDayDto>>> GetHistory(
+        [FromQuery] LeadDiscoveryHistoryQuery query, CancellationToken cancellationToken)
+        => Ok(await _historyService.GetHistoryAsync(query, cancellationToken));
+
+    /// <summary>One execution in full: per-customer results, template associations and lock transitions.</summary>
+    [HttpGet("executions/{id:guid}")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<LeadDiscoveryExecutionDetailDto>> GetExecution(Guid id, CancellationToken cancellationToken)
+        => Ok(await _historyService.GetExecutionAsync(id, cancellationToken));
+
+    /// <summary>Queues a retry of a RetryPending/PartiallyCompleted/Failed execution. It runs as a new execution
+    /// (new Execution ID and lock token) that resumes only the unfinished steps. 409 when not retryable.</summary>
+    [HttpPost("executions/{id:guid}/retry")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<LeadDiscoveryRetryQueuedDto>> RetryExecution(Guid id, CancellationToken cancellationToken)
+        => Accepted(await _historyService.RequestRetryAsync(id, cancellationToken));
 }
