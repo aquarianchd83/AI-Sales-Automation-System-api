@@ -66,4 +66,8 @@ public interface ICampaignService
     /// their current status/step. Ordered by LastMessageSentAt desc (most recently active first),
     /// nulls (never sent) last.</summary>
     Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Every message this campaign has sent - the per-send detail behind
+    /// GetAudienceAsync's roster. Newest first.</summary>
+    Task<PagedResult<CampaignMessageHistoryEntryDto>> GetHistoryAsync(Guid campaignId, CampaignHistoryQuery query, CancellationToken cancellationToken = default);
 }

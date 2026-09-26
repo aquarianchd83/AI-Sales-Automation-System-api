@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Application.Common.Models;
+
 namespace WhatsAppSalesAutomation.Application.Campaigns;
 
 /// <summary><paramref name="ScheduledStartAt"/> is this tenant's own local time (Tenant.Timezone,
@@ -80,3 +82,37 @@ public record CampaignAudienceMemberDto(
     DateTime? LastMessageSentAt,
     DateTime? NextFollowUpDueAt,
     string? StoppedReason);
+
+/// <summary>
+/// Query for GET campaigns/{id}/history. <see cref="PagedRequest.Search"/> matches the customer's
+/// name/phone; <see cref="Status"/>/<see cref="StepNumber"/>/<see cref="TemplateName"/>/
+/// <see cref="From"/>/<see cref="To"/> are additive column filters. <see cref="Status"/> is a
+/// Message.Status (MessageStatus) name. From/To bound Message.CreatedAt by calendar day
+/// (inclusive), regardless of the time-of-day given.
+/// </summary>
+public record CampaignHistoryQuery : PagedRequest
+{
+    public string? Status { get; init; }
+    public int? StepNumber { get; init; }
+    public string? TemplateName { get; init; }
+    public DateTime? From { get; init; }
+    public DateTime? To { get; init; }
+}
+
+/// <summary>One message this campaign has sent - the per-send detail behind
+/// CampaignAudienceMemberDto's roster.</summary>
+public record CampaignMessageHistoryEntryDto(
+    Guid MessageId,
+    Guid CustomerId,
+    string PhoneNumberE164,
+    string? FirstName,
+    string? LastName,
+    int? StepNumber,
+    string? TemplateName,
+    string? Text,
+    string Status,
+    string? FailureReason,
+    DateTime? SentAt,
+    DateTime? DeliveredAt,
+    DateTime? ReadAt,
+    DateTime CreatedAt);

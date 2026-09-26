@@ -185,6 +185,30 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
+    public async Task<CampaignMessageRetryResultDto> RetryMessageAsync(Guid campaignId, Guid messageId, CancellationToken cancellationToken = default)
+    {
+        var message = await _context.Messages.FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Message), messageId);
+
+        var belongsToCampaign = message.CampaignCustomerId is { } campaignCustomerId &&
+            await _context.CampaignCustomers.AnyAsync(cc => cc.Id == campaignCustomerId && cc.CampaignId == campaignId, cancellationToken);
+        if (!belongsToCampaign)
+            throw new NotFoundException(nameof(Message), messageId);
+
+        if (message.Status != MessageStatus.Failed)
+            throw new ConflictException($"Message is {message.Status}, not Failed - nothing to retry.");
+
+        var now = _dateTime.UtcNow;
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
+        // RetryOneAsync re-loads the message by id, but it's the same tracked entity (same
+        // DbContext, same identity map) as the `message` local above, so its mutations are
+        // visible here without a reload.
+        await RetryOneAsync(messageId, now, options, cancellationToken);
+
+        return new CampaignMessageRetryResultDto(message.Status == MessageStatus.Sent, message.Status.ToString(), message.FailureReason);
+    }
+
     /// <summary>Loads one campaign customer fresh and attempts the lowest active step at or after
     /// <paramref name="fromStepNumber"/> - used for both initial sends (fromStepNumber 0) and
     /// follow-ups (fromStepNumber = CurrentStepNumber + 1).</summary>

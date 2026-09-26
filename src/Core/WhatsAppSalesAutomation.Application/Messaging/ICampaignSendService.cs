@@ -23,9 +23,20 @@ public interface ICampaignSendService
     /// carries). <paramref name="campaignId"/> null runs across every eligible message; given, scopes
     /// to messages that belong to that one campaign's customers.</summary>
     Task<SendRunResult> RetryFailedSendsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Manually retries one Failed message belonging to <paramref name="campaignId"/>,
+    /// regardless of how many attempts it already used up - unlike <see cref="RetryFailedSendsAsync"/>,
+    /// this ignores the attempt-budget gate since the caller is asking for this specific message by
+    /// id. Still requires the owning campaign to be Running, same as a scheduled retry. Throws
+    /// <c>NotFoundException</c> if the message doesn't exist or isn't this campaign's, and
+    /// <c>ConflictException</c> if it isn't currently Failed.</summary>
+    Task<CampaignMessageRetryResultDto> RetryMessageAsync(Guid campaignId, Guid messageId, CancellationToken cancellationToken = default);
 }
 
 public record SendRunResult(int Considered, int Sent, int Failed, int Skipped)
 {
     public static readonly SendRunResult Empty = new(0, 0, 0, 0);
 }
+
+/// <summary>The outcome of one manual RetryMessageAsync call.</summary>
+public record CampaignMessageRetryResultDto(bool Sent, string Status, string? FailureReason);

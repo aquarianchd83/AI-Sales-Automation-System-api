@@ -466,6 +466,71 @@ public class CampaignService : ICampaignService
         return new PagedResult<CampaignAudienceMemberDto>(items, totalCount, request.Page, request.PageSize);
     }
 
+    public async Task<PagedResult<CampaignMessageHistoryEntryDto>> GetHistoryAsync(Guid campaignId, CampaignHistoryQuery query, CancellationToken cancellationToken = default)
+    {
+        await LoadCampaignAsync(campaignId, cancellationToken); // throws NotFoundException if missing
+
+        var campaignCustomerIds = _context.CampaignCustomers.Where(cc => cc.CampaignId == campaignId).Select(cc => cc.Id);
+
+        var messages =
+            from m in _context.Messages
+            join c in _context.Customers on m.CustomerId equals c.Id
+            where m.CampaignCustomerId != null && campaignCustomerIds.Contains(m.CampaignCustomerId.Value)
+            select new { m, c };
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var search = query.Search.Trim();
+            messages = messages.Where(x =>
+                x.c.PhoneNumberE164.Contains(search) ||
+                (x.c.FirstName != null && x.c.FirstName.Contains(search)) ||
+                (x.c.LastName != null && x.c.LastName.Contains(search)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Status) && Enum.TryParse<MessageStatus>(query.Status, ignoreCase: true, out var status))
+            messages = messages.Where(x => x.m.Status == status);
+
+        if (query.StepNumber is { } stepNumber)
+            messages = messages.Where(x => x.m.CampaignStepNumber == stepNumber);
+
+        if (!string.IsNullOrWhiteSpace(query.TemplateName))
+            messages = messages.Where(x => x.m.TemplateName == query.TemplateName);
+
+        // Calendar-day bounds, not literal timestamps - From/To arrive as "YYYY-MM-DD" with no
+        // time-of-day, and Message.CreatedAt (unlike CampaignCustomer's date-only equivalents
+        // elsewhere) carries one, so an exact "<= to" would silently drop everything sent after
+        // midnight on the end date.
+        if (query.From is { } from)
+            messages = messages.Where(x => x.m.CreatedAt >= from.Date);
+        if (query.To is { } to)
+            messages = messages.Where(x => x.m.CreatedAt < to.Date.AddDays(1));
+
+        var totalCount = await messages.CountAsync(cancellationToken);
+
+        var items = await messages
+            .OrderByDescending(x => x.m.CreatedAt)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(x => new CampaignMessageHistoryEntryDto(
+                x.m.Id,
+                x.c.Id,
+                x.c.PhoneNumberE164,
+                x.c.FirstName,
+                x.c.LastName,
+                x.m.CampaignStepNumber,
+                x.m.TemplateName,
+                x.m.Text,
+                x.m.Status.ToString(),
+                x.m.FailureReason,
+                x.m.SentAt,
+                x.m.DeliveredAt,
+                x.m.ReadAt,
+                x.m.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<CampaignMessageHistoryEntryDto>(items, totalCount, query.Page, query.PageSize);
+    }
+
     private async Task ValidateSendableAsync(Campaign campaign, CancellationToken cancellationToken)
     {
         var initial = campaign.Steps.FirstOrDefault(s => s.StepNumber == 0 && s.IsActive);
