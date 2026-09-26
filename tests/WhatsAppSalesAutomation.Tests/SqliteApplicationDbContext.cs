@@ -18,6 +18,9 @@ public sealed class SqliteApplicationDbContext : ApplicationDbContext
     /// tenant-owned row with no tenant gets the current one.</summary>
     public Guid? StampTenantId { get; set; }
 
+    /// <summary>Runs before every save - lets a test fail a specific write, or change the world mid-run.</summary>
+    public Action<SqliteApplicationDbContext>? BeforeSave { get; set; }
+
     public SqliteApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options, ITenantContext tenantContext, ICurrentUserService currentUser)
         : base(options, tenantContext, currentUser)
@@ -33,6 +36,7 @@ public sealed class SqliteApplicationDbContext : ApplicationDbContext
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         Stamp();
+        BeforeSave?.Invoke(this);
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 

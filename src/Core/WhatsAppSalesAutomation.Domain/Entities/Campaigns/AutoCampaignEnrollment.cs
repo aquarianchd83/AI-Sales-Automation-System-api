@@ -4,6 +4,9 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 
 /// <summary>
+/// LEGACY - no longer written. Replaced by LeadDiscoveryExecution and its per-step history; kept so the
+/// enrollments recorded before that change stay readable through GET lead-discovery/auto-campaign-history.
+///
 /// One outcome of running a newly discovered customer through auto-campaign enrollment - the audit
 /// record behind LeadDiscoveryProfile.AutoCampaignEnabled, and the idempotency guard that keeps a
 /// repeated lead-discovery run from enrolling the same customer into the same source campaign twice.
@@ -11,7 +14,7 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 /// unique filtered index in AutoCampaignEnrollmentConfiguration.
 ///
 /// Also doubles as the "today's execution campaign for this source campaign" lookup:
-/// AutoCampaignEnrollmentService reuses the newest Started row for (TenantId, SourceCampaignId,
+/// The former AutoCampaignEnrollmentService reused the newest Started row for (TenantId, SourceCampaignId,
 /// ExecutionDateLocal) instead of cloning a fresh execution campaign per discovered customer, so every
 /// customer discovered the same day shares one execution campaign.
 /// </summary>

@@ -245,9 +245,8 @@ public class CampaignSendService : ICampaignSendService
         // A customer who has never decided (PendingOptIn) is left exactly where cc already is -
         // Pending/AwaitingResponse - rather than terminally OptedOut: they may still opt in, at which
         // point this same step becomes sendable on a later tick. Previously unreachable, since
-        // CampaignService.SetAudienceAsync only ever attached OptedIn customers; now reachable because
-        // AutoCampaignEnrollmentService attaches a discovered customer the moment they're found, before
-        // anyone has recorded their consent.
+        // CampaignService.SetAudienceAsync only ever attached OptedIn customers; reachable when a customer
+        // mapped to a campaign by lead discovery is later set back to PendingOptIn by hand.
         if (customer.OptInStatus == OptInStatus.PendingOptIn)
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
 

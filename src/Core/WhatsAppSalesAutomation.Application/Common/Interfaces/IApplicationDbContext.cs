@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
@@ -103,6 +104,16 @@ public interface IApplicationDbContext
 
     DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments { get; }
 
+    DbSet<LeadDiscoveryExecution> LeadDiscoveryExecutions { get; }
+
+    DbSet<LeadDiscoveryExecutionCustomer> LeadDiscoveryExecutionCustomers { get; }
+
+    DbSet<LeadDiscoveryExecutionTemplate> LeadDiscoveryExecutionTemplates { get; }
+
+    DbSet<LeadDiscoveryLockTransition> LeadDiscoveryLockTransitions { get; }
+
+    DbSet<LeadDiscoveryGeneratedCampaign> LeadDiscoveryGeneratedCampaigns { get; }
+
     DbSet<Plan> Plans { get; }
 
     DbSet<Subscription> Subscriptions { get; }
@@ -140,6 +151,10 @@ public interface IApplicationDbContext
     DbSet<FaqEntry> FaqEntries { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Starts an explicit database transaction, for work that must commit or roll back as one unit
+    /// independently of what came before it - e.g. one discovered customer in a lead discovery execution.</summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Drops every tracked entity - used to retry a quota operation after a concurrency
     /// conflict, when what was read is stale.</summary>

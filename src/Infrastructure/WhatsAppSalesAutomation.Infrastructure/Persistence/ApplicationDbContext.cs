@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Common;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
@@ -106,6 +107,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments => Set<AutoCampaignEnrollment>();
 
+    public DbSet<LeadDiscoveryExecution> LeadDiscoveryExecutions => Set<LeadDiscoveryExecution>();
+
+    public DbSet<LeadDiscoveryExecutionCustomer> LeadDiscoveryExecutionCustomers => Set<LeadDiscoveryExecutionCustomer>();
+
+    public DbSet<LeadDiscoveryExecutionTemplate> LeadDiscoveryExecutionTemplates => Set<LeadDiscoveryExecutionTemplate>();
+
+    public DbSet<LeadDiscoveryLockTransition> LeadDiscoveryLockTransitions => Set<LeadDiscoveryLockTransition>();
+
+    public DbSet<LeadDiscoveryGeneratedCampaign> LeadDiscoveryGeneratedCampaigns => Set<LeadDiscoveryGeneratedCampaign>();
+
+    // Deliberately not on IApplicationDbContext and not ITenantOwned - reached only through
+    // SqlLeadDiscoveryLockStore, which matches on the full lock key and token itself.
+    public DbSet<LeadDiscoveryLock> LeadDiscoveryLocks => Set<LeadDiscoveryLock>();
+
     public DbSet<Plan> Plans => Set<Plan>();
 
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
@@ -131,6 +146,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TenantNotification> TenantNotifications => Set<TenantNotification>();
 
     public void ResetChangeTracker() => ChangeTracker.Clear();
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        Database.BeginTransactionAsync(cancellationToken);
 
     public DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries => Set<PlatformAuditLogEntry>();
 
