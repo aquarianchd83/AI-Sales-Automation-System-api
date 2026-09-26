@@ -37,6 +37,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly IPlanLimitsService _planLimits;
     private readonly IQuotaGate _quota;
     private readonly IDateTimeProvider _dateTime;
+    private readonly IAutoCampaignEnrollmentService _autoCampaignEnrollment;
     private readonly LeadDiscoveryOptions _options;
     private readonly LeadDiscoveryPricingOptions _pricing;
 
@@ -46,6 +47,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         IPlanLimitsService planLimits,
         IQuotaGate quota,
         IDateTimeProvider dateTime,
+        IAutoCampaignEnrollmentService autoCampaignEnrollment,
         IOptions<LeadDiscoveryOptions> options,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing)
     {
@@ -53,6 +55,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _agent = agent;
         _planLimits = planLimits;
         _quota = quota;
+        _autoCampaignEnrollment = autoCampaignEnrollment;
         _dateTime = dateTime;
         _options = options.Value;
         _pricing = pricing.Value;
@@ -159,12 +162,14 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             if (toSave.Count == 0)
                 break;
 
+            var savedThisRound = new List<DiscoveredLead>();
             foreach (var lead in toSave)
             {
                 var discovered = ToEntity(tenantId, lead);
                 discovered.CustomerId = AddCustomer(tenantId, lead);
                 _context.DiscoveredLeads.Add(discovered);
                 knownBusinesses.Add(lead.City is null ? lead.BusinessName : $"{lead.BusinessName}, {lead.City}");
+                savedThisRound.Add(discovered);
 
                 if (discovered.CustomerId is not null)
                     stats.CustomersAdded++;
@@ -172,6 +177,26 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
             await _context.SaveChangesAsync(cancellationToken);
             stats.Saved += toSave.Count;
+
+            // One customer's campaign problem must never fail the discovery run it came from - each
+            // gets its own try/catch, and AutoCampaignEnrollmentService already catches its own errors
+            // internally (this is a last-resort guard on top, e.g. against the audit write itself
+            // failing).
+            foreach (var discovered in savedThisRound)
+            {
+                if (discovered.CustomerId is not { } customerId)
+                    continue; // No phone -> no Customer -> nothing to enroll into a campaign.
+
+                try
+                {
+                    var outcome = await _autoCampaignEnrollment.EnrollAsync(tenantId, discovered, customerId, cancellationToken);
+                    stats.RecordCampaignOutcome(outcome);
+                }
+                catch (Exception)
+                {
+                    stats.RecordCampaignOutcome(AutoCampaignEnrollmentStatus.Failed);
+                }
+            }
         }
 
         await RecordRunAsync(tenantId, model, stats, cancellationToken);
@@ -339,9 +364,23 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         public bool QuotaExhausted { get; set; }
         public LeadDiscoveryUsage Usage { get; set; } = LeadDiscoveryUsage.None;
 
+        public int CampaignsStarted { get; private set; }
+        public int CampaignsSkipped { get; private set; }
+        public int CampaignsFailed { get; private set; }
+
         public int Rejected => _rejections.Values.Sum();
 
         public void Reject(string reason) => _rejections[reason] = _rejections.GetValueOrDefault(reason) + 1;
+
+        public void RecordCampaignOutcome(AutoCampaignEnrollmentStatus outcome)
+        {
+            switch (outcome)
+            {
+                case AutoCampaignEnrollmentStatus.Started: CampaignsStarted++; break;
+                case AutoCampaignEnrollmentStatus.Skipped: CampaignsSkipped++; break;
+                case AutoCampaignEnrollmentStatus.Failed: CampaignsFailed++; break;
+            }
+        }
 
         /// <summary>Counts first, then what the run consumed - enough to price a run from the job list without
         /// opening the Anthropic Console. A simulated run reports zeros for the token counts.</summary>
@@ -352,6 +391,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                           $"inputTokens={Usage.InputTokens} outputTokens={Usage.OutputTokens} " +
                           $"cacheReadTokens={Usage.CacheReadInputTokens} cacheWriteTokens={Usage.CacheCreationInputTokens} " +
                           $"webSearches={Usage.WebSearches} webFetches={Usage.WebFetches}";
+
+            // Only reported when at least one customer went through enrollment - most runs have
+            // AutoCampaignEnabled off, and an all-zero "campaigns=..." suffix on every one of those
+            // would just be noise on the job list.
+            if (CampaignsStarted + CampaignsSkipped + CampaignsFailed > 0)
+                summary += $" campaignsStarted={CampaignsStarted} campaignsSkipped={CampaignsSkipped} campaignsFailed={CampaignsFailed}";
 
             if (QuotaExhausted)
                 summary += " stoppedEarly=quotaExhausted";

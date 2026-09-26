@@ -32,6 +32,14 @@ public class SaveLeadDiscoveryProfileRequestValidator : AbstractValidator<SaveLe
             .Must(c => c is null || c.Count <= LeadDiscoveryLimits.MaxAdditionalCriteria)
             .WithMessage($"Add at most {LeadDiscoveryLimits.MaxAdditionalCriteria} additional criteria.");
         RuleForEach(x => x.AdditionalCriteria).MaximumLength(LeadDiscoveryLimits.Criterion);
+
+        // Existence/active-status of the campaign itself is checked in LeadDiscoveryService.SaveProfileAsync
+        // (needs a DB round trip, same as the BatchSize-vs-plan-limit check there) - this only guards the
+        // syntactic "enabled with nothing selected" case the UI itself should already be preventing.
+        RuleFor(x => x.SourceCampaignId)
+            .NotNull()
+            .When(x => x.AutoCampaignEnabled)
+            .WithMessage("Select a source campaign to enable auto campaign.");
     }
 
     private static bool HaveAValue(IReadOnlyList<string>? values) =>

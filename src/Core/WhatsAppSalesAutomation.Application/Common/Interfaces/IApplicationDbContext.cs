@@ -101,6 +101,8 @@ public interface IApplicationDbContext
 
     DbSet<LeadDiscoveryRun> LeadDiscoveryRuns { get; }
 
+    DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments { get; }
+
     DbSet<Plan> Plans { get; }
 
     DbSet<Subscription> Subscriptions { get; }

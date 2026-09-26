@@ -128,6 +128,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantChargesService, TenantChargesService>();
         services.AddScoped<ILeadDiscoveryService, LeadDiscoveryService>();
         services.AddScoped<ILeadDiscoveryRunService, LeadDiscoveryRunService>();
+        services.AddScoped<IAutoCampaignEnrollmentService, AutoCampaignEnrollmentService>();
 
         // Platform Admin Console (PlatformSuperAdmin-only cross-tenant screens).
         services.AddScoped<IPlatformAuditService, PlatformAuditService>();
