@@ -75,7 +75,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     // ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task New_customers_are_created_once_with_whatsapp_opted_in()
+    public async Task New_customers_are_created_once_still_pending_opt_in()
     {
         _agent.Rounds.Add(Candidates("A", "B"));
 
@@ -85,9 +85,13 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(new[] { "A Contact", "B Contact" }, customers.Select(c => c.FirstName));
         Assert.All(customers, c =>
         {
-            Assert.Equal(OptInStatus.OptedIn, c.OptInStatus);
-            Assert.NotNull(c.OptInTimestamp);
-            Assert.Equal("Lead discovery", c.OptInSource);
+            // Being discovered on the web is not consent to be messaged - see
+            // LeadDiscoveryRunService.ProcessCustomerAsync's remarks. Campaigns only ever send to
+            // OptedIn customers, so nothing discovered here can be messaged until a person actually
+            // opts in.
+            Assert.Equal(OptInStatus.PendingOptIn, c.OptInStatus);
+            Assert.Null(c.OptInTimestamp);
+            Assert.Null(c.OptInSource);
             Assert.Equal(_tenant, c.TenantId);
         });
 
@@ -95,6 +99,23 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
         Assert.Equal(2, execution.CustomersCreated);
         Assert.Equal(new DateTime(2026, 9, 10), execution.ProcessingDate);
+    }
+
+    [Fact]
+    public async Task Quota_exhausted_before_any_candidate_is_still_recorded_in_history()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service(quotaAvailable: 0).RunForTenantAsync(_tenant);
+
+        Assert.Equal(0, await _db.Customers.CountAsync());
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.True(execution.QuotaExhausted);
+        Assert.Equal(0, execution.CustomersCreated);
+        Assert.Equal(new DateTime(2026, 9, 10), execution.ProcessingDate);
+        Assert.Contains("no lead-candidate quota left", execution.Summary);
     }
 
     [Fact]
@@ -636,7 +657,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _db.SaveChanges();
     }
 
-    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null)
+    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new()
         {
@@ -645,7 +666,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         });
         var quota = Stub<IQuotaGate>.Create(new()
         {
-            ["GetAvailableAsync"] = _ => Task.FromResult(1000m),
+            ["GetAvailableAsync"] = _ => Task.FromResult(quotaAvailable),
             ["ConsumeLeadCandidatesAsync"] = args => Task.FromResult((decimal)args![1]!)
         });
         var campaigns = Stub<ICampaignService>.Create(new()

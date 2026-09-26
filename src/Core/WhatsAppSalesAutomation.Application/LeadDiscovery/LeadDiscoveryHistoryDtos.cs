@@ -22,6 +22,7 @@ public record LeadDiscoveryExecutionSummaryDto(
     DateTime StartedAtUtc,
     DateTime? EndedAtUtc,
     string LockStatus,
+    bool QuotaExhausted,
     int CustomersDiscovered,
     int CustomersCreated,
     int CustomersDuplicate,

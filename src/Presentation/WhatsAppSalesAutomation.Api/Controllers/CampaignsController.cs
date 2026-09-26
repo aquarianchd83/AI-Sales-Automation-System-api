@@ -89,6 +89,17 @@ public class CampaignsController : ControllerBase
     public async Task<ActionResult<CampaignProgressDto>> GetProgress(Guid id, CancellationToken cancellationToken)
         => Ok(await _campaignService.GetProgressAsync(id, cancellationToken));
 
+    /// <summary>Every message this campaign has sent, newest first - the per-send detail behind
+    /// GetAudience's roster.</summary>
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<PagedResult<CampaignMessageHistoryEntryDto>>> GetHistory(Guid id, [FromQuery] CampaignHistoryQuery query, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetHistoryAsync(id, query, cancellationToken));
+
+    /// <summary>Manually retries one Failed message, regardless of how many times it already failed.</summary>
+    [HttpPost("{id:guid}/messages/{messageId:guid}/retry")]
+    public async Task<ActionResult<CampaignMessageRetryResultDto>> RetryMessage(Guid id, Guid messageId, CancellationToken cancellationToken)
+        => Ok(await _sendService.RetryMessageAsync(id, messageId, cancellationToken));
+
     /// <summary>
     /// Runs the send pipeline immediately, scoped to this one campaign only - unlike
     /// <see cref="CampaignOpsController.RunJobs"/>, which runs across every eligible campaign at
