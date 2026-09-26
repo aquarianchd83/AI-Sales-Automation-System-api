@@ -138,24 +138,18 @@ public class CustomerService : ICustomerService
     }
 
     /// <summary>
-    /// Guards the unique index on PhoneNumberE164 with a readable 409 instead of a raw
-    /// DbUpdateException. IgnoreQueryFilters matters: a soft-deleted customer still occupies the
-    /// number as far as the index is concerned, even though normal queries cannot see it.
+    /// Guards the unique index on (TenantId, PhoneNumberE164) with a readable 409 instead of a raw
+    /// DbUpdateException. The index is filtered to non-deleted rows (see CustomerConfiguration), so
+    /// this deliberately uses the default query filter too - a soft-deleted customer's number is
+    /// free for reuse, same as the database will actually allow.
     /// </summary>
     private async Task EnsurePhoneNumberIsFreeAsync(string phoneNumber, Guid? excludingCustomerId, CancellationToken cancellationToken)
     {
         var clash = await _context.Customers
-            .IgnoreQueryFilters()
-            .Where(c => c.PhoneNumberE164 == phoneNumber && (excludingCustomerId == null || c.Id != excludingCustomerId))
-            .Select(c => new { c.IsDeleted })
-            .FirstOrDefaultAsync(cancellationToken);
+            .AnyAsync(c => c.PhoneNumberE164 == phoneNumber && (excludingCustomerId == null || c.Id != excludingCustomerId), cancellationToken);
 
-        if (clash is null)
-            return;
-
-        throw new ConflictException(clash.IsDeleted
-            ? $"Phone number '{phoneNumber}' belongs to a deleted customer. Restore that record instead of creating a duplicate."
-            : $"A customer with phone number '{phoneNumber}' already exists.");
+        if (clash)
+            throw new ConflictException($"A customer with phone number '{phoneNumber}' already exists.");
     }
 
     public async Task<BulkDeleteCustomersResultDto> BulkDeleteAsync(BulkDeleteCustomersRequest request, CancellationToken cancellationToken = default)

@@ -13,8 +13,10 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.Property(c => c.PhoneNumberE164).IsRequired().HasMaxLength(20);
         // Tenant-scoped, not globally unique: the same phone number can message two different
-        // tenants' WhatsApp Business Accounts.
-        builder.HasIndex(c => new { c.TenantId, c.PhoneNumberE164 }).IsUnique();
+        // tenants' WhatsApp Business Accounts. Filtered to non-deleted rows so a soft-deleted
+        // customer's number frees up for reuse - otherwise CustomerService.DeleteAsync's soft
+        // delete would leave that number permanently unusable by anyone (there is no restore).
+        builder.HasIndex(c => new { c.TenantId, c.PhoneNumberE164 }).IsUnique().HasFilter("[IsDeleted] = 0");
 
         builder.Property(c => c.FirstName).HasMaxLength(100);
         builder.Property(c => c.LastName).HasMaxLength(100);
