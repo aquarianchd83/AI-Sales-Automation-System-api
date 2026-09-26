@@ -86,6 +86,12 @@ public class LeadDiscoveryExecution : BaseEntity, ITenantOwned
 
     // ---- Customer processing ----
 
+    /// <summary>The tenant's lead-candidate quota ran out mid-run, so discovery stopped before reaching
+    /// BatchSize - fewer customers than requested is expected, not a failure. Surfaced in Lead
+    /// Discovery History so the tenant sees why, on top of the TenantNotification the quota-alert job
+    /// raises separately.</summary>
+    public bool QuotaExhausted { get; set; }
+
     public int CustomersDiscovered { get; set; }
 
     public int CustomersCreated { get; set; }

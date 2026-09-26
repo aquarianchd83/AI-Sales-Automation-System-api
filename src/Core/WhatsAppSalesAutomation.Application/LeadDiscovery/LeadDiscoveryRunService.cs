@@ -157,11 +157,44 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             return "Skipped: the tenant's plan allows no discovered leads per run.";
 
         // Prepaid: every candidate the agent evaluates is charged - fresh, duplicate or rejected - because the
-        // provider bills the research either way. No candidates left means no run, and no agent call.
+        // provider bills the research either way. No candidates left means no run, and no agent call - but it
+        // is still recorded (see RecordQuotaExhaustedSkipAsync), not silently dropped, so the tenant sees it
+        // in Lead Discovery History the same way a run that ran out of quota partway through does.
         if (await _quota.GetAvailableAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
-            return "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.";
+            return await RecordQuotaExhaustedSkipAsync(profile, cancellationToken);
 
         return await ExecuteAsync(profile, null, LeadDiscoveryTriggers.Scheduled, batchSize, cancellationToken);
+    }
+
+    /// <summary>No candidates can be evaluated at all, so there is nothing to lock and nothing to process -
+    /// this skips ExecuteAsync's lock/lease machinery entirely and records the outcome directly. Mirrors how
+    /// a mid-run exhaustion (DiscoverCustomersAsync, via FinalizeAsync) ends up Completed with QuotaExhausted
+    /// set, rather than introducing a separate "never started" shape for the same underlying condition.</summary>
+    private async Task<string> RecordQuotaExhaustedSkipAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
+    {
+        var now = _dateTime.UtcNow;
+        const string summary = "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.";
+
+        var execution = new LeadDiscoveryExecution
+        {
+            TenantId = profile.TenantId,
+            LeadDiscoveryProfileId = profile.Id,
+            ProfileName = Truncate(profile.TargetBusinessType, 200) ?? string.Empty,
+            ProcessingDate = (await _tenantTimeZone.GetLocalNowAsync(cancellationToken)).Date,
+            Trigger = LeadDiscoveryTriggers.Scheduled,
+            StartedAtUtc = now,
+            EndedAtUtc = now,
+            Status = LeadDiscoveryExecutionStatus.Completed,
+            QuotaExhausted = true,
+            LockKey = LeadDiscoveryLockClaim.KeyFor(profile.TenantId, profile.Id),
+            Summary = summary
+        };
+        execution.RootExecutionId = execution.Id;
+
+        _context.LeadDiscoveryExecutions.Add(execution);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return summary;
     }
 
     private Task<List<Guid>> FindAutomaticRetryTargetsAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken) =>
@@ -609,11 +642,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     FirstName = Truncate(lead.ContactPerson ?? lead.BusinessName, CustomerNameLength),
                     Email = Truncate(lead.Email, LeadDiscoveryLimits.Email),
                     Source = CustomerSource,
-                    // WhatsApp message consent and status for a newly discovered customer, with the consent
-                    // evidence fields saying where it came from.
-                    OptInStatus = OptInStatus.OptedIn,
-                    OptInTimestamp = now,
-                    OptInSource = CustomerSource
+                    // OptInStatus left at its PendingOptIn default, with no consent evidence written -
+                    // being discovered on the web is not consent to be messaged. Campaigns only ever
+                    // send to OptedIn customers (see CampaignSendService), so nothing discovered here
+                    // can be messaged until a person actually opts in (e.g. messages the business first).
                 };
                 _context.Customers.Add(customer);
                 discovered.CustomerId = customer.Id;
@@ -1180,6 +1212,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         }
 
         execution.EndedAtUtc = _dateTime.UtcNow;
+        execution.QuotaExhausted = run.Stats.QuotaExhausted;
         execution.Summary = Truncate(BuildSummary(run), 2000);
 
         // The lock fields belong to the lock store; bring them up to date before writing the whole row, so the
@@ -1403,8 +1436,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             .Select(l => new { l.PhoneKey, l.WebsiteKey, l.NameKey })
             .ToListAsync(cancellationToken);
 
-        // IgnoreQueryFilters so soft-deleted customers still count; the tenant is re-applied by hand.
-        var customerPhones = await _context.Customers.IgnoreQueryFilters()
+        // Soft-deleted customers do NOT count as taken (default query filter excludes them) - their
+        // phone number is free for reuse (see CustomerConfiguration's filtered unique index), so a
+        // rediscovered lead whose only "match" is a deleted CRM row should get a fresh Customer, not
+        // be treated as already known.
+        var customerPhones = await _context.Customers
             .Where(c => c.TenantId == tenantId && phoneNumbers.Contains(c.PhoneNumberE164))
             .Select(c => c.PhoneNumberE164)
             .ToListAsync(cancellationToken);

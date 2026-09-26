@@ -149,6 +149,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         AsUtc(e.StartedAtUtc),
         AsUtc(e.EndedAtUtc),
         e.LockStatus.ToString(),
+        e.QuotaExhausted,
         e.CustomersDiscovered,
         e.CustomersCreated,
         e.CustomersDuplicate,
