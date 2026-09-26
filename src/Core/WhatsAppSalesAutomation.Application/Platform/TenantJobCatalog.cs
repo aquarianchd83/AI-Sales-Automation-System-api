@@ -75,6 +75,20 @@ public static class TenantJobCatalog
             "0 2 * * *")
     };
 
+    /// <summary>Job types a tenant's own Admin may view, reschedule and trigger via the tenant-facing
+    /// Jobs screen (<c>TenantJobsController</c>) - campaign sending and lead discovery, the jobs whose
+    /// output the tenant directly owns the consequences of. WhatsApp template sync and token refresh
+    /// stay operator-only via <c>PlatformJobsController</c>: they are integration plumbing where a wrong
+    /// schedule can silently break the tenant's own WhatsApp connection, not something to hand a tenant
+    /// Admin a footgun for.</summary>
+    public static readonly IReadOnlySet<string> SelfServiceKeys = new HashSet<string>
+    {
+        TenantJobTypes.CampaignInitialSends,
+        TenantJobTypes.CampaignFollowUps,
+        TenantJobTypes.CampaignSendRetries,
+        TenantJobTypes.LeadDiscovery,
+    };
+
     public static TenantJobDefinition? Find(string jobType) =>
         All.FirstOrDefault(j => j.Key == jobType);
 
