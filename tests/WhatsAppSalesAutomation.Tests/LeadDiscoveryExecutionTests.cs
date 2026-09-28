@@ -282,7 +282,9 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
         Assert.Equal($"{ReferredCampaignName} - 2026-09-10", generated.Name);
         Assert.Equal(generated.Id, execution.GeneratedCampaignId);
-        Assert.Equal(new DateTime(2026, 9, 10, 10, 30, 0), generated.ScheduledStartAt);
+        // Immediate is the profile's default start mode - the referred campaign's own schedule (set in
+        // SeedProfileAndCampaign) is never consulted.
+        Assert.Null(generated.ScheduledStartAt);
 
         // Templates: exactly the referred campaign's steps, in order, with their configuration.
         var steps = await _db.CampaignSteps.Where(s => s.CampaignId == generated.Id).OrderBy(s => s.StepNumber).ToListAsync();
@@ -297,6 +299,19 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(created.OrderBy(x => x), mapped.OrderBy(x => x));
 
         Assert.Equal(new[] { generated.Id }, _startedCampaigns);
+    }
+
+    [Fact]
+    public async Task Auto_campaign_with_next_day_start_is_scheduled_the_day_after_processing_date()
+    {
+        EnableAutoCampaign();
+        EnableNextDayCampaignStart(new TimeSpan(9, 30, 0));
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        Assert.Equal(new DateTime(2026, 9, 11, 9, 30, 0), generated.ScheduledStartAt);
     }
 
     [Fact]
@@ -747,6 +762,14 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     {
         var profile = _db.LeadDiscoveryProfiles.Single();
         profile.AutoConsentDiscoveredCustomers = true;
+        _db.SaveChanges();
+    }
+
+    private void EnableNextDayCampaignStart(TimeSpan time)
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.AutoCampaignStartMode = LeadDiscoveryCampaignStartMode.NextDayWithTime;
+        profile.AutoCampaignStartTime = time;
         _db.SaveChanges();
     }
 

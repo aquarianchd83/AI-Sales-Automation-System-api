@@ -45,6 +45,10 @@ public static class LeadDiscoveryLimits
 /// <param name="AutoConsentDiscoveredCustomers">When true, a customer this job creates is written
 /// OptedIn instead of PendingOptIn, with no consent evidence beyond having been found on the web. False
 /// by default - see LeadDiscoveryProfile.AutoConsentDiscoveredCustomers.</param>
+/// <param name="AutoCampaignStartMode">"Immediate" or "NextDayWithTime" - see
+/// LeadDiscoveryProfile.AutoCampaignStartMode.</param>
+/// <param name="AutoCampaignStartTime">Required, and only meaningful, when
+/// <paramref name="AutoCampaignStartMode"/> is "NextDayWithTime" - the tenant's own local time of day.</param>
 public record LeadDiscoveryProfileDto(
     bool IsEnabled,
     string TargetBusinessType,
@@ -63,12 +67,16 @@ public record LeadDiscoveryProfileDto(
     string? SourceCampaignName,
     string? SourceCampaignStatus,
     bool AutoConsentDiscoveredCustomers,
+    string AutoCampaignStartMode,
+    TimeSpan? AutoCampaignStartTime,
     DateTime? UpdatedAt);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
 /// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
 /// existing, non-Stopped campaign whenever <paramref name="AutoCampaignEnabled"/> is true - see
-/// SaveLeadDiscoveryProfileRequestValidator/LeadDiscoveryService.SaveProfileAsync.</summary>
+/// SaveLeadDiscoveryProfileRequestValidator/LeadDiscoveryService.SaveProfileAsync.
+/// <paramref name="AutoCampaignStartMode"/> is "Immediate" or "NextDayWithTime";
+/// <paramref name="AutoCampaignStartTime"/> is required whenever it is "NextDayWithTime".</summary>
 public record SaveLeadDiscoveryProfileRequest(
     bool IsEnabled,
     string TargetBusinessType,
@@ -83,7 +91,9 @@ public record SaveLeadDiscoveryProfileRequest(
     IReadOnlyList<string>? AdditionalCriteria = null,
     bool AutoCampaignEnabled = false,
     Guid? SourceCampaignId = null,
-    bool AutoConsentDiscoveredCustomers = false);
+    bool AutoConsentDiscoveredCustomers = false,
+    string AutoCampaignStartMode = "Immediate",
+    TimeSpan? AutoCampaignStartTime = null);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's

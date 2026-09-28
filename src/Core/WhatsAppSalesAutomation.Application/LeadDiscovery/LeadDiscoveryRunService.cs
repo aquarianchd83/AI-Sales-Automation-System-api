@@ -814,9 +814,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             Name = BuildCampaignName(source.Name, execution.ProcessingDate),
             Description = source.Description,
             Status = CampaignStatus.Draft,
-            // The referred campaign's sending time, on the processing date.
-            ScheduledStartAt = source.ScheduledStartAt is { } sourceSchedule
-                ? execution.ProcessingDate.Date + sourceSchedule.TimeOfDay
+            // The profile's own choice, not the referred campaign's schedule - see
+            // LeadDiscoveryProfile.AutoCampaignStartMode.
+            ScheduledStartAt = run.Profile.AutoCampaignStartMode == LeadDiscoveryCampaignStartMode.NextDayWithTime
+                && run.Profile.AutoCampaignStartTime is { } startTime
+                ? execution.ProcessingDate.Date.AddDays(1) + startTime
                 : null,
             CreatedBy = source.CreatedBy,
             TargetAudienceFilterJson = JsonSerializer.Serialize(new

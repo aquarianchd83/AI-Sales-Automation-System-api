@@ -18,6 +18,7 @@ public class LeadDiscoveryProfileConfiguration : IEntityTypeConfiguration<LeadDi
         builder.HasIndex(p => p.TenantId).IsUnique();
 
         builder.Property(p => p.TargetBusinessType).IsRequired().HasMaxLength(LeadDiscoveryLimits.TargetBusinessType);
+        builder.Property(p => p.AutoCampaignStartMode).HasConversion<string>().HasMaxLength(30);
 
         // Short lists only ever read and written whole - JSON columns, as Tenant.DomainKeywords.
         builder.Property(p => p.Keywords).AsJsonStringList();

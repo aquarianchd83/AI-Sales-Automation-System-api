@@ -103,6 +103,9 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AutoCampaignEnabled = request.AutoCampaignEnabled;
         profile.SourceCampaignId = request.SourceCampaignId;
         profile.AutoConsentDiscoveredCustomers = request.AutoConsentDiscoveredCustomers;
+        // Already validated as a real enum name by SaveLeadDiscoveryProfileRequestValidator.
+        profile.AutoCampaignStartMode = Enum.Parse<LeadDiscoveryCampaignStartMode>(request.AutoCampaignStartMode, ignoreCase: true);
+        profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -270,7 +273,8 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.IsEnabled, p.TargetBusinessType, p.Keywords, p.Locations, p.BatchSize, planLimit, p.RequiredFields,
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
-        p.AutoConsentDiscoveredCustomers, p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
+        p.AutoConsentDiscoveredCustomers, p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
+        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,
