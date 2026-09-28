@@ -1,7 +1,10 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -15,7 +18,13 @@ public sealed class TenantBillingNoticeTests : IDisposable
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly SqliteApplicationDbContext _db;
     private readonly TenantBillingNoticeService _service;
-    private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme", Status = TenantStatus.Active };
+    private readonly FakeEmail _email = new();
+    private readonly FakePlatformWhatsApp _whatsApp = new();
+    private readonly Tenant _tenant = new()
+    {
+        Name = "Acme", Slug = "acme", Status = TenantStatus.Active,
+        BillingAlertEmail = "billing@acme.test", BillingAlertPhoneE164 = "+919876543210", BillingAlertWhatsAppEnabled = true
+    };
 
     public TenantBillingNoticeTests()
     {
@@ -23,7 +32,9 @@ public sealed class TenantBillingNoticeTests : IDisposable
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new PlatformContext(), new AnonymousUser());
         _db.Database.EnsureCreated();
-        _service = new TenantBillingNoticeService(_db, new TestClock());
+        // UserManager is only reached when a tenant has neither an alert email nor an owner - not exercised here.
+        var notifier = new TenantNotifier(_db, null!, _email, _whatsApp, new FixedOptions<BillingAlertOptions>(new()), NullLogger<TenantNotifier>.Instance);
+        _service = new TenantBillingNoticeService(_db, new TestClock(), notifier);
 
         _db.Tenants.Add(_tenant);
         _db.SaveChanges();
@@ -85,5 +96,46 @@ public sealed class TenantBillingNoticeTests : IDisposable
         await _db.SaveChangesAsync();
 
         await Assert.ThrowsAsync<NotFoundException>(() => _service.DeleteAsync(_tenant.Id, row.Id));
+    }
+
+    [Fact]
+    public async Task SendTestAsync_delivers_through_the_real_path_with_a_test_prefixed_title()
+    {
+        var sent = await _service.SendTestAsync(_tenant.Id, TenantNotificationKind.QuotaExhausted, QuotaType.LeadCandidates);
+
+        Assert.StartsWith("[Test]", sent.Title);
+        Assert.Equal(QuotaType.LeadCandidates, sent.QuotaType);
+        Assert.Equal(DeliveryStatus.Sent, sent.EmailStatus);
+        Assert.Equal(DeliveryStatus.Sent, sent.WhatsAppStatus);
+        Assert.Single(_email.Sent);
+        Assert.Single(_whatsApp.Sent);
+
+        var listed = await _service.ListAsync(_tenant.Id);
+        Assert.Contains(listed, n => n.Id == sent.Id);
+    }
+
+    [Fact]
+    public async Task SendTestAsync_never_dedupes_against_an_earlier_test_or_itself()
+    {
+        var first = await _service.SendTestAsync(_tenant.Id, TenantNotificationKind.QuotaLow20, QuotaType.WhatsAppMessages);
+        var second = await _service.SendTestAsync(_tenant.Id, TenantNotificationKind.QuotaLow20, QuotaType.WhatsAppMessages);
+
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal(2, (await _service.ListAsync(_tenant.Id)).Count);
+    }
+
+    [Fact]
+    public async Task SendTestAsync_requires_a_quota_type_for_a_quota_threshold_kind()
+    {
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(
+            () => _service.SendTestAsync(_tenant.Id, TenantNotificationKind.QuotaExhausted, null));
+    }
+
+    [Fact]
+    public async Task SendTestAsync_ignores_quota_type_for_a_non_quota_kind()
+    {
+        var sent = await _service.SendTestAsync(_tenant.Id, TenantNotificationKind.PlanExpiring1, QuotaType.WhatsAppMessages);
+
+        Assert.Null(sent.QuotaType);
     }
 }
