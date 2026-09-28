@@ -116,6 +116,64 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(0, execution.CustomersCreated);
         Assert.Equal(new DateTime(2026, 9, 10), execution.ProcessingDate);
         Assert.Contains("no lead-candidate quota left", execution.Summary);
+        Assert.Contains("no lead-candidate quota left", execution.ErrorMessage);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task A_profile_without_keywords_is_still_recorded_in_history()
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.Keywords = new List<string>();
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.False(execution.QuotaExhausted);
+        Assert.Contains("at least one keyword", execution.ErrorMessage);
+        Assert.Equal(LeadDiscoveryCampaignStatus.Skipped, execution.CampaignStatus);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task A_run_that_researched_is_linked_to_its_execution_and_shown_on_its_detail()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var run = await _db.LeadDiscoveryRuns.AsNoTracking().SingleAsync();
+        Assert.Equal(execution.Id, run.ExecutionId);
+
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.NotNull(detail.Research);
+        Assert.Equal(execution.Id, detail.Research!.ExecutionId);
+        Assert.Equal("Simulated", detail.Research.Model);
+        Assert.Equal(2, detail.Research.CandidatesConsidered);
+        Assert.Equal(2, detail.Research.LeadsSaved);
+        // A simulated run is free, so its per-lead cost is zero rather than a division by the lead count failing.
+        Assert.Equal(0m, detail.Research.CostPerLeadUsd);
+        Assert.False(string.IsNullOrEmpty(detail.CurrencyCode));
+    }
+
+    [Fact]
+    public async Task A_skipped_run_has_no_research_on_its_detail()
+    {
+        await Service(quotaAvailable: 0).RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        Assert.Null((await history.GetExecutionAsync(execution.Id)).Research);
     }
 
     [Fact]

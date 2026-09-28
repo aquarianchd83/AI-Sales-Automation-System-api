@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -106,6 +107,15 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
                 t.Id, t.FromStatus.ToString(), t.ToStatus.ToString(), t.TransitionAtUtc, t.LockTokenReference, t.OwnerInstanceId, t.Reason, t.Error))
             .ToListAsync(cancellationToken);
 
+        var run = await _context.LeadDiscoveryRuns.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ExecutionId == executionId && r.TenantId == tenantId, cancellationToken);
+
+        var countryCode = await _context.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.CountryCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        var pricing = RegionalPricingCatalog.Resolve(countryCode);
+
         return new LeadDiscoveryExecutionDetailDto(
             ToSummary(execution),
             execution.LockKey,
@@ -118,7 +128,10 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             execution.Summary,
             customers,
             templates,
-            transitions);
+            transitions,
+            run is null ? null : LeadDiscoveryService.ToDto(run, pricing),
+            pricing.CurrencyCode,
+            pricing.CurrencySymbol);
     }
 
     public async Task<LeadDiscoveryRetryQueuedDto> RequestRetryAsync(Guid executionId, CancellationToken cancellationToken = default)

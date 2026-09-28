@@ -15,6 +15,11 @@ public class LeadDiscoveryRun : BaseEntity, ITenantOwned
 {
     public Guid TenantId { get; set; }
 
+    /// <summary>The LeadDiscoveryExecution whose research this was, so Lead Discovery History can show what an
+    /// execution cost. Null for runs recorded before executions were linked that could not be matched to one.
+    /// Never set by a retry - a retry resumes stored candidates and researches nothing.</summary>
+    public Guid? ExecutionId { get; set; }
+
     public DateTime RanAtUtc { get; set; }
 
     /// <summary>The model that did the research, or "Simulated". Kept per run because the platform's model

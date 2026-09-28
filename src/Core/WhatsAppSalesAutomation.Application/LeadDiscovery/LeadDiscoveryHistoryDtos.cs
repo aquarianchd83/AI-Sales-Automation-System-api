@@ -90,6 +90,10 @@ public record LeadDiscoveryLockTransitionDto(
     string? Error);
 
 /// <summary>Everything recorded about one execution.</summary>
+/// <param name="Research">What this execution's AI research used and cost - null when it did no research: a
+/// retry, a skipped or blocked run, a run stopped before its first round, or one recorded before runs were linked
+/// to executions. <see cref="CurrencyCode"/>/<see cref="CurrencySymbol"/> are the tenant's currency, for
+/// Research.EstimatedCostLocal.</param>
 public record LeadDiscoveryExecutionDetailDto(
     LeadDiscoveryExecutionSummaryDto Execution,
     string LockKey,
@@ -102,7 +106,10 @@ public record LeadDiscoveryExecutionDetailDto(
     string? Summary,
     IReadOnlyList<LeadDiscoveryExecutionCustomerDto> Customers,
     IReadOnlyList<LeadDiscoveryExecutionTemplateDto> Templates,
-    IReadOnlyList<LeadDiscoveryLockTransitionDto> LockTransitions);
+    IReadOnlyList<LeadDiscoveryLockTransitionDto> LockTransitions,
+    LeadDiscoveryRunDto? Research,
+    string CurrencyCode,
+    string CurrencySymbol);
 
 /// <summary>A manual retry was queued; it runs as a new execution with a new Execution ID.</summary>
 public record LeadDiscoveryRetryQueuedDto(Guid ExecutionId, string BackgroundJobId);

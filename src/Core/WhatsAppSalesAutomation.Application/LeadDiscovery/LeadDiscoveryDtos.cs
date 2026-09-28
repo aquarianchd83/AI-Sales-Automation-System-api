@@ -82,7 +82,10 @@ public record SaveLeadDiscoveryProfileRequest(
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's
-/// own currency for display, the same treatment PlanDto gives a plan price.</summary>
+/// own currency for display, the same treatment PlanDto gives a plan price. <paramref name="ExecutionId"/> is the
+/// Lead Discovery History execution that ran it - null for an old run that could not be matched to one.
+/// <paramref name="CostPerLeadUsd"/>/<paramref name="CostPerLeadLocal"/> are the run's cost divided by the leads it
+/// saved (as LeadDiscoverySpendPeriodDto.CostPerLeadUsd does for a period) - zero when it saved none.</summary>
 public record LeadDiscoveryRunDto(
     Guid Id,
     DateTime RanAtUtc,
@@ -99,7 +102,10 @@ public record LeadDiscoveryRunDto(
     int WebSearches,
     int WebFetches,
     decimal EstimatedCostUsd,
-    decimal EstimatedCostLocal);
+    decimal EstimatedCostLocal,
+    Guid? ExecutionId,
+    decimal CostPerLeadUsd,
+    decimal CostPerLeadLocal);
 
 /// <param name="CostPerLeadUsd">Zero when the period saved no leads.</param>
 public record LeadDiscoverySpendPeriodDto(

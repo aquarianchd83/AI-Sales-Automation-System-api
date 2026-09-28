@@ -73,8 +73,9 @@ public class LeadDiscoveryRunConfiguration : IEntityTypeConfiguration<LeadDiscov
         // two would round a real charge down to zero.
         builder.Property(r => r.EstimatedCostUsd).HasPrecision(18, 6);
 
-        // Every read is one tenant's runs, newest first or within a month.
+        // Every read is one tenant's runs, newest first or within a month - or the run of one execution.
         builder.HasIndex(r => new { r.TenantId, r.RanAtUtc });
+        builder.HasIndex(r => r.ExecutionId);
     }
 }
 
