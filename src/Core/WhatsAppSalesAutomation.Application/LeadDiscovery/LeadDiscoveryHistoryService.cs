@@ -69,10 +69,18 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .OrderByDescending(e => e.StartedAtUtc)
             .ToListAsync(cancellationToken);
 
+        var executionIds = rows.Select(e => e.Id).ToList();
+        var runByExecutionId = await _context.LeadDiscoveryRuns.AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.ExecutionId != null && executionIds.Contains(r.ExecutionId!.Value))
+            .ToDictionaryAsync(r => r.ExecutionId!.Value, cancellationToken);
+        var pricing = await ResolvePricingAsync(tenantId, cancellationToken);
+
         var days = pageDates
             .Select(date => new LeadDiscoveryHistoryDayDto(
                 date,
-                rows.Where(e => e.ProcessingDate == date).Select(ToSummary).ToList()))
+                rows.Where(e => e.ProcessingDate == date)
+                    .Select(e => ToSummary(e, runByExecutionId.GetValueOrDefault(e.Id), pricing))
+                    .ToList()))
             .ToList();
 
         return new PagedResult<LeadDiscoveryHistoryDayDto>(days, totalDays, query.Page, query.PageSize);
@@ -110,14 +118,10 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         var run = await _context.LeadDiscoveryRuns.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ExecutionId == executionId && r.TenantId == tenantId, cancellationToken);
 
-        var countryCode = await _context.Tenants
-            .Where(t => t.Id == tenantId)
-            .Select(t => t.CountryCode)
-            .FirstOrDefaultAsync(cancellationToken);
-        var pricing = RegionalPricingCatalog.Resolve(countryCode);
+        var pricing = await ResolvePricingAsync(tenantId, cancellationToken);
 
         return new LeadDiscoveryExecutionDetailDto(
-            ToSummary(execution),
+            ToSummary(execution, run, pricing),
             execution.LockKey,
             execution.LockTokenReference,
             execution.LockOwnerInstanceId,
@@ -152,7 +156,16 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         return new LeadDiscoveryRetryQueuedDto(executionId, jobId);
     }
 
-    private static LeadDiscoveryExecutionSummaryDto ToSummary(LeadDiscoveryExecution e) => new(
+    private async Task<RegionalPricing> ResolvePricingAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var countryCode = await _context.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.CountryCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        return RegionalPricingCatalog.Resolve(countryCode);
+    }
+
+    private static LeadDiscoveryExecutionSummaryDto ToSummary(LeadDiscoveryExecution e, LeadDiscoveryRun? run, RegionalPricing pricing) => new(
         e.Id,
         DateTime.SpecifyKind(e.ProcessingDate, DateTimeKind.Unspecified),
         e.LeadDiscoveryProfileId,
@@ -191,7 +204,10 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         e.FailedStep,
         e.ErrorMessage,
         e.NextRetryInfo,
-        LeadDiscoveryRetryRules.CanRetry(e));
+        LeadDiscoveryRetryRules.CanRetry(e),
+        run is null ? 0m : LeadDiscoveryService.ToDto(run, pricing).EstimatedCostLocal,
+        pricing.CurrencyCode,
+        pricing.CurrencySymbol);
 
     // A DateTime read back from SQL Server datetime2 is Kind.Unspecified and would serialize without a "Z",
     // which a browser reads as local time.

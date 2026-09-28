@@ -162,6 +162,14 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         // A simulated run is free, so its per-lead cost is zero rather than a division by the lead count failing.
         Assert.Equal(0m, detail.Research.CostPerLeadUsd);
         Assert.False(string.IsNullOrEmpty(detail.CurrencyCode));
+        // The list row carries the same cost as the detail's Research, so History doesn't need a second call.
+        Assert.Equal(detail.Research.EstimatedCostLocal, detail.Execution.EstimatedCostLocal);
+        Assert.Equal(detail.CurrencyCode, detail.Execution.CurrencyCode);
+
+        var page = await history.GetHistoryAsync(new LeadDiscoveryHistoryQuery());
+        var row = Assert.Single(Assert.Single(page.Items).Executions);
+        Assert.Equal(detail.Execution.EstimatedCostLocal, row.EstimatedCostLocal);
+        Assert.Equal(detail.CurrencyCode, row.CurrencyCode);
     }
 
     [Fact]
@@ -173,7 +181,9 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
             Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
 
-        Assert.Null((await history.GetExecutionAsync(execution.Id)).Research);
+        var detail = await history.GetExecutionAsync(execution.Id);
+        Assert.Null(detail.Research);
+        Assert.Equal(0m, detail.Execution.EstimatedCostLocal);
     }
 
     [Fact]

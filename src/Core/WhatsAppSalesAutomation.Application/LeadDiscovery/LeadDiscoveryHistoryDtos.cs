@@ -11,7 +11,10 @@ public record LeadDiscoveryHistoryQuery : PagedRequest
     public string? Status { get; init; }
 }
 
-/// <summary>One execution in Lead Discovery History. Statuses are enum names - see LeadDiscoveryStatuses.</summary>
+/// <summary>One execution in Lead Discovery History. Statuses are enum names - see LeadDiscoveryStatuses.
+/// <paramref name="EstimatedCostLocal"/> is the linked run's cost in the tenant's own currency (zero when the
+/// execution did no research - a retry, or a run skipped before it started); <paramref name="CurrencyCode"/>/
+/// <paramref name="CurrencySymbol"/> are the tenant's currency regardless, so a zero still reads correctly.</summary>
 public record LeadDiscoveryExecutionSummaryDto(
     Guid Id,
     DateTime ProcessingDate,
@@ -51,7 +54,10 @@ public record LeadDiscoveryExecutionSummaryDto(
     string? FailedStep,
     string? ErrorMessage,
     string? NextRetryInfo,
-    bool CanRetry);
+    bool CanRetry,
+    decimal EstimatedCostLocal,
+    string CurrencyCode,
+    string CurrencySymbol);
 
 /// <summary>One processing date and every execution that belongs to it, newest first.</summary>
 public record LeadDiscoveryHistoryDayDto(DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);
