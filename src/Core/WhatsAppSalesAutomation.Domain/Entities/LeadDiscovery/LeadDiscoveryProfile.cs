@@ -62,4 +62,11 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// whenever <see cref="AutoCampaignEnabled"/> is true; re-validated as an existing, non-Stopped campaign
     /// every time it is used.</summary>
     public Guid? SourceCampaignId { get; set; }
+
+    /// <summary>When true, a customer this job creates is written OptedIn instead of the default
+    /// PendingOptIn, with no consent evidence beyond having been found on the web - see
+    /// LeadDiscoveryRunService.ProcessCustomerAsync. False by default: being discovered is not consent
+    /// to be messaged, and turning this on is a tenant's own choice to skip that check, not something
+    /// the platform decides for them.</summary>
+    public bool AutoConsentDiscoveredCustomers { get; set; }
 }

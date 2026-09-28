@@ -658,8 +658,16 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     // OptInStatus left at its PendingOptIn default, with no consent evidence written -
                     // being discovered on the web is not consent to be messaged. Campaigns only ever
                     // send to OptedIn customers (see CampaignSendService), so nothing discovered here
-                    // can be messaged until a person actually opts in (e.g. messages the business first).
+                    // can be messaged until a person actually opts in (e.g. messages the business first) -
+                    // unless the tenant has explicitly turned on AutoConsentDiscoveredCustomers, their own
+                    // choice to skip that check, not something the platform decides for them.
                 };
+                if (run.Profile.AutoConsentDiscoveredCustomers)
+                {
+                    customer.OptInStatus = OptInStatus.OptedIn;
+                    customer.OptInTimestamp = now;
+                    customer.OptInSource = CustomerSource;
+                }
                 _context.Customers.Add(customer);
                 discovered.CustomerId = customer.Id;
 

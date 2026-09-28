@@ -42,6 +42,9 @@ public static class LeadDiscoveryLimits
 /// cue to show a "campaign no longer exists" warning instead of a blank dropdown.</param>
 /// <param name="SourceCampaignStatus">The source campaign's current Status (e.g. "Running", "Stopped"),
 /// or null under the same conditions as <paramref name="SourceCampaignName"/>.</param>
+/// <param name="AutoConsentDiscoveredCustomers">When true, a customer this job creates is written
+/// OptedIn instead of PendingOptIn, with no consent evidence beyond having been found on the web. False
+/// by default - see LeadDiscoveryProfile.AutoConsentDiscoveredCustomers.</param>
 public record LeadDiscoveryProfileDto(
     bool IsEnabled,
     string TargetBusinessType,
@@ -59,6 +62,7 @@ public record LeadDiscoveryProfileDto(
     Guid? SourceCampaignId,
     string? SourceCampaignName,
     string? SourceCampaignStatus,
+    bool AutoConsentDiscoveredCustomers,
     DateTime? UpdatedAt);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
@@ -78,7 +82,8 @@ public record SaveLeadDiscoveryProfileRequest(
     int MinimumLeadScore = 60,
     IReadOnlyList<string>? AdditionalCriteria = null,
     bool AutoCampaignEnabled = false,
-    Guid? SourceCampaignId = null);
+    Guid? SourceCampaignId = null,
+    bool AutoConsentDiscoveredCustomers = false);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's

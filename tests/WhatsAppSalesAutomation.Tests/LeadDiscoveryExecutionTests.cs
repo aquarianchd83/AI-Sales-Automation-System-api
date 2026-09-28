@@ -102,6 +102,24 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_consent_opts_in_new_customers_with_no_manual_step()
+    {
+        EnableAutoConsent();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var customers = await _db.Customers.OrderBy(c => c.FirstName).ToListAsync();
+        Assert.Equal(2, customers.Count);
+        Assert.All(customers, c =>
+        {
+            Assert.Equal(OptInStatus.OptedIn, c.OptInStatus);
+            Assert.NotNull(c.OptInTimestamp);
+            Assert.Equal("Lead discovery", c.OptInSource);
+        });
+    }
+
+    [Fact]
     public async Task Quota_exhausted_before_any_candidate_is_still_recorded_in_history()
     {
         _agent.Rounds.Add(Candidates("A", "B"));
@@ -722,6 +740,13 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var profile = _db.LeadDiscoveryProfiles.Single();
         profile.AutoCampaignEnabled = true;
         profile.SourceCampaignId = _referredCampaignId;
+        _db.SaveChanges();
+    }
+
+    private void EnableAutoConsent()
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.AutoConsentDiscoveredCustomers = true;
         _db.SaveChanges();
     }
 

@@ -102,6 +102,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AdditionalCriteria = TenantBusinessDetails.NormalizeKeywords(request.AdditionalCriteria);
         profile.AutoCampaignEnabled = request.AutoCampaignEnabled;
         profile.SourceCampaignId = request.SourceCampaignId;
+        profile.AutoConsentDiscoveredCustomers = request.AutoConsentDiscoveredCustomers;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -269,7 +270,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.IsEnabled, p.TargetBusinessType, p.Keywords, p.Locations, p.BatchSize, planLimit, p.RequiredFields,
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
-        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
+        p.AutoConsentDiscoveredCustomers, p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,
