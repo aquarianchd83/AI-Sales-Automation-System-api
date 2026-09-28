@@ -140,6 +140,29 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Quota_exhausted_before_any_candidate_notifies_the_tenant_immediately()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        Guid? notifiedTenant = null;
+        QuotaType? notifiedType = null;
+        var quotaAlerts = Stub<IQuotaAlertService>.Create(new()
+        {
+            ["NotifyIfExhaustedAsync"] = args =>
+            {
+                notifiedTenant = (Guid)args![0]!;
+                notifiedType = (QuotaType)args![1]!;
+                return Task.FromResult(true);
+            }
+        });
+
+        await Service(quotaAvailable: 0, quotaAlerts: quotaAlerts).RunForTenantAsync(_tenant);
+
+        // Immediate, not left to the 15-minute quota-alerts sweep - see LeadDiscoveryRunService.NotifyQuotaExhaustedAsync.
+        Assert.Equal(_tenant, notifiedTenant);
+        Assert.Equal(QuotaType.LeadCandidates, notifiedType);
+    }
+
+    [Fact]
     public async Task A_profile_without_keywords_is_still_recorded_in_history()
     {
         var profile = _db.LeadDiscoveryProfiles.Single();
@@ -773,7 +796,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _db.SaveChanges();
     }
 
-    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m)
+    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new()
         {
@@ -795,7 +818,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         });
 
         return new LeadDiscoveryRunService(
-            _db, _agent, planLimits, quota, _clock, new IstTimeZone(_clock), campaigns,
+            _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
+            _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
             Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()));
     }

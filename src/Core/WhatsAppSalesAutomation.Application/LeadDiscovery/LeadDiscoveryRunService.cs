@@ -63,6 +63,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly ILeadDiscoveryAgent _agent;
     private readonly IPlanLimitsService _planLimits;
     private readonly IQuotaGate _quota;
+    private readonly IQuotaAlertService _quotaAlerts;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly ICampaignService _campaignService;
@@ -77,6 +78,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         ILeadDiscoveryAgent agent,
         IPlanLimitsService planLimits,
         IQuotaGate quota,
+        IQuotaAlertService quotaAlerts,
         IDateTimeProvider dateTime,
         ITenantTimeZoneProvider tenantTimeZone,
         ICampaignService campaignService,
@@ -90,6 +92,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _agent = agent;
         _planLimits = planLimits;
         _quota = quota;
+        _quotaAlerts = quotaAlerts;
         _dateTime = dateTime;
         _tenantTimeZone = tenantTimeZone;
         _campaignService = campaignService;
@@ -165,9 +168,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         // provider bills the research either way. No candidates left means no run and no agent call, but it is
         // still recorded, the same way a run that ran out of quota partway through is.
         if (await _quota.GetAvailableAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
+        {
+            await NotifyQuotaExhaustedAsync(profile.TenantId, cancellationToken);
             return await RecordSkipAsync(profile,
                 "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.",
                 quotaExhausted: true, cancellationToken);
+        }
 
         return await ExecuteAsync(profile, null, LeadDiscoveryTriggers.Scheduled, batchSize, cancellationToken);
     }
@@ -208,6 +214,21 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         await _context.SaveChangesAsync(cancellationToken);
 
         return summary;
+    }
+
+    /// <summary>Tells the tenant right away rather than waiting for the quota-alerts sweep (up to 15
+    /// minutes later) - a discovery run just stopped because of this, so the tenant should hear about it
+    /// now. Never lets a notification problem interrupt recording the run itself.</summary>
+    private async Task NotifyQuotaExhaustedAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _quotaAlerts.NotifyIfExhaustedAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not notify tenant {TenantId} of exhausted lead-candidate quota", tenantId);
+        }
     }
 
     private Task<List<Guid>> FindAutomaticRetryTargetsAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken) =>
@@ -426,6 +447,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 if (affordable < 1)
                 {
                     stats.QuotaExhausted = true;
+                    await NotifyQuotaExhaustedAsync(tenantId, cancellationToken);
                     break;
                 }
 
