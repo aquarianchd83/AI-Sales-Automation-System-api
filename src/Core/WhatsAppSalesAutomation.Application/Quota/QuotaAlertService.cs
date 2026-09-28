@@ -17,6 +17,12 @@ public interface IQuotaAlertService
 {
     /// <summary>Returns how many alerts were raised.</summary>
     Task<int> EvaluateAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Checks one tenant's one quota type right now and raises QuotaExhausted immediately if it
+    /// is at zero, instead of waiting for the next scheduled sweep. Same (kind, quota, episode) dedup key
+    /// as <see cref="EvaluateAsync"/>, so calling both for the same exhaustion never double-notifies.
+    /// Returns whether it raised (false when not exhausted, or already notified this episode).</summary>
+    Task<bool> NotifyIfExhaustedAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default);
 }
 
 public class QuotaAlertService : IQuotaAlertService
@@ -103,6 +109,25 @@ public class QuotaAlertService : IQuotaAlertService
         }
 
         return raised;
+    }
+
+    public async Task<bool> NotifyIfExhaustedAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default)
+    {
+        var now = _dateTime.UtcNow;
+        var live = await _context.QuotaGrants.IgnoreQueryFilters()
+            .Where(g => g.TenantId == tenantId && g.QuotaType == quotaType && g.ExpiredProcessedAtUtc == null && g.ExpiresAtUtc > now)
+            .ToListAsync(cancellationToken);
+
+        var capacity = live.Sum(g => g.UnitsGranted);
+        var remaining = live.Sum(g => g.UnitsRemaining);
+        if (capacity <= 0 || remaining > 0)
+            return false;
+
+        var episode = await CurrentEpisodeAsync(tenantId, quotaType, cancellationToken);
+        var (title, body) = Describe(TenantNotificationKind.QuotaExhausted, quotaType, remaining, capacity);
+        return await _notifier.NotifyAsync(
+            new TenantNotificationRequest(tenantId, TenantNotificationKind.QuotaExhausted, quotaType, episode, title, body, AlsoWhatsApp: true),
+            cancellationToken);
     }
 
     /// <summary>The id of the last entry that added units for this tenant and quota type: a new one means a

@@ -1,4 +1,5 @@
 using WhatsAppSalesAutomation.Domain.Common;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 
@@ -56,10 +57,27 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     public bool AutoCampaignEnabled { get; set; }
 
     /// <summary>The referred campaign - the whole Auto-Campaign configuration: its steps are the templates
-    /// (sequence, delays, message text and variables, media) and its schedule is the sending time. Only its
-    /// own steps are ever used; nothing else from the tenant's template library. A plain Guid, not a foreign
-    /// key - same cross-aggregate-reference convention as <see cref="DiscoveredLead.CustomerId"/>. Required
-    /// whenever <see cref="AutoCampaignEnabled"/> is true; re-validated as an existing, non-Stopped campaign
-    /// every time it is used.</summary>
+    /// (sequence, delays, message text and variables, media). Its own schedule is never used - see
+    /// <see cref="AutoCampaignStartMode"/>. Only its own steps are ever used; nothing else from the
+    /// tenant's template library. A plain Guid, not a foreign key - same cross-aggregate-reference
+    /// convention as <see cref="DiscoveredLead.CustomerId"/>. Required whenever
+    /// <see cref="AutoCampaignEnabled"/> is true; re-validated as an existing, non-Stopped campaign every
+    /// time it is used.</summary>
     public Guid? SourceCampaignId { get; set; }
+
+    /// <summary>When the campaign an execution generates should start - see LeadDiscoveryRunService.
+    /// Immediate by default.</summary>
+    public LeadDiscoveryCampaignStartMode AutoCampaignStartMode { get; set; } = LeadDiscoveryCampaignStartMode.Immediate;
+
+    /// <summary>The tenant's own local time of day the generated campaign starts the day after its
+    /// processing date - only used, and required, when <see cref="AutoCampaignStartMode"/> is
+    /// <see cref="LeadDiscoveryCampaignStartMode.NextDayWithTime"/>.</summary>
+    public TimeSpan? AutoCampaignStartTime { get; set; }
+
+    /// <summary>When true, a customer this job creates is written OptedIn instead of the default
+    /// PendingOptIn, with no consent evidence beyond having been found on the web - see
+    /// LeadDiscoveryRunService.ProcessCustomerAsync. False by default: being discovered is not consent
+    /// to be messaged, and turning this on is a tenant's own choice to skip that check, not something
+    /// the platform decides for them.</summary>
+    public bool AutoConsentDiscoveredCustomers { get; set; }
 }

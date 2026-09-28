@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -151,6 +152,13 @@ public class BillingController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Sends one real test alert through the same in-app/email/WhatsApp path a genuine one would
+    /// use - see ITenantBillingNoticeService.SendTestAsync's own doc comment.</summary>
+    [HttpPost("notifications/test")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<TenantNotificationDto>> SendTestNotification([FromBody] SendTestNotificationRequest request, CancellationToken cancellationToken)
+        => Ok(await _notices.SendTestAsync(RequireTenantId(), request.Kind, request.QuotaType, cancellationToken));
+
     [HttpGet("alert-settings")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<BillingAlertSettingsDto>> GetAlertSettings(CancellationToken cancellationToken)
@@ -190,3 +198,7 @@ public class BillingController : ControllerBase
 }
 
 public record BillingCapabilitiesDto(bool RefundRequestsEnabled);
+
+/// <summary>Body of POST billing/notifications/test. <paramref name="QuotaType"/> is required for the
+/// three quota-threshold kinds (QuotaLow20/QuotaLow5/QuotaExhausted) and ignored otherwise.</summary>
+public record SendTestNotificationRequest(TenantNotificationKind Kind, QuotaType? QuotaType);

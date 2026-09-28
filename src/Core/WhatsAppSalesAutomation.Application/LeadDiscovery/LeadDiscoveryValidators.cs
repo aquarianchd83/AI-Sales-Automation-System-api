@@ -1,4 +1,5 @@
 using FluentValidation;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
 
@@ -40,6 +41,15 @@ public class SaveLeadDiscoveryProfileRequestValidator : AbstractValidator<SaveLe
             .NotNull()
             .When(x => x.AutoCampaignEnabled)
             .WithMessage("Select a source campaign to enable auto campaign.");
+
+        RuleFor(x => x.AutoCampaignStartMode)
+            .Must(m => Enum.TryParse<LeadDiscoveryCampaignStartMode>(m, ignoreCase: true, out _))
+            .WithMessage("Auto campaign start must be Immediate or NextDayWithTime.");
+
+        RuleFor(x => x.AutoCampaignStartTime)
+            .NotNull()
+            .When(x => string.Equals(x.AutoCampaignStartMode, nameof(LeadDiscoveryCampaignStartMode.NextDayWithTime), StringComparison.OrdinalIgnoreCase))
+            .WithMessage("Pick a time for the next-day start.");
     }
 
     private static bool HaveAValue(IReadOnlyList<string>? values) =>

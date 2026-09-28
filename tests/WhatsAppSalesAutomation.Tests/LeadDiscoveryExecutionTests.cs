@@ -102,6 +102,24 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Auto_consent_opts_in_new_customers_with_no_manual_step()
+    {
+        EnableAutoConsent();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var customers = await _db.Customers.OrderBy(c => c.FirstName).ToListAsync();
+        Assert.Equal(2, customers.Count);
+        Assert.All(customers, c =>
+        {
+            Assert.Equal(OptInStatus.OptedIn, c.OptInStatus);
+            Assert.NotNull(c.OptInTimestamp);
+            Assert.Equal("Lead discovery", c.OptInSource);
+        });
+    }
+
+    [Fact]
     public async Task Quota_exhausted_before_any_candidate_is_still_recorded_in_history()
     {
         _agent.Rounds.Add(Candidates("A", "B"));
@@ -116,6 +134,97 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(0, execution.CustomersCreated);
         Assert.Equal(new DateTime(2026, 9, 10), execution.ProcessingDate);
         Assert.Contains("no lead-candidate quota left", execution.Summary);
+        Assert.Contains("no lead-candidate quota left", execution.ErrorMessage);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task Quota_exhausted_before_any_candidate_notifies_the_tenant_immediately()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        Guid? notifiedTenant = null;
+        QuotaType? notifiedType = null;
+        var quotaAlerts = Stub<IQuotaAlertService>.Create(new()
+        {
+            ["NotifyIfExhaustedAsync"] = args =>
+            {
+                notifiedTenant = (Guid)args![0]!;
+                notifiedType = (QuotaType)args![1]!;
+                return Task.FromResult(true);
+            }
+        });
+
+        await Service(quotaAvailable: 0, quotaAlerts: quotaAlerts).RunForTenantAsync(_tenant);
+
+        // Immediate, not left to the 15-minute quota-alerts sweep - see LeadDiscoveryRunService.NotifyQuotaExhaustedAsync.
+        Assert.Equal(_tenant, notifiedTenant);
+        Assert.Equal(QuotaType.LeadCandidates, notifiedType);
+    }
+
+    [Fact]
+    public async Task A_profile_without_keywords_is_still_recorded_in_history()
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.Keywords = new List<string>();
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.False(execution.QuotaExhausted);
+        Assert.Contains("at least one keyword", execution.ErrorMessage);
+        Assert.Equal(LeadDiscoveryCampaignStatus.Skipped, execution.CampaignStatus);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task A_run_that_researched_is_linked_to_its_execution_and_shown_on_its_detail()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var run = await _db.LeadDiscoveryRuns.AsNoTracking().SingleAsync();
+        Assert.Equal(execution.Id, run.ExecutionId);
+
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.NotNull(detail.Research);
+        Assert.Equal(execution.Id, detail.Research!.ExecutionId);
+        Assert.Equal("Simulated", detail.Research.Model);
+        Assert.Equal(2, detail.Research.CandidatesConsidered);
+        Assert.Equal(2, detail.Research.LeadsSaved);
+        // A simulated run is free, so its per-lead cost is zero rather than a division by the lead count failing.
+        Assert.Equal(0m, detail.Research.CostPerLeadUsd);
+        Assert.False(string.IsNullOrEmpty(detail.CurrencyCode));
+        // The list row carries the same cost as the detail's Research, so History doesn't need a second call.
+        Assert.Equal(detail.Research.EstimatedCostLocal, detail.Execution.EstimatedCostLocal);
+        Assert.Equal(detail.CurrencyCode, detail.Execution.CurrencyCode);
+
+        var page = await history.GetHistoryAsync(new LeadDiscoveryHistoryQuery());
+        var row = Assert.Single(Assert.Single(page.Items).Executions);
+        Assert.Equal(detail.Execution.EstimatedCostLocal, row.EstimatedCostLocal);
+        Assert.Equal(detail.CurrencyCode, row.CurrencyCode);
+    }
+
+    [Fact]
+    public async Task A_skipped_run_has_no_research_on_its_detail()
+    {
+        await Service(quotaAvailable: 0).RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+        Assert.Null(detail.Research);
+        Assert.Equal(0m, detail.Execution.EstimatedCostLocal);
     }
 
     [Fact]
@@ -196,7 +305,9 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
         Assert.Equal($"{ReferredCampaignName} - 2026-09-10", generated.Name);
         Assert.Equal(generated.Id, execution.GeneratedCampaignId);
-        Assert.Equal(new DateTime(2026, 9, 10, 10, 30, 0), generated.ScheduledStartAt);
+        // Immediate is the profile's default start mode - the referred campaign's own schedule (set in
+        // SeedProfileAndCampaign) is never consulted.
+        Assert.Null(generated.ScheduledStartAt);
 
         // Templates: exactly the referred campaign's steps, in order, with their configuration.
         var steps = await _db.CampaignSteps.Where(s => s.CampaignId == generated.Id).OrderBy(s => s.StepNumber).ToListAsync();
@@ -211,6 +322,19 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(created.OrderBy(x => x), mapped.OrderBy(x => x));
 
         Assert.Equal(new[] { generated.Id }, _startedCampaigns);
+    }
+
+    [Fact]
+    public async Task Auto_campaign_with_next_day_start_is_scheduled_the_day_after_processing_date()
+    {
+        EnableAutoCampaign();
+        EnableNextDayCampaignStart(new TimeSpan(9, 30, 0));
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        Assert.Equal(new DateTime(2026, 9, 11, 9, 30, 0), generated.ScheduledStartAt);
     }
 
     [Fact]
@@ -657,7 +781,22 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _db.SaveChanges();
     }
 
-    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m)
+    private void EnableAutoConsent()
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.AutoConsentDiscoveredCustomers = true;
+        _db.SaveChanges();
+    }
+
+    private void EnableNextDayCampaignStart(TimeSpan time)
+    {
+        var profile = _db.LeadDiscoveryProfiles.Single();
+        profile.AutoCampaignStartMode = LeadDiscoveryCampaignStartMode.NextDayWithTime;
+        profile.AutoCampaignStartTime = time;
+        _db.SaveChanges();
+    }
+
+    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new()
         {
@@ -679,7 +818,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         });
 
         return new LeadDiscoveryRunService(
-            _db, _agent, planLimits, quota, _clock, new IstTimeZone(_clock), campaigns,
+            _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
+            _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
             Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()));
     }

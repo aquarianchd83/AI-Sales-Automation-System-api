@@ -102,6 +102,10 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AdditionalCriteria = TenantBusinessDetails.NormalizeKeywords(request.AdditionalCriteria);
         profile.AutoCampaignEnabled = request.AutoCampaignEnabled;
         profile.SourceCampaignId = request.SourceCampaignId;
+        profile.AutoConsentDiscoveredCustomers = request.AutoConsentDiscoveredCustomers;
+        // Already validated as a real enum name by SaveLeadDiscoveryProfileRequestValidator.
+        profile.AutoCampaignStartMode = Enum.Parse<LeadDiscoveryCampaignStartMode>(request.AutoCampaignStartMode, ignoreCase: true);
+        profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -269,6 +273,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.IsEnabled, p.TargetBusinessType, p.Keywords, p.Locations, p.BatchSize, planLimit, p.RequiredFields,
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
+        p.AutoConsentDiscoveredCustomers, p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
         p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
@@ -276,8 +281,16 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         l.Website, l.SourceUrl, l.PhoneVerified, l.PhoneSourceUrl, QualifiedStatus, l.LeadScore, l.ScoreRationale,
         l.CustomerId, l.CreatedAt);
 
-    private static LeadDiscoveryRunDto ToDto(LeadDiscoveryRun r, RegionalPricing pricing) => new(
+    /// <summary>Shared with LeadDiscoveryHistoryService, which shows an execution's run on its detail.</summary>
+    internal static LeadDiscoveryRunDto ToDto(LeadDiscoveryRun r, RegionalPricing pricing) => new(
         r.Id, r.RanAtUtc, r.Model, r.Rounds, r.CandidatesConsidered, r.LeadsSaved, r.Duplicates, r.Rejected,
         r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.WebSearches, r.WebFetches,
-        r.EstimatedCostUsd, ToLocal(r.EstimatedCostUsd, pricing));
+        r.EstimatedCostUsd, ToLocal(r.EstimatedCostUsd, pricing), r.ExecutionId,
+        CostPerLead(r.EstimatedCostUsd, r.LeadsSaved, 1m, decimals: 6),
+        CostPerLead(r.EstimatedCostUsd, r.LeadsSaved, pricing.RateToUsd, decimals: 4));
+
+    /// <summary>Six places in USD, like the spend summary's CostPerLeadUsd; four in the local currency rather
+    /// than ToLocal's two, because a cheap run's per-lead cost can be a fraction of a cent.</summary>
+    private static decimal CostPerLead(decimal usd, int leads, decimal rate, int decimals) =>
+        leads == 0 ? 0m : Math.Round(usd * rate / leads, decimals, MidpointRounding.AwayFromZero);
 }

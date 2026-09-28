@@ -42,6 +42,13 @@ public static class LeadDiscoveryLimits
 /// cue to show a "campaign no longer exists" warning instead of a blank dropdown.</param>
 /// <param name="SourceCampaignStatus">The source campaign's current Status (e.g. "Running", "Stopped"),
 /// or null under the same conditions as <paramref name="SourceCampaignName"/>.</param>
+/// <param name="AutoConsentDiscoveredCustomers">When true, a customer this job creates is written
+/// OptedIn instead of PendingOptIn, with no consent evidence beyond having been found on the web. False
+/// by default - see LeadDiscoveryProfile.AutoConsentDiscoveredCustomers.</param>
+/// <param name="AutoCampaignStartMode">"Immediate" or "NextDayWithTime" - see
+/// LeadDiscoveryProfile.AutoCampaignStartMode.</param>
+/// <param name="AutoCampaignStartTime">Required, and only meaningful, when
+/// <paramref name="AutoCampaignStartMode"/> is "NextDayWithTime" - the tenant's own local time of day.</param>
 public record LeadDiscoveryProfileDto(
     bool IsEnabled,
     string TargetBusinessType,
@@ -59,12 +66,17 @@ public record LeadDiscoveryProfileDto(
     Guid? SourceCampaignId,
     string? SourceCampaignName,
     string? SourceCampaignStatus,
+    bool AutoConsentDiscoveredCustomers,
+    string AutoCampaignStartMode,
+    TimeSpan? AutoCampaignStartTime,
     DateTime? UpdatedAt);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
 /// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
 /// existing, non-Stopped campaign whenever <paramref name="AutoCampaignEnabled"/> is true - see
-/// SaveLeadDiscoveryProfileRequestValidator/LeadDiscoveryService.SaveProfileAsync.</summary>
+/// SaveLeadDiscoveryProfileRequestValidator/LeadDiscoveryService.SaveProfileAsync.
+/// <paramref name="AutoCampaignStartMode"/> is "Immediate" or "NextDayWithTime";
+/// <paramref name="AutoCampaignStartTime"/> is required whenever it is "NextDayWithTime".</summary>
 public record SaveLeadDiscoveryProfileRequest(
     bool IsEnabled,
     string TargetBusinessType,
@@ -78,11 +90,17 @@ public record SaveLeadDiscoveryProfileRequest(
     int MinimumLeadScore = 60,
     IReadOnlyList<string>? AdditionalCriteria = null,
     bool AutoCampaignEnabled = false,
-    Guid? SourceCampaignId = null);
+    Guid? SourceCampaignId = null,
+    bool AutoConsentDiscoveredCustomers = false,
+    string AutoCampaignStartMode = "Immediate",
+    TimeSpan? AutoCampaignStartTime = null);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's
-/// own currency for display, the same treatment PlanDto gives a plan price.</summary>
+/// own currency for display, the same treatment PlanDto gives a plan price. <paramref name="ExecutionId"/> is the
+/// Lead Discovery History execution that ran it - null for an old run that could not be matched to one.
+/// <paramref name="CostPerLeadUsd"/>/<paramref name="CostPerLeadLocal"/> are the run's cost divided by the leads it
+/// saved (as LeadDiscoverySpendPeriodDto.CostPerLeadUsd does for a period) - zero when it saved none.</summary>
 public record LeadDiscoveryRunDto(
     Guid Id,
     DateTime RanAtUtc,
@@ -99,7 +117,10 @@ public record LeadDiscoveryRunDto(
     int WebSearches,
     int WebFetches,
     decimal EstimatedCostUsd,
-    decimal EstimatedCostLocal);
+    decimal EstimatedCostLocal,
+    Guid? ExecutionId,
+    decimal CostPerLeadUsd,
+    decimal CostPerLeadLocal);
 
 /// <param name="CostPerLeadUsd">Zero when the period saved no leads.</param>
 public record LeadDiscoverySpendPeriodDto(

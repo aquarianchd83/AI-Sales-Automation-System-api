@@ -63,6 +63,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly ILeadDiscoveryAgent _agent;
     private readonly IPlanLimitsService _planLimits;
     private readonly IQuotaGate _quota;
+    private readonly IQuotaAlertService _quotaAlerts;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly ICampaignService _campaignService;
@@ -77,6 +78,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         ILeadDiscoveryAgent agent,
         IPlanLimitsService planLimits,
         IQuotaGate quota,
+        IQuotaAlertService quotaAlerts,
         IDateTimeProvider dateTime,
         ITenantTimeZoneProvider tenantTimeZone,
         ICampaignService campaignService,
@@ -90,6 +92,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _agent = agent;
         _planLimits = planLimits;
         _quota = quota;
+        _quotaAlerts = quotaAlerts;
         _dateTime = dateTime;
         _tenantTimeZone = tenantTimeZone;
         _campaignService = campaignService;
@@ -148,32 +151,41 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
     private async Task<string> RunFreshAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
     {
+        // From here on every firing is recorded in Lead Discovery History, even one that does nothing: the
+        // profile is enabled, so the tenant expects a run and needs to see why there was none. (No profile, or
+        // a disabled one, is the tenant not using discovery - recording those would fill history with noise.)
         if (profile.Keywords.Count == 0 || profile.Locations.Count == 0)
-            return "Skipped: the profile needs at least one keyword and one location.";
+            return await RecordSkipAsync(profile, "Skipped: the profile needs at least one keyword and one location.",
+                quotaExhausted: false, cancellationToken);
 
         var planLimit = await _planLimits.GetLeadDiscoveryBatchLimitAsync(profile.TenantId, cancellationToken);
         var batchSize = Math.Min(profile.BatchSize, planLimit ?? int.MaxValue);
         if (batchSize <= 0)
-            return "Skipped: the tenant's plan allows no discovered leads per run.";
+            return await RecordSkipAsync(profile, "Skipped: the tenant's plan allows no discovered leads per run.",
+                quotaExhausted: false, cancellationToken);
 
         // Prepaid: every candidate the agent evaluates is charged - fresh, duplicate or rejected - because the
-        // provider bills the research either way. No candidates left means no run, and no agent call - but it
-        // is still recorded (see RecordQuotaExhaustedSkipAsync), not silently dropped, so the tenant sees it
-        // in Lead Discovery History the same way a run that ran out of quota partway through does.
+        // provider bills the research either way. No candidates left means no run and no agent call, but it is
+        // still recorded, the same way a run that ran out of quota partway through is.
         if (await _quota.GetAvailableAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
-            return await RecordQuotaExhaustedSkipAsync(profile, cancellationToken);
+        {
+            await NotifyQuotaExhaustedAsync(profile.TenantId, cancellationToken);
+            return await RecordSkipAsync(profile,
+                "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.",
+                quotaExhausted: true, cancellationToken);
+        }
 
         return await ExecuteAsync(profile, null, LeadDiscoveryTriggers.Scheduled, batchSize, cancellationToken);
     }
 
-    /// <summary>No candidates can be evaluated at all, so there is nothing to lock and nothing to process -
-    /// this skips ExecuteAsync's lock/lease machinery entirely and records the outcome directly. Mirrors how
-    /// a mid-run exhaustion (DiscoverCustomersAsync, via FinalizeAsync) ends up Completed with QuotaExhausted
-    /// set, rather than introducing a separate "never started" shape for the same underlying condition.</summary>
-    private async Task<string> RecordQuotaExhaustedSkipAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
+    /// <summary>A scheduled firing that cannot start at all, so there is nothing to lock and nothing to process -
+    /// this skips ExecuteAsync's lock/lease machinery entirely and records the outcome directly. Completed, like
+    /// a mid-run quota exhaustion (DiscoverCustomersAsync, via FinalizeAsync), rather than Failed: there is
+    /// nothing a retry could resume, and a Failed row would offer one.</summary>
+    private async Task<string> RecordSkipAsync(
+        LeadDiscoveryProfile profile, string summary, bool quotaExhausted, CancellationToken cancellationToken)
     {
         var now = _dateTime.UtcNow;
-        const string summary = "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.";
 
         var execution = new LeadDiscoveryExecution
         {
@@ -185,8 +197,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             StartedAtUtc = now,
             EndedAtUtc = now,
             Status = LeadDiscoveryExecutionStatus.Completed,
-            QuotaExhausted = true,
+            QuotaExhausted = quotaExhausted,
             LockKey = LeadDiscoveryLockClaim.KeyFor(profile.TenantId, profile.Id),
+            CampaignStatus = LeadDiscoveryCampaignStatus.Skipped,
+            TemplateStatus = LeadDiscoveryAssociationStatus.Skipped,
+            MappingStatus = LeadDiscoveryAssociationStatus.Skipped,
+            CampaignNote = "Nothing was discovered - this run did not start.",
+            // Shown on the history row itself, not only in the detail's Summary.
+            ErrorMessage = summary,
+            NextRetryInfo = "Nothing to retry. The next scheduled run will try again.",
             Summary = summary
         };
         execution.RootExecutionId = execution.Id;
@@ -195,6 +214,21 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         await _context.SaveChangesAsync(cancellationToken);
 
         return summary;
+    }
+
+    /// <summary>Tells the tenant right away rather than waiting for the quota-alerts sweep (up to 15
+    /// minutes later) - a discovery run just stopped because of this, so the tenant should hear about it
+    /// now. Never lets a notification problem interrupt recording the run itself.</summary>
+    private async Task NotifyQuotaExhaustedAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _quotaAlerts.NotifyIfExhaustedAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not notify tenant {TenantId} of exhausted lead-candidate quota", tenantId);
+        }
     }
 
     private Task<List<Guid>> FindAutomaticRetryTargetsAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken) =>
@@ -413,6 +447,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 if (affordable < 1)
                 {
                     stats.QuotaExhausted = true;
+                    await NotifyQuotaExhaustedAsync(tenantId, cancellationToken);
                     break;
                 }
 
@@ -645,8 +680,16 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     // OptInStatus left at its PendingOptIn default, with no consent evidence written -
                     // being discovered on the web is not consent to be messaged. Campaigns only ever
                     // send to OptedIn customers (see CampaignSendService), so nothing discovered here
-                    // can be messaged until a person actually opts in (e.g. messages the business first).
+                    // can be messaged until a person actually opts in (e.g. messages the business first) -
+                    // unless the tenant has explicitly turned on AutoConsentDiscoveredCustomers, their own
+                    // choice to skip that check, not something the platform decides for them.
                 };
+                if (run.Profile.AutoConsentDiscoveredCustomers)
+                {
+                    customer.OptInStatus = OptInStatus.OptedIn;
+                    customer.OptInTimestamp = now;
+                    customer.OptInSource = CustomerSource;
+                }
                 _context.Customers.Add(customer);
                 discovered.CustomerId = customer.Id;
 
@@ -793,9 +836,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             Name = BuildCampaignName(source.Name, execution.ProcessingDate),
             Description = source.Description,
             Status = CampaignStatus.Draft,
-            // The referred campaign's sending time, on the processing date.
-            ScheduledStartAt = source.ScheduledStartAt is { } sourceSchedule
-                ? execution.ProcessingDate.Date + sourceSchedule.TimeOfDay
+            // The profile's own choice, not the referred campaign's schedule - see
+            // LeadDiscoveryProfile.AutoCampaignStartMode.
+            ScheduledStartAt = run.Profile.AutoCampaignStartMode == LeadDiscoveryCampaignStartMode.NextDayWithTime
+                && run.Profile.AutoCampaignStartTime is { } startTime
+                ? execution.ProcessingDate.Date.AddDays(1) + startTime
                 : null,
             CreatedBy = source.CreatedBy,
             TargetAudienceFilterJson = JsonSerializer.Serialize(new
@@ -1319,6 +1364,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             _context.LeadDiscoveryRuns.Add(new LeadDiscoveryRun
             {
                 TenantId = run.Profile.TenantId,
+                ExecutionId = run.Execution.Id,
                 RanAtUtc = _dateTime.UtcNow,
                 Model = Truncate(stats.Model, LeadDiscoveryLimits.Model) ?? string.Empty,
                 Rounds = stats.Rounds,

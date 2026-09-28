@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260926191732_LinkLeadDiscoveryRunToExecution")]
+    partial class LinkLeadDiscoveryRunToExecution
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2682,17 +2685,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("AutoCampaignEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("AutoCampaignStartMode")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<TimeSpan?>("AutoCampaignStartTime")
-                        .HasColumnType("time");
-
-                    b.Property<bool>("AutoConsentDiscoveredCustomers")
                         .HasColumnType("bit");
 
                     b.Property<int>("BatchSize")

@@ -50,11 +50,11 @@ public sealed class QuotaAlertTests : IDisposable
         _connection.Dispose();
     }
 
-    private Task GrantAsync(decimal units) =>
-        _ledger.AdjustAsync(_tenant.Id, QuotaType.WhatsAppMessages, units, "test funding", Guid.NewGuid());
+    private Task GrantAsync(decimal units, QuotaType type = QuotaType.WhatsAppMessages) =>
+        _ledger.AdjustAsync(_tenant.Id, type, units, "test funding", Guid.NewGuid());
 
-    private Task SpendAsync(decimal units, string key) =>
-        _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.WhatsAppMessages, units, key, "Message", key));
+    private Task SpendAsync(decimal units, string key, QuotaType type = QuotaType.WhatsAppMessages) =>
+        _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, type, units, key, "Message", key));
 
     private Task<List<TenantNotification>> NotificationsAsync() =>
         _db.TenantNotifications.IgnoreQueryFilters().OrderBy(n => n.CreatedAt).ToListAsync();
@@ -179,5 +179,44 @@ public sealed class QuotaAlertTests : IDisposable
         await _db.SaveChangesAsync();
 
         Assert.Equal(0, await _alerts.EvaluateAsync());
+    }
+
+    [Fact]
+    public async Task NotifyIfExhaustedAsync_raises_nothing_while_quota_remains()
+    {
+        await GrantAsync(1000, QuotaType.LeadCandidates);
+        await SpendAsync(500, "m1", QuotaType.LeadCandidates);
+
+        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        Assert.Empty(await NotificationsAsync());
+    }
+
+    [Fact]
+    public async Task NotifyIfExhaustedAsync_alerts_immediately_when_lead_candidates_run_out()
+    {
+        await GrantAsync(1000, QuotaType.LeadCandidates);
+        await SpendAsync(1000, "m1", QuotaType.LeadCandidates);
+
+        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+
+        var alert = Assert.Single(await NotificationsAsync());
+        Assert.Equal(TenantNotificationKind.QuotaExhausted, alert.Kind);
+        Assert.Equal(QuotaType.LeadCandidates, alert.QuotaType);
+        Assert.Equal(DeliveryStatus.Sent, alert.EmailStatus);
+        Assert.Contains("lead candidates", alert.Title);
+    }
+
+    [Fact]
+    public async Task NotifyIfExhaustedAsync_and_the_sweep_share_the_same_episode_so_neither_double_notifies()
+    {
+        await GrantAsync(1000, QuotaType.LeadCandidates);
+        await SpendAsync(1000, "m1", QuotaType.LeadCandidates);
+
+        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        // The scheduled sweep runs later and finds the same exhaustion already alerted this episode.
+        Assert.Equal(0, await _alerts.EvaluateAsync());
+        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+
+        Assert.Single(await NotificationsAsync());
     }
 }
