@@ -192,6 +192,7 @@ public sealed class RefundServiceTests : IDisposable
 
         Assert.Equal(RefundStatus.Cancelled, cancelled.Status);
         Assert.Equal(1000m, await BalanceAsync());
+        Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.CreditsAdded && n.Body.Contains("withdrew"));
         await Assert.ThrowsAsync<ConflictException>(() => _refunds.CancelAsync(_tenant.Id, request.Id));
     }
 

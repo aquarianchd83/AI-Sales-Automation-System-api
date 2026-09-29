@@ -113,6 +113,7 @@ public class RefundService : IRefundService
         await _ledger.ReleaseRefundHoldAsync(request.TenantId, request.Id, keepFraction: 0m, cancellationToken);
         request.Status = RefundStatus.Cancelled;
         await _context.SaveChangesAsync(cancellationToken);
+        await NotifyCreditsReturnedAsync(request, "you withdrew your refund request", cancellationToken);
         return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();
     }
 
@@ -304,7 +305,7 @@ public class RefundService : IRefundService
 
     /// <summary>Tells the tenant which units came back to their wallet when a hold was released (read from the
     /// release ledger entries, so it names each quota separately and stays silent when nothing came back).
-    /// Keyed on the request, so a repeat can never notify twice. Withdrawing a request yourself is not announced.</summary>
+    /// Keyed on the request, so a repeat can never notify twice. Covers a withdrawn, declined, expired or partly approved request.</summary>
     private async Task NotifyCreditsReturnedAsync(RefundRequest request, string why, CancellationToken cancellationToken)
     {
         var releaseKey = $"refund-release:{request.Id}";
