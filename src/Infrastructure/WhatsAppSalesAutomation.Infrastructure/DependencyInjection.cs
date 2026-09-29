@@ -161,6 +161,7 @@ public static class DependencyInjection
         services.AddScoped<IWhatsAppWebhookParser, WhatsAppWebhookParser>();
         services.AddScoped<IWebhookSignatureValidator, WebhookSignatureValidator>();
         services.AddScoped<INotificationService, SignalRNotificationService>();
+        services.AddScoped<INotificationBroadcaster, SignalRNotificationBroadcaster>();
 
         AddWhatsAppClient(services, configuration);
         AddAiClients(services, configuration);

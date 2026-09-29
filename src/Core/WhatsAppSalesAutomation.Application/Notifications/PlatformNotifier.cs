@@ -13,17 +13,20 @@ public class PlatformNotifier : IPlatformNotifier
     private readonly IApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IEmailSender _email;
+    private readonly INotificationBroadcaster _broadcaster;
     private readonly ILogger<PlatformNotifier> _logger;
 
     public PlatformNotifier(
         IApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
         IEmailSender email,
+        INotificationBroadcaster broadcaster,
         ILogger<PlatformNotifier> logger)
     {
         _context = context;
         _userManager = userManager;
         _email = email;
+        _broadcaster = broadcaster;
         _logger = logger;
     }
 
@@ -92,6 +95,28 @@ public class PlatformNotifier : IPlatformNotifier
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+
+            string? tenantName = null;
+            if (request.TenantId is { } tenantId)
+                tenantName = await _context.Tenants.IgnoreQueryFilters()
+                    .Where(t => t.Id == tenantId)
+                    .Select(t => t.Name)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+            await _broadcaster.NotifyPlatformAsync(new
+            {
+                id = notification.Id,
+                kind = notification.Kind,
+                severity = notification.Severity,
+                tenantId = notification.TenantId,
+                tenantName,
+                jobType = notification.JobType,
+                title = notification.Title,
+                body = notification.Body,
+                createdAt = notification.CreatedAt,
+                acknowledged = notification.AcknowledgedAtUtc is not null
+            }, cancellationToken);
+
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

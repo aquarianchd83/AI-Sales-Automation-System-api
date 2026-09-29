@@ -12,5 +12,10 @@ public enum TenantNotificationKind
     RefundExpired = 7,
     // The plan's billing period ends in a week / tomorrow: it renews (and is charged), or cannot renew.
     PlanExpiring7 = 8,
-    PlanExpiring1 = 9
+    PlanExpiring1 = 9,
+    // Raised by TenantJobRunner for every run of a self-service job (TenantJobCatalog.SelfServiceKeys) -
+    // one pair per run, not per Hangfire tick, so these track "your lead discovery/campaign job just ran"
+    // rather than the job's own schedule.
+    JobStarted = 10,
+    JobCompleted = 11
 }

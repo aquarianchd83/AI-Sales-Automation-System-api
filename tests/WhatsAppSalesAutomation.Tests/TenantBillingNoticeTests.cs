@@ -33,7 +33,7 @@ public sealed class TenantBillingNoticeTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new PlatformContext(), new AnonymousUser());
         _db.Database.EnsureCreated();
         // UserManager is only reached when a tenant has neither an alert email nor an owner - not exercised here.
-        var notifier = new TenantNotifier(_db, null!, _email, _whatsApp, new FixedOptions<BillingAlertOptions>(new()), NullLogger<TenantNotifier>.Instance);
+        var notifier = new TenantNotifier(_db, null!, _email, _whatsApp, new FakeNotificationBroadcaster(), new FixedOptions<BillingAlertOptions>(new()), NullLogger<TenantNotifier>.Instance);
         _service = new TenantBillingNoticeService(_db, new TestClock(), notifier);
 
         _db.Tenants.Add(_tenant);

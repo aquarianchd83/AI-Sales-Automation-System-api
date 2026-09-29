@@ -73,6 +73,26 @@ public sealed class FakeEmail : IEmailSender
     }
 }
 
+/// <summary>Records what would have been pushed live, without an actual SignalR hub - the notifiers
+/// treat a broadcast failure as best-effort anyway, so tests only need something that never throws.</summary>
+public sealed class FakeNotificationBroadcaster : INotificationBroadcaster
+{
+    public List<(Guid TenantId, object Notification)> TenantPushes { get; } = new();
+    public List<object> PlatformPushes { get; } = new();
+
+    public Task NotifyTenantAsync(Guid tenantId, object notification, CancellationToken cancellationToken = default)
+    {
+        TenantPushes.Add((tenantId, notification));
+        return Task.CompletedTask;
+    }
+
+    public Task NotifyPlatformAsync(object notification, CancellationToken cancellationToken = default)
+    {
+        PlatformPushes.Add(notification);
+        return Task.CompletedTask;
+    }
+}
+
 public sealed class FakePlatformWhatsApp : IPlatformWhatsAppSender
 {
     public bool Configured { get; set; } = true;

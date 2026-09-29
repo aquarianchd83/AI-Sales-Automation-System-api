@@ -77,11 +77,20 @@ public class TenantJobRunner
 
         services.GetRequiredService<ITenantContext>().SetTenant(tenantId);
 
+        // Only the jobs a tenant Admin can see and run themselves (TenantJobsController) - WhatsApp
+        // template sync/token refresh are integration plumbing the tenant has no context for, so those
+        // stay silent here the same way they're hidden from that tenant-facing screen.
+        var notifyTenant = TenantJobCatalog.SelfServiceKeys.Contains(jobType);
+        if (notifyTenant)
+            await NotifyTenantJobEventAsync(services, tenantId, jobType, started: true, summary: null, cancellationToken);
+
         var stopwatch = Stopwatch.StartNew();
         try
         {
             var summary = await runForTenantAsync(services, cancellationToken);
             stopwatch.Stop();
+            if (notifyTenant)
+                await NotifyTenantJobEventAsync(services, tenantId, jobType, started: false, summary, cancellationToken);
             await RecordAsync(tenantId, jobType, TenantJobRunOutcome.Succeeded, summary, (int)stopwatch.ElapsedMilliseconds, cancellationToken);
         }
         catch (Exception ex)
@@ -219,4 +228,34 @@ public class TenantJobRunner
 
     private static string? Truncate(string? summary)
         => summary is not null && summary.Length > MaxSummaryLength ? summary[..MaxSummaryLength] : summary;
+
+    /// <summary>The tenant-facing half of requirement #1: an in-app notification when a self-service job
+    /// starts running and another when it finishes, one pair per run - not per Hangfire tick, since a run
+    /// that was skipped never reaches here and a run that fails is left to the platform alert above rather
+    /// than raising a tenant-facing "failed" notice for every retry. Every call is its own fresh episode
+    /// (see <see cref="ITenantNotifier"/>'s dedupe key), so a job that runs daily gets a fresh pair each
+    /// day rather than being deduped away after the first.</summary>
+    private static async Task NotifyTenantJobEventAsync(
+        IServiceProvider services,
+        Guid tenantId,
+        string jobType,
+        bool started,
+        string? summary,
+        CancellationToken cancellationToken)
+    {
+        var jobName = TenantJobCatalog.Find(jobType)?.DisplayName ?? jobType;
+        var kind = started ? TenantNotificationKind.JobStarted : TenantNotificationKind.JobCompleted;
+        var episode = Guid.NewGuid().ToString("N");
+        var title = started ? $"{jobName} started" : $"{jobName} completed";
+        var body = started
+            ? $"{jobName} has started running for your account."
+            : summary is null
+                ? $"{jobName} finished running."
+                : $"{jobName} finished running. {summary}";
+
+        var notifier = services.GetRequiredService<ITenantNotifier>();
+        await notifier.NotifyAsync(
+            new TenantNotificationRequest(tenantId, kind, null, episode, title, body, AlsoWhatsApp: false),
+            cancellationToken);
+    }
 }
