@@ -296,6 +296,7 @@ public static class DependencyInjection
         services.AddScoped<CampaignInitialSenderJob>();
         services.AddScoped<FollowUpSchedulerJob>();
         services.AddScoped<MessageStatusRetryJob>();
+        services.AddScoped<CampaignCompletionJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
         services.AddScoped<MessageTemplateSyncJob>();

@@ -148,8 +148,6 @@ public class CampaignSendService : ICampaignSendService
         foreach (var item in due)
             result = Add(result, await ProcessOneAsync(item.Id, item.CurrentStepNumber + 1, now, options, cancellationToken));
 
-        await CompleteFinishedCampaignsAsync(campaignId, now, cancellationToken);
-
         return result;
     }
 
@@ -157,14 +155,14 @@ public class CampaignSendService : ICampaignSendService
     /// audience member has reached a final state (nobody Pending or awaiting a follow-up - a customer
     /// who never replies still finishes once the last step is sent), or the expected end date has
     /// passed. A campaign with no audience is never closed by the first rule.</summary>
-    private async Task CompleteFinishedCampaignsAsync(Guid? campaignId, DateTime now, CancellationToken cancellationToken)
+    public async Task<int> CompleteFinishedCampaignsAsync(CancellationToken cancellationToken = default)
     {
-        var query = _context.Campaigns.Include(c => c.Steps).Where(c => c.Status == CampaignStatus.Running);
-        if (campaignId is { } scopeTo)
-            query = query.Where(c => c.Id == scopeTo);
-
-        var running = await query.ToListAsync(cancellationToken);
-        var changed = false;
+        var now = _dateTime.UtcNow;
+        var running = await _context.Campaigns
+            .Include(c => c.Steps)
+            .Where(c => c.Status == CampaignStatus.Running)
+            .ToListAsync(cancellationToken);
+        var completed = 0;
 
         foreach (var campaign in running)
         {
@@ -179,11 +177,13 @@ public class CampaignSendService : ICampaignSendService
 
             campaign.Status = CampaignStatus.Completed;
             campaign.StoppedAt = now;
-            changed = true;
+            completed++;
         }
 
-        if (changed)
+        if (completed > 0)
             await _context.SaveChangesAsync(cancellationToken);
+
+        return completed;
     }
 
     public async Task<SendRunResult> RetryFailedSendsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default)

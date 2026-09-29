@@ -36,6 +36,11 @@ public interface ICampaignSendService
     /// the bulk form of <see cref="RetryMessageAsync"/>, same attempt-budget bypass. The campaign must be
     /// Running (throws <c>ConflictException</c> otherwise, rather than letting each retry be abandoned).</summary>
     Task<SendRunResult> ResendFailedForStepAsync(Guid campaignId, int stepNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes every Running campaign that is done - no audience member still Pending or
+    /// awaiting a follow-up, or the campaign's expected end date has passed - by marking it Completed.
+    /// Driven by its own twice-daily job, not by the send jobs. Returns how many were closed.</summary>
+    Task<int> CompleteFinishedCampaignsAsync(CancellationToken cancellationToken = default);
 }
 
 public record SendRunResult(int Considered, int Sent, int Failed, int Skipped)

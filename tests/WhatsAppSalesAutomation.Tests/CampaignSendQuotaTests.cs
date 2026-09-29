@@ -189,7 +189,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         Seed(TemplateCategory.Marketing, customers: 2);
         await SetAudienceState(CampaignCustomerStatus.Completed);
 
-        await _sender.ProcessFollowUpsAsync();
+        await _sender.CompleteFinishedCampaignsAsync();
 
         var campaign = await _db.Campaigns.SingleAsync();
         Assert.Equal(CampaignStatus.Completed, campaign.Status);
@@ -202,7 +202,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         Seed(TemplateCategory.Marketing, customers: 2);
         await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
 
-        await _sender.ProcessFollowUpsAsync();
+        await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
     }
@@ -212,7 +212,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
     {
         Seed(TemplateCategory.Marketing, customers: 0);
 
-        await _sender.ProcessFollowUpsAsync();
+        await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
     }
@@ -226,7 +226,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _campaign.Steps.Single().DelayDaysAfterPrevious = 1;
         await _db.SaveChangesAsync();
 
-        await _sender.ProcessFollowUpsAsync();
+        await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Completed, (await _db.Campaigns.SingleAsync()).Status);
     }
@@ -240,7 +240,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _campaign.Steps.Single().DelayDaysAfterPrevious = 2;
         await _db.SaveChangesAsync();
 
-        await _sender.ProcessFollowUpsAsync();
+        await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
     }
