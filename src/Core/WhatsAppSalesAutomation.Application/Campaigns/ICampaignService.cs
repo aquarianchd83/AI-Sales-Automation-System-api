@@ -70,4 +70,11 @@ public interface ICampaignService
     /// <summary>Every message this campaign has sent - the per-send detail behind
     /// GetAudienceAsync's roster. Newest first.</summary>
     Task<PagedResult<CampaignMessageHistoryEntryDto>> GetHistoryAsync(Guid campaignId, CampaignHistoryQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>Per-step delivery breakdown across the audience - the numbers behind "who got step N".</summary>
+    Task<IReadOnlyList<CampaignStepDeliverySummaryDto>> GetStepDeliverySummaryAsync(Guid campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Every audience member's outcome for one step, including those not sent it yet
+    /// (Upcoming) or never will be (WillNotReceive). Throws NotFoundException for an unknown step.</summary>
+    Task<PagedResult<CampaignStepRecipientDto>> GetStepRecipientsAsync(Guid campaignId, int stepNumber, CampaignStepRecipientQuery query, CancellationToken cancellationToken = default);
 }

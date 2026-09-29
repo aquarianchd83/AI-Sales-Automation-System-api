@@ -531,6 +531,141 @@ public class CampaignService : ICampaignService
         return new PagedResult<CampaignMessageHistoryEntryDto>(items, totalCount, query.Page, query.PageSize);
     }
 
+    public async Task<IReadOnlyList<CampaignStepDeliverySummaryDto>> GetStepDeliverySummaryAsync(Guid campaignId, CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
+        var templateIds = campaign.Steps.Where(s => s.MessageTemplateId.HasValue).Select(s => s.MessageTemplateId!.Value).Distinct().ToList();
+        var templateNames = await _context.MessageTemplates
+            .Where(t => templateIds.Contains(t.Id))
+            .ToDictionaryAsync(t => t.Id, t => t.Name, cancellationToken);
+
+        var summaries = new List<CampaignStepDeliverySummaryDto>();
+        foreach (var step in campaign.Steps.OrderBy(s => s.StepNumber))
+        {
+            var rows = await LoadStepRecipientsAsync(campaignId, step.StepNumber, null, cancellationToken);
+            int Count(string outcome) => rows.Count(r => r.Outcome == outcome);
+
+            summaries.Add(new CampaignStepDeliverySummaryDto(
+                step.StepNumber,
+                step.StepType,
+                step.MessageTemplateId is { } tid && templateNames.TryGetValue(tid, out var name) ? name : null,
+                step.IsActive,
+                rows.Count,
+                Count(CampaignStepOutcome.Queued),
+                Count(CampaignStepOutcome.Sent),
+                Count(CampaignStepOutcome.Delivered),
+                Count(CampaignStepOutcome.Read),
+                Count(CampaignStepOutcome.Failed),
+                Count(CampaignStepOutcome.Upcoming),
+                Count(CampaignStepOutcome.WillNotReceive)));
+        }
+
+        return summaries;
+    }
+
+    public async Task<PagedResult<CampaignStepRecipientDto>> GetStepRecipientsAsync(Guid campaignId, int stepNumber, CampaignStepRecipientQuery query, CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
+        if (campaign.Steps.All(s => s.StepNumber != stepNumber))
+            throw new NotFoundException(nameof(CampaignStep), stepNumber);
+
+        var rows = await LoadStepRecipientsAsync(campaignId, stepNumber, query.Search, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(query.Outcome))
+        {
+            var outcome = query.Outcome.Trim();
+            rows = rows.Where(r => string.Equals(r.Outcome, outcome, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        // Failures first (they are the ones needing action), then whoever is still due, then the rest.
+        var items = rows
+            .OrderBy(r => OutcomeRank(r.Outcome))
+            .ThenBy(r => r.FirstName)
+            .ThenBy(r => r.PhoneNumberE164)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .ToList();
+
+        return new PagedResult<CampaignStepRecipientDto>(items, rows.Count, query.Page, query.PageSize);
+    }
+
+    private static int OutcomeRank(string outcome) => outcome switch
+    {
+        CampaignStepOutcome.Failed => 0,
+        CampaignStepOutcome.Queued => 1,
+        CampaignStepOutcome.Upcoming => 2,
+        CampaignStepOutcome.Sent => 3,
+        CampaignStepOutcome.Delivered => 4,
+        CampaignStepOutcome.Read => 5,
+        _ => 6,
+    };
+
+    /// <summary>The whole audience's outcome for one step. Built in memory from two narrow queries: a
+    /// campaign audience is bounded by the plan's customer limit, and the outcome rule (message status,
+    /// else "will it still be sent?") does not translate cleanly to SQL. A step has at most one message
+    /// per campaign customer - the send idempotency key is (campaign customer, step).</summary>
+    private async Task<List<CampaignStepRecipientDto>> LoadStepRecipientsAsync(Guid campaignId, int stepNumber, string? search, CancellationToken cancellationToken)
+    {
+        var members = _context.CampaignCustomers
+            .Where(cc => cc.CampaignId == campaignId)
+            .Join(_context.Customers, cc => cc.CustomerId, c => c.Id, (cc, c) => new { cc, c });
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            members = members.Where(x =>
+                x.c.PhoneNumberE164.Contains(term) ||
+                (x.c.FirstName != null && x.c.FirstName.Contains(term)) ||
+                (x.c.LastName != null && x.c.LastName.Contains(term)));
+        }
+
+        var audience = await members
+            .Select(x => new
+            {
+                CampaignCustomerId = x.cc.Id,
+                x.cc.Status,
+                x.cc.CurrentStepNumber,
+                x.cc.NextFollowUpDueAt,
+                x.cc.StoppedReason,
+                CustomerId = x.c.Id,
+                x.c.PhoneNumberE164,
+                x.c.FirstName,
+                x.c.LastName,
+            })
+            .ToListAsync(cancellationToken);
+
+        var campaignCustomerIds = _context.CampaignCustomers.Where(cc => cc.CampaignId == campaignId).Select(cc => cc.Id);
+        var messages = (await _context.Messages
+                .Where(m => m.CampaignStepNumber == stepNumber && m.CampaignCustomerId != null && campaignCustomerIds.Contains(m.CampaignCustomerId.Value))
+                .Select(m => new { m.Id, CampaignCustomerId = m.CampaignCustomerId!.Value, m.Status, m.FailureReason, m.SentAt, m.DeliveredAt, m.ReadAt, m.CreatedAt })
+                .ToListAsync(cancellationToken))
+            .GroupBy(m => m.CampaignCustomerId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAt).First());
+
+        return audience.Select(a =>
+        {
+            if (messages.TryGetValue(a.CampaignCustomerId, out var m))
+            {
+                return new CampaignStepRecipientDto(
+                    a.CustomerId, a.PhoneNumberE164, a.FirstName, a.LastName,
+                    m.Status.ToString(), m.Id, m.FailureReason, m.SentAt, m.DeliveredAt, m.ReadAt, null, null);
+            }
+
+            var stillDue = a.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.AwaitingResponse
+                && a.CurrentStepNumber < stepNumber;
+
+            return stillDue
+                ? new CampaignStepRecipientDto(
+                    a.CustomerId, a.PhoneNumberE164, a.FirstName, a.LastName,
+                    CampaignStepOutcome.Upcoming, null, null, null, null, null,
+                    a.CurrentStepNumber == stepNumber - 1 ? a.NextFollowUpDueAt : null, null)
+                : new CampaignStepRecipientDto(
+                    a.CustomerId, a.PhoneNumberE164, a.FirstName, a.LastName,
+                    CampaignStepOutcome.WillNotReceive, null, null, null, null, null, null,
+                    a.StoppedReason ?? a.Status.ToString());
+        }).ToList();
+    }
+
     private async Task ValidateSendableAsync(Campaign campaign, CancellationToken cancellationToken)
     {
         var initial = campaign.Steps.FirstOrDefault(s => s.StepNumber == 0 && s.IsActive);

@@ -209,6 +209,32 @@ public class CampaignSendService : ICampaignSendService
         return new CampaignMessageRetryResultDto(message.Status == MessageStatus.Sent, message.Status.ToString(), message.FailureReason);
     }
 
+    public async Task<SendRunResult> ResendFailedForStepAsync(Guid campaignId, int stepNumber, CancellationToken cancellationToken = default)
+    {
+        var campaign = await _context.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Campaign), campaignId);
+        if (campaign.Status != CampaignStatus.Running)
+            throw new ConflictException($"Campaign is {campaign.Status}; failed messages can only be resent while it is Running.");
+
+        var now = _dateTime.UtcNow;
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
+        var campaignCustomerIds = _context.CampaignCustomers.Where(cc => cc.CampaignId == campaignId).Select(cc => cc.Id);
+        var messageIds = await _context.Messages
+            .Where(m => m.Status == MessageStatus.Failed && m.CampaignStepNumber == stepNumber
+                && m.CampaignCustomerId != null && campaignCustomerIds.Contains(m.CampaignCustomerId.Value))
+            .OrderBy(m => m.CreatedAt)
+            .Take(options.MaxSendsPerRun)
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+        var result = SendRunResult.Empty;
+        foreach (var messageId in messageIds)
+            result = Add(result, await RetryOneAsync(messageId, now, options, cancellationToken));
+
+        return result;
+    }
+
     /// <summary>Loads one campaign customer fresh and attempts the lowest active step at or after
     /// <paramref name="fromStepNumber"/> - used for both initial sends (fromStepNumber 0) and
     /// follow-ups (fromStepNumber = CurrentStepNumber + 1).</summary>

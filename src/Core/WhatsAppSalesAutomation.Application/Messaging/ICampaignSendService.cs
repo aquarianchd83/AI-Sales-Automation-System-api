@@ -31,6 +31,11 @@ public interface ICampaignSendService
     /// <c>NotFoundException</c> if the message doesn't exist or isn't this campaign's, and
     /// <c>ConflictException</c> if it isn't currently Failed.</summary>
     Task<CampaignMessageRetryResultDto> RetryMessageAsync(Guid campaignId, Guid messageId, CancellationToken cancellationToken = default);
+
+    /// <summary>Resends every Failed message of one step of <paramref name="campaignId"/> in one go -
+    /// the bulk form of <see cref="RetryMessageAsync"/>, same attempt-budget bypass. The campaign must be
+    /// Running (throws <c>ConflictException</c> otherwise, rather than letting each retry be abandoned).</summary>
+    Task<SendRunResult> ResendFailedForStepAsync(Guid campaignId, int stepNumber, CancellationToken cancellationToken = default);
 }
 
 public record SendRunResult(int Considered, int Sent, int Failed, int Skipped)
