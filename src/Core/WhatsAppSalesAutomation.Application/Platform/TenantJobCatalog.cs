@@ -13,6 +13,7 @@ public static class TenantJobTypes
     public const string CampaignInitialSends = "campaign-initial-sends";
     public const string CampaignFollowUps = "campaign-follow-ups";
     public const string CampaignSendRetries = "campaign-send-retries";
+    public const string CampaignCompletion = "campaign-completion";
     public const string WhatsAppTemplateSync = "whatsapp-template-sync";
     public const string WhatsAppTokenRefresh = "whatsapp-token-refresh";
     public const string LeadDiscovery = "lead-discovery";
@@ -59,6 +60,11 @@ public static class TenantJobCatalog
             "Retries sends that failed transiently (WhatsApp API errors, rate limits).",
             "0 8 * * *"),
         new TenantJobDefinition(
+            TenantJobTypes.CampaignCompletion,
+            "Campaign completion",
+            "Closes Running campaigns once every audience member has finished or the campaign's expected end date has passed. Runs twice a day.",
+            "0 6,18 * * *"),
+        new TenantJobDefinition(
             TenantJobTypes.WhatsAppTemplateSync,
             "WhatsApp template sync",
             "Pushes new/changed message templates to Meta and pulls their review status back.",
@@ -86,6 +92,7 @@ public static class TenantJobCatalog
         TenantJobTypes.CampaignInitialSends,
         TenantJobTypes.CampaignFollowUps,
         TenantJobTypes.CampaignSendRetries,
+        TenantJobTypes.CampaignCompletion,
         TenantJobTypes.LeadDiscovery,
     };
 

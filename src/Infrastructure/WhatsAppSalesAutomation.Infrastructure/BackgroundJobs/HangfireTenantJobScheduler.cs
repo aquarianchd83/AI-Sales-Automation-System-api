@@ -79,6 +79,9 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             case TenantJobTypes.CampaignSendRetries:
                 _recurringJobs.AddOrUpdate<MessageStatusRetryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
+            case TenantJobTypes.CampaignCompletion:
+                _recurringJobs.AddOrUpdate<CampaignCompletionJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
+                break;
             case TenantJobTypes.WhatsAppTemplateSync:
                 _recurringJobs.AddOrUpdate<MessageTemplateSyncJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
@@ -110,6 +113,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             TenantJobTypes.CampaignInitialSends => _backgroundJobs.Enqueue<CampaignInitialSenderJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.CampaignFollowUps => _backgroundJobs.Enqueue<FollowUpSchedulerJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.CampaignSendRetries => _backgroundJobs.Enqueue<MessageStatusRetryJob>(job => job.RunAsync(tenantId)),
+            TenantJobTypes.CampaignCompletion => _backgroundJobs.Enqueue<CampaignCompletionJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTemplateSync => _backgroundJobs.Enqueue<MessageTemplateSyncJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTokenRefresh => _backgroundJobs.Enqueue<WhatsAppTokenRefreshJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.LeadDiscovery => _backgroundJobs.Enqueue<LeadDiscoveryJob>(job => job.RunAsync(tenantId)),

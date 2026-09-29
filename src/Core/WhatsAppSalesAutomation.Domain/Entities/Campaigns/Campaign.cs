@@ -35,7 +35,21 @@ public class Campaign : BaseEntity, ITenantOwned
 
     public DateTime? StartedAt { get; set; }
 
+    /// <summary>When the campaign ended: the manual Stop, or for a Completed campaign the moment it
+    /// closed itself (every audience member finished, or <see cref="ExpectedEndAt"/> passed).</summary>
     public DateTime? StoppedAt { get; set; }
+
+    /// <summary>StartedAt plus the delays of every active step - when the last follow-up falls due. Null
+    /// until started or with no active step. Needs <see cref="Steps"/> loaded. The Angular
+    /// campaignEndDate helper computes the same value; keep them in step.</summary>
+    public DateTime? ExpectedEndAt()
+    {
+        if (StartedAt is not { } started)
+            return null;
+
+        var active = Steps.Where(s => s.IsActive).ToList();
+        return active.Count == 0 ? null : started.AddDays(active.Sum(s => s.DelayDaysAfterPrevious));
+    }
 
     /// <summary>
     /// Snapshot of how the audience was selected (e.g. tag names), kept for the record. The audience

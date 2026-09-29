@@ -172,6 +172,79 @@ public sealed class CampaignSendQuotaTests : IDisposable
         Assert.Equal(4m, await BalanceAsync());
     }
 
+    private async Task SetAudienceState(CampaignCustomerStatus status)
+    {
+        foreach (var cc in await _db.CampaignCustomers.ToListAsync())
+        {
+            cc.Status = status;
+            cc.NextFollowUpDueAt = status == CampaignCustomerStatus.AwaitingResponse ? _clock.UtcNow.AddDays(1) : null;
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task A_campaign_closes_once_every_audience_member_has_finished()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await SetAudienceState(CampaignCustomerStatus.Completed);
+
+        await _sender.CompleteFinishedCampaignsAsync();
+
+        var campaign = await _db.Campaigns.SingleAsync();
+        Assert.Equal(CampaignStatus.Completed, campaign.Status);
+        Assert.Equal(_clock.UtcNow, campaign.StoppedAt);
+    }
+
+    [Fact]
+    public async Task A_campaign_stays_running_while_someone_is_still_awaiting_a_follow_up()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
+
+        await _sender.CompleteFinishedCampaignsAsync();
+
+        Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task A_campaign_with_no_audience_is_not_closed_by_the_everyone_finished_rule()
+    {
+        Seed(TemplateCategory.Marketing, customers: 0);
+
+        await _sender.CompleteFinishedCampaignsAsync();
+
+        Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task A_campaign_closes_once_its_end_date_has_passed_even_with_people_still_waiting()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
+        _campaign.StartedAt = _clock.UtcNow.AddDays(-3);
+        _campaign.Steps.Single().DelayDaysAfterPrevious = 1;
+        await _db.SaveChangesAsync();
+
+        await _sender.CompleteFinishedCampaignsAsync();
+
+        Assert.Equal(CampaignStatus.Completed, (await _db.Campaigns.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task A_campaign_before_its_end_date_is_left_running()
+    {
+        Seed(TemplateCategory.Marketing, customers: 1);
+        await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
+        _campaign.StartedAt = _clock.UtcNow.AddDays(-1);
+        _campaign.Steps.Single().DelayDaysAfterPrevious = 2;
+        await _db.SaveChangesAsync();
+
+        await _sender.CompleteFinishedCampaignsAsync();
+
+        Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
+    }
+
     private sealed class FakeWhatsApp : IWhatsAppService
     {
         public bool Succeed { get; set; } = true;

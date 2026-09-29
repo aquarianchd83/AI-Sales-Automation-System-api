@@ -122,7 +122,7 @@ public class CampaignService : ICampaignService
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var campaign = await LoadCampaignAsync(id, cancellationToken);
-        RequireStatus(campaign, "delete", CampaignStatus.Draft, CampaignStatus.Stopped);
+        RequireStatus(campaign, "delete", CampaignStatus.Draft, CampaignStatus.Stopped, CampaignStatus.Completed);
 
         // Campaign -> CampaignCustomers cascades, but Message -> CampaignCustomer is deliberately
         // Restrict, not Cascade - a guard against any path silently destroying send history. A Draft
