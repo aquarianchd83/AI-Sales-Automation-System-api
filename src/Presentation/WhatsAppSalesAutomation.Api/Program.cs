@@ -168,6 +168,7 @@ try
     app.UseAuthorization();
     app.MapControllers();
     app.MapHub<ConversationHub>("/hubs/conversations");
+    app.MapHub<NotificationsHub>("/hubs/notifications");
 
     app.UseHangfireDashboard("/hangfire", new DashboardOptions
     {

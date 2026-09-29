@@ -47,17 +47,17 @@ public static class TenantJobCatalog
             TenantJobTypes.CampaignInitialSends,
             "Campaign initial sends",
             "Sends the first message of each campaign step to customers who have just become due.",
-            "* * * * *"),
+            "0 6 * * *"),
         new TenantJobDefinition(
             TenantJobTypes.CampaignFollowUps,
             "Campaign follow-ups",
             "Sends scheduled follow-up messages to customers who did not respond to an earlier step.",
-            "* * * * *"),
+            "0 7 * * *"),
         new TenantJobDefinition(
             TenantJobTypes.CampaignSendRetries,
             "Campaign send retries",
             "Retries sends that failed transiently (WhatsApp API errors, rate limits).",
-            "*/5 * * * *"),
+            "0 8 * * *"),
         new TenantJobDefinition(
             TenantJobTypes.WhatsAppTemplateSync,
             "WhatsApp template sync",

@@ -16,6 +16,7 @@ public class TenantNotifier : ITenantNotifier
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IEmailSender _email;
     private readonly IPlatformWhatsAppSender _whatsApp;
+    private readonly INotificationBroadcaster _broadcaster;
     private readonly BillingAlertOptions _options;
     private readonly ILogger<TenantNotifier> _logger;
 
@@ -24,6 +25,7 @@ public class TenantNotifier : ITenantNotifier
         UserManager<ApplicationUser> userManager,
         IEmailSender email,
         IPlatformWhatsAppSender whatsApp,
+        INotificationBroadcaster broadcaster,
         IOptionsSnapshot<BillingAlertOptions> options,
         ILogger<TenantNotifier> logger)
     {
@@ -31,6 +33,7 @@ public class TenantNotifier : ITenantNotifier
         _userManager = userManager;
         _email = email;
         _whatsApp = whatsApp;
+        _broadcaster = broadcaster;
         _options = options.Value;
         _logger = logger;
     }
@@ -107,6 +110,20 @@ public class TenantNotifier : ITenantNotifier
 
             notification.DeliveryNote = notes.Count == 0 ? null : string.Join("; ", notes);
             await _context.SaveChangesAsync(cancellationToken);
+
+            await _broadcaster.NotifyTenantAsync(request.TenantId, new
+            {
+                id = notification.Id,
+                kind = notification.Kind,
+                quotaType = notification.QuotaType,
+                title = notification.Title,
+                body = notification.Body,
+                emailStatus = notification.EmailStatus,
+                whatsAppStatus = notification.WhatsAppStatus,
+                createdAt = notification.CreatedAt,
+                acknowledged = notification.AcknowledgedAtUtc is not null
+            }, cancellationToken);
+
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
