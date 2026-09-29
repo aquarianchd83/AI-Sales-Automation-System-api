@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -27,6 +28,8 @@ public class BillingService : IBillingService
     private readonly ITenantJobProvisioner _jobProvisioner;
     private readonly IQuotaLedgerService _quota;
     private readonly IPricingService _pricing;
+    /// <summary>Optional so a caller that only exercises pricing/plans need not supply one; DI always does.</summary>
+    private readonly ITenantNotifier? _notifier;
 
     public BillingService(
         IApplicationDbContext context,
@@ -34,8 +37,10 @@ public class BillingService : IBillingService
         IDateTimeProvider dateTime,
         ITenantJobProvisioner jobProvisioner,
         IQuotaLedgerService quota,
-        IPricingService pricing)
+        IPricingService pricing,
+        ITenantNotifier? notifier = null)
     {
+        _notifier = notifier;
         _pricing = pricing;
         _quota = quota;
         _context = context;
@@ -236,6 +241,20 @@ public class BillingService : IBillingService
 
         // Idempotent per payment id, so a retry after a failure here can never grant twice.
         await _quota.GrantCreditsAsync(tenantId, pack, payment.Id, now, cancellationToken);
+
+        // Episode is the payment, so a repeated call for the same payment can never tell the tenant twice.
+        if (_notifier is not null)
+        {
+            var label = QuotaAlertService.Label(pack.QuotaType);
+            var units = pack.Units.ToString("#,##0.##");
+            await _notifier.NotifyAsync(
+                new TenantNotificationRequest(
+                    tenantId, TenantNotificationKind.CreditsAdded, pack.QuotaType, payment.Id.ToString("N"),
+                    $"{units} {label} added",
+                    $"Your purchase of {units} {label} is complete. They are valid for {QuotaLedgerService.CreditValidityMonths} months.",
+                    AlsoWhatsApp: false),
+                cancellationToken);
+        }
 
         return PaymentDto.From(payment);
     }
