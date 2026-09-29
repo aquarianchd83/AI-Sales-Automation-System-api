@@ -110,6 +110,12 @@ public class CampaignsController : ControllerBase
     public async Task<ActionResult<SendRunResult>> ResendFailedForStep(Guid id, int stepNumber, CancellationToken cancellationToken)
         => Ok(await _sendService.ResendFailedForStepAsync(id, stepNumber, cancellationToken));
 
+    /// <summary>Sends the next step now, skipping the follow-up delay: to the given customers, or to everyone
+    /// still Pending or awaiting a follow-up when none are named. Running campaigns only.</summary>
+    [HttpPost("{id:guid}/force-next-step")]
+    public async Task<ActionResult<SendRunResult>> ForceNextStep(Guid id, [FromBody] ForceNextStepRequest? request, CancellationToken cancellationToken)
+        => Ok(await _sendService.ForceNextStepAsync(id, request?.CustomerIds, cancellationToken));
+
     /// <summary>Manually retries one Failed message, regardless of how many times it already failed.</summary>
     [HttpPost("{id:guid}/messages/{messageId:guid}/retry")]
     public async Task<ActionResult<CampaignMessageRetryResultDto>> RetryMessage(Guid id, Guid messageId, CancellationToken cancellationToken)
@@ -147,3 +153,6 @@ public class CampaignOpsController : ControllerBase
 }
 
 public record RunJobsResultDto(SendRunResult InitialSends, SendRunResult FollowUps, SendRunResult Retries);
+
+/// <summary>Body of POST campaigns/{id}/force-next-step. Null or empty <see cref="CustomerIds"/> means everyone eligible.</summary>
+public record ForceNextStepRequest(IReadOnlyList<Guid>? CustomerIds);
