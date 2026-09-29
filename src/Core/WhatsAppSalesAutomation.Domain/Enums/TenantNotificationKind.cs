@@ -17,5 +17,8 @@ public enum TenantNotificationKind
     // one pair per run, not per Hangfire tick, so these track "your lead discovery/campaign job just ran"
     // rather than the job's own schedule.
     JobStarted = 10,
-    JobCompleted = 11
+    JobCompleted = 11,
+    // A platform operator granted the tenant extra units of a quota (QuotaType is set) - a one-off good-news
+    // notice, so each grant has its own episode.
+    CreditsAdded = 12
 }

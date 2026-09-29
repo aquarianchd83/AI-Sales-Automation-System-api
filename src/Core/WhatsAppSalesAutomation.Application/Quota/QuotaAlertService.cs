@@ -160,7 +160,7 @@ public class QuotaAlertService : IQuotaAlertService
         };
     }
 
-    private static string Label(QuotaType type) => type switch
+    public static string Label(QuotaType type) => type switch
     {
         QuotaType.WhatsAppMessages => "WhatsApp messages",
         QuotaType.AiConversations => "AI conversations",
