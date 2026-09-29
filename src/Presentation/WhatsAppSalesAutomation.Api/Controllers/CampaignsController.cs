@@ -95,6 +95,21 @@ public class CampaignsController : ControllerBase
     public async Task<ActionResult<PagedResult<CampaignMessageHistoryEntryDto>>> GetHistory(Guid id, [FromQuery] CampaignHistoryQuery query, CancellationToken cancellationToken)
         => Ok(await _campaignService.GetHistoryAsync(id, query, cancellationToken));
 
+    /// <summary>Per-step delivery breakdown across the audience.</summary>
+    [HttpGet("{id:guid}/steps/delivery")]
+    public async Task<ActionResult<IReadOnlyList<CampaignStepDeliverySummaryDto>>> GetStepDelivery(Guid id, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetStepDeliverySummaryAsync(id, cancellationToken));
+
+    /// <summary>Each audience member's outcome for one step: received, failed, still to come, or never.</summary>
+    [HttpGet("{id:guid}/steps/{stepNumber:int}/recipients")]
+    public async Task<ActionResult<PagedResult<CampaignStepRecipientDto>>> GetStepRecipients(Guid id, int stepNumber, [FromQuery] CampaignStepRecipientQuery query, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetStepRecipientsAsync(id, stepNumber, query, cancellationToken));
+
+    /// <summary>Resends every Failed message of one step.</summary>
+    [HttpPost("{id:guid}/steps/{stepNumber:int}/resend-failed")]
+    public async Task<ActionResult<SendRunResult>> ResendFailedForStep(Guid id, int stepNumber, CancellationToken cancellationToken)
+        => Ok(await _sendService.ResendFailedForStepAsync(id, stepNumber, cancellationToken));
+
     /// <summary>Manually retries one Failed message, regardless of how many times it already failed.</summary>
     [HttpPost("{id:guid}/messages/{messageId:guid}/retry")]
     public async Task<ActionResult<CampaignMessageRetryResultDto>> RetryMessage(Guid id, Guid messageId, CancellationToken cancellationToken)

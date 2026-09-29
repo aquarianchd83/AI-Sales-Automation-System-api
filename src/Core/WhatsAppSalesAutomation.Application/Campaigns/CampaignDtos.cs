@@ -116,3 +116,56 @@ public record CampaignMessageHistoryEntryDto(
     DateTime? DeliveredAt,
     DateTime? ReadAt,
     DateTime CreatedAt);
+
+/// <summary>Delivery outcome of one campaign step across the whole audience - who has it, who is
+/// still due it, who never will. <see cref="Recipients"/> is the audience size; every other count
+/// is a slice of it, so Queued+Sent+Delivered+Read+Failed+Upcoming+WillNotReceive == Recipients.</summary>
+public record CampaignStepDeliverySummaryDto(
+    int StepNumber,
+    string StepType,
+    string? TemplateName,
+    bool IsActive,
+    int Recipients,
+    int Queued,
+    int Sent,
+    int Delivered,
+    int Read,
+    int Failed,
+    int Upcoming,
+    int WillNotReceive);
+
+/// <summary>Query for GET campaigns/{id}/steps/{stepNumber}/recipients. <see cref="Outcome"/> is one of
+/// the <see cref="CampaignStepOutcome"/> names.</summary>
+public record CampaignStepRecipientQuery : PagedRequest
+{
+    public string? Outcome { get; init; }
+}
+
+/// <summary>One audience member's outcome for one step. <see cref="MessageId"/> is set once a message
+/// exists for the step (the id to resend when <see cref="Outcome"/> is Failed).
+/// <see cref="DueAt"/> is when an Upcoming step becomes eligible (null = next send run).
+/// <see cref="Note"/> says why a WillNotReceive recipient will not get it.</summary>
+public record CampaignStepRecipientDto(
+    Guid CustomerId,
+    string PhoneNumberE164,
+    string? FirstName,
+    string? LastName,
+    string Outcome,
+    Guid? MessageId,
+    string? FailureReason,
+    DateTime? SentAt,
+    DateTime? DeliveredAt,
+    DateTime? ReadAt,
+    DateTime? DueAt,
+    string? Note);
+
+public static class CampaignStepOutcome
+{
+    public const string Queued = "Queued";
+    public const string Sent = "Sent";
+    public const string Delivered = "Delivered";
+    public const string Read = "Read";
+    public const string Failed = "Failed";
+    public const string Upcoming = "Upcoming";
+    public const string WillNotReceive = "WillNotReceive";
+}
