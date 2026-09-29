@@ -173,6 +173,7 @@ public class RefundService : IRefundService
 
         // Paid out. What was held beyond the approved share (a partial approval) goes back to the wallet.
         await _ledger.ReleaseRefundHoldAsync(request.TenantId, request.Id, fraction, cancellationToken);
+        await NotifyCreditsReturnedAsync(request, "part of your refund wasn't approved", cancellationToken);
 
         var share = payment.LocalAmount > 0 ? refundLocal / payment.LocalAmount : 0m;
         var refundTax = Math.Round(payment.TaxLocal * share, 2, MidpointRounding.AwayFromZero);
@@ -254,6 +255,7 @@ public class RefundService : IRefundService
             "Your refund request was declined",
             $"We couldn't approve your refund request: {request.ReviewNote}",
             AlsoWhatsApp: false), cancellationToken);
+        await NotifyCreditsReturnedAsync(request, "your refund request was declined", cancellationToken);
 
         return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();
     }
@@ -294,9 +296,36 @@ public class RefundService : IRefundService
                 "Your refund request was closed",
                 "Your refund request wasn't answered in time and has been closed, and your credits are available again. You can ask again if you still need it.",
                 AlsoWhatsApp: false), cancellationToken);
+            await NotifyCreditsReturnedAsync(request, "your refund request was closed", cancellationToken);
         }
 
         return stale.Count;
+    }
+
+    /// <summary>Tells the tenant which units came back to their wallet when a hold was released (read from the
+    /// release ledger entries, so it names each quota separately and stays silent when nothing came back).
+    /// Keyed on the request, so a repeat can never notify twice. Withdrawing a request yourself is not announced.</summary>
+    private async Task NotifyCreditsReturnedAsync(RefundRequest request, string why, CancellationToken cancellationToken)
+    {
+        var releaseKey = $"refund-release:{request.Id}";
+        var returned = await _context.QuotaLedgerEntries.IgnoreQueryFilters()
+            .Where(e => e.TenantId == request.TenantId
+                        && e.OperationKey == releaseKey
+                        && e.EntryType == QuotaEntryType.RefundRelease)
+            .GroupBy(e => e.QuotaType)
+            .Select(g => new { QuotaType = g.Key, Units = g.Sum(e => e.UnitsDelta) })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in returned.Where(r => r.Units > 0))
+        {
+            var label = QuotaAlertService.Label(item.QuotaType);
+            var units = item.Units.ToString("#,##0.##");
+            await _notifier.NotifyAsync(new TenantNotificationRequest(
+                request.TenantId, TenantNotificationKind.CreditsAdded, item.QuotaType, $"refund-{request.Id:N}",
+                $"{units} {label} returned",
+                $"{units} {label} are back in your account because {why}.",
+                AlsoWhatsApp: false), cancellationToken);
+        }
     }
 
     private async Task<RefundRequest> CreateRequestAsync(Payment payment, RefundEligibilityDto eligibility, string reason, Guid requestedBy, CancellationToken cancellationToken)

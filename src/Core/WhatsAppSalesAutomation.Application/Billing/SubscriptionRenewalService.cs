@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -26,8 +27,11 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
     private readonly IDateTimeProvider _dateTime;
     private readonly IPricingService _pricing;
 
-    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime, IPricingService pricing)
+    private readonly ITenantNotifier? _notifier;
+
+    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime, IPricingService pricing, ITenantNotifier? notifier = null)
     {
+        _notifier = notifier;
         _pricing = pricing;
         _context = context;
         _ledger = ledger;
@@ -74,6 +78,22 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
 
             await _ledger.AllocatePlanQuotaAsync(tenant.Id, plan.Id, start, end, payment.Id, cancellationToken);
             renewed++;
+
+            // One notice per quota the plan includes, keyed on the renewal payment so a re-run can't repeat it.
+            if (_notifier is not null)
+            {
+                var included = await _context.PlanQuotas.Where(q => q.PlanId == plan.Id && q.IncludedUnits > 0).ToListAsync(cancellationToken);
+                foreach (var quota in included)
+                {
+                    var label = QuotaAlertService.Label(quota.QuotaType);
+                    var units = quota.IncludedUnits.ToString("#,##0.##");
+                    await _notifier.NotifyAsync(new TenantNotificationRequest(
+                        tenant.Id, TenantNotificationKind.CreditsAdded, quota.QuotaType, payment.Id.ToString("N"),
+                        $"{units} {label} added",
+                        $"Your {plan.Name} plan renewed and {units} {label} were added for this period, which ends {end:d MMM yyyy}.",
+                        AlsoWhatsApp: false), cancellationToken);
+                }
+            }
         }
 
         var expired = await _ledger.ExpireDueAsync(cancellationToken);

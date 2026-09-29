@@ -179,6 +179,7 @@ public sealed class RefundServiceTests : IDisposable
         Assert.Equal(1000m, await BalanceAsync());
         Assert.Equal(0, _gateway.Calls);
         Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.RefundRejected);
+        Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.CreditsAdded && n.Body.Contains("declined"));
     }
 
     [Fact]
@@ -291,6 +292,7 @@ public sealed class RefundServiceTests : IDisposable
         Assert.Equal(1000m, await BalanceAsync());
         Assert.Equal(RefundStatus.Expired, (await _db.RefundRequests.IgnoreQueryFilters().SingleAsync()).Status);
         Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.RefundExpired);
+        Assert.Contains(_notifier.Sent, n => n.Kind == TenantNotificationKind.CreditsAdded && n.Body.Contains("closed"));
     }
 
     [Fact]
