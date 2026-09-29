@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
@@ -93,6 +94,35 @@ public sealed class PlanAndCreditFlowTests : IDisposable
 
         Assert.Equal(4000m, await BalanceAsync()); // 3,000 from Growth + the 1,000 credits, not 500 + 3,000 + 1,000
         Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations)); // Growth defines no AI quota here
+    }
+
+    [Fact]
+    public async Task Buying_credits_tells_the_tenant_they_were_added()
+    {
+        var notifier = new CapturingNotifier();
+        var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
+        var billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax(), notifier);
+        await billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
+
+        var payment = await billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
+
+        var sent = Assert.Single(notifier.Requests);
+        Assert.Equal(TenantNotificationKind.CreditsAdded, sent.Kind);
+        Assert.Equal(_tenant.Id, sent.TenantId);
+        Assert.Equal(QuotaType.WhatsAppMessages, sent.QuotaType);
+        Assert.Equal(payment.Id.ToString("N"), sent.EpisodeKey);
+        Assert.Contains("1,000", sent.Title);
+    }
+
+    private sealed class CapturingNotifier : ITenantNotifier
+    {
+        public List<TenantNotificationRequest> Requests { get; } = new();
+
+        public Task<bool> NotifyAsync(TenantNotificationRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(true);
+        }
     }
 
     // ---- Buying credits
