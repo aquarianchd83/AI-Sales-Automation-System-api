@@ -92,6 +92,7 @@ public static class TenantJobCatalog
         TenantJobTypes.CampaignInitialSends,
         TenantJobTypes.CampaignFollowUps,
         TenantJobTypes.CampaignSendRetries,
+        TenantJobTypes.CampaignCompletion,
         TenantJobTypes.LeadDiscovery,
     };
 
