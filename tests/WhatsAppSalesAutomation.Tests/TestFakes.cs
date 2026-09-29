@@ -80,6 +80,13 @@ public sealed class FakeNotificationBroadcaster : INotificationBroadcaster
     public List<(Guid TenantId, object Notification)> TenantPushes { get; } = new();
     public List<object> PlatformPushes { get; } = new();
     public List<(Guid TenantId, string JobType)> JobFinishedPushes { get; } = new();
+    public List<(Guid TenantId, string JobType)> JobStartedPushes { get; } = new();
+
+    public Task NotifyTenantJobStartedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default)
+    {
+        JobStartedPushes.Add((tenantId, jobType));
+        return Task.CompletedTask;
+    }
 
     public Task NotifyTenantJobFinishedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default)
     {

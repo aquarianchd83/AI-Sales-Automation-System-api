@@ -14,6 +14,7 @@ public class SignalRNotificationBroadcaster : INotificationBroadcaster
 {
     private const string EventName = "NotificationReceived";
     private const string JobFinishedEventName = "JobFinished";
+    private const string JobStartedEventName = "JobStarted";
 
     private readonly IHubContext<NotificationsHub> _hubContext;
     private readonly ILogger<SignalRNotificationBroadcaster> _logger;
@@ -34,6 +35,19 @@ public class SignalRNotificationBroadcaster : INotificationBroadcaster
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Could not push a live notification to tenant {TenantId}", tenantId);
+        }
+    }
+
+    public async Task NotifyTenantJobStartedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group(NotificationsHub.TenantGroup(tenantId))
+                .SendAsync(JobStartedEventName, new { jobType }, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not push a job-started event to tenant {TenantId}", tenantId);
         }
     }
 

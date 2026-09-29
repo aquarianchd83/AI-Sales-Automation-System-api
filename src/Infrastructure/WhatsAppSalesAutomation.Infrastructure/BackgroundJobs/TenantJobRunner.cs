@@ -83,6 +83,8 @@ public class TenantJobRunner
         var notifyTenant = TenantJobCatalog.SelfServiceKeys.Contains(jobType);
         if (notifyTenant)
             await NotifyTenantJobEventAsync(services, tenantId, jobType, started: true, summary: null, cancellationToken);
+        if (notifyTenant && services.GetService<INotificationBroadcaster>() is { } startedBroadcaster)
+            await startedBroadcaster.NotifyTenantJobStartedAsync(tenantId, jobType, cancellationToken);
 
         var stopwatch = Stopwatch.StartNew();
         try

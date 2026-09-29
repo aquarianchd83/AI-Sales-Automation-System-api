@@ -31,4 +31,8 @@ public interface INotificationBroadcaster
     /// outcome), so a page showing what that job changes - the campaign grid, say - can refetch itself.
     /// A separate event from the bell's notifications: it carries only the job type, nothing to display.</summary>
     Task NotifyTenantJobFinishedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default);
+
+    /// <summary>The counterpart sent when a job's run begins, so a screen can show it as in progress (and grey out
+    /// its "run now" button) until the matching finished event arrives.</summary>
+    Task NotifyTenantJobStartedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default);
 }
