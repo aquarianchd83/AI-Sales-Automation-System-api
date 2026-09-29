@@ -26,4 +26,9 @@ public interface INotificationBroadcaster
     Task NotifyTenantAsync(Guid tenantId, object notification, CancellationToken cancellationToken = default);
 
     Task NotifyPlatformAsync(object notification, CancellationToken cancellationToken = default);
+
+    /// <summary>Tells a tenant's open screens that one of its background jobs just finished (whatever the
+    /// outcome), so a page showing what that job changes - the campaign grid, say - can refetch itself.
+    /// A separate event from the bell's notifications: it carries only the job type, nothing to display.</summary>
+    Task NotifyTenantJobFinishedAsync(Guid tenantId, string jobType, CancellationToken cancellationToken = default);
 }
