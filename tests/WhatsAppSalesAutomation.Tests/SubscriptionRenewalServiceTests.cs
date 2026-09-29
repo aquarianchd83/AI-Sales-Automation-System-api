@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -20,6 +21,7 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
     private readonly SqliteApplicationDbContext _db;
     private readonly QuotaLedgerService _ledger;
     private readonly SubscriptionRenewalService _renewal;
+    private readonly RecordingNotifier _notifier = new();
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme", CountryCode = "IN" };
     private readonly Plan _plan = new() { Code = "starter", Name = "Starter", PriceMonthlyCents = 3900 };
 
@@ -30,7 +32,7 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new NoTenant(), new NoUser());
         _db.Database.EnsureCreated();
         _ledger = new QuotaLedgerService(_db, _clock);
-        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock, TestPricing.NoTax());
+        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock, TestPricing.NoTax(), _notifier);
 
         _db.Tenants.Add(_tenant);
         _db.Plans.Add(_plan);
@@ -51,6 +53,19 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
     {
         _db.Dispose();
         _connection.Dispose();
+    }
+
+    [Fact]
+    public async Task A_renewal_tells_the_tenant_what_was_added_once()
+    {
+        await _renewal.RunAsync();
+        await _renewal.RunAsync();
+
+        var sent = Assert.Single(_notifier.Sent);
+        Assert.Equal(TenantNotificationKind.CreditsAdded, sent.Kind);
+        Assert.Equal(QuotaType.WhatsAppMessages, sent.QuotaType);
+        Assert.Contains("Starter", sent.Body);
+        Assert.Contains("1,000", sent.Title);
     }
 
     [Fact]
