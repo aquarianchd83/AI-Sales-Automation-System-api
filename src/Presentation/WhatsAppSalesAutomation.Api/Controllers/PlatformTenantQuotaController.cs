@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -20,8 +21,11 @@ public class PlatformTenantQuotaController : ControllerBase
     private readonly IPlatformAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
 
-    public PlatformTenantQuotaController(IQuotaLedgerService quota, IPlatformAuditService auditService, ICurrentUserService currentUser)
+    private readonly ITenantNotifier _notifier;
+
+    public PlatformTenantQuotaController(IQuotaLedgerService quota, IPlatformAuditService auditService, ICurrentUserService currentUser, ITenantNotifier notifier)
     {
+        _notifier = notifier;
         _quota = quota;
         _auditService = auditService;
         _currentUser = currentUser;
@@ -46,6 +50,21 @@ public class PlatformTenantQuotaController : ControllerBase
         await _auditService.LogAsync(
             actor, _currentUser.Email ?? string.Empty, PlatformAuditActions.TenantQuotaAdjusted, tenantId,
             details: $"{request.QuotaType} {request.UnitsDelta:+0.####;-0.####} - {request.Reason}", cancellationToken: cancellationToken);
+
+        // Only additions are good news worth telling the tenant about; a removal is an operator correction.
+        if (request.UnitsDelta > 0)
+        {
+            var label = QuotaAlertService.Label(request.QuotaType);
+            var units = request.UnitsDelta.ToString("#,##0.##");
+            var validDays = request.ValidForDays ?? 365;
+            await _notifier.NotifyAsync(
+                new TenantNotificationRequest(
+                    tenantId, TenantNotificationKind.CreditsAdded, request.QuotaType, Guid.NewGuid().ToString("N"),
+                    $"{units} {label} added",
+                    $"{units} {label} have been added to your account. They are valid for {validDays} days.",
+                    AlsoWhatsApp: false),
+                cancellationToken);
+        }
 
         return Ok(await _quota.GetBalancesAsync(tenantId, cancellationToken));
     }
