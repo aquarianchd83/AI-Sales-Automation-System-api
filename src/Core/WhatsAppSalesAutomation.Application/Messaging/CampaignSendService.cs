@@ -148,7 +148,42 @@ public class CampaignSendService : ICampaignSendService
         foreach (var item in due)
             result = Add(result, await ProcessOneAsync(item.Id, item.CurrentStepNumber + 1, now, options, cancellationToken));
 
+        await CompleteFinishedCampaignsAsync(campaignId, now, cancellationToken);
+
         return result;
+    }
+
+    /// <summary>Closes Running campaigns that are done, so they stop showing as live: either every
+    /// audience member has reached a final state (nobody Pending or awaiting a follow-up - a customer
+    /// who never replies still finishes once the last step is sent), or the expected end date has
+    /// passed. A campaign with no audience is never closed by the first rule.</summary>
+    private async Task CompleteFinishedCampaignsAsync(Guid? campaignId, DateTime now, CancellationToken cancellationToken)
+    {
+        var query = _context.Campaigns.Include(c => c.Steps).Where(c => c.Status == CampaignStatus.Running);
+        if (campaignId is { } scopeTo)
+            query = query.Where(c => c.Id == scopeTo);
+
+        var running = await query.ToListAsync(cancellationToken);
+        var changed = false;
+
+        foreach (var campaign in running)
+        {
+            var members = _context.CampaignCustomers.Where(cc => cc.CampaignId == campaign.Id);
+            var pastEnd = campaign.ExpectedEndAt() is { } end && now > end;
+            var everyoneFinished = !pastEnd
+                && await members.AnyAsync(cancellationToken)
+                && !await members.AnyAsync(cc => cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.AwaitingResponse, cancellationToken);
+
+            if (!pastEnd && !everyoneFinished)
+                continue;
+
+            campaign.Status = CampaignStatus.Completed;
+            campaign.StoppedAt = now;
+            changed = true;
+        }
+
+        if (changed)
+            await _context.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<SendRunResult> RetryFailedSendsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default)
