@@ -16,14 +16,22 @@ public class MessageTemplateService : IMessageTemplateService
     private readonly IValidator<CreateMessageTemplateRequest> _createValidator;
     private readonly IValidator<UpdateMessageTemplateRequest> _updateValidator;
     private readonly IValidator<ReviewMessageTemplateRequest> _reviewValidator;
+    /// <summary>Optional so a caller that never pushes a header image need not supply one; DI always does.</summary>
+    private readonly IMediaStorageService? _mediaStorage;
+
+    /// <summary>Meta's limits for an image header: JPEG or PNG, at most 5 MB.</summary>
+    private const long MaxHeaderImageBytes = 5 * 1024 * 1024;
+    private static readonly string[] HeaderImageContentTypes = { "image/jpeg", "image/png" };
 
     public MessageTemplateService(
         IApplicationDbContext context,
         IWhatsAppService whatsApp,
         IValidator<CreateMessageTemplateRequest> createValidator,
         IValidator<UpdateMessageTemplateRequest> updateValidator,
-        IValidator<ReviewMessageTemplateRequest> reviewValidator)
+        IValidator<ReviewMessageTemplateRequest> reviewValidator,
+        IMediaStorageService? mediaStorage = null)
     {
+        _mediaStorage = mediaStorage;
         _context = context;
         _whatsApp = whatsApp;
         _createValidator = createValidator;
@@ -64,6 +72,9 @@ public class MessageTemplateService : IMessageTemplateService
         if (exists)
             throw new ConflictException($"A template named '{request.WhatsAppTemplateName}' already exists for language '{request.Language}'.");
 
+        if (request.HeaderMediaAssetId is { } headerId)
+            await EnsureUsableHeaderImageAsync(headerId, cancellationToken);
+
         var template = new MessageTemplate
         {
             Name = request.Name,
@@ -71,6 +82,7 @@ public class MessageTemplateService : IMessageTemplateService
             Category = Enum.Parse<TemplateCategory>(request.Category, ignoreCase: true),
             WhatsAppTemplateName = request.WhatsAppTemplateName,
             BodyText = request.BodyText,
+            HeaderMediaAssetId = request.HeaderMediaAssetId,
             WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending
         };
 
@@ -141,12 +153,79 @@ public class MessageTemplateService : IMessageTemplateService
             && (request.BodyText != template.BodyText || languageChanged || categoryChanged))
             template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
 
+        await ApplyHeaderImageChangeAsync(template, request, cancellationToken);
+
         template.BodyText = request.BodyText;
         template.IsActive = request.IsActive;
 
         await _context.SaveChangesAsync(cancellationToken);
 
         return ToDto(template);
+    }
+
+    /// <summary>Which image a template shows can change any time - a send supplies the current one by link - but
+    /// whether it HAS an image header is decided when Meta creates it and cannot change afterwards. So adding or
+    /// removing the image is only allowed while the template is not on Meta yet; swapping it for another image is
+    /// allowed on a template that already has an image header there.</summary>
+    private async Task ApplyHeaderImageChangeAsync(MessageTemplate template, UpdateMessageTemplateRequest request, CancellationToken cancellationToken)
+    {
+        var newHeaderId = request.RemoveHeaderImage ? null : request.HeaderMediaAssetId ?? template.HeaderMediaAssetId;
+        if (newHeaderId == template.HeaderMediaAssetId)
+            return;
+
+        if (template.MetaTemplateId is not null)
+        {
+            var addsOrRemoves = newHeaderId is null || template.HeaderMediaAssetId is null;
+            if (addsOrRemoves || !template.HeaderOnMeta)
+                throw new ConflictException(
+                    $"'{template.WhatsAppTemplateName}' is already on Meta {(template.HeaderOnMeta ? "with" : "without")} an image, and Meta fixes that when a template is created. " +
+                    "You can swap the image of a template that has one, but to add or remove the image create a new template.");
+        }
+
+        if (newHeaderId is { } id)
+            await EnsureUsableHeaderImageAsync(id, cancellationToken);
+
+        template.HeaderMediaAssetId = newHeaderId;
+    }
+
+    private async Task EnsureUsableHeaderImageAsync(Guid mediaAssetId, CancellationToken cancellationToken)
+    {
+        var asset = await _context.MediaAssets.FirstOrDefaultAsync(m => m.Id == mediaAssetId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Domain.Entities.Media.MediaAsset), mediaAssetId);
+
+        if (!HeaderImageContentTypes.Contains(asset.ContentType, StringComparer.OrdinalIgnoreCase))
+            throw new ConflictException($"'{asset.FileName}' can't be a template image: Meta accepts JPEG or PNG for a message header.");
+
+        if (asset.SizeBytes > MaxHeaderImageBytes)
+            throw new ConflictException($"'{asset.FileName}' is too large for a template image: Meta allows at most 5 MB.");
+    }
+
+    /// <summary>The header sample Meta needs when a template with an image is created or edited there, or null when
+    /// the template has none to send. A missing file surfaces as a push failure, not an exception.</summary>
+    private async Task<(WhatsAppTemplateHeaderImage? Image, string? Error)> LoadHeaderImageAsync(MessageTemplate template, CancellationToken cancellationToken)
+    {
+        if (template.HeaderMediaAssetId is not { } id)
+            return (null, null);
+
+        // On Meta already: only a template created with an image keeps sending one on an edit.
+        if (template.MetaTemplateId is not null && !template.HeaderOnMeta)
+            return (null, null);
+
+        var asset = await _context.MediaAssets.FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+        if (asset is null || _mediaStorage is null)
+            return (null, "The template's image is no longer available.");
+
+        try
+        {
+            await using var stream = await _mediaStorage.OpenReadAsync(asset.StorageKey, cancellationToken);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken);
+            return (new WhatsAppTemplateHeaderImage(asset.FileName, asset.ContentType, buffer.ToArray()), null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (null, $"The template's image '{asset.FileName}' could not be read: {ex.Message}");
+        }
     }
 
     public async Task<MessageTemplateDto> ReviewAsync(Guid id, ReviewMessageTemplateRequest request, CancellationToken cancellationToken = default)
@@ -230,8 +309,15 @@ public class MessageTemplateService : IMessageTemplateService
         foreach (var template in candidates)
         {
             var (metaBodyText, exampleValues) = TemplatePlaceholderResolver.ToMetaTemplateBody(template.BodyText);
+            var (headerImage, headerError) = await LoadHeaderImageAsync(template, cancellationToken);
+            if (headerError is not null)
+            {
+                failures.Add(new TemplatePushFailureDto(template.Id, template.WhatsAppTemplateName, headerError));
+                continue;
+            }
+
             var submission = new WhatsAppTemplateSubmission(
-                template.WhatsAppTemplateName, template.Language, template.Category.ToString(), metaBodyText, exampleValues);
+                template.WhatsAppTemplateName, template.Language, template.Category.ToString(), metaBodyText, exampleValues, headerImage);
 
             var result = template.MetaTemplateId is null
                 ? await _whatsApp.CreateMessageTemplateAsync(submission, cancellationToken)
@@ -251,6 +337,9 @@ public class MessageTemplateService : IMessageTemplateService
             if (wasCreate)
             {
                 createdCount++;
+                // Created with its image header: from now on a send may attach the image, and Meta will not let the
+                // template gain or lose the header.
+                template.HeaderOnMeta = headerImage is not null;
                 // Create's response often carries an immediate status (usually PENDING, occasionally
                 // an instant APPROVED for simple templates) - applying it now means a freshly-created
                 // template does not have to wait for this same job's pull phase, moments later, to
@@ -412,5 +501,6 @@ public class MessageTemplateService : IMessageTemplateService
 
     private static MessageTemplateDto ToDto(MessageTemplate t) => new(
         t.Id, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName,
-        t.WhatsAppTemplateStatus.ToString(), t.BodyText, t.IsActive, t.CreatedAt, t.MetaTemplateId);
+        t.WhatsAppTemplateStatus.ToString(), t.BodyText, t.IsActive, t.CreatedAt, t.MetaTemplateId,
+        t.HeaderMediaAssetId, t.HeaderOnMeta);
 }

@@ -20,6 +20,13 @@ public class MessageTemplateConfiguration : IEntityTypeConfiguration<MessageTemp
         builder.Property(t => t.MetaTemplateId).HasMaxLength(100);
         builder.Property(t => t.LastPushedBodyText).HasMaxLength(2000);
 
+        // Restrict, not cascade or set-null: deleting an image a template still shows is refused by
+        // MediaService before it gets here, so this is only the last line of defence.
+        builder.HasOne<WhatsAppSalesAutomation.Domain.Entities.Media.MediaAsset>()
+            .WithMany()
+            .HasForeignKey(t => t.HeaderMediaAssetId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // Meta scopes template names by (name, language) - the same template name commonly exists
         // once per language, e.g. "welcome_offer" in both en and hi.
         builder.HasIndex(t => new { t.WhatsAppTemplateName, t.Language }).IsUnique();

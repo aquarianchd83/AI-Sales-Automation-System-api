@@ -17,14 +17,17 @@ public record MessageTemplateDto(
     string BodyText,
     bool IsActive,
     DateTime CreatedAt,
-    string? MetaTemplateId);
+    string? MetaTemplateId,
+    Guid? HeaderMediaAssetId = null,
+    bool HeaderOnMeta = false);
 
 public record CreateMessageTemplateRequest(
     string Name,
     string Language,
     string Category,
     string WhatsAppTemplateName,
-    string BodyText);
+    string BodyText,
+    Guid? HeaderMediaAssetId = null);
 
 /// <summary>
 /// <paramref name="WhatsAppTemplateName"/> is optional and, when given, only accepted while the
@@ -43,7 +46,9 @@ public record UpdateMessageTemplateRequest(
     bool IsActive,
     string? WhatsAppTemplateName = null,
     string? Language = null,
-    string? Category = null);
+    string? Category = null,
+    Guid? HeaderMediaAssetId = null,
+    bool RemoveHeaderImage = false);
 
 /// <summary>
 /// A manual override of a template's review status, for a template that is NOT on Meta (never

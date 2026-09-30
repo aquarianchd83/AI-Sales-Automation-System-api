@@ -523,10 +523,9 @@ public class CampaignSendService : ICampaignSendService
         var body = string.IsNullOrWhiteSpace(template.BodyText) ? step.MessageText : template.BodyText;
         var (resolvedText, parameterValues) = TemplatePlaceholderResolver.Resolve(body, customer);
 
-        var firstMediaId = step.StepMedia.OrderBy(m => m.DisplayOrder).Select(m => (Guid?)m.MediaAssetId).FirstOrDefault();
-        var mediaUrl = firstMediaId is null
-            ? null
-            : await _context.MediaAssets.Where(a => a.Id == firstMediaId).Select(a => a.Url).FirstOrDefaultAsync(cancellationToken);
+        // The image comes from the template (Meta requires it on every send of a template created with one), not from
+        // the step: a header parameter for a template without an image header is rejected.
+        var mediaUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken);
 
         var result = await _whatsApp.SendTemplateMessageAsync(
             customer.PhoneNumberE164, template.WhatsAppTemplateName, template.Language, parameterValues, mediaUrl, cancellationToken);

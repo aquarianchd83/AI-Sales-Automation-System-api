@@ -74,7 +74,8 @@ public record TenantWhatsAppCredentials(
     string AccessToken,
     string AppSecret,
     string ApiVersion,
-    string ApiBaseUrl);
+    string ApiBaseUrl,
+    string? AppId = null);
 
 /// <summary>Result of the cross-tenant, by-phone-number-id webhook routing lookup.</summary>
 public record TenantWhatsAppLookupResult(Guid TenantId, TenantWhatsAppCredentials Credentials);

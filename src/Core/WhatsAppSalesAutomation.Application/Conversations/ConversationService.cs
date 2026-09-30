@@ -193,6 +193,7 @@ public class ConversationService : IConversationService
         string? templateName = null;
         TemplateCategory? templateCategory = null;
         string languageCode = "en";
+        string? headerImageUrl = null;
         IReadOnlyList<string> parameterValues = Array.Empty<string>();
 
         if (!string.IsNullOrWhiteSpace(request.Text))
@@ -224,6 +225,7 @@ public class ConversationService : IConversationService
             templateName = template.WhatsAppTemplateName;
             templateCategory = template.Category;
             languageCode = template.Language;
+            headerImageUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken);
         }
 
         var idempotencyKey = $"agent:{Guid.NewGuid()}";
@@ -254,7 +256,7 @@ public class ConversationService : IConversationService
 
         var result = templateName is null
             ? await _whatsApp.SendTextMessageAsync(customer.PhoneNumberE164, resolvedText, cancellationToken)
-            : await _whatsApp.SendTemplateMessageAsync(customer.PhoneNumberE164, templateName, languageCode, parameterValues, cancellationToken: cancellationToken);
+            : await _whatsApp.SendTemplateMessageAsync(customer.PhoneNumberE164, templateName, languageCode, parameterValues, headerImageUrl, cancellationToken);
 
         message.AttemptCount++;
 

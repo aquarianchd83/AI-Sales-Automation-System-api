@@ -104,6 +104,10 @@ public class MediaService : IMediaService
     {
         var asset = await FindOrThrowAsync(id, cancellationToken);
 
+        // Applies even with force: force only detaches step attachments, and a template still shows this image.
+        if (await _context.MessageTemplates.AnyAsync(t => t.HeaderMediaAssetId == id, cancellationToken))
+            throw new ConflictException($"Media asset '{asset.FileName}' is the image of a message template. Change or remove it there before deleting the file.");
+
         if (!force)
         {
             var inUse = await _context.CampaignStepMedia.AnyAsync(m => m.MediaAssetId == id, cancellationToken);

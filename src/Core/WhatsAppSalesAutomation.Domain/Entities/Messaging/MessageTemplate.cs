@@ -41,4 +41,13 @@ public class MessageTemplate : BaseEntity, ITenantOwned
     /// means never pushed; kept as its own field rather than inferred from WhatsAppTemplateStatus
     /// since a locally-edited-then-reverted body should not force a pointless re-push.</summary>
     public string? LastPushedBodyText { get; set; }
+
+    /// <summary>The optional image shown at the top of the message. Its file is what a send attaches (by link)
+    /// as the WhatsApp header. Which image can change at any time; whether the template HAS a header is fixed on
+    /// Meta at creation, see <see cref="HeaderOnMeta"/>.</summary>
+    public Guid? HeaderMediaAssetId { get; set; }
+
+    /// <summary>True once the template was created on Meta WITH an image header. Meta only accepts a header
+    /// parameter for a template defined with one, so a send attaches the image only when this is set.</summary>
+    public bool HeaderOnMeta { get; set; }
 }
