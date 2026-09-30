@@ -10,14 +10,21 @@ namespace WhatsAppSalesAutomation.Application.Common;
 /// path (campaign or agent) is sending.</summary>
 public static class TemplateHeaderImage
 {
-    public static async Task<string?> ResolveUrlAsync(IApplicationDbContext context, MessageTemplate template, CancellationToken cancellationToken)
+    /// <param name="storage">When given, the link is rebuilt from the current MediaStorage configuration, so a
+    /// PublicBaseUrl set after the file was uploaded still applies; otherwise the URL stored at upload is used.</param>
+    public static async Task<string?> ResolveUrlAsync(IApplicationDbContext context, MessageTemplate template, CancellationToken cancellationToken, IMediaStorageService? storage = null)
     {
         if (!template.HeaderOnMeta || template.HeaderMediaAssetId is not { } assetId)
             return null;
 
-        return await context.MediaAssets
+        var asset = await context.MediaAssets
             .Where(a => a.Id == assetId)
-            .Select(a => a.Url)
+            .Select(a => new { a.Url, a.StorageKey })
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (asset is null)
+            return null;
+
+        return storage is null ? asset.Url : storage.GetPublicUrl(asset.StorageKey);
     }
 }

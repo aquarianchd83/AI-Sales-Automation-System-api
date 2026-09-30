@@ -15,6 +15,7 @@ namespace WhatsAppSalesAutomation.Application.Conversations;
 public class ConversationService : IConversationService
 {
     private readonly IApplicationDbContext _context;
+    private readonly IMediaStorageService? _mediaStorage;
     private readonly IDateTimeProvider _dateTime;
     private readonly IWhatsAppService _whatsApp;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
@@ -29,9 +30,11 @@ public class ConversationService : IConversationService
         ITenantConfigOverrideProvider tenantConfig,
         IValidator<ChangeConversationModeRequest> modeValidator,
         IValidator<SendConversationMessageRequest> sendValidator,
-        IQuotaGate quota)
+        IQuotaGate quota,
+        IMediaStorageService? mediaStorage = null)
     {
         _quota = quota;
+        _mediaStorage = mediaStorage;
         _context = context;
         _dateTime = dateTime;
         _whatsApp = whatsApp;
@@ -225,7 +228,7 @@ public class ConversationService : IConversationService
             templateName = template.WhatsAppTemplateName;
             templateCategory = template.Category;
             languageCode = template.Language;
-            headerImageUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken);
+            headerImageUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken, _mediaStorage);
         }
 
         var idempotencyKey = $"agent:{Guid.NewGuid()}";

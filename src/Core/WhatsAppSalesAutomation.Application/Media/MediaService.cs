@@ -130,7 +130,11 @@ public class MediaService : IMediaService
         await _context.MediaAssets.FirstOrDefaultAsync(m => m.Id == id, cancellationToken)
             ?? throw new NotFoundException(nameof(MediaAsset), id);
 
-    private static MediaAssetDto ToDto(MediaAsset m) => new(m.Id, m.FileName, m.ContentType, m.SizeBytes, m.Url, m.CreatedAt);
+    private MediaAssetDto ToDto(MediaAsset m)
+    {
+        var url = _storage.GetPublicUrl(m.StorageKey);
+        return new(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url));
+    }
 
     /// <summary>File-level checks (size/type) do not go through FluentValidation - there is no DTO
     /// to validate, just a stream - so this mirrors the same 400-mapped exception UserService already
