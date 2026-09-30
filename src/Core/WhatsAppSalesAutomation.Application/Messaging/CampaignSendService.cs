@@ -517,7 +517,11 @@ public class CampaignSendService : ICampaignSendService
         MessagingOptions options,
         CancellationToken cancellationToken)
     {
-        var (resolvedText, parameterValues) = TemplatePlaceholderResolver.Resolve(step.MessageText, customer);
+        // The variables come from the approved template's own body - the text Meta holds and the customer sees -
+        // so they cannot disagree with it (a mismatch is Meta's "(#132000) Number of parameters does not match").
+        // The step's own text is only a fallback for a template with no body.
+        var body = string.IsNullOrWhiteSpace(template.BodyText) ? step.MessageText : template.BodyText;
+        var (resolvedText, parameterValues) = TemplatePlaceholderResolver.Resolve(body, customer);
 
         var firstMediaId = step.StepMedia.OrderBy(m => m.DisplayOrder).Select(m => (Guid?)m.MediaAssetId).FirstOrDefault();
         var mediaUrl = firstMediaId is null

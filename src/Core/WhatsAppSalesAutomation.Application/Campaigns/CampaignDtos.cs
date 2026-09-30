@@ -43,11 +43,14 @@ public record CreateCampaignRequest(string Name, string? Description, DateTime? 
 /// </summary>
 public record UpdateCampaignRequest(string Name, string? Description, DateTime? ScheduledStartAt);
 
-/// <summary><paramref name="StepType"/> is one of Initial, FollowUp1-4; a campaign may have at most one of each.</summary>
+/// <summary><paramref name="StepType"/> is one of Initial, FollowUp1-4; a campaign may have at most one of each.
+/// <paramref name="MessageText"/> is optional and no longer drives the send: customers see the approved Meta
+/// template body, and its {{n}} variables are filled from that template's own body. A value given here is
+/// kept only when no template is assigned yet.</summary>
 public record UpsertCampaignStepRequest(
     string StepType,
     int DelayDaysAfterPrevious,
-    string MessageText,
+    string? MessageText,
     Guid? MessageTemplateId,
     IReadOnlyList<Guid> MediaAssetIds,
     bool IsActive = true);

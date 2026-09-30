@@ -192,10 +192,14 @@ public class CampaignService : ICampaignService
         if (mediaCount != request.MediaAssetIds.Count)
             throw Invalid("mediaAssetIds", "One or more media asset ids do not exist.");
 
+        string? templateBody = null;
         if (request.MessageTemplateId.HasValue)
         {
-            var templateExists = await _context.MessageTemplates.AnyAsync(t => t.Id == request.MessageTemplateId, cancellationToken);
-            if (!templateExists)
+            templateBody = await _context.MessageTemplates
+                .Where(t => t.Id == request.MessageTemplateId)
+                .Select(t => t.BodyText)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (templateBody is null)
                 throw Invalid("messageTemplateId", "Template does not exist.");
         }
 
@@ -219,7 +223,9 @@ public class CampaignService : ICampaignService
         }
 
         step.DelayDaysAfterPrevious = request.DelayDaysAfterPrevious;
-        step.MessageText = request.MessageText;
+        // A record of the template body as of this save (the column is required). The send itself reads the
+        // template's live body, so this copy can lag behind a later template edit without affecting anything.
+        step.MessageText = templateBody ?? request.MessageText ?? string.Empty;
         step.MessageTemplateId = request.MessageTemplateId;
         step.IsActive = request.IsActive;
 
