@@ -37,8 +37,8 @@ public class MessageTemplatesController : ControllerBase
     public async Task<ActionResult<MessageTemplateDto>> Update(Guid id, [FromBody] UpdateMessageTemplateRequest request, CancellationToken cancellationToken)
         => Ok(await _templateService.UpdateAsync(id, request, cancellationToken));
 
-    /// <summary>A manual override, independent of the hourly MessageTemplateSyncJob - see
-    /// <see cref="ReviewMessageTemplateRequest"/>.</summary>
+    /// <summary>A manual review-status override, only for a template that is not on Meta yet (409 otherwise -
+    /// Meta decides, and the sync would revert it). See <see cref="ReviewMessageTemplateRequest"/>.</summary>
     [HttpPost("{id:guid}/review")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<MessageTemplateDto>> Review(Guid id, [FromBody] ReviewMessageTemplateRequest request, CancellationToken cancellationToken)

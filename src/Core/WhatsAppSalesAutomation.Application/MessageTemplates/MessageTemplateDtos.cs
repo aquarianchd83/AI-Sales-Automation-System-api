@@ -46,9 +46,10 @@ public record UpdateMessageTemplateRequest(
     string? Category = null);
 
 /// <summary>
-/// A manual override of a template's review status - independent of MessageTemplateSyncJob's
-/// automatic pull from Meta, for the rare case someone needs to force a value ahead of (or instead
-/// of) the next sync, e.g. against a Simulated provider where there is no real Meta review to sync.
+/// A manual override of a template's review status, for a template that is NOT on Meta (never
+/// pushed - e.g. against a Simulated provider where there is no real Meta review to sync). Refused (409)
+/// for a template that has a MetaTemplateId: Meta is the authority there, and the next sync
+/// (MessageTemplateSyncJob or the per-row Sync) would overwrite the value anyway.
 /// </summary>
 public record ReviewMessageTemplateRequest(string Status);
 

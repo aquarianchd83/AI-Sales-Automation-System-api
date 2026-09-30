@@ -148,6 +148,17 @@ public class MessageTemplateService : IMessageTemplateService
         await _reviewValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var template = await FindOrThrowAsync(id, cancellationToken);
+
+        // Once a template exists on Meta, Meta is the only authority on whether it is approved: the hourly
+        // sync (and the per-row Sync) pulls its real review status and writes it back over this field. A
+        // manual "Approve" would look like it worked, then be reverted at the next pull - and until then a
+        // campaign could try to send a template Meta has not approved, which Meta rejects. So refuse it
+        // outright rather than accept a value that cannot stick.
+        if (template.MetaTemplateId is not null)
+            throw new ConflictException(
+                $"'{template.WhatsAppTemplateName}' is on Meta, and Meta decides its review status - a manual change would be reverted by the next sync. " +
+                "Use Sync to fetch Meta's current status; it turns Approved once Meta finishes its review.");
+
         template.WhatsAppTemplateStatus = Enum.Parse<WhatsAppTemplateStatus>(request.Status, ignoreCase: true);
 
         await _context.SaveChangesAsync(cancellationToken);
