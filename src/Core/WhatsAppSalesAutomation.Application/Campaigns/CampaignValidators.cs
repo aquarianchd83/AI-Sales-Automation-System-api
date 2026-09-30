@@ -49,10 +49,12 @@ public class UpsertCampaignStepRequestValidator : AbstractValidator<UpsertCampai
             .Must(s => CampaignStepTypeName.TryParse(s, out _))
             .WithMessage("StepType must be 'Initial' or 'FollowUp' followed by a positive number, e.g. 'FollowUp1'.");
 
-        RuleFor(x => x.MessageText)
-            .NotEmpty()
+        // Optional: the send uses the selected template's body (see CampaignSendService.AttemptSendAsync), so
+        // this is only checked when a caller still supplies one.
+        RuleFor(x => x.MessageText!)
             .MaximumLength(2000)
             .Must(body => TemplatePlaceholderResolver.TryValidateTokens(body, out _))
+            .When(x => !string.IsNullOrWhiteSpace(x.MessageText))
             .WithMessage($"Message text may only use these placeholders: {{{{{string.Join("}}, {{", TemplatePlaceholderResolver.KnownTokens)}}}}}.");
 
         RuleFor(x => x.DelayDaysAfterPrevious)

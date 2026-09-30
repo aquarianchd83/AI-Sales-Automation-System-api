@@ -249,6 +249,25 @@ public sealed class CampaignSendQuotaTests : IDisposable
     }
 
     [Fact]
+    public async Task The_template_variables_come_from_the_templates_body_not_the_steps_own_text()
+    {
+        Seed(TemplateCategory.Marketing, customers: 1);
+        await Fund(5);
+        var template = await _db.MessageTemplates.SingleAsync();
+        template.BodyText = "Hi {{FirstName}}, call {{PhoneNumber}}";
+        // A stale or unrelated step text must not change what Meta is sent: it would carry different placeholders.
+        _campaign.Steps.Single().MessageText = "Something else entirely {{LastName}}";
+        await _db.SaveChangesAsync();
+
+        var result = await _sender.ProcessInitialSendsAsync();
+
+        Assert.Equal(1, result.Sent);
+        Assert.Equal(2, _whatsApp.SentParameters.Single().Count);
+        Assert.Equal("+919000000000", _whatsApp.SentParameters.Single()[1]);
+        Assert.StartsWith("Hi ", (await _db.Messages.SingleAsync()).Text);
+    }
+
+    [Fact]
     public async Task A_campaign_stays_running_while_someone_is_still_awaiting_a_follow_up()
     {
         Seed(TemplateCategory.Marketing, customers: 2);
@@ -301,12 +320,14 @@ public sealed class CampaignSendQuotaTests : IDisposable
     {
         public bool Succeed { get; set; } = true;
         public int Calls { get; private set; }
+        public List<IReadOnlyList<string>> SentParameters { get; } = new();
 
         public Task<WhatsAppSendResult> SendTemplateMessageAsync(
             string toPhoneNumberE164, string templateName, string languageCode, IReadOnlyList<string> parameterValues,
             string? mediaUrl = null, CancellationToken cancellationToken = default)
         {
             Calls++;
+            SentParameters.Add(parameterValues);
             return Task.FromResult(Succeed ? new WhatsAppSendResult(true, $"wamid.{Calls}", null) : new WhatsAppSendResult(false, null, "rejected"));
         }
 
