@@ -35,7 +35,9 @@ public interface IMessageTemplateService
     /// Status mapping: APPROVED -&gt; Approved; REJECTED -&gt; Rejected; PENDING/IN_APPEAL/PENDING_DELETION
     /// -&gt; Pending; anything else (PAUSED, DISABLED, or a status Meta adds later) -&gt; Rejected AND
     /// IsActive = false, since a template Meta will not currently deliver must not stay selectable by
-    /// a campaign step regardless of what to call its state. A template that exists on Meta but not
+    /// a campaign step regardless of what to call its state. The category is pulled too: Meta may reclassify
+    /// a template on review (e.g. Utility -&gt; Marketing), and Meta's category is the one billed and
+    /// enforced, so the local one follows it. A template that exists on Meta but not
     /// locally is reported in UnmatchedRemoteTemplateNames, never auto-created.
     /// </summary>
     Task<TemplateSyncResultDto> SyncWithMetaAsync(CancellationToken cancellationToken = default);
