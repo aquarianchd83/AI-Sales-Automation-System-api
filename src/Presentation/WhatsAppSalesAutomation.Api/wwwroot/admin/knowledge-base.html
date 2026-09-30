@@ -108,11 +108,12 @@
   </section>
 </main>
 
+<script src="lib/signalr.min.js"></script>
 <script>
 (function () {
   var API_BASE = window.location.origin;
   var MODELS = ['OpenAI', 'Google', 'Anthropic'];
-  var state = { accessToken: null, refreshToken: null, articles: [] };
+  var state = { accessToken: null, refreshToken: null, articles: [], hubConnection: null, refreshTimer: null };
 
   var el = {
     loginPanel: document.getElementById('login-panel'),
@@ -164,6 +165,7 @@
   }
 
   function showLoggedOut(message) {
+    stopRealtime();
     clearSession();
     el.loginPanel.hidden = false;
     el.appPanel.hidden = true;
@@ -176,6 +178,48 @@
     el.appPanel.hidden = false;
     el.whoami.hidden = false;
     el.whoami.textContent = state.email || '';
+    startRealtime();
+  }
+
+  // A single pushed status change (e.g. one article finishing indexing) reloads immediately; a burst
+  // of them (reindexing many stale articles at once) coalesces into one reload instead of one per
+  // article, on the same "wait a beat, then settle" idea as a debounced search box.
+  function scheduleRefresh() {
+    if (state.refreshTimer) return;
+    state.refreshTimer = setTimeout(function () {
+      state.refreshTimer = null;
+      loadArticles();
+    }, 800);
+  }
+
+  // Live channel for "an article's indexing status changed" pushes (see FinishAsync in
+  // KnowledgeIngestionService) - the one case a manual Refresh click cannot cover, since the job that
+  // changes an article's status usually finishes on a background worker well after this page's own
+  // last fetch. Best-effort: if it never connects, or the reconnect gives up, the Refresh button and a
+  // reload still show the true state - nothing here is the source of truth.
+  function startRealtime() {
+    if (state.hubConnection || typeof signalR === 'undefined') return;
+
+    var connection = new signalR.HubConnectionBuilder()
+      .withUrl(API_BASE + '/hubs/notifications', { accessTokenFactory: function () { return state.accessToken; } })
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on('NotificationReceived', function (notification) {
+      if (notification && notification.type === 'KnowledgeBaseArticleUpdated') scheduleRefresh();
+    });
+
+    connection.start().catch(function () { /* best-effort - see doc comment above */ });
+    state.hubConnection = connection;
+  }
+
+  function stopRealtime() {
+    if (state.refreshTimer) { clearTimeout(state.refreshTimer); state.refreshTimer = null; }
+    if (state.hubConnection) {
+      var connection = state.hubConnection;
+      state.hubConnection = null;
+      connection.stop().catch(function () {});
+    }
   }
 
   // Wraps fetch with the bearer token and a single silent refresh-token retry on 401 - an admin
