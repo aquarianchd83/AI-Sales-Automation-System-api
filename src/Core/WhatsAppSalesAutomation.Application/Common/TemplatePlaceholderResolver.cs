@@ -38,6 +38,17 @@ public static class TemplatePlaceholderResolver
         return unknownTokens.Count == 0;
     }
 
+    /// <summary>What a template says when the customer has no first name: "Hi there," reads naturally. Meta rejects a
+    /// template variable that is empty, so an empty value would fail the whole send.</summary>
+    public const string FirstNameFallback = "there";
+
+    /// <summary>Same reason for a missing last name. A last name has no natural stand-in, so this is a neutral word
+    /// rather than an empty string.</summary>
+    public const string LastNameFallback = "customer";
+
+    private static string OrFallback(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
     /// <summary>Substitutes every token with the customer's value and returns the positional
     /// parameter list, ready for <c>IWhatsAppService.SendTemplateMessageAsync</c>. One parameter
     /// per DISTINCT token (same rule as <see cref="ExtractTokens"/>) - WhatsApp's approved template
@@ -48,8 +59,8 @@ public static class TemplatePlaceholderResolver
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["FirstName"] = customer.FirstName ?? string.Empty,
-            ["LastName"] = customer.LastName ?? string.Empty,
+            ["FirstName"] = OrFallback(customer.FirstName, FirstNameFallback),
+            ["LastName"] = OrFallback(customer.LastName, LastNameFallback),
             ["PhoneNumber"] = customer.PhoneNumberE164
         };
 
