@@ -182,11 +182,9 @@ public class CampaignService : ICampaignService
         if (request.MediaAssetIds.Distinct().Count() != request.MediaAssetIds.Count)
             throw Invalid("mediaAssetIds", "Duplicate media asset ids.");
 
-        // Resolved per call (not once per DI scope) - merges this tenant's Campaigns:* overrides, if
-        // any, over the platform default. See ITenantConfigOverrideProvider's own doc comment.
-        var options = await _tenantConfig.GetCampaignOptionsAsync(cancellationToken);
-        if (request.MediaAssetIds.Count < options.MinStepMedia || request.MediaAssetIds.Count > options.MaxStepMedia)
-            throw Invalid("mediaAssetIds", $"A step needs between {options.MinStepMedia} and {options.MaxStepMedia} media items; {request.MediaAssetIds.Count} given.");
+        // No min/max on a step's media: a message's picture now belongs to its template (MessageTemplate.HeaderMediaAssetId),
+        // and step media is no longer attached to a send, so requiring some would only block a valid step. The ids
+        // are still accepted and checked below so existing steps and older clients keep working.
 
         var mediaCount = await _context.MediaAssets.CountAsync(m => request.MediaAssetIds.Contains(m.Id), cancellationToken);
         if (mediaCount != request.MediaAssetIds.Count)
@@ -685,13 +683,8 @@ public class CampaignService : ICampaignService
             .Where(t => templateIds.Contains(t.Id))
             .ToDictionaryAsync(t => t.Id, cancellationToken);
 
-        var options = await _tenantConfig.GetCampaignOptionsAsync(cancellationToken);
-
         foreach (var step in activeSteps)
         {
-            if (step.StepMedia.Count < options.MinStepMedia || step.StepMedia.Count > options.MaxStepMedia)
-                throw new ConflictException($"Step '{step.StepType}' needs between {options.MinStepMedia} and {options.MaxStepMedia} media items; it has {step.StepMedia.Count}.");
-
             if (step.MessageTemplateId is null || !templates.TryGetValue(step.MessageTemplateId.Value, out var template))
                 throw new ConflictException($"Step '{step.StepType}' has no template assigned.");
 
