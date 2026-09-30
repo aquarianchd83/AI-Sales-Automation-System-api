@@ -109,7 +109,13 @@ public class MessageTemplateService : IMessageTemplateService
                     nameChanged ? "name" : null,
                     languageChanged ? "language" : null,
                     categoryChanged ? "category" : null
-                }.Where(f => f is not null);
+                }.Where(f => f is not null).ToList();
+
+                if (changedFields.Count == 1 && categoryChanged)
+                    throw new ConflictException(
+                        $"'{template.WhatsAppTemplateName}' is on Meta, and Meta assigns its category (it may reclassify a template on review). " +
+                        "Use Sync to bring Meta's category here; to get a different one, create a new template in that category.");
+
                 throw new ConflictException(
                     $"'{template.WhatsAppTemplateName}' has already been created on Meta and its {string.Join("/", changedFields)} cannot be changed there - create a new template instead.");
             }
@@ -323,10 +329,25 @@ public class MessageTemplateService : IMessageTemplateService
 
             var (mappedStatus, mappedIsActive) = MapRemoteStatus(remote.Status);
 
+            var changed = false;
             if (local.WhatsAppTemplateStatus != mappedStatus || local.IsActive != mappedIsActive)
             {
                 local.WhatsAppTemplateStatus = mappedStatus;
                 local.IsActive = mappedIsActive;
+                changed = true;
+            }
+
+            // Meta may reclassify a template on review (e.g. a "Utility" one that breaks the utility
+            // guidelines becomes Marketing). The category Meta holds is the one it bills and enforces, and it
+            // also sets how many quota units each send uses here - so adopt it rather than keep a stale one.
+            if (MapRemoteCategory(remote.Category) is { } remoteCategory && local.Category != remoteCategory)
+            {
+                local.Category = remoteCategory;
+                changed = true;
+            }
+
+            if (changed)
+            {
                 statusUpdatedCount++;
                 anyChange = true;
             }
@@ -337,6 +358,15 @@ public class MessageTemplateService : IMessageTemplateService
 
         return (remoteTemplates.Count, matchedCount, statusUpdatedCount, unmatched);
     }
+
+    /// <summary>Meta's category name to ours; null for one we do not model, which leaves the local category alone.</summary>
+    private static TemplateCategory? MapRemoteCategory(string? metaCategory) => metaCategory?.ToUpperInvariant() switch
+    {
+        "MARKETING" => TemplateCategory.Marketing,
+        "UTILITY" => TemplateCategory.Utility,
+        "AUTHENTICATION" => TemplateCategory.Authentication,
+        _ => null
+    };
 
     /// <summary>See IMessageTemplateService.SyncWithMetaAsync's doc comment for the full mapping table
     /// this implements. IsActive is only ever forced to false here (a Rejected/Paused/Disabled
