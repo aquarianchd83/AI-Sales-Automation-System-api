@@ -98,6 +98,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
     private readonly ILogger<KnowledgeIngestionService> _logger;
     private readonly IKnowledgeRetrievalService? _retrieval;
     private readonly IPlatformEmbeddingService? _platformEmbedder;
+    private readonly INotificationBroadcaster? _notifications;
 
     /// <summary>The embedder for the run in progress: the platform's for a GLOBAL article, the ambient
     /// tenant's otherwise. Chosen once at the start of each run from the ARTICLE, never from whoever
@@ -119,7 +120,11 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         // Optional: the smoke check needs retrieval, but indexing must not depend on it. A null here
         // just skips that one check.
         IKnowledgeRetrievalService? retrieval = null,
-        IPlatformEmbeddingService? platformEmbedder = null)
+        IPlatformEmbeddingService? platformEmbedder = null,
+        // Optional for the same reason: a job reaching a terminal state pushes a live "refetch this
+        // article" hint to whoever has the admin page open (see FinishAsync), but indexing itself must
+        // not depend on anyone being connected to hear it.
+        INotificationBroadcaster? notifications = null)
     {
         _context = context;
         _embeddings = embeddings;
@@ -133,6 +138,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         _logger = logger;
         _retrieval = retrieval;
         _platformEmbedder = platformEmbedder;
+        _notifications = notifications;
         _embedder = embeddings;
     }
 
@@ -646,5 +652,20 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         job.ReasonCode = reasonCode;
         job.Detail = detail is { Length: > 2000 } ? detail[..2000] : detail;
         await _context.SaveChangesAsync(ct);
+
+        // A job started via QueueIndexingAsync finishes on a Hangfire worker, well after the request
+        // that queued it has returned - the one place indexing genuinely settles outside any open
+        // admin page's own request/response cycle. IndexNowAsync's synchronous callers reach here too,
+        // which just means their page gets the same push its own response was about to trigger anyway;
+        // harmless. Thin payload, same "refetch yourself" contract as every other push - see
+        // INotificationBroadcaster's own doc comment.
+        if (_notifications is not null)
+        {
+            var payload = new { type = "KnowledgeBaseArticleUpdated", articleId = job.ArticleId };
+            if (job.TenantId is { } tenantId)
+                await _notifications.NotifyTenantAsync(tenantId, payload, ct);
+            else
+                await _notifications.NotifyPlatformAsync(payload, ct);
+        }
     }
 }
