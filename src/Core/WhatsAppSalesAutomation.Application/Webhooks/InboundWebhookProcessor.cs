@@ -305,6 +305,8 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         _context.Messages.Add(message);
         await _context.SaveChangesAsync(cancellationToken);
 
+        await MarkCampaignRepliesAsync(customer.Id, isOptOut, inbound.Timestamp, cancellationToken);
+
         if (isOptOut)
         {
             // Opting out is itself the resolution - Phase 1's rule is "stop all automation, log,
@@ -322,5 +324,40 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         await _notifications.NotifyNewInboundMessageAsync(conversationId, customer.Id, inbound.TextBody, cancellationToken);
 
         return true;
+    }
+
+    /// <summary>A reply ends a campaign's automation for that customer: everyone in a campaign who was sent a
+    /// message and is awaiting a follow-up becomes Responded (or OptedOut when the reply is a STOP), with no
+    /// further follow-up due. Customers still Pending were never contacted, so an unrelated message from them
+    /// changes nothing. The row is concurrency-guarded against the follow-up scheduler, so a race is retried
+    /// against the fresh row rather than lost.</summary>
+    internal async Task MarkCampaignRepliesAsync(Guid customerId, bool isOptOut, DateTime repliedAtUtc, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var awaiting = await _context.CampaignCustomers
+                .Where(cc => cc.CustomerId == customerId && cc.Status == CampaignCustomerStatus.AwaitingResponse)
+                .ToListAsync(cancellationToken);
+            if (awaiting.Count == 0)
+                return;
+
+            foreach (var cc in awaiting)
+            {
+                cc.Status = isOptOut ? CampaignCustomerStatus.OptedOut : CampaignCustomerStatus.Responded;
+                cc.StoppedReason = isOptOut ? "Customer opted out" : "Customer replied";
+                cc.LastCustomerResponseAt = repliedAtUtc;
+                cc.NextFollowUpDueAt = null;
+            }
+
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                _context.ResetChangeTracker();
+            }
+        }
     }
 }
