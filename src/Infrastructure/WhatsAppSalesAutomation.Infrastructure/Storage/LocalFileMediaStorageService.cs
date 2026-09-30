@@ -45,6 +45,18 @@ public class LocalFileMediaStorageService : IMediaStorageService
         return new MediaStorageResult(relativeKey, url);
     }
 
+    public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
+    {
+        var fullPath = Path.GetFullPath(Path.Combine(_rootPath, storageKey.Replace('/', Path.DirectorySeparatorChar)));
+
+        // The key comes from our own database, but never let a bad one climb out of the media folder.
+        if (!fullPath.StartsWith(Path.GetFullPath(_rootPath), StringComparison.OrdinalIgnoreCase))
+            throw new FileNotFoundException("Media key points outside the media folder.", storageKey);
+
+        Stream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return Task.FromResult(stream);
+    }
+
     public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
     {
         var fullPath = Path.Combine(_rootPath, storageKey.Replace('/', Path.DirectorySeparatorChar));

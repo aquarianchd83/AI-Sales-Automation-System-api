@@ -9,6 +9,10 @@ public interface IMediaStorageService
     Task<MediaStorageResult> UploadAsync(Stream content, string fileName, string contentType, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens a stored file for reading (e.g. to hand its bytes to Meta). The caller disposes the stream.
+    /// Throws <see cref="FileNotFoundException"/> if the file is gone.</summary>
+    Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

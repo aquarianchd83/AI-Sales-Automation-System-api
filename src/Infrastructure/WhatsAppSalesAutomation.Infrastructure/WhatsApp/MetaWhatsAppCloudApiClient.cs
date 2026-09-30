@@ -59,6 +59,13 @@ public class MetaWhatsAppCloudApiClient
 
         if (!string.IsNullOrWhiteSpace(mediaUrl))
         {
+            // Meta downloads the header image from this link, so it has to be a public absolute URL. A relative
+            // one (the local media folder with no PublicBaseUrl set) can never work; say so instead of letting Meta
+            // answer with a vague media error.
+            if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var mediaUri) || (mediaUri.Scheme != Uri.UriSchemeHttp && mediaUri.Scheme != Uri.UriSchemeHttps))
+                return WhatsAppSendResult.Failed(
+                    "The template's header image isn't reachable by Meta: its address is not a public URL. Set the media storage PublicBaseUrl to this API's public address.");
+
             // Anonymous types cannot have a computed member name, so the "image"/"video" branch
             // is spelled out explicitly rather than building the property name from mediaKind.
             object mediaParameter = InferMediaKind(mediaUrl) == "video"
@@ -222,12 +229,21 @@ public class MetaWhatsAppCloudApiClient
         if (string.IsNullOrWhiteSpace(credentials.WhatsAppBusinessAccountId))
             return new WhatsAppTemplateSubmitResult(false, null, null, "WhatsAppBusinessAccountId is not configured.");
 
+        string? headerHandle = null;
+        if (submission.HeaderImage is not null)
+        {
+            var (handle, uploadError) = await UploadHeaderImageAsync(credentials, submission.HeaderImage, cancellationToken);
+            if (handle is null)
+                return new WhatsAppTemplateSubmitResult(false, null, null, uploadError);
+            headerHandle = handle;
+        }
+
         var payload = new
         {
             name = submission.Name,
             language = submission.Language,
             category = submission.Category.ToUpperInvariant(),
-            components = BuildTemplateComponents(submission)
+            components = BuildTemplateComponents(submission, headerHandle)
         };
 
         try
@@ -255,7 +271,17 @@ public class MetaWhatsAppCloudApiClient
     public async Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(
         TenantWhatsAppCredentials credentials, string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken)
     {
-        var payload = new { components = BuildTemplateComponents(submission) };
+        // An edit replaces the template's components, so a template that has an image header must send it again.
+        string? headerHandle = null;
+        if (submission.HeaderImage is not null)
+        {
+            var (handle, uploadError) = await UploadHeaderImageAsync(credentials, submission.HeaderImage, cancellationToken);
+            if (handle is null)
+                return new WhatsAppTemplateSubmitResult(false, metaTemplateId, null, uploadError);
+            headerHandle = handle;
+        }
+
+        var payload = new { components = BuildTemplateComponents(submission, headerHandle) };
 
         try
         {
@@ -296,7 +322,7 @@ public class MetaWhatsAppCloudApiClient
     /// from. Built as a plain Dictionary rather than an anonymous type since the "example" key is
     /// only added conditionally (a template with no placeholders has nothing to give an example for,
     /// and Meta rejects an empty body_text example array as readily as a missing one).</summary>
-    private static object[] BuildTemplateComponents(WhatsAppTemplateSubmission submission)
+    private static object[] BuildTemplateComponents(WhatsAppTemplateSubmission submission, string? headerImageHandle = null)
     {
         var component = new Dictionary<string, object?>
         {
@@ -307,7 +333,96 @@ public class MetaWhatsAppCloudApiClient
         if (submission.ExampleValues.Count > 0)
             component["example"] = new { body_text = new[] { submission.ExampleValues.ToArray() } };
 
-        return new object[] { component };
+        if (headerImageHandle is null)
+            return new object[] { component };
+
+        // An image header is defined here, once, with a handle to a sample of it (from the Resumable Upload
+        // API): Meta reviews the template against that sample and afterwards only accepts an image header
+        // parameter for it. The image actually shown to a customer is supplied per send, by link.
+        var header = new Dictionary<string, object?>
+        {
+            ["type"] = "HEADER",
+            ["format"] = "IMAGE",
+            ["example"] = new { header_handle = new[] { headerImageHandle } }
+        };
+
+        return new object[] { header, component };
+    }
+
+    /// <summary>Uploads a sample of the header image with Meta's Resumable Upload API and returns the handle a
+    /// template's HEADER example needs: first a session is opened under the Meta App id, then the file's bytes are
+    /// sent to that session. Returns null and an error message (never throws) so the caller can report it like any
+    /// other push failure.</summary>
+    private async Task<(string? Handle, string? Error)> UploadHeaderImageAsync(
+        TenantWhatsAppCredentials credentials, WhatsAppTemplateHeaderImage image, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(credentials.AppId))
+            return (null, "The Meta App ID isn't configured for this workspace, and Meta needs it to upload the header image. Ask your platform administrator to add it in the WhatsApp settings.");
+
+        try
+        {
+            var baseUrl = credentials.ApiBaseUrl.EndsWith('/') ? credentials.ApiBaseUrl : $"{credentials.ApiBaseUrl}/";
+            var versioned = new Uri($"{baseUrl}{credentials.ApiVersion}/");
+
+            var openSession = new Uri(
+                versioned,
+                $"{credentials.AppId}/uploads?file_length={image.Content.Length}&file_type={Uri.EscapeDataString(image.ContentType)}&file_name={Uri.EscapeDataString(image.FileName)}");
+            using var openRequest = new HttpRequestMessage(HttpMethod.Post, openSession);
+            openRequest.Headers.Authorization = new AuthenticationHeaderValue("OAuth", credentials.AccessToken);
+            using var openResponse = await _httpClient.SendAsync(openRequest, cancellationToken);
+            var openBody = await openResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!openResponse.IsSuccessStatusCode)
+                return (null, ReadMetaError(openBody, "Meta would not open an upload for the header image."));
+
+            var sessionId = JsonSerializer.Deserialize<MetaUploadSession>(openBody, JsonOptions)?.Id;
+            if (string.IsNullOrEmpty(sessionId))
+                return (null, "Meta did not return an upload session for the header image.");
+
+            using var uploadRequest = new HttpRequestMessage(HttpMethod.Post, new Uri(versioned, sessionId))
+            {
+                Content = new ByteArrayContent(image.Content)
+            };
+            uploadRequest.Headers.Authorization = new AuthenticationHeaderValue("OAuth", credentials.AccessToken);
+            uploadRequest.Headers.TryAddWithoutValidation("file_offset", "0");
+            using var uploadResponse = await _httpClient.SendAsync(uploadRequest, cancellationToken);
+            var uploadBody = await uploadResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!uploadResponse.IsSuccessStatusCode)
+                return (null, ReadMetaError(uploadBody, "Meta rejected the header image upload."));
+
+            var handle = JsonSerializer.Deserialize<MetaUploadHandle>(uploadBody, JsonOptions)?.Handle;
+            return string.IsNullOrEmpty(handle)
+                ? (null, "Meta did not return a handle for the uploaded header image.")
+                : (handle, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Meta header image upload threw for {File}", image.FileName);
+            return (null, $"Uploading the header image to Meta failed: {ex.Message}");
+        }
+    }
+
+    private static string ReadMetaError(string rawBody, string fallback)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<MetaErrorResponse>(rawBody, JsonOptions)?.Error?.Message ?? fallback;
+        }
+        catch (JsonException)
+        {
+            return fallback;
+        }
+    }
+
+    private class MetaUploadSession
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+    }
+
+    private class MetaUploadHandle
+    {
+        [JsonPropertyName("h")]
+        public string? Handle { get; set; }
     }
 
     private class MetaTemplateSubmitResponse

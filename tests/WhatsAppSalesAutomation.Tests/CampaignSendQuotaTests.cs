@@ -249,6 +249,29 @@ public sealed class CampaignSendQuotaTests : IDisposable
     }
 
     [Fact]
+    public async Task The_templates_image_is_attached_when_meta_holds_the_template_with_one_and_never_otherwise()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await Fund(5);
+        var asset = new WhatsAppSalesAutomation.Domain.Entities.Media.MediaAsset
+        {
+            FileName = "hero.png", ContentType = "image/png", SizeBytes = 10, StorageProvider = "Local", StorageKey = "k", Url = "https://cdn.example.test/hero.png", Checksum = "x",
+        };
+        _db.MediaAssets.Add(asset);
+        var template = await _db.MessageTemplates.SingleAsync();
+        template.HeaderMediaAssetId = asset.Id; // chosen, but Meta does not hold the template with a header yet
+        await _db.SaveChangesAsync();
+
+        await _sender.ForceNextStepAsync(_campaign.Id, new[] { (await _db.CampaignCustomers.ToListAsync())[0].CustomerId });
+        Assert.Equal(new string?[] { null }, _whatsApp.SentMediaUrls);
+
+        template.HeaderOnMeta = true;
+        await _db.SaveChangesAsync();
+        await _sender.ForceNextStepAsync(_campaign.Id, new[] { (await _db.CampaignCustomers.ToListAsync())[1].CustomerId });
+        Assert.Equal("https://cdn.example.test/hero.png", _whatsApp.SentMediaUrls.Last());
+    }
+
+    [Fact]
     public async Task The_template_variables_come_from_the_templates_body_not_the_steps_own_text()
     {
         Seed(TemplateCategory.Marketing, customers: 1);
@@ -321,6 +344,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         public bool Succeed { get; set; } = true;
         public int Calls { get; private set; }
         public List<IReadOnlyList<string>> SentParameters { get; } = new();
+        public List<string?> SentMediaUrls { get; } = new();
 
         public Task<WhatsAppSendResult> SendTemplateMessageAsync(
             string toPhoneNumberE164, string templateName, string languageCode, IReadOnlyList<string> parameterValues,
@@ -328,6 +352,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         {
             Calls++;
             SentParameters.Add(parameterValues);
+            SentMediaUrls.Add(mediaUrl);
             return Task.FromResult(Succeed ? new WhatsAppSendResult(true, $"wamid.{Calls}", null) : new WhatsAppSendResult(false, null, "rejected"));
         }
 

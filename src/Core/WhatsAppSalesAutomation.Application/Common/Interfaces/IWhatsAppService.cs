@@ -86,7 +86,12 @@ public record WhatsAppTemplateSubmission(
     string Language,
     string Category,
     string MetaBodyText,
-    IReadOnlyList<string> ExampleValues);
+    IReadOnlyList<string> ExampleValues,
+    WhatsAppTemplateHeaderImage? HeaderImage = null);
+
+/// <summary>The image a template shows above its body. Meta needs a sample of it to review the template, so the
+/// file itself is handed over rather than just a link.</summary>
+public record WhatsAppTemplateHeaderImage(string FileName, string ContentType, byte[] Content);
 
 /// <summary><paramref name="Status"/> is Meta's raw string, same convention as WhatsAppRemoteTemplate.
 /// A failure is a normal, expected outcome (an invalid template name, a policy violation) - not every

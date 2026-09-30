@@ -186,7 +186,8 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
             TryUnprotect(protector, row.AccessToken),
             TryUnprotect(protector, row.AppSecret),
             row.ApiVersion,
-            row.ApiBaseUrl);
+            row.ApiBaseUrl,
+            row.AppId);
     }
 
     private static TenantWhatsAppConfigDto ToDto(TenantWhatsAppConfig row) => new(
