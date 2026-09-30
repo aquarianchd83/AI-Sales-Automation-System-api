@@ -151,6 +151,39 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
+    public async Task<SendRunResult> ForceNextStepAsync(Guid campaignId, IReadOnlyCollection<Guid>? customerIds, CancellationToken cancellationToken = default)
+    {
+        var campaign = await _context.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Campaign), campaignId);
+        if (campaign.Status != CampaignStatus.Running)
+            throw new ConflictException($"Campaign is {campaign.Status}; the next step can only be forced while it is Running.");
+
+        var now = _dateTime.UtcNow;
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
+        var eligible = _context.CampaignCustomers.Where(cc =>
+            cc.CampaignId == campaignId &&
+            (cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.AwaitingResponse));
+        if (customerIds is { Count: > 0 })
+            eligible = eligible.Where(cc => customerIds.Contains(cc.CustomerId));
+
+        var targets = await eligible
+            .OrderBy(cc => cc.NextFollowUpDueAt == null ? 0 : 1)
+            .ThenBy(cc => cc.NextFollowUpDueAt)
+            .Take(options.MaxSendsPerRun)
+            .Select(cc => new { cc.Id, cc.CurrentStepNumber })
+            .ToListAsync(cancellationToken);
+
+        // CurrentStepNumber is -1 until the Initial step goes out, so +1 is the Initial step for a Pending
+        // customer and the next follow-up for one who is awaiting it - the same rule the scheduled jobs use,
+        // minus their "is it due yet" selection.
+        var result = SendRunResult.Empty;
+        foreach (var target in targets)
+            result = Add(result, await ProcessOneAsync(target.Id, target.CurrentStepNumber + 1, now, options, cancellationToken));
+
+        return result;
+    }
+
     /// <summary>Closes Running campaigns that are done, so they stop showing as live: either every
     /// audience member has reached a final state (nobody Pending or awaiting a follow-up - a customer
     /// who never replies still finishes once the last step is sent), or the expected end date has

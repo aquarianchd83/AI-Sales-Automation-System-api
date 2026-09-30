@@ -37,6 +37,14 @@ public interface ICampaignSendService
     /// Running (throws <c>ConflictException</c> otherwise, rather than letting each retry be abandoned).</summary>
     Task<SendRunResult> ResendFailedForStepAsync(Guid campaignId, int stepNumber, CancellationToken cancellationToken = default);
 
+    /// <summary>Sends the next step now to customers of <paramref name="campaignId"/> who are Pending (their
+    /// Initial step) or awaiting a follow-up, without waiting for the follow-up delay to elapse. Limited to
+    /// <paramref name="customerIds"/> when given, otherwise everyone eligible. Goes through the same checks as
+    /// a scheduled send (opt-in, approved template, prepaid quota), so a customer who cannot be sent to is
+    /// counted as skipped rather than failing the call. The campaign must be Running (throws
+    /// <c>ConflictException</c> otherwise); at most one send run's worth of customers is processed.</summary>
+    Task<SendRunResult> ForceNextStepAsync(Guid campaignId, IReadOnlyCollection<Guid>? customerIds, CancellationToken cancellationToken = default);
+
     /// <summary>Closes every Running campaign that is done - no audience member still Pending or
     /// awaiting a follow-up, or the campaign's expected end date has passed - by marking it Completed.
     /// Driven by its own twice-daily job, not by the send jobs. Returns how many were closed.</summary>

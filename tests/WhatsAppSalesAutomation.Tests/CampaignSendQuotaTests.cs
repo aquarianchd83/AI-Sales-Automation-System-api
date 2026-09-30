@@ -172,6 +172,58 @@ public sealed class CampaignSendQuotaTests : IDisposable
         Assert.Equal(4m, await BalanceAsync());
     }
 
+    [Fact]
+    public async Task Forcing_the_next_step_sends_a_follow_up_before_its_delay_has_elapsed()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await Fund(5);
+        var template = await _db.MessageTemplates.SingleAsync();
+        _db.CampaignSteps.Add(new CampaignStep { CampaignId = _campaign.Id, StepNumber = 1, StepType = "FollowUp1", MessageText = "Again", DelayDaysAfterPrevious = 3, MessageTemplateId = template.Id });
+        await _db.SaveChangesAsync();
+
+        // Both already had the Initial message and are waiting three days for the follow-up.
+        await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
+        foreach (var cc in await _db.CampaignCustomers.ToListAsync())
+        {
+            cc.CurrentStepNumber = 0;
+            cc.NextFollowUpDueAt = _clock.UtcNow.AddDays(3);
+        }
+
+        await _db.SaveChangesAsync();
+        Assert.Equal(0, (await _sender.ProcessFollowUpsAsync()).Sent); // not due, so the scheduled job does nothing
+
+        var only = (await _db.CampaignCustomers.ToListAsync())[0];
+        var result = await _sender.ForceNextStepAsync(_campaign.Id, new[] { only.CustomerId });
+
+        Assert.Equal(1, result.Sent);
+        var message = await _db.Messages.SingleAsync();
+        Assert.Equal(1, message.CampaignStepNumber);
+        Assert.Equal(only.Id, message.CampaignCustomerId);
+    }
+
+    [Fact]
+    public async Task Forcing_the_next_step_with_no_customers_named_sends_the_initial_step_to_everyone_pending()
+    {
+        Seed(TemplateCategory.Marketing, customers: 2);
+        await Fund(5);
+
+        var result = await _sender.ForceNextStepAsync(_campaign.Id, null);
+
+        Assert.Equal(2, result.Sent);
+        Assert.All(await _db.Messages.ToListAsync(), m => Assert.Equal(0, m.CampaignStepNumber));
+    }
+
+    [Fact]
+    public async Task Forcing_the_next_step_is_refused_unless_the_campaign_is_running()
+    {
+        Seed(TemplateCategory.Marketing, customers: 1);
+        _campaign.Status = CampaignStatus.Paused;
+        await _db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<WhatsAppSalesAutomation.Application.Common.Exceptions.ConflictException>(
+            () => _sender.ForceNextStepAsync(_campaign.Id, null));
+    }
+
     private async Task SetAudienceState(CampaignCustomerStatus status)
     {
         foreach (var cc in await _db.CampaignCustomers.ToListAsync())

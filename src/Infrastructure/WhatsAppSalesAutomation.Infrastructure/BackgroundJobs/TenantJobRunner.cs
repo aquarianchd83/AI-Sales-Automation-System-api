@@ -83,6 +83,8 @@ public class TenantJobRunner
         var notifyTenant = TenantJobCatalog.SelfServiceKeys.Contains(jobType);
         if (notifyTenant)
             await NotifyTenantJobEventAsync(services, tenantId, jobType, started: true, summary: null, cancellationToken);
+        if (notifyTenant && services.GetService<INotificationBroadcaster>() is { } startedBroadcaster)
+            await startedBroadcaster.NotifyTenantJobStartedAsync(tenantId, jobType, cancellationToken);
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -92,12 +94,16 @@ public class TenantJobRunner
             if (notifyTenant)
                 await NotifyTenantJobEventAsync(services, tenantId, jobType, started: false, summary, cancellationToken);
             await RecordAsync(tenantId, jobType, TenantJobRunOutcome.Succeeded, summary, (int)stopwatch.ElapsedMilliseconds, cancellationToken);
+            if (notifyTenant)
+                await PushJobFinishedAsync(services, tenantId, jobType, cancellationToken);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
             _logger.LogError(ex, "{JobType} failed for tenant {TenantId}", jobType, tenantId);
             await RecordAsync(tenantId, jobType, TenantJobRunOutcome.Failed, ex.Message, (int)stopwatch.ElapsedMilliseconds, cancellationToken);
+            if (notifyTenant)
+                await PushJobFinishedAsync(services, tenantId, jobType, cancellationToken);
 
             // Deliberately swallowed, as it was under the fan-out runner, but for a different reason now
             // that a run only concerns one tenant: rethrowing would put the job into Hangfire's retry
@@ -105,6 +111,14 @@ public class TenantJobRunner
             // The failure is recorded on that tenant's own schedule row (and its ConsecutiveFailureCount)
             // for the console to surface instead.
         }
+    }
+
+    /// <summary>Lets the tenant's open screens know this job finished, after its row is recorded so a refetch sees
+    /// the new state. Best-effort: the broadcaster itself never throws, and a missing one is simply skipped.</summary>
+    private static async Task PushJobFinishedAsync(IServiceProvider services, Guid tenantId, string jobType, CancellationToken cancellationToken)
+    {
+        if (services.GetService<INotificationBroadcaster>() is { } broadcaster)
+            await broadcaster.NotifyTenantJobFinishedAsync(tenantId, jobType, cancellationToken);
     }
 
     /// <summary>Why this run should do nothing, or null to go ahead. A missing schedule row is not a skip
