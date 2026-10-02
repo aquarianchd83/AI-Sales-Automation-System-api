@@ -70,14 +70,14 @@ public class PlatformNotificationService : IPlatformNotificationService
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var term = request.Search.Trim();
+            var term = request.Search.Trim().ToLower();
             // Tenant names live on another table, so the matching tenants are resolved first rather than joined per row.
             var tenantIds = await _context.Tenants.IgnoreQueryFilters()
-                .Where(t => t.Name.Contains(term))
+                .Where(t => t.Name.ToLower().Contains(term))
                 .Select(t => t.Id)
                 .ToListAsync(cancellationToken);
 
-            query = query.Where(n => n.Title.Contains(term) || n.Body.Contains(term) || (n.TenantId != null && tenantIds.Contains(n.TenantId.Value)));
+            query = query.Where(n => n.Title.ToLower().Contains(term) || n.Body.ToLower().Contains(term) || (n.TenantId != null && tenantIds.Contains(n.TenantId.Value)));
         }
 
         var total = await query.CountAsync(cancellationToken);

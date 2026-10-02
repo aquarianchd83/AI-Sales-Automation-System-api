@@ -18,6 +18,7 @@ using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
+using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 using WhatsAppSalesAutomation.Infrastructure.Realtime;
@@ -33,6 +34,17 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // A signing secret anyone can read in the repository lets them forge a token for any tenant, so a deployed instance
+    // must not start with one. Development keeps the placeholder (that is what it is for) but says so every time.
+    if (JwtSecretGuard.FindProblem(builder.Configuration["Jwt:Secret"]) is { } jwtProblem)
+    {
+        if (!builder.Environment.IsDevelopment())
+            throw new InvalidOperationException(
+                $"{jwtProblem} Set the Jwt__Secret environment variable to 32 or more random characters (see docs/DEPLOYMENT.md, section 6).");
+
+        Log.Warning("{Problem} Tolerated only because this is the Development environment.", jwtProblem);
+    }
 
     builder.Host.UseSerilog((context, services, configuration) =>
     {
@@ -112,11 +124,13 @@ try
 
     var app = builder.Build();
 
-   // if (app.Environment.IsDevelopment())
-   // {
+    // The API's full surface, with a try-it-out console, is a gift to anyone probing a deployed instance, so it is off
+    // outside Development unless Swagger:Enabled says otherwise (an env var is enough: Swagger__Enabled=true).
+    if (app.Configuration.GetValue("Swagger:Enabled", app.Environment.IsDevelopment()))
+    {
         app.UseSwagger();
         app.UseSwaggerUI();
-   // }
+    }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
 
