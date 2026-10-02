@@ -19,6 +19,10 @@ public interface IMediaStorageService
     /// <c>MediaAsset.Url</c>, which was frozen at upload time and goes stale when the base URL is set or changes.</summary>
     string GetPublicUrl(string storageKey);
 
+    /// <summary>Where this API itself serves the stored file (no host), so the portal can preview it from the API
+    /// whatever the public base URL is - a tunnel or CDN in front of it may not serve browsers directly.</summary>
+    string GetLocalPath(string storageKey);
+
     /// <summary>True when <paramref name="url"/> is something Meta's servers can fetch: absolute http(s) on a host
     /// that is not this machine. False means the storage's public base URL is not configured (or points at localhost).</summary>
     bool IsPublicUrl(string url);

@@ -514,17 +514,18 @@ public class MessageTemplateService : IMessageTemplateService
 
         return templates.Select(t =>
         {
-            string? fileName = null, url = null;
+            string? fileName = null, url = null, preview = null;
             if (t.HeaderMediaAssetId is { } id && assets.TryGetValue(id, out var asset))
             {
                 fileName = asset.FileName;
                 url = Media.MediaAssetLinks.PublicUrl(asset.Provider, asset.StorageKey, asset.Url, _mediaStorage);
+                preview = Media.MediaAssetLinks.PreviewUrl(asset.Provider, asset.StorageKey, asset.Url, _mediaStorage);
             }
 
             return new MessageTemplateDto(
                 t.Id, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName,
                 t.WhatsAppTemplateStatus.ToString(), t.BodyText, t.IsActive, t.CreatedAt, t.MetaTemplateId,
-                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url);
+                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url, preview);
         }).ToList();
     }
 }

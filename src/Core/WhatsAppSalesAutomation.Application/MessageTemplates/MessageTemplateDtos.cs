@@ -21,7 +21,8 @@ public record MessageTemplateDto(
     Guid? HeaderMediaAssetId = null,
     bool HeaderOnMeta = false,
     string? HeaderImageFileName = null,
-    string? HeaderImageUrl = null);
+    string? HeaderImageUrl = null,
+    string? HeaderImagePreviewUrl = null);
 
 public record CreateMessageTemplateRequest(
     string Name,

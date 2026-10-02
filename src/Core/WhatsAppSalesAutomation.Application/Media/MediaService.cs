@@ -219,7 +219,8 @@ public class MediaService : IMediaService
     private MediaAssetDto ToDto(MediaAsset m)
     {
         var url = MediaAssetLinks.PublicUrl(m.StorageProvider, m.StorageKey, m.Url, _storage);
-        return new(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url));
+        return new(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url),
+            MediaAssetLinks.PreviewUrl(m.StorageProvider, m.StorageKey, m.Url, _storage));
     }
 
     /// <summary>File-level checks (size/type) do not go through FluentValidation - there is no DTO

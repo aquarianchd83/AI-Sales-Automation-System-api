@@ -60,6 +60,7 @@ public class MediaFromUrlTests : IDisposable
         Assert.Equal("logo.png", dto.FileName);
         Assert.Equal("image/png", dto.ContentType);
         Assert.True(dto.IsPublicUrl);
+        Assert.Equal("https://site.example/assets/eye/logo.png", dto.PreviewUrl);
     }
 
     [Fact]
@@ -135,6 +136,8 @@ public class MediaFromUrlTests : IDisposable
         public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+        public string GetLocalPath(string storageKey) => $"/media/{storageKey}";
 
         public string GetPublicUrl(string storageKey) => $"https://ours.example/media/{storageKey}";
 
