@@ -55,18 +55,7 @@ public class MediaService : IMediaService
         Guid? uploadedBy,
         CancellationToken cancellationToken = default)
     {
-        if (sizeBytes <= 0)
-            throw Invalid(nameof(content), "The uploaded file is empty.");
-
-        // Resolved per call (not once per DI scope) - merges this tenant's Media:* overrides, if any,
-        // over the platform default. See ITenantConfigOverrideProvider's own doc comment.
-        var options = await _tenantConfig.GetMediaOptionsAsync(cancellationToken);
-
-        if (sizeBytes > options.MaxSizeBytes)
-            throw Invalid(nameof(sizeBytes), $"File exceeds the {options.MaxSizeBytes / (1024 * 1024)} MB limit.");
-
-        if (!options.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
-            throw Invalid(nameof(contentType), $"Content type '{contentType}' is not allowed. Use one of: {string.Join(", ", options.AllowedContentTypes)}.");
+        await CheckFileAsync(content, sizeBytes, contentType, cancellationToken);
 
         // Buffered rather than streamed straight to storage: the checksum has to be computed before
         // we know whether to store the bytes at all, and 16 MB is small enough that holding it in
@@ -98,6 +87,66 @@ public class MediaService : IMediaService
 
         _context.MediaAssets.Add(asset);
         await _context.SaveChangesAsync(cancellationToken);
+
+        return ToDto(asset);
+    }
+
+    /// <summary>Size/type checks shared by upload and replace. The media options are resolved per call (not once per DI scope) -
+    /// they merge this tenant's Media:* overrides, if any, over the platform default.</summary>
+    private async Task CheckFileAsync(Stream content, long sizeBytes, string contentType, CancellationToken cancellationToken)
+    {
+        if (sizeBytes <= 0)
+            throw Invalid(nameof(content), "The uploaded file is empty.");
+
+        var options = await _tenantConfig.GetMediaOptionsAsync(cancellationToken);
+
+        if (sizeBytes > options.MaxSizeBytes)
+            throw Invalid(nameof(sizeBytes), $"File exceeds the {options.MaxSizeBytes / (1024 * 1024)} MB limit.");
+
+        if (!options.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+            throw Invalid(nameof(contentType), $"Content type '{contentType}' is not allowed. Use one of: {string.Join(", ", options.AllowedContentTypes)}.");
+    }
+
+    public async Task<MediaAssetDto> ReplaceAsync(
+        Guid id,
+        Stream content,
+        string fileName,
+        string contentType,
+        long sizeBytes,
+        CancellationToken cancellationToken = default)
+    {
+        var asset = await FindOrThrowAsync(id, cancellationToken);
+        await CheckFileAsync(content, sizeBytes, contentType, cancellationToken);
+
+        await using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+        buffer.Position = 0;
+        var checksum = Convert.ToHexString(await SHA256.HashDataAsync(buffer, cancellationToken)).ToLowerInvariant();
+
+        buffer.Position = 0;
+        var stored = await _storage.UploadAsync(buffer, fileName, contentType, cancellationToken);
+
+        // The entry keeps its id, so every template or step using it carries the new file from now on; the old stored
+        // copy goes once the new one is saved. The cached WhatsApp media handle belonged to the old bytes.
+        var oldKey = asset.StorageKey;
+        asset.FileName = fileName;
+        asset.ContentType = contentType;
+        asset.SizeBytes = sizeBytes;
+        asset.StorageProvider = stored.StorageKey.StartsWith("s3:") ? "S3" : "Local";
+        asset.StorageKey = stored.StorageKey;
+        asset.Url = stored.Url;
+        asset.Checksum = checksum;
+        asset.WhatsAppMediaId = null;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _storage.DeleteAsync(oldKey, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // An orphaned old file is harmless; failing the replace after it succeeded would not be.
+        }
 
         return ToDto(asset);
     }

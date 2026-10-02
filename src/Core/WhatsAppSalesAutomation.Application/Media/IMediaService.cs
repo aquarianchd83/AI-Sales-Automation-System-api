@@ -14,6 +14,10 @@ public interface IMediaService
     /// </summary>
     Task<MediaAssetDto> UploadAsync(Stream content, string fileName, string contentType, long sizeBytes, Guid? uploadedBy, CancellationToken cancellationToken = default);
 
+    /// <summary>Swaps the file behind an existing entry for a new one. The entry keeps its id, so templates and steps using it
+    /// carry the new file; the old stored copy is removed.</summary>
+    Task<MediaAssetDto> ReplaceAsync(Guid id, Stream content, string fileName, string contentType, long sizeBytes, CancellationToken cancellationToken = default);
+
     /// <summary>Adds a file the tenant already hosts: downloads it once (to check type and size, and to hand to Meta when a
     /// template is created) but keeps THEIR link as the public address, instead of one of ours.</summary>
     Task<MediaAssetDto> AddFromUrlAsync(string url, Guid? uploadedBy, CancellationToken cancellationToken = default);

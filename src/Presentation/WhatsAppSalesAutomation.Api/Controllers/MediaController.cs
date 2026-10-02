@@ -49,6 +49,18 @@ public class MediaController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
+    /// <summary>Replaces the file of an existing entry (same id, so everything using it follows).</summary>
+    [HttpPost("{id:guid}/replace")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<ActionResult<MediaAssetDto>> Replace(Guid id, IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("A non-empty file is required.");
+
+        await using var stream = file.OpenReadStream();
+        return Ok(await _mediaService.ReplaceAsync(id, stream, file.FileName, file.ContentType, file.Length, cancellationToken));
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, [FromQuery] bool force, CancellationToken cancellationToken)
     {

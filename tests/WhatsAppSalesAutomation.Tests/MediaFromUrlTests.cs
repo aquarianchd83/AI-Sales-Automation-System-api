@@ -103,6 +103,36 @@ public class MediaFromUrlTests : IDisposable
 
         Assert.Contains("could not be reached", ex.Message);
     }
+    [Fact]
+    public async Task Replacing_a_file_keeps_the_entry_id_and_swaps_its_content()
+    {
+        _fetcher.Result = new MediaUrlFetchResult(new byte[] { 1, 2, 3 }, "image/png", "old.png");
+        var added = await Service().AddFromUrlAsync("https://site.example/old.png", null);
+        var before = await _db.MediaAssets.AsNoTracking().SingleAsync();
+        Assert.Equal("External", before.StorageProvider);
+
+        var replaced = await Service().ReplaceAsync(added.Id, new MemoryStream(new byte[] { 9, 9 }), "new.jpg", "image/jpeg", 2);
+
+        Assert.Equal(added.Id, replaced.Id);
+        Assert.Equal("new.jpg", replaced.FileName);
+        Assert.Equal("image/jpeg", replaced.ContentType);
+        Assert.Equal(2, replaced.SizeBytes);
+        var after = await _db.MediaAssets.AsNoTracking().SingleAsync();
+        Assert.Equal("Local", after.StorageProvider); // now stored by us, no longer the tenant's own link
+        Assert.NotEqual(before.StorageKey, after.StorageKey);
+    }
+
+    [Fact]
+    public async Task A_replacement_of_a_disallowed_type_is_refused_and_changes_nothing()
+    {
+        _fetcher.Result = new MediaUrlFetchResult(new byte[] { 1 }, "image/png", "a.png");
+        var added = await Service().AddFromUrlAsync("https://site.example/a.png", null);
+
+        await Assert.ThrowsAsync<ValidationException>(() => Service().ReplaceAsync(added.Id, new MemoryStream(new byte[] { 1 }), "x.exe", "application/x-msdownload", 1));
+
+        Assert.Equal("a.png", (await _db.MediaAssets.AsNoTracking().SingleAsync()).FileName);
+    }
+
 
     [Theory]
     [InlineData("127.0.0.1")]
