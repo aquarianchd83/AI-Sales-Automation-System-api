@@ -56,11 +56,11 @@ public class MessageTemplateService : IMessageTemplateService
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<MessageTemplateDto>(items.Select(ToDto).ToList(), totalCount, request.Page, request.PageSize);
+        return new PagedResult<MessageTemplateDto>(await ToDtosAsync(items, cancellationToken), totalCount, request.Page, request.PageSize);
     }
 
     public async Task<MessageTemplateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        ToDto(await FindOrThrowAsync(id, cancellationToken));
+        await ToDtoAsync(await FindOrThrowAsync(id, cancellationToken), cancellationToken);
 
     public async Task<MessageTemplateDto> CreateAsync(CreateMessageTemplateRequest request, CancellationToken cancellationToken = default)
     {
@@ -89,7 +89,7 @@ public class MessageTemplateService : IMessageTemplateService
         _context.MessageTemplates.Add(template);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(template);
+        return await ToDtoAsync(template, cancellationToken);
     }
 
     public async Task<MessageTemplateDto> UpdateAsync(Guid id, UpdateMessageTemplateRequest request, CancellationToken cancellationToken = default)
@@ -160,7 +160,7 @@ public class MessageTemplateService : IMessageTemplateService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(template);
+        return await ToDtoAsync(template, cancellationToken);
     }
 
     /// <summary>Which image a template shows can change any time - a send supplies the current one by link - but
@@ -248,7 +248,7 @@ public class MessageTemplateService : IMessageTemplateService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(template);
+        return await ToDtoAsync(template, cancellationToken);
     }
 
     public async Task<TemplateSyncResultDto> SyncWithMetaAsync(CancellationToken cancellationToken = default)
@@ -279,7 +279,7 @@ public class MessageTemplateService : IMessageTemplateService
         var refreshed = await FindOrThrowAsync(id, cancellationToken);
         var pushError = pushFailures.FirstOrDefault(f => f.TemplateId == id)?.ErrorMessage;
 
-        return new MessageTemplateSyncOneResultDto(ToDto(refreshed), pushError);
+        return new MessageTemplateSyncOneResultDto(await ToDtoAsync(refreshed, cancellationToken), pushError);
     }
 
     /// <summary>Phase 1 of SyncWithMetaAsync - see IMessageTemplateService.SyncWithMetaAsync's doc
@@ -499,8 +499,32 @@ public class MessageTemplateService : IMessageTemplateService
         await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken)
             ?? throw new NotFoundException(nameof(MessageTemplate), id);
 
-    private static MessageTemplateDto ToDto(MessageTemplate t) => new(
-        t.Id, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName,
-        t.WhatsAppTemplateStatus.ToString(), t.BodyText, t.IsActive, t.CreatedAt, t.MetaTemplateId,
-        t.HeaderMediaAssetId, t.HeaderOnMeta);
+    private async Task<MessageTemplateDto> ToDtoAsync(MessageTemplate t, CancellationToken cancellationToken) =>
+        (await ToDtosAsync(new[] { t }, cancellationToken))[0];
+
+    /// <summary>Maps templates, naming the image each one carries (and where the portal can preview it) with one
+    /// lookup for the whole page, so the list can show WHICH image is attached without a request per row.</summary>
+    private async Task<List<MessageTemplateDto>> ToDtosAsync(IReadOnlyCollection<MessageTemplate> templates, CancellationToken cancellationToken)
+    {
+        var ids = templates.Where(t => t.HeaderMediaAssetId != null).Select(t => t.HeaderMediaAssetId!.Value).Distinct().ToList();
+        var assets = ids.Count == 0
+            ? new Dictionary<Guid, (string FileName, string StorageKey, string Url)>()
+            : (await _context.MediaAssets.Where(a => ids.Contains(a.Id)).Select(a => new { a.Id, a.FileName, a.StorageKey, a.Url }).ToListAsync(cancellationToken))
+                .ToDictionary(a => a.Id, a => (a.FileName, a.StorageKey, a.Url));
+
+        return templates.Select(t =>
+        {
+            string? fileName = null, url = null;
+            if (t.HeaderMediaAssetId is { } id && assets.TryGetValue(id, out var asset))
+            {
+                fileName = asset.FileName;
+                url = _mediaStorage?.GetPublicUrl(asset.StorageKey) ?? asset.Url;
+            }
+
+            return new MessageTemplateDto(
+                t.Id, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName,
+                t.WhatsAppTemplateStatus.ToString(), t.BodyText, t.IsActive, t.CreatedAt, t.MetaTemplateId,
+                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url);
+        }).ToList();
+    }
 }
