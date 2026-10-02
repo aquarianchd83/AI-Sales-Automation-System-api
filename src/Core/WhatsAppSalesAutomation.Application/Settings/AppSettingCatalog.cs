@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -107,5 +107,20 @@ public static class AppSettingCatalog
         new("MediaStorage:S3:SecretAccessKey", "MediaStorage", IsSecret: true, Description: "The secret for the access key above."),
         new("MediaStorage:S3:KeyPrefix", "MediaStorage", IsSecret: false, Description: "Folder inside the bucket (default media); the public-read bucket policy should cover it."),
         new("MediaStorage:S3:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Optional CDN/custom domain in front of the bucket; empty uses the bucket's own address."),
+
+        // How the platform reaches people for sign-in (password reset, verification). Managed on the Platform Admin Console's
+        // Authentication Delivery page (PlatformDeliverySettingsService) and live only in this table. All are live: the
+        // senders read them through IOptionsSnapshot.
+        new("App:PublicUrl", "App", IsSecret: false, Description: "The web app's public address, used for links in emails. Never taken from a request."),
+        new("Email:Smtp:Host", "Email", IsSecret: false, Description: "SMTP server. Empty means the platform sends no email."),
+        new("Email:Smtp:Port", "Email", IsSecret: false),
+        new("Email:Smtp:User", "Email", IsSecret: false),
+        new("Email:Smtp:Password", "Email", IsSecret: true),
+        new("Email:Smtp:From", "Email", IsSecret: false, Description: "The address emails are sent as."),
+        new("Email:Smtp:EnableSsl", "Email", IsSecret: false),
+        new("Sms:Msg91:Enabled", "Sms", IsSecret: false, Description: "Whether one-time codes are sent by SMS through MSG91."),
+        new("Sms:Msg91:AuthKey", "Sms", IsSecret: true, Description: "MSG91 account auth key."),
+        new("Sms:Msg91:OtpTemplateId", "Sms", IsSecret: false, Description: "MSG91 (DLT-registered) OTP template id."),
+        new("Sms:Msg91:BaseUrl", "Sms", IsSecret: false, Description: "MSG91 API base address."),
     };
 }

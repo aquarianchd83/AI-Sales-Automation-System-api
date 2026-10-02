@@ -6,8 +6,9 @@ using WhatsAppSalesAutomation.Application.Notifications;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Notifications;
 
-/// <summary>Bound from "Email:Smtp". With no Host configured the platform simply has no email channel: sends
-/// come back Skipped, which the notification records as such rather than as a failure.</summary>
+/// <summary>Bound from "Email:Smtp", which the Platform Admin Console's Authentication Delivery page keeps in the AppSettings
+/// table (the password encrypted). With no Host configured the platform simply has no email channel: sends come back
+/// Skipped, which the notification records as such rather than as a failure.</summary>
 public class SmtpOptions
 {
     public string Host { get; set; } = string.Empty;
@@ -21,42 +22,54 @@ public class SmtpOptions
     public string From { get; set; } = string.Empty;
 
     public bool EnableSsl { get; set; } = true;
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(Host) && !string.IsNullOrWhiteSpace(From);
 }
 
-public class SmtpEmailSender : IEmailSender
+/// <summary>The one place a message actually goes out over SMTP. The sender below calls it with the saved settings, and the
+/// Test button calls it with whatever is in the form - so a test exercises exactly what a real send would.</summary>
+public static class SmtpMailer
 {
-    private readonly SmtpOptions _options;
-    private readonly ILogger<SmtpEmailSender> _logger;
-
-    public SmtpEmailSender(IOptions<SmtpOptions> options, ILogger<SmtpEmailSender> logger)
+    public static async Task<DeliveryResult> SendAsync(
+        SmtpOptions options, string toEmail, string subject, string body, ILogger logger, CancellationToken cancellationToken = default)
     {
-        _options = options.Value;
-        _logger = logger;
-    }
-
-    public async Task<DeliveryResult> SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(_options.Host) || string.IsNullOrWhiteSpace(_options.From))
+        if (!options.IsConfigured)
         {
-            _logger.LogInformation("Email not sent to {To} ({Subject}): no SMTP host configured", toEmail, subject);
+            logger.LogInformation("Email not sent to {To} ({Subject}): no SMTP host configured", toEmail, subject);
             return new DeliveryResult(false, "no SMTP host configured", Skipped: true);
         }
 
         try
         {
-            using var client = new SmtpClient(_options.Host, _options.Port)
+            using var client = new SmtpClient(options.Host, options.Port)
             {
-                EnableSsl = _options.EnableSsl,
-                Credentials = string.IsNullOrWhiteSpace(_options.User) ? null : new NetworkCredential(_options.User, _options.Password)
+                EnableSsl = options.EnableSsl,
+                Credentials = string.IsNullOrWhiteSpace(options.User) ? null : new NetworkCredential(options.User, options.Password)
             };
-            using var message = new MailMessage(_options.From, toEmail, subject, body);
+            using var message = new MailMessage(options.From, toEmail, subject, body);
             await client.SendMailAsync(message, cancellationToken);
             return new DeliveryResult(true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Email to {To} failed", toEmail);
+            logger.LogWarning(ex, "Email to {To} failed", toEmail);
             return new DeliveryResult(false, ex.Message);
         }
     }
+}
+
+public class SmtpEmailSender : IEmailSender
+{
+    // A snapshot, not IOptions: an administrator who saves new SMTP settings is not asked to restart anything.
+    private readonly IOptionsSnapshot<SmtpOptions> _options;
+    private readonly ILogger<SmtpEmailSender> _logger;
+
+    public SmtpEmailSender(IOptionsSnapshot<SmtpOptions> options, ILogger<SmtpEmailSender> logger)
+    {
+        _options = options;
+        _logger = logger;
+    }
+
+    public Task<DeliveryResult> SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default) =>
+        SmtpMailer.SendAsync(_options.Value, toEmail, subject, body, _logger, cancellationToken);
 }

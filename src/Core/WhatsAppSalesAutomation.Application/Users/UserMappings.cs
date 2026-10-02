@@ -14,5 +14,7 @@ public static class UserMappings
         user.IsActive,
         roles as IReadOnlyList<string> ?? roles.ToList(),
         user.CreatedAt,
-        user.LastLoginAt);
+        user.LastLoginAt,
+        user.EmailConfirmed,
+        user.PhoneNumberConfirmed);
 }

@@ -123,6 +123,8 @@ public class UserService : IUserService
             ?? throw new NotFoundException(nameof(ApplicationUser), id);
 
         user.FullName = request.FullName;
+        if (!WhatsAppSalesAutomation.Application.Auth.PhoneNumbers.Same(user.PhoneNumber, request.PhoneNumber))
+            user.PhoneNumberConfirmed = false;
         user.PhoneNumber = request.PhoneNumber;
         user.IsActive = request.IsActive;
 

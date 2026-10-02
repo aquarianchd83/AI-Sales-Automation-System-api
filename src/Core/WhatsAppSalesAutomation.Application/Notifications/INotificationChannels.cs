@@ -11,6 +11,14 @@ public interface IEmailSender
     Task<DeliveryResult> SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Sends a one-time code by SMS. Provider-specific (the provider's registered template carries the wording), so
+/// the interface is the code and the number, nothing more. Skipped - not failed - when SMS is not set up.</summary>
+public interface ISmsOtpSender
+{
+    /// <param name="toPhoneE164">Digits with the country code, with or without a leading +.</param>
+    Task<DeliveryResult> SendOtpAsync(string toPhoneE164, string code, CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Sends a template message from the PLATFORM's own WhatsApp number, never a tenant's: a billing alert has to
 /// work when the tenant's own WhatsApp quota is zero, and it must not spend that quota. Business-initiated, so
