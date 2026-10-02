@@ -14,12 +14,14 @@ public class MediaService : IMediaService
     private readonly IApplicationDbContext _context;
     private readonly IMediaStorageService _storage;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
+    private readonly IMediaUrlFetcher? _urlFetcher;
 
-    public MediaService(IApplicationDbContext context, IMediaStorageService storage, ITenantConfigOverrideProvider tenantConfig)
+    public MediaService(IApplicationDbContext context, IMediaStorageService storage, ITenantConfigOverrideProvider tenantConfig, IMediaUrlFetcher? urlFetcher = null)
     {
         _context = context;
         _storage = storage;
         _tenantConfig = tenantConfig;
+        _urlFetcher = urlFetcher;
     }
 
     public async Task<PagedResult<MediaAssetDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
@@ -100,6 +102,90 @@ public class MediaService : IMediaService
         return ToDto(asset);
     }
 
+    public async Task<MediaAssetDto> AddFromUrlAsync(string url, Guid? uploadedBy, CancellationToken cancellationToken = default)
+    {
+        if (_urlFetcher is null)
+            throw Invalid(nameof(url), "Adding a file by link is not available.");
+
+        url = (url ?? string.Empty).Trim();
+        if (url.Length is 0 or > 1000)
+            throw Invalid(nameof(url), "Enter the link of the file (up to 1000 characters).");
+
+        // Adding the same link twice returns the first entry.
+        var already = await _context.MediaAssets.FirstOrDefaultAsync(m => m.Url == url, cancellationToken);
+        if (already is not null)
+            return ToDto(already);
+
+        var options = await _tenantConfig.GetMediaOptionsAsync(cancellationToken);
+
+        MediaUrlFetchResult fetched;
+        try
+        {
+            fetched = await _urlFetcher.FetchAsync(url, options.MaxSizeBytes, cancellationToken);
+        }
+        catch (MediaUrlFetchException ex)
+        {
+            throw Invalid(nameof(url), ex.Message);
+        }
+
+        if (fetched.Content.Length == 0)
+            throw Invalid(nameof(url), "The link returned an empty file.");
+
+        var extension = Path.GetExtension(fetched.FileName);
+        var contentType = options.AllowedContentTypes.Contains(fetched.ContentType, StringComparer.OrdinalIgnoreCase)
+            ? fetched.ContentType
+            : ContentTypeFromExtension(extension);
+
+        // Some hosts answer images as application/octet-stream, so the extension is the fallback - never a free pass.
+        if (contentType is null || !options.AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
+            throw Invalid(nameof(url), $"That link is not an allowed file type. Use one of: {string.Join(", ", options.AllowedContentTypes)}.");
+
+        var fileName = string.IsNullOrWhiteSpace(fetched.FileName) ? "media" + ExtensionFor(contentType) : fetched.FileName;
+        var checksum = Convert.ToHexString(SHA256.HashData(fetched.Content)).ToLowerInvariant();
+
+        // Our own copy is kept only so a template's image can be handed to Meta when the template is created; the
+        // address everyone sees and messages carry stays the tenant's own link.
+        await using var buffer = new MemoryStream(fetched.Content);
+        var stored = await _storage.UploadAsync(buffer, fileName, contentType, cancellationToken);
+
+        var asset = new MediaAsset
+        {
+            FileName = fileName,
+            ContentType = contentType,
+            SizeBytes = fetched.Content.Length,
+            StorageProvider = MediaAssetLinks.ExternalProvider,
+            StorageKey = stored.StorageKey,
+            Url = url,
+            Checksum = checksum,
+            UploadedBy = uploadedBy
+        };
+
+        _context.MediaAssets.Add(asset);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return ToDto(asset);
+    }
+
+    private static string? ContentTypeFromExtension(string extension) => extension.ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        ".webp" => "image/webp",
+        ".mp4" => "video/mp4",
+        ".3gp" => "video/3gpp",
+        _ => null,
+    };
+
+    private static string ExtensionFor(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/webp" => ".webp",
+        "video/mp4" => ".mp4",
+        "video/3gpp" => ".3gp",
+        _ => string.Empty,
+    };
+
     public async Task DeleteAsync(Guid id, bool force = false, CancellationToken cancellationToken = default)
     {
         var asset = await FindOrThrowAsync(id, cancellationToken);
@@ -132,7 +218,7 @@ public class MediaService : IMediaService
 
     private MediaAssetDto ToDto(MediaAsset m)
     {
-        var url = _storage.GetPublicUrl(m.StorageKey);
+        var url = MediaAssetLinks.PublicUrl(m.StorageProvider, m.StorageKey, m.Url, _storage);
         return new(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url));
     }
 

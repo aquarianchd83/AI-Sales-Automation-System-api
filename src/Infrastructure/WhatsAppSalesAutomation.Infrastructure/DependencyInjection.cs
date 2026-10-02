@@ -200,6 +200,9 @@ public static class DependencyInjection
             .RemoveAllLoggers();
 
         services.AddHttpClient<MetaWhatsAppCloudApiClient>();
+        services.AddHttpClient<IMediaUrlFetcher, WhatsAppSalesAutomation.Infrastructure.Storage.HttpMediaUrlFetcher>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
         services.AddScoped<SimulatedWhatsAppClient>();
         services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
 
