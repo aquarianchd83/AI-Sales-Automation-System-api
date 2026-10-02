@@ -128,6 +128,14 @@ public class BillingController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<TenantNotificationDto>>> GetNotifications(CancellationToken cancellationToken)
         => Ok(await _notices.ListAsync(RequireTenantId(), cancellationToken));
 
+    /// <summary>The tenant's full notification list, paged - behind the bell's "More notifications" button.
+    /// <c>?page=&amp;pageSize=&amp;search=&amp;unreadOnly=</c>.</summary>
+    [HttpGet("notifications/history")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<TenantNotificationDto>>> GetNotificationHistory(
+        [FromQuery] PagedRequest request, [FromQuery] bool unreadOnly, CancellationToken cancellationToken)
+        => Ok(await _notices.GetHistoryAsync(RequireTenantId(), request, unreadOnly, cancellationToken));
+
     [HttpPost("notifications/{notificationId:guid}/acknowledge")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<IActionResult> AcknowledgeNotification(Guid notificationId, CancellationToken cancellationToken)
