@@ -78,6 +78,22 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
         new("Welcome", "en", "Marketing", "welcome_offer", "Hi {{FirstName}}", headerId);
 
     [Fact]
+    public async Task The_list_names_the_image_each_template_carries()
+    {
+        var png = Image();
+        await Service().CreateAsync(NewTemplate(png.Id));
+        await Service().CreateAsync(NewTemplate(null) with { WhatsAppTemplateName = "plain_one" });
+
+        var page = await Service().GetPagedAsync(new WhatsAppSalesAutomation.Application.Common.Models.PagedRequest());
+
+        var withImage = Assert.Single(page.Items, t => t.HeaderMediaAssetId != null);
+        Assert.Equal("hero.png", withImage.HeaderImageFileName);
+        var plain = Assert.Single(page.Items, t => t.HeaderMediaAssetId == null);
+        Assert.Null(plain.HeaderImageFileName);
+        Assert.Null(plain.HeaderImageUrl);
+    }
+
+    [Fact]
     public async Task A_template_can_be_created_with_a_png_or_jpeg_image()
     {
         var png = Image("image/png");
@@ -85,6 +101,8 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
 
         Assert.Equal(png.Id, created.HeaderMediaAssetId);
         Assert.False(created.HeaderOnMeta); // not on Meta until the first sync
+        Assert.Equal("hero.png", created.HeaderImageFileName);
+        Assert.Equal($"https://cdn.example.test/{png.StorageKey}", created.HeaderImageUrl);
 
         var jpeg = Image("image/jpeg", name: "hero.jpg");
         var second = await Service().CreateAsync(NewTemplate(jpeg.Id) with { WhatsAppTemplateName = "welcome_two" });

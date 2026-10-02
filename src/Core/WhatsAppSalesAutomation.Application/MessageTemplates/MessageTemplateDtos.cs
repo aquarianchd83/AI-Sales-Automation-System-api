@@ -19,7 +19,9 @@ public record MessageTemplateDto(
     DateTime CreatedAt,
     string? MetaTemplateId,
     Guid? HeaderMediaAssetId = null,
-    bool HeaderOnMeta = false);
+    bool HeaderOnMeta = false,
+    string? HeaderImageFileName = null,
+    string? HeaderImageUrl = null);
 
 public record CreateMessageTemplateRequest(
     string Name,
