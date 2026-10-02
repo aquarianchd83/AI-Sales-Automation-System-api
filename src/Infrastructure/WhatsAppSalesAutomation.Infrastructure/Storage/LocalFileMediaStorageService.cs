@@ -41,8 +41,19 @@ public class LocalFileMediaStorageService : IMediaStorageService
             await content.CopyToAsync(fileStream, cancellationToken);
         }
 
-        var url = $"{_settings.PublicBaseUrl}{_settings.PublicBasePath}/{relativeKey}";
+        var url = GetPublicUrl(relativeKey);
         return new MediaStorageResult(relativeKey, url);
+    }
+
+    public string GetPublicUrl(string storageKey) =>
+        $"{_settings.PublicBaseUrl?.Trim().TrimEnd('/')}{_settings.PublicBasePath}/{storageKey}";
+
+    public bool IsPublicUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return false;
+
+        return !(uri.IsLoopback || uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase));
     }
 
     public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)

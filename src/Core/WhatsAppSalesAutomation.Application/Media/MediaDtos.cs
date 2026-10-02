@@ -6,4 +6,5 @@ public record MediaAssetDto(
     string ContentType,
     long SizeBytes,
     string Url,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    bool IsPublicUrl);

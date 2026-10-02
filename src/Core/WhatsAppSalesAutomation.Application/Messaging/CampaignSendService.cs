@@ -36,6 +36,7 @@ public class CampaignSendService : ICampaignSendService
     private static readonly TimeSpan StaleQueuedThreshold = TimeSpan.FromMinutes(10);
 
     private readonly IApplicationDbContext _context;
+    private readonly IMediaStorageService? _mediaStorage;
     private readonly IWhatsAppService _whatsApp;
     private readonly IDateTimeProvider _dateTime;
     private readonly IConversationService _conversations;
@@ -54,9 +55,11 @@ public class CampaignSendService : ICampaignSendService
         IQuotaGate quota,
         ITenantConfigOverrideProvider tenantConfig,
         ITenantTimeZoneProvider tenantTimeZone,
-        ILogger<CampaignSendService> logger)
+        ILogger<CampaignSendService> logger,
+        IMediaStorageService? mediaStorage = null)
     {
         _context = context;
+        _mediaStorage = mediaStorage;
         _whatsApp = whatsApp;
         _dateTime = dateTime;
         _conversations = conversations;
@@ -525,7 +528,7 @@ public class CampaignSendService : ICampaignSendService
 
         // The image comes from the template (Meta requires it on every send of a template created with one), not from
         // the step: a header parameter for a template without an image header is rejected.
-        var mediaUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken);
+        var mediaUrl = await TemplateHeaderImage.ResolveUrlAsync(_context, template, cancellationToken, _mediaStorage);
 
         var result = await _whatsApp.SendTemplateMessageAsync(
             customer.PhoneNumberE164, template.WhatsAppTemplateName, template.Language, parameterValues, mediaUrl, cancellationToken);

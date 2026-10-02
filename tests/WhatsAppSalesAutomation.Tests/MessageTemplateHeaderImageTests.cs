@@ -209,6 +209,10 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
 
         public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+        public string GetPublicUrl(string storageKey) => $"https://cdn.example.test/{storageKey}";
+
+        public bool IsPublicUrl(string url) => url.StartsWith("https://cdn.example.test");
+
         public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) =>
             _files.TryGetValue(storageKey, out var bytes)
                 ? Task.FromResult<Stream>(new MemoryStream(bytes))
