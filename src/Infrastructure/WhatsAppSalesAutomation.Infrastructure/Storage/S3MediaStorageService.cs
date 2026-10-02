@@ -3,6 +3,7 @@ using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Storage;
@@ -41,7 +42,7 @@ public class S3MediaStorageService : IMediaStorageService
         };
         // The key is a generated name that never changes, so browsers and Meta can cache the file hard.
         request.Headers.CacheControl = "public, max-age=31536000";
-        await _client.Value.PutObjectAsync(request, cancellationToken);
+        await Translate(() => _client.Value.PutObjectAsync(request, cancellationToken));
 
         var storageKey = KeyMarker + objectKey;
         return new MediaStorageResult(storageKey, GetPublicUrl(storageKey));
@@ -50,7 +51,7 @@ public class S3MediaStorageService : IMediaStorageService
     public async Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
     {
         EnsureConfigured();
-        await _client.Value.DeleteObjectAsync(_settings.BucketName, ObjectKey(storageKey), cancellationToken);
+        await Translate(() => _client.Value.DeleteObjectAsync(_settings.BucketName, ObjectKey(storageKey), cancellationToken));
     }
 
     public async Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
@@ -58,7 +59,7 @@ public class S3MediaStorageService : IMediaStorageService
         EnsureConfigured();
         try
         {
-            using var response = await _client.Value.GetObjectAsync(_settings.BucketName, ObjectKey(storageKey), cancellationToken);
+            using var response = await Translate(() => _client.Value.GetObjectAsync(_settings.BucketName, ObjectKey(storageKey), cancellationToken));
             var buffer = new MemoryStream();
             await response.ResponseStream.CopyToAsync(buffer, cancellationToken);
             buffer.Position = 0;
@@ -88,16 +89,54 @@ public class S3MediaStorageService : IMediaStorageService
 
     private static string ObjectKey(string storageKey) => storageKey.StartsWith(KeyMarker) ? storageKey[KeyMarker.Length..] : storageKey;
 
+    /// <summary>Turns AWS's low-level failures into a sentence the platform admin can act on; the original is kept as the inner exception for the log.</summary>
+    private async Task<T> Translate<T>(Func<Task<T>> call)
+    {
+        try
+        {
+            return await call();
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound && ex.ErrorCode == "NoSuchKey")
+        {
+            throw;
+        }
+        catch (AmazonS3Exception ex)
+        {
+            var hint = ex.ErrorCode switch
+            {
+                "NoSuchBucket" => $"bucket '{_settings.BucketName}' does not exist in {_settings.Region}",
+                "InvalidAccessKeyId" or "SignatureDoesNotMatch" => "the access key or secret is wrong",
+                "AccessDenied" or "AllAccessDisabled" => "the AWS identity is not allowed to write to the bucket (it needs s3:PutObject, s3:GetObject and s3:DeleteObject)",
+                "PermanentRedirect" or "AuthorizationHeaderMalformed" => $"the bucket is not in region {_settings.Region}",
+                _ => ex.Message,
+            };
+            throw new StorageUnavailableException($"Media storage (S3) failed: {hint}. Ask the platform administrator to check MediaStorage:S3.", ex);
+        }
+        catch (AmazonClientException ex)
+        {
+            var hint = _settings.HasAccessKeys
+                ? ex.Message
+                : "no AWS credentials were found - fill in MediaStorage:S3:AccessKeyId and SecretAccessKey (this server has no AWS role or default profile)";
+            throw new StorageUnavailableException($"Media storage (S3) failed: {hint}.", ex);
+        }
+    }
+
+    private Task Translate(Func<Task> call) => Translate(async () =>
+    {
+        await call();
+        return true;
+    });
+
     private void EnsureConfigured()
     {
         if (!_settings.IsConfigured)
-            throw new InvalidOperationException("Media storage is set to S3 but MediaStorage:S3:BucketName and Region are not configured. Ask the platform administrator to set them.");
+            throw new StorageUnavailableException("Media storage is set to S3 but MediaStorage:S3:BucketName and Region are not configured. Ask the platform administrator to set them.");
     }
 
     private IAmazonS3 CreateClient()
     {
         var region = RegionEndpoint.GetBySystemName(_settings.Region);
-        return string.IsNullOrWhiteSpace(_settings.AccessKeyId) || string.IsNullOrWhiteSpace(_settings.SecretAccessKey)
+        return !_settings.HasAccessKeys
             ? new AmazonS3Client(region)
             : new AmazonS3Client(new BasicAWSCredentials(_settings.AccessKeyId, _settings.SecretAccessKey), region);
     }
