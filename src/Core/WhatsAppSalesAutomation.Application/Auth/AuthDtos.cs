@@ -36,6 +36,16 @@ public record TenantSignUpRequest(
 
 public record RefreshTokenRequest(string RefreshToken);
 
+/// <param name="Channel">"email" (default) sends a link; "sms" sends a code to the account's verified phone.</param>
+public record ForgotPasswordRequest(string Email, string? Channel = null);
+
+/// <param name="Token">The emailed token, or for <paramref name="Channel"/> "sms" the six-digit code.</param>
+public record ResetPasswordRequest(string Email, string Token, string NewPassword, string? Channel = null);
+
+public record VerifyPhoneRequest(string Code);
+
+public record VerifyEmailRequest(string Email, string Token);
+
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public record TokenPairDto(

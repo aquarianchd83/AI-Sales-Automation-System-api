@@ -368,8 +368,31 @@ and the Hangfire dashboard need. If those ever move off this origin, tighten it 
 |---|---|
 | `/swagger` | on in `Development`, **off everywhere else** by default. `Swagger:Enabled` overrides it either way (environment variable `Swagger__Enabled=true`) - only do that behind the proxy or an allow-list. |
 | `/hangfire` | `HangfireDashboardAuthorizationFilter`; unrestricted in Development only |
+| `/health/live` | `200` while the process runs. For "restart it if this fails". Anonymous; the body is a status word only. |
+| `/health/ready` | `200` only when the database answers, otherwise `503`. For "send it traffic only if this passes". Sits behind the HTTPS redirect like everything else, so probe the address the proxy forwards. |
 | `/hubs/conversations` | SignalR. The proxy must allow WebSocket upgrade, or clients silently fall back to long polling |
 | `/media/*` | uploaded campaign media from `App_Data/media` — local disk, so it needs a persistent volume and is **not** multi-instance safe as-is |
+
+---
+
+## 9a. Sign-in emails and texts (SMTP, SMS)
+
+Password reset, email verification and phone verification all depend on how the platform can reach a person. A
+PlatformSuperAdmin sets it up on the Platform Admin Console's **Authentication Delivery** page; it is stored in the
+`AppSettings` table (the SMTP password and the MSG91 auth key encrypted) and is live without a restart.
+
+| Setting | What for |
+|---|---|
+| **Web app address** (`App:PublicUrl`) | The address put in reset and verification links. Set it, or those emails are not sent: the link is never built from the incoming request, because that would let anyone point a reset email at their own site. |
+| **SMTP** (`Email:Smtp:*`) | The mail server. With no host, no email goes out and the sign-in flows that need it quietly do nothing (the reason is in the log). |
+| **SMS** (`Sms:Msg91:*`) | MSG91: auth key plus a DLT-registered OTP template whose message uses `##OTP##`. We generate and check the code ourselves; MSG91 only delivers it. |
+
+Use the page's **Send test** buttons after saving - they send one real message with what is in the form.
+
+Sign-in protection that ships with it: five wrong passwords lock an account for fifteen minutes (a password reset lifts it),
+changing or resetting a password signs out every other session, and new self-signups must confirm their email. SMS reset codes
+go only to a phone the user has verified, are six digits, are limited to one per minute per account, and wrong guesses count
+against the same five-strike lockout.
 
 ---
 
@@ -397,7 +420,8 @@ Single-instance assumptions to resolve before running more than one:
 - [ ] Startup log checked for full-text availability
 - [ ] `Reranker:Cohere:ApiKey` supplied, or `FusionOnly` mode accepted (check retrieval diagnostics)
 - [ ] Recent rows in `KnowledgeIngestionJobs` checked for `Failed` / `AwaitingApproval` / `Rejected`
-- [ ] Health checker IP added to `RateLimiting:ExemptIpAddresses`
+- [ ] Load balancer / uptime monitor pointed at `/health/ready` (and `/health/live` for restarts), with its IP added to `RateLimiting:ExemptIpAddresses`
+- [ ] **Authentication Delivery** page filled in (web app address, SMTP, and MSG91 if SMS is wanted) and both Send test buttons used
 - [ ] Swagger left off (the default outside Development), or `Swagger__Enabled=true` set deliberately and protected
 - [ ] Meta webhook registered against `https://api.<domain>/api/v1/webhooks/whatsapp`
 - [ ] Stripe webhook registered and `Stripe:WebhookSecret` set, or billing left deliberately off

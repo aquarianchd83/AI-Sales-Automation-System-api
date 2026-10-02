@@ -19,6 +19,13 @@ namespace WhatsAppSalesAutomation.Application.Auth;
 
 public class AuthService : IAuthService
 {
+    public const string LockedOutMessage = "Too many failed sign-in attempts. Try again in a few minutes, or reset your password.";
+
+    // A real hash to verify against when the email has no account, so "unknown email" costs the same time as
+    // "wrong password" and response timing cannot be used to learn which emails are registered.
+    private static readonly ApplicationUser DecoyUser = new();
+    private static readonly string DecoyHash = new PasswordHasher<ApplicationUser>().HashPassword(DecoyUser, "Decoy-Password-1!");
+
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IApplicationDbContext _context;
     private readonly IJwtTokenService _jwtTokenService;
@@ -35,6 +42,7 @@ public class AuthService : IAuthService
 
     private readonly ICountryAvailability _countries;
     private readonly IPlatformNotifier _platformNotifier;
+    private readonly IAccountRecoveryService _recovery;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -51,8 +59,10 @@ public class AuthService : IAuthService
         IValidator<RefreshTokenRequest> refreshTokenValidator,
         IValidator<ChangePasswordRequest> changePasswordValidator,
         ICountryAvailability countries,
-        IPlatformNotifier platformNotifier)
+        IPlatformNotifier platformNotifier,
+        IAccountRecoveryService recovery)
     {
+        _recovery = recovery;
         _countries = countries;
         _platformNotifier = platformNotifier;
         _userManager = userManager;
@@ -108,7 +118,8 @@ public class AuthService : IAuthService
             Email = request.Email,
             FullName = request.FullName,
             IsActive = true,
-            EmailConfirmed = true,
+            // Not confirmed until they follow the emailed link: anyone can type anyone's address into a signup form.
+            EmailConfirmed = false,
             CreatedAt = _dateTime.UtcNow
         };
 
@@ -144,6 +155,8 @@ public class AuthService : IAuthService
             $"Admin: {user.FullName} <{user.Email}>. Their trial ends {tenant.TrialEndsAtUtc:d MMM yyyy}.",
             tenant.Id), cancellationToken);
 
+        await _recovery.SendVerificationEmailAsync(user.Id, cancellationToken);
+
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
     }
@@ -153,8 +166,30 @@ public class AuthService : IAuthService
         await _loginValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var user = await _userManager.FindByEmailAsync(request.Email);
-        if (user is null || !user.IsActive || !await _userManager.CheckPasswordAsync(user, request.Password))
+        if (user is null)
+        {
+            _userManager.PasswordHasher.VerifyHashedPassword(DecoyUser, DecoyHash, request.Password);
             throw new AuthenticationFailedException();
+        }
+
+        // Locked out means no password is tried at all - not even the right one - or the lock would only slow a
+        // guesser down, not stop them.
+        if (await _userManager.IsLockedOutAsync(user))
+            throw new AuthenticationFailedException(LockedOutMessage);
+
+        if (!user.IsActive || !await _userManager.CheckPasswordAsync(user, request.Password))
+        {
+            if (user.IsActive)
+            {
+                await _userManager.AccessFailedAsync(user);
+                if (await _userManager.IsLockedOutAsync(user))
+                    throw new AuthenticationFailedException(LockedOutMessage);
+            }
+
+            throw new AuthenticationFailedException();
+        }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
 
         var tenant = user.TenantId is { } userTenantId
             ? await _context.Tenants.FirstOrDefaultAsync(t => t.Id == userTenantId, cancellationToken)
@@ -242,6 +277,10 @@ public class AuthService : IAuthService
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
             throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.NewPassword), e.Description)));
+
+        // Whoever else holds a session - including a thief - is signed out. The caller's own access token keeps
+        // working until it expires, and they sign in again with the new password when it does.
+        await _recovery.RevokeAllSessionsAsync(userId, cancellationToken);
     }
 
     private async Task<TokenPairDto> IssueTokenPairAsync(

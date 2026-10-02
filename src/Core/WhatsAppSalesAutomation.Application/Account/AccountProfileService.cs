@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Auth;
 using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using FluentValidation.Results;
@@ -56,7 +57,11 @@ public class AccountProfileService : IAccountProfileService
         }
 
         user.FullName = request.FullName.Trim();
-        user.PhoneNumber = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+        var newPhone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : request.PhoneNumber.Trim();
+        // A different number has not been proven to be theirs: verification (and so SMS password reset) starts over.
+        if (!PhoneNumbers.Same(user.PhoneNumber, newPhone))
+            user.PhoneNumberConfirmed = false;
+        user.PhoneNumber = newPhone;
         user.Timezone = request.Timezone;
         await _countries.EnsureAllowedAsync(request.CountryCode, user.CountryCode, cancellationToken);
         user.CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim();
@@ -114,7 +119,9 @@ public class AccountProfileService : IAccountProfileService
             roles.Contains(AppRoles.PlatformSuperAdmin),
             user.TenantId,
             user.CreatedAt,
-            user.LastLoginAt);
+            user.LastLoginAt,
+            user.EmailConfirmed,
+            user.PhoneNumberConfirmed);
     }
 
     /// <summary>Identity reports its own failures as a result object rather than throwing; surface them as

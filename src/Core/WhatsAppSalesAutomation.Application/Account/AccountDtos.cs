@@ -19,7 +19,9 @@ public record UserProfileDto(
     bool IsPlatformSuperAdmin,
     Guid? TenantId,
     DateTime CreatedAt,
-    DateTime? LastLoginAt);
+    DateTime? LastLoginAt,
+    bool EmailConfirmed = true,
+    bool PhoneNumberConfirmed = false);
 
 /// <summary>
 /// Body of PUT account/profile - replaces every editable field at once, so a null optional field clears it.

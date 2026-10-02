@@ -18,10 +18,12 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IAccountRecoveryService _recovery;
 
-    public AuthController(IAuthService authService)
+    public AuthController(IAuthService authService, IAccountRecoveryService recovery)
     {
         _authService = authService;
+        _recovery = recovery;
     }
 
     [HttpPost("signup")]
@@ -60,6 +62,54 @@ public class AuthController : ControllerBase
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         await _authService.ChangePasswordAsync(userId, request, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>Always 204, whether or not the address has an account (or a verified phone, for the sms channel) - the
+    /// response must not tell a stranger which addresses are registered.</summary>
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _recovery.RequestPasswordResetAsync(request, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await _recovery.ResetPasswordAsync(request, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("verify-email")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken cancellationToken)
+    {
+        await _recovery.VerifyEmailAsync(request, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("resend-verification")]
+    public async Task<IActionResult> ResendVerification(CancellationToken cancellationToken)
+    {
+        await _recovery.SendVerificationEmailAsync(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>Texts a code to the phone number on the signed-in user's profile.</summary>
+    [HttpPost("phone/send-code")]
+    public async Task<IActionResult> SendPhoneCode(CancellationToken cancellationToken)
+    {
+        await _recovery.SendPhoneVerificationCodeAsync(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("phone/verify")]
+    public async Task<IActionResult> VerifyPhone([FromBody] VerifyPhoneRequest request, CancellationToken cancellationToken)
+    {
+        await _recovery.VerifyPhoneAsync(Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), request, cancellationToken);
         return NoContent();
     }
 }

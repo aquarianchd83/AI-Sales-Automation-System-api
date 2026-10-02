@@ -60,3 +60,48 @@ public class ChangePasswordRequestValidator : AbstractValidator<ChangePasswordRe
         RuleFor(x => x.NewPassword).NotEmpty().MinimumLength(8);
     }
 }
+
+public class ForgotPasswordRequestValidator : AbstractValidator<ForgotPasswordRequest>
+{
+    public ForgotPasswordRequestValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.Channel).Must(AuthChannels.IsValid).WithMessage("Channel must be 'email' or 'sms'.");
+    }
+}
+
+public static class AuthChannels
+{
+    public static bool IsValid(string? channel) =>
+        string.IsNullOrEmpty(channel)
+        || string.Equals(channel, AccountRecoveryService.Email, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(channel, AccountRecoveryService.Sms, StringComparison.OrdinalIgnoreCase);
+}
+
+public class VerifyPhoneRequestValidator : AbstractValidator<VerifyPhoneRequest>
+{
+    public VerifyPhoneRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(12);
+    }
+}
+
+public class ResetPasswordRequestValidator : AbstractValidator<ResetPasswordRequest>
+{
+    public ResetPasswordRequestValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.Token).NotEmpty();
+        RuleFor(x => x.NewPassword).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Channel).Must(AuthChannels.IsValid).WithMessage("Channel must be 'email' or 'sms'.");
+    }
+}
+
+public class VerifyEmailRequestValidator : AbstractValidator<VerifyEmailRequest>
+{
+    public VerifyEmailRequestValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.Token).NotEmpty();
+    }
+}

@@ -99,6 +99,12 @@ public static class DependencyInjection
                 options.Password.RequireUppercase = true;
                 options.Password.RequireDigit = true;
                 options.User.RequireUniqueEmail = true;
+
+                // Five wrong passwords lock the account for fifteen minutes. Per-IP rate limiting alone does nothing
+                // against guessing spread across many addresses; this counts per account. A password reset lifts it.
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
@@ -319,6 +325,9 @@ public static class DependencyInjection
 
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpOptions>(configuration.GetSection("Email:Smtp"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IEmailSender, WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpEmailSender>();
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91Options>(configuration.GetSection("Sms:Msg91"));
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Notifications.ISmsOtpSender, WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91SmsSender>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IDeliveryTester, WhatsAppSalesAutomation.Infrastructure.Notifications.DeliveryTester>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender, WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>();
     }
 }

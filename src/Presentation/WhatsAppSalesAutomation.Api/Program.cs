@@ -18,6 +18,7 @@ using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Infrastructure;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
+using WhatsAppSalesAutomation.Api.Health;
 using WhatsAppSalesAutomation.Infrastructure.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
@@ -121,6 +122,7 @@ try
     // AppSettings table, deliberately: see that type's doc comment.
     builder.Services.AddRateLimiting(builder.Configuration);
     builder.Services.Configure<SecurityHeaderOptions>(builder.Configuration.GetSection("SecurityHeaders"));
+    builder.Services.AddAppHealthChecks();
 
     var app = builder.Build();
 
@@ -181,6 +183,7 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
+    app.MapAppHealthChecks();
     app.MapHub<ConversationHub>("/hubs/conversations");
     app.MapHub<NotificationsHub>("/hubs/notifications");
 

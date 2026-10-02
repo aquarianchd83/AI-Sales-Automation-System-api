@@ -8,7 +8,10 @@ public record UserDto(
     bool IsActive,
     IReadOnlyList<string> Roles,
     DateTime CreatedAt,
-    DateTime? LastLoginAt);
+    DateTime? LastLoginAt,
+    /// <summary>False until the user follows the link emailed at signup. Only self-signups start false.</summary>
+    bool EmailConfirmed = true,
+    bool PhoneNumberConfirmed = false);
 
 public record CreateUserRequest(
     string FullName,
