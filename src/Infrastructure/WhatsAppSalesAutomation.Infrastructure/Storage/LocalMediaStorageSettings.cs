@@ -16,4 +16,8 @@ public class LocalMediaStorageSettings
     /// WhatsApp provider with media-bearing templates.
     /// </summary>
     public string PublicBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>"Local" (this server's disk, the default) or "S3" (the platform's bucket, see S3MediaStorageSettings).
+    /// Files already stored stay where they are; this only decides where NEW uploads go.</summary>
+    public string Provider { get; set; } = "Local";
 }

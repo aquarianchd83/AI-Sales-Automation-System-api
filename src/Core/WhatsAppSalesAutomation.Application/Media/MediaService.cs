@@ -89,7 +89,7 @@ public class MediaService : IMediaService
             FileName = fileName,
             ContentType = contentType,
             SizeBytes = sizeBytes,
-            StorageProvider = "Local",
+            StorageProvider = stored.StorageKey.StartsWith("s3:") ? "S3" : "Local",
             StorageKey = stored.StorageKey,
             Url = stored.Url,
             Checksum = checksum,
