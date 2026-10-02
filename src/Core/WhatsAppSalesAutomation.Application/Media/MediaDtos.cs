@@ -8,3 +8,5 @@ public record MediaAssetDto(
     string Url,
     DateTime CreatedAt,
     bool IsPublicUrl);
+
+public record AddMediaFromUrlRequest(string Url);

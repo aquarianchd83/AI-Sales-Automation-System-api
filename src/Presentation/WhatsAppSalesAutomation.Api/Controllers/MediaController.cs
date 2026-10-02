@@ -41,6 +41,14 @@ public class MediaController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
+    /// <summary>Adds a file the tenant already hosts by its link instead of uploading it.</summary>
+    [HttpPost("from-url")]
+    public async Task<ActionResult<MediaAssetDto>> AddFromUrl([FromBody] AddMediaFromUrlRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _mediaService.AddFromUrlAsync(request.Url, _currentUser.UserId, cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, [FromQuery] bool force, CancellationToken cancellationToken)
     {
