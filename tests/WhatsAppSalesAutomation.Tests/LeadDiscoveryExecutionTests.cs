@@ -102,6 +102,52 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task New_customers_are_tagged_with_the_processing_date_and_share_one_tag()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var customers = await _db.Customers.Include(c => c.Tags).ToListAsync();
+        Assert.Equal(2, customers.Count);
+        Assert.All(customers, c => Assert.Equal(new[] { "2026-09-10" }, c.Tags.Select(t => t.Name)));
+        var tag = await _db.CustomerTags.SingleAsync();
+        Assert.Equal(_tenant, tag.TenantId);
+    }
+
+    [Fact]
+    public async Task A_second_run_on_the_same_date_reuses_the_tag_and_customers_already_known_are_not_tagged()
+    {
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = Phone("A"), FirstName = "Existing A" });
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        await Service().RunForTenantAsync(_tenant);
+
+        _agent.Rounds.Add(Candidates("C"));
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.CustomerTags.CountAsync());
+        var tagged = await _db.Customers.Where(c => c.Tags.Any()).Select(c => c.FirstName).OrderBy(n => n).ToListAsync();
+        Assert.Equal(new[] { "B Contact", "C Contact" }, tagged);
+        var existing = await _db.Customers.Include(c => c.Tags).SingleAsync(c => c.FirstName == "Existing A");
+        Assert.Empty(existing.Tags);
+    }
+
+    [Fact]
+    public async Task Another_tenants_tag_of_the_same_name_does_not_block_the_run()
+    {
+        _db.CustomerTags.Add(new CustomerTag { TenantId = Guid.NewGuid(), Name = "2026-09-10" });
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(1, execution.CustomersCreated);
+        Assert.Equal(2, await _db.CustomerTags.IgnoreQueryFilters().CountAsync(t => t.Name == "2026-09-10"));
+    }
+
+    [Fact]
     public async Task Auto_consent_opts_in_new_customers_with_no_manual_step()
     {
         EnableAutoConsent();
