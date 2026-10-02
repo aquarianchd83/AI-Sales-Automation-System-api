@@ -55,6 +55,16 @@ public class CustomersController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _customerService.BulkDeleteAsync(request, cancellationToken));
 
+    /// <summary>
+    /// Adds the same tags to several customers at once. Returns 200 with a per-id breakdown, since a batch can partially succeed
+    /// (ids that are unknown or already deleted come back in notFoundIds).
+    /// </summary>
+    [HttpPost("bulk-tags")]
+    public async Task<ActionResult<BulkAddCustomerTagsResultDto>> BulkAddTags(
+        [FromBody] BulkAddCustomerTagsRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _customerService.BulkAddTagsAsync(request, cancellationToken));
+
     [HttpPost("{id:guid}/tags")]
     public async Task<ActionResult<CustomerDto>> AddTags(Guid id, [FromBody] AddCustomerTagsRequest request, CancellationToken cancellationToken)
         => Ok(await _customerService.AddTagsAsync(id, request, cancellationToken));

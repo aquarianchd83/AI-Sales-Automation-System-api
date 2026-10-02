@@ -71,3 +71,35 @@ public class BulkDeleteCustomersRequestValidator : AbstractValidator<BulkDeleteC
             .NotEqual(Guid.Empty).WithMessage("Customer ids must be non-empty GUIDs.");
     }
 }
+
+public class BulkAddCustomerTagsRequestValidator : AbstractValidator<BulkAddCustomerTagsRequest>
+{
+    /// <summary>Tag column length (CustomerTagConfiguration).</summary>
+    public const int MaxTagLength = 100;
+
+    /// <summary>Bounds one request's fan-out: customers x tags rows.</summary>
+    public const int MaxTags = 20;
+
+    public BulkAddCustomerTagsRequestValidator()
+    {
+        RuleFor(x => x.Ids)
+            .NotEmpty().WithMessage("At least one customer id is required.")
+            .Must(ids => ids is null || ids.Count <= BulkDeleteCustomersRequestValidator.MaxIds)
+            .WithMessage($"A maximum of {BulkDeleteCustomersRequestValidator.MaxIds} customers can be tagged per request.");
+
+        RuleForEach(x => x.Ids)
+            .NotEqual(Guid.Empty).WithMessage("Customer ids must be non-empty GUIDs.");
+
+        RuleFor(x => x.TagNames)
+            .NotEmpty().WithMessage("At least one tag is required.")
+            .Must(names => names is null || names.Count <= MaxTags)
+            .WithMessage($"A maximum of {MaxTags} tags can be added per request.")
+            .Must(names => names is null || names.Any(n => !string.IsNullOrWhiteSpace(n)))
+            .WithMessage("At least one tag is required.");
+
+        RuleForEach(x => x.TagNames)
+            .Must(n => n is null || n.Trim().Length <= MaxTagLength)
+            .WithMessage($"A tag can be at most {MaxTagLength} characters.");
+    }
+}
+
