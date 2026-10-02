@@ -263,14 +263,14 @@ public sealed class ReportService : IReportService
             {
                 Date = g.Key,
                 Count = g.Count(),
-                Escalated = g.Count(i => i.ActionTaken == AiActionTaken.Escalated)
+                Escalated = g.Count(i => i.ActionTaken == AiActionTaken.Escalated || i.ActionTaken == AiActionTaken.Drafted)
             })
             .OrderBy(x => x.Date)
             .ToListAsync(cancellationToken);
 
         return new AiPerformanceReportDto(
-            window, total, Actions(AiActionTaken.Replied), Actions(AiActionTaken.Escalated), Actions(AiActionTaken.NoActionNeeded),
-            Rate(Actions(AiActionTaken.Escalated), total),
+            window, total, Actions(AiActionTaken.Replied), Actions(AiActionTaken.Escalated) + Actions(AiActionTaken.Drafted), Actions(AiActionTaken.NoActionNeeded),
+            Rate(Actions(AiActionTaken.Escalated) + Actions(AiActionTaken.Drafted), total),
             confidence is null ? null : Math.Round(confidence.Value, 4),
             latency is null ? null : Math.Round(latency.Value, 1),
             promptTokens, completionTokens, buying, human, optOut,

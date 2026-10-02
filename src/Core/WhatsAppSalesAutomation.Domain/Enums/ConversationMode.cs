@@ -1,9 +1,10 @@
 namespace WhatsAppSalesAutomation.Domain.Enums;
 
 /// <summary>
-/// AI defaults per the Phase 1 design, but no <c>IAiService</c> exists until Phase 5 - until then,
-/// every inbound message escalates to a human regardless of Mode (see InboundWebhookProcessor), so
-/// Mode is recorded for forward-compatibility rather than acted on differently per value yet.
+/// Who talks to the customer. <c>AI</c>: the AI replies on its own and escalates when it should not.
+/// <c>Human</c>: the AI never runs; the agent writes every reply. <c>Hybrid</c>: the AI answers plain
+/// questions itself, but wherever it would escalate - and while a handoff is open - its reply is held as
+/// a draft for the agent to send, edit or discard (see ConversationOrchestrator).
 /// </summary>
 public enum ConversationMode
 {
