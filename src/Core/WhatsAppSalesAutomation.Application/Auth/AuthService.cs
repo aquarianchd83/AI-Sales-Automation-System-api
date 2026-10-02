@@ -43,6 +43,7 @@ public class AuthService : IAuthService
     private readonly ICountryAvailability _countries;
     private readonly IPlatformNotifier _platformNotifier;
     private readonly IAccountRecoveryService _recovery;
+    private readonly ITenantNotifier _tenantNotifier;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -60,8 +61,10 @@ public class AuthService : IAuthService
         IValidator<ChangePasswordRequest> changePasswordValidator,
         ICountryAvailability countries,
         IPlatformNotifier platformNotifier,
-        IAccountRecoveryService recovery)
+        IAccountRecoveryService recovery,
+        ITenantNotifier tenantNotifier)
     {
+        _tenantNotifier = tenantNotifier;
         _recovery = recovery;
         _countries = countries;
         _platformNotifier = platformNotifier;
@@ -183,7 +186,10 @@ public class AuthService : IAuthService
             {
                 await _userManager.AccessFailedAsync(user);
                 if (await _userManager.IsLockedOutAsync(user))
+                {
+                    await NotifyLockedAsync(user, cancellationToken);
                     throw new AuthenticationFailedException(LockedOutMessage);
+                }
             }
 
             throw new AuthenticationFailedException();
@@ -281,6 +287,23 @@ public class AuthService : IAuthService
         // Whoever else holds a session - including a thief - is signed out. The caller's own access token keeps
         // working until it expires, and they sign in again with the new password when it does.
         await _recovery.RevokeAllSessionsAsync(userId, cancellationToken);
+    }
+
+    /// <summary>Tells the workspace's admins that someone was just locked out - a forgotten password or a guesser, and only a person can
+    /// tell which. Once per lock (the episode is the lock's end time). Never throws: the notifier swallows its own delivery problems.</summary>
+    private async Task NotifyLockedAsync(ApplicationUser user, CancellationToken cancellationToken)
+    {
+        if (user.TenantId is not { } tenantId)
+            return;
+
+        var name = string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName;
+        await _tenantNotifier.NotifyAsync(new TenantNotificationRequest(
+            tenantId, TenantNotificationKind.AccountLocked, null,
+            $"lockout-{user.Id:N}-{user.LockoutEnd?.UtcTicks}",
+            $"Sign-in locked for {name}",
+            $"{name} ({user.Email}) was locked out for 15 minutes after repeated wrong passwords. If it was them, they can reset their password " +
+            "from the sign-in page. If it was not, the Audit Log shows each failed attempt and the address it came from.",
+            AlsoWhatsApp: false), cancellationToken);
     }
 
     private async Task<TokenPairDto> IssueTokenPairAsync(

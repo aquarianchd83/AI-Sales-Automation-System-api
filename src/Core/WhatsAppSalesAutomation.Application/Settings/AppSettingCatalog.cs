@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -122,5 +122,14 @@ public static class AppSettingCatalog
         new("Sms:Msg91:AuthKey", "Sms", IsSecret: true, Description: "MSG91 account auth key."),
         new("Sms:Msg91:OtpTemplateId", "Sms", IsSecret: false, Description: "MSG91 (DLT-registered) OTP template id."),
         new("Sms:Msg91:BaseUrl", "Sms", IsSecret: false, Description: "MSG91 API base address."),
+
+        // Retention - how long data the platform only needs for a while is kept, in days. 0 keeps it forever; 1-6 counts as 7. Read live by
+        // the daily clean-up. Conversations and messages are deliberately not here.
+        new("Retention:WebhookEventDays", "Retention", IsSecret: false, Description: "Days to keep raw webhook payloads once processed. 0 = forever."),
+        new("Retention:RefreshTokenDays", "Retention", IsSecret: false, Description: "Days to keep expired or revoked sign-in tokens. 0 = forever."),
+        new("Retention:NotificationDays", "Retention", IsSecret: false, Description: "Days to keep notifications that have been read. 0 = forever."),
+        new("Retention:AiInteractionDays", "Retention", IsSecret: false, Description: "Days to keep AI turn records. 0 = forever."),
+        new("Retention:AuditLogDays", "Retention", IsSecret: false, Description: "Days to keep audit trail entries. 0 = forever."),
+        new("Retention:BatchSize", "Retention", IsSecret: false, Description: "Rows removed per statement (100-5000)."),
     };
 }

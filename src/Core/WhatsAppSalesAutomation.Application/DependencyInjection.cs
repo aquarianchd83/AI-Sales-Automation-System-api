@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSalesAutomation.Application.Account;
 using WhatsAppSalesAutomation.Application.Ai;
+using WhatsAppSalesAutomation.Application.Audit;
 using WhatsAppSalesAutomation.Application.Auth;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
@@ -42,6 +43,7 @@ public static class DependencyInjection
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
         services.Configure<AppLinkOptions>(configuration.GetSection("App"));
+        services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
         services.Configure<LeadDiscoveryOptions>(configuration.GetSection("LeadDiscovery"));
         services.Configure<LeadDiscoveryPricingOptions>(configuration.GetSection("LeadDiscovery:Pricing"));
         services.Configure<WhatsAppPricingOptions>(configuration.GetSection("WhatsApp:Pricing"));
@@ -87,6 +89,7 @@ public static class DependencyInjection
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountRecoveryService, AccountRecoveryService>();
+        services.AddScoped<IAuditTrailWriter, AuditTrailWriter>();
         services.AddScoped<IAccountProfileService, AccountProfileService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<ITenantSlugResolver, TenantSlugResolver>();

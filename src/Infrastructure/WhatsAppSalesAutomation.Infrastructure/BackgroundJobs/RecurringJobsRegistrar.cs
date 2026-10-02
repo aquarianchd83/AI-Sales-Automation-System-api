@@ -38,6 +38,11 @@ public static class RecurringJobsRegistrar
         // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
         recurringJobs.AddOrUpdate<QuotaAlertJob>(
             "quota-alerts", job => job.RunAsync(), "*/15 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Daily at 03:20 UTC, clear of the reconciliation pass at 00:30: deletes what has outlived its retention period (webhook payloads,
+        // dead tokens, read notifications, old AI turns and audit rows). Idempotent, so a repeated or overlapping run is harmless.
+        recurringJobs.AddOrUpdate<DataRetentionJob>(
+            "data-retention", job => job.RunAsync(), "20 3 * * *", RecurringJobPolicy.SkipMissedOccurrences);
     }
 
     /// <summary>

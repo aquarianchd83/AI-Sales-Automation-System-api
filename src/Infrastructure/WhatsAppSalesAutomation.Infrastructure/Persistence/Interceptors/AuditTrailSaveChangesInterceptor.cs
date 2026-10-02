@@ -9,13 +9,18 @@ using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
+using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
+using WhatsAppSalesAutomation.Infrastructure.Tenancy;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
 
 /// <summary>An entity type that is audited, and the ONLY properties of it that are recorded.</summary>
-public sealed record AuditedEntity(string Name, IReadOnlyList<string> Properties);
+/// <param name="Redacted">Properties whose CHANGE is worth recording but whose VALUE must never be: a password hash, an API key, a long
+/// message body. The trail says "changed" and nothing else - it is readable by tenant admins, and it outlives the secret.</param>
+public sealed record AuditedEntity(string Name, IReadOnlyList<string> Properties, IReadOnlyList<string>? Redacted = null);
 
 /// <summary>
 /// What is audited, and which properties of it are recorded.
@@ -34,7 +39,7 @@ public sealed record AuditedEntity(string Name, IReadOnlyList<string> Properties
 public static class AuditedEntityCatalog
 {
     /// <summary>Names of properties whose change makes an Update a StatusChange.</summary>
-    private static readonly HashSet<string> LifecycleProperties = new(StringComparer.Ordinal) { "Status", "Stage", "Mode" };
+    private static readonly HashSet<string> LifecycleProperties = new(StringComparer.Ordinal) { "Status", "Stage", "Mode", "IsActive" };
 
     private static readonly IReadOnlyDictionary<Type, AuditedEntity> Entities = new Dictionary<Type, AuditedEntity>
     {
@@ -47,7 +52,27 @@ public static class AuditedEntityCatalog
         [typeof(Customer)] = new("Customer", new[] { "OptInStatus", "OptOutSource" }),
 
         // Never Content: an article's body can be large and is versioned in its own table.
-        [typeof(KnowledgeBaseArticle)] = new("KnowledgeArticle", new[] { "Title", "Status", "SourceType", "AuthorityRank", "VersionNumber", "IsCurrentVersion" })
+        [typeof(KnowledgeBaseArticle)] = new("KnowledgeArticle", new[] { "Title", "Status", "SourceType", "AuthorityRank", "VersionNumber", "IsCurrentVersion" }),
+
+        // Who can sign in, and what happens to the door. AccessFailedCount gives one row per wrong password (with the address the
+        // attempt came from), LockoutEnd the lock itself, IsActive a deactivation. The password hash is redacted: that it changed is
+        // the fact, what it changed to is nobody's business. Roles are not on this row; UserService records those itself.
+        [typeof(ApplicationUser)] = new("User",
+            new[] { "FullName", "Email", "PhoneNumber", "IsActive", "EmailConfirmed", "PhoneNumberConfirmed", "AccessFailedCount", "LockoutEnd" },
+            new[] { "PasswordHash" }),
+
+        // The tenant's own credentials and the rules its agent runs by. Every key and token is redacted.
+        [typeof(TenantWhatsAppConfig)] = new("WhatsAppConfig",
+            new[] { "PhoneNumberId", "WhatsAppBusinessAccountId", "AppId", "ApiVersion", "ApiBaseUrl" },
+            new[] { "AccessToken", "AppSecret", "WebhookVerifyToken" }),
+        [typeof(TenantAiProviderConfig)] = new("AiProviderConfig",
+            new[] { "Provider", "EmbeddingProvider", "AnthropicModel", "OpenAiChatModel", "GoogleChatModel" },
+            new[] { "AnthropicApiKey", "OpenAiApiKey", "GoogleApiKey" }),
+        [typeof(MessageTemplate)] = new("MessageTemplate",
+            new[] { "Name", "Language", "Category", "WhatsAppTemplateName", "WhatsAppTemplateStatus", "IsActive" },
+            new[] { "BodyText" }),
+        [typeof(QualificationField)] = new("QualificationField", new[] { "FieldKey", "DisplayName", "IsActive", "IsRequired", "Priority", "ScoreWeight" }),
+        [typeof(LeadScoringRule)] = new("ScoringRule", new[] { "RuleKey", "DisplayName", "Points", "IsActive", "MarksLeadHot", "MatchValue" })
     };
 
     public static bool TryGet(Type clrType, out AuditedEntity entity) => Entities.TryGetValue(clrType, out entity!);
@@ -130,7 +155,7 @@ public sealed class AuditTrailSaveChangesInterceptor : SaveChangesInterceptor
         if (tenantId is null || tenantId == Guid.Empty)
             return null;
 
-        var entityId = entry.Property("Id").CurrentValue is Guid id ? id : Guid.Empty;
+        var entityId = EntityIdOf(entry);
         AuditAction action;
         var changes = new Dictionary<string, object?>();
 
@@ -156,6 +181,13 @@ public sealed class AuditTrailSaveChangesInterceptor : SaveChangesInterceptor
                 }
 
                 action = AuditAction.Update;
+                foreach (var name in audited.Redacted ?? Array.Empty<string>())
+                {
+                    var secret = entry.Property(name);
+                    if (secret.IsModified && !Equals(secret.OriginalValue, secret.CurrentValue))
+                        changes[name] = "changed";
+                }
+
                 foreach (var name in audited.Properties)
                 {
                     var property = entry.Property(name);
@@ -201,8 +233,16 @@ public sealed class AuditTrailSaveChangesInterceptor : SaveChangesInterceptor
     {
         ITenantOwned owned => owned.TenantId,
         ITenantScopedOrGlobal scoped => scoped.TenantId,
+        ApplicationUser user => user.TenantId, // null for a platform operator, who belongs to no tenant's trail
         _ => null
     };
+
+    /// <summary>The row's own Id; for one keyed by tenant (the per-tenant credential rows) that is the tenant id.</summary>
+    private static Guid EntityIdOf(EntityEntry entry)
+    {
+        var key = entry.Metadata.FindProperty("Id") ?? entry.Metadata.FindPrimaryKey()?.Properties.FirstOrDefault(p => p.ClrType == typeof(Guid));
+        return key is not null && entry.Property(key.Name).CurrentValue is Guid id ? id : Guid.Empty;
+    }
 
     /// <summary>Enums as names and dates in a round-trip format, so the JSON reads the same to a person
     /// as to a program and does not shift meaning when an enum is renumbered.</summary>
