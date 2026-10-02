@@ -19,12 +19,12 @@ public static class TemplateHeaderImage
 
         var asset = await context.MediaAssets
             .Where(a => a.Id == assetId)
-            .Select(a => new { a.Url, a.StorageKey })
+            .Select(a => new { a.Url, a.StorageKey, a.StorageProvider })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (asset is null)
             return null;
 
-        return storage is null ? asset.Url : storage.GetPublicUrl(asset.StorageKey);
+        return Media.MediaAssetLinks.PublicUrl(asset.StorageProvider, asset.StorageKey, asset.Url, storage);
     }
 }

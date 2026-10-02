@@ -78,6 +78,22 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
         new("Welcome", "en", "Marketing", "welcome_offer", "Hi {{FirstName}}", headerId);
 
     [Fact]
+    public async Task An_image_added_by_link_is_sent_from_the_tenants_own_address()
+    {
+        var png = Image();
+        png.StorageProvider = "External";
+        png.Url = "https://bucket.s3.amazonaws.com/logo.png";
+        _db.SaveChanges();
+        var service = Service();
+        var created = await service.CreateAsync(NewTemplate(png.Id));
+        Assert.Equal("https://bucket.s3.amazonaws.com/logo.png", created.HeaderImageUrl);
+
+        var template = await _db.MessageTemplates.FirstAsync(t => t.Id == created.Id);
+        template.HeaderOnMeta = true;
+        Assert.Equal("https://bucket.s3.amazonaws.com/logo.png", await TemplateHeaderImage.ResolveUrlAsync(_db, template, default, new InMemoryStorage(_files)));
+    }
+
+    [Fact]
     public async Task The_list_names_the_image_each_template_carries()
     {
         var png = Image();

@@ -508,9 +508,9 @@ public class MessageTemplateService : IMessageTemplateService
     {
         var ids = templates.Where(t => t.HeaderMediaAssetId != null).Select(t => t.HeaderMediaAssetId!.Value).Distinct().ToList();
         var assets = ids.Count == 0
-            ? new Dictionary<Guid, (string FileName, string StorageKey, string Url)>()
-            : (await _context.MediaAssets.Where(a => ids.Contains(a.Id)).Select(a => new { a.Id, a.FileName, a.StorageKey, a.Url }).ToListAsync(cancellationToken))
-                .ToDictionary(a => a.Id, a => (a.FileName, a.StorageKey, a.Url));
+            ? new Dictionary<Guid, (string FileName, string StorageKey, string Url, string Provider)>()
+            : (await _context.MediaAssets.Where(a => ids.Contains(a.Id)).Select(a => new { a.Id, a.FileName, a.StorageKey, a.Url, a.StorageProvider }).ToListAsync(cancellationToken))
+                .ToDictionary(a => a.Id, a => (a.FileName, a.StorageKey, a.Url, Provider: a.StorageProvider));
 
         return templates.Select(t =>
         {
@@ -518,7 +518,7 @@ public class MessageTemplateService : IMessageTemplateService
             if (t.HeaderMediaAssetId is { } id && assets.TryGetValue(id, out var asset))
             {
                 fileName = asset.FileName;
-                url = _mediaStorage?.GetPublicUrl(asset.StorageKey) ?? asset.Url;
+                url = Media.MediaAssetLinks.PublicUrl(asset.Provider, asset.StorageKey, asset.Url, _mediaStorage);
             }
 
             return new MessageTemplateDto(
