@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -96,6 +97,7 @@ public sealed class MessageTemplateCategorySyncTests : IDisposable
     private readonly SqliteApplicationDbContext _db;
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme" };
     private string _remoteCategory = "MARKETING";
+    private string _remoteStatus = "APPROVED";
 
     public MessageTemplateCategorySyncTests()
     {
@@ -113,12 +115,14 @@ public sealed class MessageTemplateCategorySyncTests : IDisposable
         _connection.Dispose();
     }
 
+    private readonly RecordingNotifier _notices = new();
+
     private MessageTemplateService Service()
     {
         var whatsApp = Fake.Of<IWhatsAppService>((m, _) => m.Name == nameof(IWhatsAppService.GetMessageTemplatesAsync)
-            ? Task.FromResult<IReadOnlyList<WhatsAppRemoteTemplate>>(new[] { new WhatsAppRemoteTemplate("m1", "create_template_from_portal", "en", "APPROVED", _remoteCategory) })
+            ? Task.FromResult<IReadOnlyList<WhatsAppRemoteTemplate>>(new[] { new WhatsAppRemoteTemplate("m1", "create_template_from_portal", "en", _remoteStatus, _remoteCategory) })
             : throw new NotImplementedException(m.Name));
-        return new MessageTemplateService(_db, whatsApp, null!, null!, null!);
+        return new MessageTemplateService(_db, whatsApp, null!, null!, null!, notifier: _notices);
     }
 
     private MessageTemplate Add(TemplateCategory category)
@@ -131,6 +135,64 @@ public sealed class MessageTemplateCategorySyncTests : IDisposable
         _db.MessageTemplates.Add(template);
         _db.SaveChanges();
         return template;
+    }
+
+    [Fact]
+    public async Task Approval_by_meta_tells_the_tenant_and_says_when_it_reclassified_the_category()
+    {
+        var template = Add(TemplateCategory.Utility);
+        template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
+        await _db.SaveChangesAsync();
+
+        await Service().SyncWithMetaAsync();
+
+        var notice = Assert.Single(_notices.Sent);
+        Assert.Equal(TenantNotificationKind.TemplateApproved, notice.Kind);
+        Assert.Equal(_tenant.Id, notice.TenantId);
+        Assert.Contains("approved", notice.Title);
+        Assert.Contains("Marketing", notice.Body);
+        Assert.Contains("Utility", notice.Body);
+    }
+
+    [Theory]
+    [InlineData("REJECTED", "rejected")]
+    [InlineData("PAUSED", "paused")]
+    [InlineData("DISABLED", "disabled")]
+    public async Task A_template_meta_rejects_pauses_or_disables_needs_the_tenants_attention(string remoteStatus, string word)
+    {
+        Add(TemplateCategory.Marketing);
+        _remoteStatus = remoteStatus;
+
+        await Service().SyncWithMetaAsync();
+
+        var notice = Assert.Single(_notices.Sent);
+        Assert.Equal(TenantNotificationKind.TemplateNeedsAttention, notice.Kind);
+        Assert.Contains(word, notice.Title);
+        Assert.Contains("inactive", notice.Body);
+    }
+
+    [Fact]
+    public async Task A_sync_that_changes_nothing_is_silent_and_so_is_a_move_back_to_pending()
+    {
+        Add(TemplateCategory.Marketing);
+
+        await Service().SyncWithMetaAsync();            // already approved here and there
+        _remoteStatus = "PENDING";
+        await Service().SyncWithMetaAsync();            // an appeal / edit: not news
+
+        Assert.Empty(_notices.Sent);
+    }
+
+    [Fact]
+    public async Task A_template_that_meta_pauses_and_later_approves_again_gives_two_notices()
+    {
+        Add(TemplateCategory.Marketing);
+        _remoteStatus = "PAUSED";
+        await Service().SyncWithMetaAsync();
+        _remoteStatus = "APPROVED";
+        await Service().SyncWithMetaAsync();
+
+        Assert.Equal(new[] { TenantNotificationKind.TemplateNeedsAttention, TenantNotificationKind.TemplateApproved }, _notices.Sent.Select(n => n.Kind));
     }
 
     [Fact]

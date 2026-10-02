@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -18,6 +19,7 @@ public class MessageTemplateService : IMessageTemplateService
     private readonly IValidator<ReviewMessageTemplateRequest> _reviewValidator;
     /// <summary>Optional so a caller that never pushes a header image need not supply one; DI always does.</summary>
     private readonly IMediaStorageService? _mediaStorage;
+    private readonly ITenantNotifier? _notifier;
 
     /// <summary>Meta's limits for an image header: JPEG or PNG, at most 5 MB.</summary>
     private const long MaxHeaderImageBytes = 5 * 1024 * 1024;
@@ -29,9 +31,11 @@ public class MessageTemplateService : IMessageTemplateService
         IValidator<CreateMessageTemplateRequest> createValidator,
         IValidator<UpdateMessageTemplateRequest> updateValidator,
         IValidator<ReviewMessageTemplateRequest> reviewValidator,
-        IMediaStorageService? mediaStorage = null)
+        IMediaStorageService? mediaStorage = null,
+        ITenantNotifier? notifier = null)
     {
         _mediaStorage = mediaStorage;
+        _notifier = notifier;
         _context = context;
         _whatsApp = whatsApp;
         _createValidator = createValidator;
@@ -390,6 +394,7 @@ public class MessageTemplateService : IMessageTemplateService
         var statusUpdatedCount = 0;
         var unmatched = new List<string>();
         var anyChange = false;
+        var reviewOutcomes = new List<(MessageTemplate Template, WhatsAppTemplateStatus Previous, string RemoteStatus, TemplateCategory PreviousCategory)>();
 
         foreach (var remote in remoteTemplates)
         {
@@ -419,6 +424,8 @@ public class MessageTemplateService : IMessageTemplateService
             var (mappedStatus, mappedIsActive) = MapRemoteStatus(remote.Status);
 
             var changed = false;
+            var previousStatus = local.WhatsAppTemplateStatus;
+            var previousCategory = local.Category;
             if (local.WhatsAppTemplateStatus != mappedStatus || local.IsActive != mappedIsActive)
             {
                 local.WhatsAppTemplateStatus = mappedStatus;
@@ -439,11 +446,16 @@ public class MessageTemplateService : IMessageTemplateService
             {
                 statusUpdatedCount++;
                 anyChange = true;
+                reviewOutcomes.Add((local, previousStatus, remote.Status, previousCategory));
             }
         }
 
         if (anyChange)
             await _context.SaveChangesAsync(cancellationToken);
+
+        // Told after the save, so the tenant is never told about a change that did not stick. Never throws.
+        foreach (var (template, previous, remoteStatus, previousCategory) in reviewOutcomes)
+            await NotifyReviewOutcomeAsync(template, previous, remoteStatus, previousCategory, cancellationToken);
 
         return (remoteTemplates.Count, matchedCount, statusUpdatedCount, unmatched);
     }
@@ -468,6 +480,44 @@ public class MessageTemplateService : IMessageTemplateService
         "PENDING" or "IN_APPEAL" or "PENDING_DELETION" => (WhatsAppTemplateStatus.Pending, true),
         _ => (WhatsAppTemplateStatus.Rejected, false) // PAUSED, DISABLED, or any future Meta status.
     };
+
+    /// <summary>Tells the tenant when Meta's review ended in something they must act on or can now use: approved (and whether
+    /// Meta reclassified the category, which changes what each send costs), or rejected / paused / disabled (the template can no
+    /// longer be sent). Moving back to Pending is the tenant's own edit or an appeal - not news.</summary>
+    private async Task NotifyReviewOutcomeAsync(
+        MessageTemplate template, WhatsAppTemplateStatus previous, string remoteStatus, TemplateCategory previousCategory, CancellationToken cancellationToken)
+    {
+        if (_notifier is null || template.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Pending || template.WhatsAppTemplateStatus == previous)
+            return;
+
+        var approved = template.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Approved;
+        var kind = approved ? TenantNotificationKind.TemplateApproved : TenantNotificationKind.TemplateNeedsAttention;
+
+        var outcome = remoteStatus.ToUpperInvariant() switch
+        {
+            "APPROVED" => "approved",
+            "REJECTED" => "rejected",
+            "PAUSED" => "paused",
+            "DISABLED" => "disabled",
+            _ => "not approved"
+        };
+
+        var title = approved ? $"Template \"{template.Name}\" was approved" : $"Template \"{template.Name}\" was {outcome} by Meta";
+        var body = approved
+            ? $"Meta approved \"{template.Name}\" - campaigns can use it now."
+            : $"Meta {outcome} \"{template.Name}\", so it can't be sent and has been made inactive. Open Message Templates to review it, or make a copy and submit that.";
+
+        if (approved && template.Category != previousCategory)
+            body += $" Meta classed it as {template.Category} (you submitted {previousCategory}); that is the category it bills and counts against your quota under.";
+
+        // Each review is its own episode (a template can be approved, paused and approved again), so the id alone would
+        // swallow every notice after the first.
+        var episode = $"{template.Id:N}-{template.WhatsAppTemplateStatus}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        await _notifier.NotifyAsync(new TenantNotificationRequest(
+            template.TenantId, kind, null, episode, Truncate(title, 200), Truncate(body, 1000), AlsoWhatsApp: false), cancellationToken);
+    }
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";
 
     /// <summary>Dictionary&lt;(string, string), T&gt; needs one IEqualityComparer for the tuple key to
     /// go case-insensitive on both components - ValueTuple's own default equality is case-sensitive.</summary>

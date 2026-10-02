@@ -3,6 +3,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Billing;
@@ -28,10 +29,12 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
     private readonly IPricingService _pricing;
 
     private readonly ITenantNotifier? _notifier;
+    private readonly IPlatformNotifier? _platformNotifier;
 
-    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime, IPricingService pricing, ITenantNotifier? notifier = null)
+    public SubscriptionRenewalService(IApplicationDbContext context, IQuotaLedgerService ledger, IDateTimeProvider dateTime, IPricingService pricing, ITenantNotifier? notifier = null, IPlatformNotifier? platformNotifier = null)
     {
         _notifier = notifier;
+        _platformNotifier = platformNotifier;
         _pricing = pricing;
         _context = context;
         _ledger = ledger;
@@ -68,7 +71,10 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
                 .GetValueOrDefault(plan.Id)?.GetValueOrDefault(region.CountryCode);
             var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode);
             if (quote is null)
+            {
+                await NotifyCannotRenewAsync(subscription, plan, tenant, cancellationToken);
                 continue;
+            }
 
             var payment = PaymentFactory.For(tenant.Id, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id, periodStartUtc: start, periodEndUtc: end);
             _context.Payments.Add(payment);
@@ -98,5 +104,29 @@ public class SubscriptionRenewalService : ISubscriptionRenewalService
 
         var expired = await _ledger.ExpireDueAsync(cancellationToken);
         return (renewed, expired);
+    }
+
+    /// <summary>A plan with no price for the tenant's country cannot renew, and nothing else says so: the pass just moves on and
+    /// tries again, while the tenant's quota quietly stops being topped up. Told once per period (the episode is the period
+    /// that ended), not on every pass - this runs often.</summary>
+    private async Task NotifyCannotRenewAsync(Subscription subscription, Plan plan, Tenant tenant, CancellationToken cancellationToken)
+    {
+        var episode = $"renewal-{subscription.CurrentPeriodEndUtc:yyyyMMdd}";
+
+        if (_notifier is not null)
+            await _notifier.NotifyAsync(new TenantNotificationRequest(
+                tenant.Id, TenantNotificationKind.PlanRenewalFailed, null, episode,
+                $"Your {plan.Name} plan couldn't renew",
+                $"Your {plan.Name} plan ended on {subscription.CurrentPeriodEndUtc:d MMM yyyy} but can't renew automatically right now, " +
+                "so no new quota has been added. The platform team has been told - you can also contact support.",
+                AlsoWhatsApp: true), cancellationToken);
+
+        if (_platformNotifier is not null)
+            await _platformNotifier.NotifyAsync(new PlatformNotificationRequest(
+                PlatformNotificationKind.PlanRenewalFailed, PlatformNotificationSeverity.Warning, episode,
+                $"{tenant.Name}'s {plan.Name} plan couldn't renew",
+                $"The {plan.Name} plan has no price for {tenant.CountryCode ?? "the tenant's country"}, so {tenant.Name}'s period ending " +
+                $"{subscription.CurrentPeriodEndUtc:d MMM yyyy} was not renewed and no quota was granted. Set a price for that country, or move the tenant to another plan.",
+                tenant.Id), cancellationToken);
     }
 }

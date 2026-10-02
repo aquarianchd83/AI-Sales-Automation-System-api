@@ -43,6 +43,7 @@ public class RefundService : IRefundService
     private readonly IQuotaLedgerService _ledger;
     private readonly IRefundGateway _gateway;
     private readonly ITenantNotifier _notifier;
+    private readonly IPlatformNotifier? _platformNotifier;
     private readonly IDateTimeProvider _dateTime;
     private readonly RefundPolicyOptions _policy;
 
@@ -52,8 +53,10 @@ public class RefundService : IRefundService
         IRefundGateway gateway,
         ITenantNotifier notifier,
         IDateTimeProvider dateTime,
-        IOptionsSnapshot<RefundPolicyOptions> policy)
+        IOptionsSnapshot<RefundPolicyOptions> policy,
+        IPlatformNotifier? platformNotifier = null)
     {
+        _platformNotifier = platformNotifier;
         _context = context;
         _ledger = ledger;
         _gateway = gateway;
@@ -90,6 +93,14 @@ public class RefundService : IRefundService
             throw new ConflictException(eligibility.Reason ?? "This payment can't be refunded.");
 
         var request = await CreateRequestAsync(payment, eligibility, reason.Trim(), requestedByUserId, cancellationToken);
+
+        // It waits for an operator, and lapses if nobody acts - so the operator has to be told it exists.
+        await NotifyOperatorsAsync(
+            PlatformNotificationKind.RefundRequested, PlatformNotificationSeverity.Warning, request.TenantId, $"requested-{request.Id:N}",
+            "Refund requested",
+            $"A refund of {payment.CurrencySymbol}{eligibility.LocalAmount:0.00} for {payment.PlanName} is waiting for review. Reason given: {request.Reason}",
+            cancellationToken);
+
         return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();
     }
 
@@ -169,6 +180,13 @@ public class RefundService : IRefundService
             request.Status = RefundStatus.Failed;
             request.FailureReason = gateway.Error ?? "The payment gateway did not complete the refund.";
             await _context.SaveChangesAsync(cancellationToken);
+
+            // Money and units stay held until someone retries or rejects it - nobody will know unless told.
+            await NotifyOperatorsAsync(
+                PlatformNotificationKind.RefundFailed, PlatformNotificationSeverity.Critical, request.TenantId, $"failed-{request.Id:N}-{now:yyyyMMddHHmmss}",
+                "A refund did not go through",
+                $"The gateway did not complete the approved refund of {payment.CurrencySymbol}{refundLocal:0.00} for {payment.PlanName}: {request.FailureReason} It is still held - retry or reject it.",
+                cancellationToken);
             return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();
         }
 
@@ -327,6 +345,19 @@ public class RefundService : IRefundService
                 $"{units} {label} are back in your account because {why}.",
                 AlsoWhatsApp: false), cancellationToken);
         }
+    }
+
+    /// <summary>Raises an operator alert for a refund event. Never throws: an alert failing must not fail the refund.</summary>
+    private async Task NotifyOperatorsAsync(
+        PlatformNotificationKind kind, PlatformNotificationSeverity severity, Guid tenantId, string episode, string title, string body, CancellationToken cancellationToken)
+    {
+        if (_platformNotifier is null)
+            return;
+
+        var tenantName = await _context.Tenants.IgnoreQueryFilters().Where(t => t.Id == tenantId).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken);
+        var who = tenantName is null ? string.Empty : $"{tenantName}: ";
+        await _platformNotifier.NotifyAsync(new PlatformNotificationRequest(
+            kind, severity, episode, title, who.Length + body.Length <= 1000 ? who + body : (who + body)[..999] + "…", tenantId), cancellationToken);
     }
 
     private async Task<RefundRequest> CreateRequestAsync(Payment payment, RefundEligibilityDto eligibility, string reason, Guid requestedBy, CancellationToken cancellationToken)

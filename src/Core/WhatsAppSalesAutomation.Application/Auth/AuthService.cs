@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Leads;
@@ -33,6 +34,7 @@ public class AuthService : IAuthService
     private readonly IValidator<ChangePasswordRequest> _changePasswordValidator;
 
     private readonly ICountryAvailability _countries;
+    private readonly IPlatformNotifier _platformNotifier;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -48,9 +50,11 @@ public class AuthService : IAuthService
         IValidator<LoginRequest> loginValidator,
         IValidator<RefreshTokenRequest> refreshTokenValidator,
         IValidator<ChangePasswordRequest> changePasswordValidator,
-        ICountryAvailability countries)
+        ICountryAvailability countries,
+        IPlatformNotifier platformNotifier)
     {
         _countries = countries;
+        _platformNotifier = platformNotifier;
         _userManager = userManager;
         _context = context;
         _jwtTokenService = jwtTokenService;
@@ -131,6 +135,14 @@ public class AuthService : IAuthService
         // unaffected, and a retry of this signup cannot double-seed.
         await _qualification.SeedDefaultsAsync(tenant.Id, cancellationToken);
         await _leadScoring.SeedDefaultsAsync(tenant.Id, cancellationToken);
+
+        // The operators run the platform and see nothing of a signup unless told. Never throws, so a mail problem can't fail it.
+        await _platformNotifier.NotifyAsync(new PlatformNotificationRequest(
+            PlatformNotificationKind.TenantSignedUp, PlatformNotificationSeverity.Info, $"signup-{tenant.Id:N}",
+            $"New signup: {tenant.Name}",
+            $"{tenant.Name} ({tenant.Slug}) signed up{(tenant.CountryCode is null ? string.Empty : $" from {tenant.CountryCode}")}. " +
+            $"Admin: {user.FullName} <{user.Email}>. Their trial ends {tenant.TrialEndsAtUtc:d MMM yyyy}.",
+            tenant.Id), cancellationToken);
 
         var roles = await _userManager.GetRolesAsync(user);
         return await IssueTokenPairAsync(user, roles, ipAddress, cancellationToken);
