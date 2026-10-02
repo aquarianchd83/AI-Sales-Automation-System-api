@@ -1,10 +1,11 @@
 namespace WhatsAppSalesAutomation.Infrastructure.Storage;
 
-/// <summary>Bound from "MediaStorage:S3". The platform owner provides ONE bucket for every tenant, so a tenant never has to
+/// <summary>Bound from "MediaStorage:S3", which is fed ONLY by the AppSettings table - the platform administrator edits it on the
+/// Platform Admin Console's AWS Settings page, and appsettings.json holds no AWS values. The platform owner provides ONE bucket for every tenant, so a tenant never has to
 /// open a cloud account: they upload in the Media Library and the files land here, under their own folder.
 /// The objects must be publicly readable (Meta downloads them by link) - a bucket policy allowing s3:GetObject on
 /// <see cref="KeyPrefix"/>/* does it once for everyone; no per-file permissions are set.
-/// Every value is trimmed: a stray space pasted into appsettings ("my-bucket ") otherwise makes AWS reject the bucket name.</summary>
+/// Every value is trimmed: a stray space pasted into the settings page ("my-bucket ") otherwise makes AWS reject the bucket name.</summary>
 public class S3MediaStorageSettings
 {
     private string _bucketName = string.Empty;

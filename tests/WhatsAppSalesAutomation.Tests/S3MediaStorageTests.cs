@@ -16,7 +16,7 @@ public class S3MediaStorageTests
     }
 
     private static S3MediaStorageService S3(string publicBase = "") => new(
-        Options.Create(new S3MediaStorageSettings { BucketName = "plat-media", Region = "ap-southeast-2", PublicBaseUrl = publicBase }),
+        Snapshot.Of(new S3MediaStorageSettings { BucketName = "plat-media", Region = "ap-southeast-2", PublicBaseUrl = publicBase }),
         new Ambient());
 
     private static RoutingMediaStorageService Router(string provider, S3MediaStorageService s3)
@@ -25,7 +25,7 @@ public class S3MediaStorageTests
         var local = new LocalFileMediaStorageService(
             Fake.Of<IWebHostEnvironment>((_, _) => null),
             Options.Create(new LocalMediaStorageSettings { RootPath = root, PublicBaseUrl = "https://api.example.com" }));
-        return new RoutingMediaStorageService(local, s3, Options.Create(new LocalMediaStorageSettings { Provider = provider }));
+        return new RoutingMediaStorageService(local, s3, Snapshot.Of(new LocalMediaStorageSettings { Provider = provider }));
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class S3MediaStorageTests
     [Fact]
     public async Task Uploading_to_s3_without_a_bucket_says_who_must_configure_it()
     {
-        var unconfigured = new S3MediaStorageService(Options.Create(new S3MediaStorageSettings()), new Ambient());
+        var unconfigured = new S3MediaStorageService(Snapshot.Of(new S3MediaStorageSettings()), new Ambient());
 
         var ex = await Assert.ThrowsAsync<WhatsAppSalesAutomation.Application.Common.Exceptions.StorageUnavailableException>(() => unconfigured.UploadAsync(new MemoryStream(), "a.png", "image/png"));
 
@@ -64,7 +64,7 @@ public class S3MediaStorageTests
 
         // Whatever the machine has (a role, a profile, nothing), the failure must never be a bare 500: a keyless laptop gets
         // told to fill the keys in.
-        var service = new S3MediaStorageService(Options.Create(settings), new Ambient());
+        var service = new S3MediaStorageService(Snapshot.Of(settings), new Ambient());
         var ex = await Record.ExceptionAsync(() => service.DeleteAsync("s3:media/x/none.png"));
         if (ex is not null)
             Assert.IsType<WhatsAppSalesAutomation.Application.Common.Exceptions.StorageUnavailableException>(ex);

@@ -137,6 +137,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformTenantService, PlatformTenantService>();
         services.AddScoped<IPlatformBillingService, PlatformBillingService>();
         services.AddScoped<IPlatformConfigurationService, PlatformConfigurationService>();
+        services.AddScoped<IPlatformAwsSettingsService, PlatformAwsSettingsService>();
         services.AddScoped<IPlanCostReportService, PlanCostReportService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
         services.AddScoped<IPlatformPaymentService, PlatformPaymentService>();

@@ -97,13 +97,15 @@ public static class AppSettingCatalog
         new("MediaStorage:PublicBasePath", "MediaStorage", IsSecret: false, Description: "URL prefix media is served under - restart required to take effect."),
         new("MediaStorage:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Scheme+host to prepend so Meta can fetch template media - restart required to take effect."),
         // Where NEW uploads go. "S3" = the platform's own bucket, so tenants never need a cloud account; files already
-        // stored keep working wherever they are. All need a restart (read once into IOptions at startup).
-        new("MediaStorage:Provider", "MediaStorage", IsSecret: false, Description: "Local (this server's disk) or S3 (the platform's bucket) for new uploads - restart required."),
-        new("MediaStorage:S3:BucketName", "MediaStorage", IsSecret: false, Description: "The S3 bucket every tenant's media is stored in - restart required."),
-        new("MediaStorage:S3:Region", "MediaStorage", IsSecret: false, Description: "The bucket's AWS region, e.g. ap-southeast-2 - restart required."),
-        new("MediaStorage:S3:AccessKeyId", "MediaStorage", IsSecret: true, Description: "AWS access key with put/get/delete on the bucket; leave empty to use the server's own AWS role - restart required."),
-        new("MediaStorage:S3:SecretAccessKey", "MediaStorage", IsSecret: true, Description: "The secret for the access key above - restart required."),
-        new("MediaStorage:S3:KeyPrefix", "MediaStorage", IsSecret: false, Description: "Folder inside the bucket (default media); the public-read bucket policy should cover it - restart required."),
-        new("MediaStorage:S3:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Optional CDN/custom domain in front of the bucket; empty uses the bucket's own address - restart required."),
+        // stored keep working wherever they are. The S3 keys have no appsettings.json counterpart - they are managed on the
+        // Platform Admin Console's AWS Settings page (PlatformAwsSettingsService) and live only in this table. All are live:
+        // the storage services read them through IOptionsSnapshot.
+        new("MediaStorage:Provider", "MediaStorage", IsSecret: false, Description: "Local (this server's disk) or S3 (the platform's bucket) for new uploads."),
+        new("MediaStorage:S3:BucketName", "MediaStorage", IsSecret: false, Description: "The S3 bucket every tenant's media is stored in."),
+        new("MediaStorage:S3:Region", "MediaStorage", IsSecret: false, Description: "The bucket's AWS region, e.g. ap-southeast-2."),
+        new("MediaStorage:S3:AccessKeyId", "MediaStorage", IsSecret: true, Description: "AWS access key with put/get/delete on the bucket; leave empty to use the server's own AWS role."),
+        new("MediaStorage:S3:SecretAccessKey", "MediaStorage", IsSecret: true, Description: "The secret for the access key above."),
+        new("MediaStorage:S3:KeyPrefix", "MediaStorage", IsSecret: false, Description: "Folder inside the bucket (default media); the public-read bucket policy should cover it."),
+        new("MediaStorage:S3:PublicBaseUrl", "MediaStorage", IsSecret: false, Description: "Optional CDN/custom domain in front of the bucket; empty uses the bucket's own address."),
     };
 }

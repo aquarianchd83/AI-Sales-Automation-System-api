@@ -38,6 +38,7 @@ public static class PlatformAuditActions
     public const string CreditPackUpdated = "CreditPackUpdated";
     public const string CreditPackDeactivated = "CreditPackDeactivated";
     public const string ConfigurationUpdated = "ConfigurationUpdated";
+    public const string AwsSettingsUpdated = "AwsSettingsUpdated";
     public const string FlowchartCreated = "FlowchartCreated";
     public const string FlowchartUpdated = "FlowchartUpdated";
     public const string FlowchartDeleted = "FlowchartDeleted";
