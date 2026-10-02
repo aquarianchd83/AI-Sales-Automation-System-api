@@ -690,6 +690,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     customer.OptInTimestamp = now;
                     customer.OptInSource = CustomerSource;
                 }
+                // Every customer a run creates is tagged with the run's processing date, so a day's discoveries can be found
+                // (and campaigned to) together in the Customers screen.
+                customer.Tags.Add(await GetOrCreateDateTagAsync(tenantId, run.Execution.ProcessingDate, cancellationToken));
                 _context.Customers.Add(customer);
                 discovered.CustomerId = customer.Id;
 
@@ -724,6 +727,26 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         await _context.SaveChangesAsync(cancellationToken);
         return CustomerOutcome.Failed;
     }
+
+    /// <summary>The tenant's tag named for <paramref name="processingDate"/> (yyyy-MM-dd, the tenant's local date for this run), created on
+    /// first use. Looked up per customer rather than cached: a rolled-back customer clears the change tracker, and a tag created inside
+    /// that transaction would be gone with it.</summary>
+    private async Task<CustomerTag> GetOrCreateDateTagAsync(Guid tenantId, DateTime processingDate, CancellationToken cancellationToken)
+    {
+        var name = DateTagName(processingDate);
+
+        var tag = await _context.CustomerTags.FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Name == name, cancellationToken);
+        if (tag is null)
+        {
+            tag = new CustomerTag { TenantId = tenantId, Name = name };
+            _context.CustomerTags.Add(tag);
+        }
+
+        return tag;
+    }
+
+    /// <summary>The name of the tag a run puts on the customers it creates: its processing date, e.g. 2026-10-02.</summary>
+    internal static string DateTagName(DateTime processingDate) => processingDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
     // ------------------------------------------------------------------------------------------------
     // Auto-Campaign

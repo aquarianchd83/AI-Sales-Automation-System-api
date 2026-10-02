@@ -12,6 +12,7 @@ public class CustomerTagConfiguration : IEntityTypeConfiguration<CustomerTag>
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Name).IsRequired().HasMaxLength(100);
-        builder.HasIndex(t => t.Name).IsUnique();
+        // Unique per tenant, not globally: two tenants may both have a "VIP" or a date tag such as 2026-10-02.
+        builder.HasIndex(t => new { t.TenantId, t.Name }).IsUnique();
     }
 }
