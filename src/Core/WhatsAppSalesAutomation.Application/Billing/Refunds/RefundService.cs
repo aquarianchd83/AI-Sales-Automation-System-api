@@ -423,7 +423,7 @@ public class RefundService : IRefundService
                 {
                     var used = (u.UnitsGranted - u.UnitsRemaining) / u.UnitsGranted;
                     if (used >= _policy.SubscriptionMaxUsageFraction)
-                        return No($"You've used {used:P0} of your {u.QuotaType} quota. Subscriptions can only be refunded below {_policy.SubscriptionMaxUsageFraction:P0} usage.", windowEnds);
+                        return No($"You've used {Math.Round(used * 100)}% of your {u.QuotaType} quota. Subscriptions can only be refunded below {Math.Round(_policy.SubscriptionMaxUsageFraction * 100)}% usage.", windowEnds);
                 }
             }
 
