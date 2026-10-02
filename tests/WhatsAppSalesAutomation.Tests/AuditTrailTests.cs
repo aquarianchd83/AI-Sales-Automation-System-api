@@ -382,7 +382,8 @@ public sealed class AuditTrailTests : IDisposable
         Seed(TenantA, "Lead", AuditAction.Update, Now.AddMinutes(-1), userId);
         Seed(TenantA, "Lead", AuditAction.Update, Now.AddMinutes(-2), by: null);
 
-        var items = (await NewService(TenantA).GetPagedAsync(new AuditLogQuery())).Items;
+        // Only the Lead entries: creating the user above is itself audited now (as a "User" entry), and is not what this test is about.
+        var items = (await NewService(TenantA).GetPagedAsync(new AuditLogQuery { EntityName = "Lead" })).Items;
 
         Assert.Equal("Priya Sharma", items[0].PerformedByName);
         Assert.Null(items[1].PerformedBy);

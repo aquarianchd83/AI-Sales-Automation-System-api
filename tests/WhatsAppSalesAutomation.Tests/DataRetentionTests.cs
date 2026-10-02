@@ -32,6 +32,11 @@ public sealed class DataRetentionTests : IDisposable
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new PlatformContext(), new AnonymousUser());
         _db.Database.EnsureCreated();
+
+        // These rows are seeded without their parents (a user, a conversation and message): what is under test is the age cut-off, not the
+        // foreign keys. On SQL Server an AI turn's sources and validation failures go with it through the cascade; that part is not
+        // exercised here.
+        _db.Database.ExecuteSqlRaw("PRAGMA foreign_keys = OFF");
     }
 
     public void Dispose()
