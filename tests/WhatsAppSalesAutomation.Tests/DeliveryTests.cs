@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using WhatsAppSalesAutomation.Api.Health;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Infrastructure.Notifications;
