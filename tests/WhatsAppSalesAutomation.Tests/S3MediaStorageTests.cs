@@ -49,9 +49,25 @@ public class S3MediaStorageTests
     {
         var unconfigured = new S3MediaStorageService(Options.Create(new S3MediaStorageSettings()), new Ambient());
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => unconfigured.UploadAsync(new MemoryStream(), "a.png", "image/png"));
+        var ex = await Assert.ThrowsAsync<WhatsAppSalesAutomation.Application.Common.Exceptions.StorageUnavailableException>(() => unconfigured.UploadAsync(new MemoryStream(), "a.png", "image/png"));
 
         Assert.Contains("platform administrator", ex.Message);
+    }
+
+    [Fact]
+    public async Task Stray_spaces_in_the_settings_are_ignored_and_missing_keys_are_explained()
+    {
+        var settings = new S3MediaStorageSettings { BucketName = "plat-media ", Region = " ap-southeast-2" };
+        Assert.Equal("plat-media", settings.BucketName);
+        Assert.Equal("ap-southeast-2", settings.Region);
+        Assert.False(settings.HasAccessKeys);
+
+        // Whatever the machine has (a role, a profile, nothing), the failure must never be a bare 500: a keyless laptop gets
+        // told to fill the keys in.
+        var service = new S3MediaStorageService(Options.Create(settings), new Ambient());
+        var ex = await Record.ExceptionAsync(() => service.DeleteAsync("s3:media/x/none.png"));
+        if (ex is not null)
+            Assert.IsType<WhatsAppSalesAutomation.Application.Common.Exceptions.StorageUnavailableException>(ex);
     }
 
     [Fact]
