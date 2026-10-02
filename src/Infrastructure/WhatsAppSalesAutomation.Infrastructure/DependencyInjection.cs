@@ -155,6 +155,7 @@ public static class DependencyInjection
         services.AddScoped<LocalFileMediaStorageService>();
         services.AddScoped<S3MediaStorageService>();
         services.AddScoped<IMediaStorageService, RoutingMediaStorageService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Platform.IAwsConnectionTester, S3ConnectionTester>();
 
         services.Configure<LocalLogFileReaderSettings>(configuration.GetSection("LogViewer"));
         services.AddScoped<ILogFileReaderService, LocalLogFileReaderService>();

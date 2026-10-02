@@ -3,7 +3,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Storage;
 
-/// <summary>The one <see cref="IMediaStorageService"/> the app sees. New uploads go where MediaStorage:Provider says;
+/// <summary>The one <see cref="IMediaStorageService"/> the app sees. New uploads go where MediaStorage:Provider says (re-read every request, so the Platform Admin Console's AWS Settings apply with no restart);
 /// every other call follows the file's own key, so switching the platform to S3 never strands files already on disk.</summary>
 public class RoutingMediaStorageService : IMediaStorageService
 {
@@ -11,7 +11,7 @@ public class RoutingMediaStorageService : IMediaStorageService
     private readonly S3MediaStorageService _s3;
     private readonly LocalMediaStorageSettings _settings;
 
-    public RoutingMediaStorageService(LocalFileMediaStorageService local, S3MediaStorageService s3, IOptions<LocalMediaStorageSettings> settings)
+    public RoutingMediaStorageService(LocalFileMediaStorageService local, S3MediaStorageService s3, IOptionsSnapshot<LocalMediaStorageSettings> settings)
     {
         _local = local;
         _s3 = s3;

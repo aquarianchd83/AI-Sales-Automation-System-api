@@ -18,7 +18,7 @@ public class S3MediaStorageService : IMediaStorageService
     private readonly ITenantContext _tenant;
     private readonly Lazy<IAmazonS3> _client;
 
-    public S3MediaStorageService(IOptions<S3MediaStorageSettings> settings, ITenantContext tenant)
+    public S3MediaStorageService(IOptionsSnapshot<S3MediaStorageSettings> settings, ITenantContext tenant)
     {
         _settings = settings.Value;
         _tenant = tenant;
@@ -110,13 +110,13 @@ public class S3MediaStorageService : IMediaStorageService
                 "PermanentRedirect" or "AuthorizationHeaderMalformed" => $"the bucket is not in region {_settings.Region}",
                 _ => ex.Message,
             };
-            throw new StorageUnavailableException($"Media storage (S3) failed: {hint}. Ask the platform administrator to check MediaStorage:S3.", ex);
+            throw new StorageUnavailableException($"Media storage (S3) failed: {hint}. Ask the platform administrator to check the AWS Settings in the Platform Admin Console.", ex);
         }
         catch (AmazonClientException ex)
         {
             var hint = _settings.HasAccessKeys
                 ? ex.Message
-                : "no AWS credentials were found - fill in MediaStorage:S3:AccessKeyId and SecretAccessKey (this server has no AWS role or default profile)";
+                : "no AWS credentials were found - the platform administrator must fill in the AWS access key ID and secret access key in the Platform Admin Console (this server has no AWS role or default profile)";
             throw new StorageUnavailableException($"Media storage (S3) failed: {hint}.", ex);
         }
     }
@@ -130,7 +130,7 @@ public class S3MediaStorageService : IMediaStorageService
     private void EnsureConfigured()
     {
         if (!_settings.IsConfigured)
-            throw new StorageUnavailableException("Media storage is set to S3 but MediaStorage:S3:BucketName and Region are not configured. Ask the platform administrator to set them.");
+            throw new StorageUnavailableException("Media storage is set to S3 but the AWS bucket name and region are not configured. Ask the platform administrator to set them in the Platform Admin Console.");
     }
 
     private IAmazonS3 CreateClient()
