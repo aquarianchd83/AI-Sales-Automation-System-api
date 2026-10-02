@@ -48,7 +48,32 @@ public record AiConversationContext(
     /// <summary>The customer's saved language preference, if any. A hint rather than an instruction:
     /// the model is told to match whatever they actually wrote, because a stored preference goes stale
     /// and the message in front of it does not.</summary>
-    string? PreferredLanguage);
+    string? PreferredLanguage,
+    /// <summary>What the CRM already knows about this customer before they typed anything: tags, where
+    /// they came from, the campaign message they are replying to, answers from earlier enquiries. Null
+    /// only for callers that have no CRM to consult.</summary>
+    AiCrmContext? Crm = null);
+
+/// <summary>The customer as the CRM already knows them. Everything here is data on file, not something
+/// the customer said in this chat - the prompt presents it that way, so the agent uses it to avoid
+/// asking and to personalise, not as a claim to repeat back as fact.</summary>
+public record AiCrmContext(
+    IReadOnlyList<string> Tags,
+    string? CustomerSource,
+    string? CampaignName,
+    /// <summary>The last campaign message we sent this customer - the one they are most likely replying
+    /// to. A template's rendered body, or the template name when no body is on file.</summary>
+    string? LastCampaignMessage,
+    /// <summary>Answers given on an EARLIER lead, for fields not yet answered on this one. They may be
+    /// out of date, so the agent confirms them rather than asking from scratch.</summary>
+    IReadOnlyList<AiCapturedField> EarlierAnswers,
+    /// <summary>How many earlier conversations this customer has had with the business.</summary>
+    int PreviousConversations)
+{
+    public bool IsEmpty =>
+        Tags.Count == 0 && string.IsNullOrWhiteSpace(CustomerSource) && string.IsNullOrWhiteSpace(CampaignName)
+        && string.IsNullOrWhiteSpace(LastCampaignMessage) && EarlierAnswers.Count == 0 && PreviousConversations == 0;
+}
 
 /// <summary>The business the agent is speaking for. Every field but <see cref="Name"/> is optional, and
 /// a blank one is omitted from the prompt rather than rendered as an empty label - "Location:" with

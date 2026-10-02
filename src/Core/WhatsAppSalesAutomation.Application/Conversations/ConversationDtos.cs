@@ -22,7 +22,11 @@ public record ConversationDto(
     double? AiConfidenceLast,
     string? LastDetectedIntent,
     string? LastLeadScore,
-    string? Summary);
+    string? Summary,
+    /// <summary>Hybrid mode: the reply the AI wrote but held back for the agent. Only set on the single
+    /// conversation read, and only while it is still unanswered - once an agent (or anyone) sends a
+    /// message after it, it is no longer a suggestion.</summary>
+    string? SuggestedReply = null);
 
 public record ConversationMessageDto(
     Guid Id,

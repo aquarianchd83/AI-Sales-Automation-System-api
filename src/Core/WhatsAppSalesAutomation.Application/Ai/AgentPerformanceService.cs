@@ -89,7 +89,7 @@ public class AgentPerformanceService : IAgentPerformanceService
         return new AgentTurnStatsDto(
             TotalTurns: turns.Count,
             RepliedTurns: replied,
-            EscalatedTurns: turns.Count(t => t.ActionTaken == AiActionTaken.Escalated),
+            EscalatedTurns: turns.Count(t => t.ActionTaken == AiActionTaken.Escalated || t.ActionTaken == AiActionTaken.Drafted),
             ContainmentRate: Rate(replied, turns.Count),
             AverageConfidence: Math.Round(turns.Average(t => t.ConfidenceScore), 3),
             BlockedReplies: blockedReplies,

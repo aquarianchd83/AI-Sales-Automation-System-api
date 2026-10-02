@@ -89,7 +89,27 @@ public class ConversationService : IConversationService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException(nameof(Conversation), id);
 
-        return row.Conversation.ToDto(row.Customer);
+        return row.Conversation.ToDto(row.Customer) with { SuggestedReply = await GetSuggestedReplyAsync(id, cancellationToken) };
+    }
+
+    /// <summary>The newest AI draft on the conversation, unless a message went out after it - at that point
+    /// the agent has dealt with the moment and the draft is stale.</summary>
+    private async Task<string?> GetSuggestedReplyAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var draft = await _context.AiInteractions
+            .Where(i => i.ConversationId == conversationId && i.ActionTaken == AiActionTaken.Drafted)
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => new { i.ProposedResponseText, i.CreatedAt })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (draft is null || string.IsNullOrWhiteSpace(draft.ProposedResponseText))
+            return null;
+
+        var answered = await _context.Messages.AnyAsync(
+            m => m.ConversationId == conversationId && m.Direction == MessageDirection.Outbound && m.CreatedAt >= draft.CreatedAt,
+            cancellationToken);
+
+        return answered ? null : draft.ProposedResponseText;
     }
 
     public async Task<PagedResult<ConversationMessageDto>> GetMessagesAsync(Guid conversationId, PagedRequest request, CancellationToken cancellationToken = default)

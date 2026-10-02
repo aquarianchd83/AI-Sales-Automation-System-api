@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
@@ -19,13 +20,14 @@ namespace WhatsAppSalesAutomation.Application.Ai;
 /// Implements architecture doc &sect;8's state machine. Called once per non-opt-out inbound message,
 /// after InboundWebhookProcessor has already persisted the Message and opened/reused the Conversation.
 ///
-/// Two deliberate simplifications versus the doc's pseudocode, both flagged rather than silently
-/// applied: (1) Mode == AI never sends an "optional holding message" on escalation - the doc marks it
-/// optional and a holding message adds a second outbound send to reason about for no functional gain
-/// yet. (2) Mode == Hybrid is currently handled identically to Mode == AI (full escalate-or-reply, no
-/// partial "answer the FAQ-safe part first") - splitting one AI turn into a partial answer plus a
-/// handoff needs product-defined rules for what counts as "FAQ-safe" that do not exist yet; Hybrid mode
-/// still functions, it just does not yet get the more nuanced behaviour the doc describes for it.
+/// How the three modes differ. Human: the AI never runs. AI: the AI replies on its own and raises a
+/// handoff when it should not. Hybrid: the same decisions, but wherever AI mode would escalate - and
+/// for as long as a handoff is open - the AI's reply is held as a DRAFT for the agent instead of being
+/// sent, so the customer is never left waiting in silence and the model never speaks for the business
+/// on money or complaints. Everything else in Hybrid (a plain product question) is answered directly.
+///
+/// One deliberate simplification remains: Mode == AI never sends an "optional holding message" on
+/// escalation - the doc marks it optional and it adds a second outbound send to reason about.
 /// </summary>
 public class ConversationOrchestrator : IConversationOrchestrator
 {
@@ -43,6 +45,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IQualificationPlanner _qualification;
     private readonly ILeadScoringService _scoring;
     private readonly IAiReplyValidator _validator;
+    private readonly ICrmContextBuilder _crm;
     private readonly ILogger<ConversationOrchestrator> _logger;
 
     public ConversationOrchestrator(
@@ -60,6 +63,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IQualificationPlanner qualification,
         ILeadScoringService scoring,
         IAiReplyValidator validator,
+        ICrmContextBuilder crm,
         ILogger<ConversationOrchestrator> logger)
     {
         _quota = quota;
@@ -76,6 +80,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _qualification = qualification;
         _scoring = scoring;
         _validator = validator;
+        _crm = crm;
         _logger = logger;
     }
 
@@ -133,6 +138,14 @@ public class ConversationOrchestrator : IConversationOrchestrator
         var qualificationPaused = lead?.HotLeadDetectedAt is not null;
         var plan = await _qualification.PlanAsync(leadId, qualificationPaused, cancellationToken);
 
+        // What the CRM already holds, gathered before the model is asked anything so it can use it rather
+        // than make the customer repeat it.
+        var crm = await _crm.BuildAsync(
+            customerId, leadId, conversationId,
+            plan.Known.Select(k => k.FieldKey).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            options.MinFieldExtractionConfidence,
+            cancellationToken);
+
         var context = new AiConversationContext(
             conversationId,
             customer.FullName,
@@ -145,7 +158,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
             plan.Known,
             plan.ToAsk,
             qualificationPaused,
-            customer.PreferredLanguage);
+            customer.PreferredLanguage,
+            crm);
 
         // Prepaid: one AI conversation is spent before the model is called (the provider bills whether or not the
         // AI ends up replying or escalating). With none left the customer is handed to a human instead of being
@@ -167,6 +181,20 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         // Nothing the model returned is trusted yet. Everything below works from the validated view.
         var validated = _validator.Validate(result, context);
+
+        // "Do not ask what they just told you" is a rule for the model, and a model can slip. The check
+        // here is what makes it a guarantee: a reply that asks for something this very message answered
+        // (or that was already on file) is thrown away and the model is asked again, now knowing it.
+        if (AskedWhatWasAlreadyAnswered(result, validated, plan, options, qualificationPaused) is { } answered)
+        {
+            _logger.LogInformation(
+                "AI reply on conversation {ConversationId} asked for '{FieldKey}', which is already answered - asking the model again with it filled in.",
+                conversationId, result.AskedFieldKey);
+
+            context = context with { KnownFields = answered.Known, FieldsToAsk = answered.ToAsk };
+            result = await _ai.GetResponseAsync(context, cancellationToken);
+            validated = _validator.Validate(result, context);
+        }
 
         if (validated.HasFailures)
         {
@@ -210,6 +238,15 @@ public class ConversationOrchestrator : IConversationOrchestrator
             || !validated.CanSend
             || (score.IsHot && options.HandoffOnHotLead);
 
+        // Hybrid holds the reply for the agent wherever AI mode would escalate, and for as long as a human
+        // is already engaged. Only a reply that is safe to send is worth drafting: a blocked or empty one
+        // is the escalation path's job, exactly as in AI mode.
+        var draftForAgent = conversation.Mode == ConversationMode.Hybrid
+            && validated.CanSend
+            && !validated.OptOutRequested
+            && !string.IsNullOrWhiteSpace(validated.ResponseText)
+            && (escalate || conversation.Status == ConversationStatus.Escalated);
+
         var interaction = new AiInteraction
         {
             ConversationId = conversationId,
@@ -220,7 +257,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
             // more useful than an audit of what was asserted.
             ExtractedEntitiesJson = JsonSerializer.Serialize(accepted),
             ProposedResponseText = validated.ResponseText,
-            ActionTaken = escalate ? AiActionTaken.Escalated : AiActionTaken.Replied,
+            ActionTaken = draftForAgent ? AiActionTaken.Drafted : escalate ? AiActionTaken.Escalated : AiActionTaken.Replied,
             ModelUsed = result.ModelUsed,
             PromptTokens = result.PromptTokens,
             CompletionTokens = result.CompletionTokens,
@@ -300,7 +337,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
             var handoff = await _handoffs.GetOrCreateOpenHandoffAsync(
                 conversationId,
                 triggerReason.ToString(),
-                BuildHandoffNote(validated, score, plan),
+                BuildHandoffNote(validated, score, plan, draftForAgent),
                 summary,
                 cancellationToken);
 
@@ -314,12 +351,59 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 "Suppressed AI reply on conversation {ConversationId} because the customer opted out.",
                 conversationId);
         }
+        else if (draftForAgent)
+        {
+            // A human is engaged on this conversation; the agent was already told about this message by
+            // the inbound webhook, and the draft is waiting on the conversation for them.
+            _logger.LogInformation(
+                "Held AI reply on conversation {ConversationId} as a draft for the agent (Hybrid mode, handoff open).",
+                conversationId);
+        }
         else
         {
             await SendAiReplyAsync(conversation, customer, inboundMessageId, validated.ResponseText, cancellationToken);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>The known/to-ask lists to retry with, or null when the reply asked for nothing that was
+    /// already answered. "Answered" means on file already, or stated in this very message with enough
+    /// confidence to count (the same floor <see cref="QualificationPlanner"/> uses for "known").</summary>
+    private static (IReadOnlyList<AiCapturedField> Known, IReadOnlyList<AiQualificationField> ToAsk)? AskedWhatWasAlreadyAnswered(
+        AiReplyResult result, ValidatedReply validated, QualificationPlan plan, AiOptions options, bool qualificationPaused)
+    {
+        var asked = result.AskedFieldKey;
+        if (qualificationPaused || string.IsNullOrWhiteSpace(asked))
+            return null;
+
+        var toldNow = validated.ExtractedFields
+            .Where(f => f.Confidence >= options.MinFieldExtractionConfidence && !string.IsNullOrWhiteSpace(f.Value))
+            .GroupBy(f => f.FieldKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last().Value, StringComparer.OrdinalIgnoreCase);
+
+        var knownKeys = plan.Known.Select(k => k.FieldKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!knownKeys.Contains(asked) && !toldNow.ContainsKey(asked))
+            return null;
+
+        var known = plan.Known.ToList();
+        foreach (var (key, value) in toldNow)
+        {
+            if (knownKeys.Contains(key))
+                continue;
+
+            var field = plan.SchemaFields.FirstOrDefault(f => string.Equals(f.FieldKey, key, StringComparison.OrdinalIgnoreCase));
+            known.Add(new AiCapturedField(key, field?.DisplayName ?? key, value));
+        }
+
+        var answeredKeys = known.Select(k => k.FieldKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var toAsk = plan.SchemaFields
+            .Where(f => !answeredKeys.Contains(f.FieldKey))
+            .Take(Math.Max(0, options.MaxFieldsToAsk))
+            .ToList();
+
+        return (known, toAsk);
     }
 
     /// <summary>Matches AiInteractionValidationFailure.Detail's column. The detail is there to read a
@@ -398,7 +482,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     /// <summary>The one-line version, for the queue list where there is room for a sentence and not a
     /// card. The full briefing goes to <see cref="HandoffSummary"/>; this stays because a list row that
     /// reads "AI escalation" and nothing else makes an agent open every item to triage any of them.</summary>
-    private static string BuildHandoffNote(ValidatedReply validated, LeadScoreResult score, QualificationPlan plan)
+    private static string BuildHandoffNote(ValidatedReply validated, LeadScoreResult score, QualificationPlan plan, bool drafted)
     {
         var parts = new List<string>
         {
@@ -416,6 +500,9 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
         if (!validated.CanSend)
             parts.Add($"reply blocked ({validated.FailureSummary})");
+
+        if (drafted)
+            parts.Add("AI drafted a reply for you to send or edit");
 
         if (!string.IsNullOrWhiteSpace(validated.AgentNote))
             parts.Add(validated.AgentNote);

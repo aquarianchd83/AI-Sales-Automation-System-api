@@ -101,6 +101,7 @@ public static class DependencyInjection
         services.AddScoped<IInboundWebhookProcessor, InboundWebhookProcessor>();
         services.AddScoped<ILeadScoringService, LeadScoringService>();
         services.AddScoped<IQualificationPlanner, QualificationPlanner>();
+        services.AddScoped<ICrmContextBuilder, CrmContextBuilder>();
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<IQualificationAdminService, QualificationAdminService>();
         services.AddScoped<ILeadScoringAdminService, LeadScoringAdminService>();
