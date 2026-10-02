@@ -280,8 +280,11 @@ Every setting below is overridable by environment variable — `__` is the secti
 | `Stripe:WebhookSecret` | `Stripe__WebhookSecret` |
 
 **`Jwt:Secret` must be replaced.** It ships as the literal placeholder
-`REPLACE_WITH_A_LONG_RANDOM_SECRET_AT_LEAST_32_CHARACTERS`; until it is changed, anyone who can read
-the repository can forge a valid token for any tenant.
+`REPLACE_WITH_A_LONG_RANDOM_SECRET_AT_LEAST_32_CHARACTERS`; with it, anyone who can read the repository
+can forge a valid token for any tenant. **The API now refuses to start outside the `Development`
+environment** while the secret is missing, still the placeholder, shorter than 32 characters, or made of
+a few repeated characters, and the startup error says which. In `Development` it only logs a warning.
+Generate one with, for example, `openssl rand -base64 48`, and supply it as `Jwt__Secret`.
 
 ### Settings that live in the database instead
 
@@ -363,7 +366,7 @@ and the Hangfire dashboard need. If those ever move off this origin, tighten it 
 
 | Path | Access |
 |---|---|
-| `/swagger` | **currently exposed in every environment** — the `IsDevelopment()` guard in `Program.cs` is commented out. Re-enable it or put it behind the proxy before going public. |
+| `/swagger` | on in `Development`, **off everywhere else** by default. `Swagger:Enabled` overrides it either way (environment variable `Swagger__Enabled=true`) - only do that behind the proxy or an allow-list. |
 | `/hangfire` | `HangfireDashboardAuthorizationFilter`; unrestricted in Development only |
 | `/hubs/conversations` | SignalR. The proxy must allow WebSocket upgrade, or clients silently fall back to long polling |
 | `/media/*` | uploaded campaign media from `App_Data/media` — local disk, so it needs a persistent volume and is **not** multi-instance safe as-is |
@@ -386,7 +389,7 @@ Single-instance assumptions to resolve before running more than one:
 
 ## 11. Post-deployment checklist
 
-- [ ] `Jwt:Secret` replaced with 32+ random characters
+- [ ] `Jwt:Secret` replaced with 32+ random characters (the API will not start in a deployed environment until it is)
 - [ ] Every secret in section 6 supplied by environment variable or a secret store, and any value ever committed **rotated**
 - [ ] `Cors:AllowedOrigins` lists the real tenant wildcard (and the apex if used)
 - [ ] `SecurityHeaders:EnableHsts` is `true`
@@ -395,7 +398,7 @@ Single-instance assumptions to resolve before running more than one:
 - [ ] `Reranker:Cohere:ApiKey` supplied, or `FusionOnly` mode accepted (check retrieval diagnostics)
 - [ ] Recent rows in `KnowledgeIngestionJobs` checked for `Failed` / `AwaitingApproval` / `Rejected`
 - [ ] Health checker IP added to `RateLimiting:ExemptIpAddresses`
-- [ ] Swagger closed, or accepted as public
+- [ ] Swagger left off (the default outside Development), or `Swagger__Enabled=true` set deliberately and protected
 - [ ] Meta webhook registered against `https://api.<domain>/api/v1/webhooks/whatsapp`
 - [ ] Stripe webhook registered and `Stripe:WebhookSecret` set, or billing left deliberately off
 - [ ] `App_Data/keys` and `App_Data/media` on persistent storage and in the backup set
