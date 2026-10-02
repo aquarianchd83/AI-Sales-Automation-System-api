@@ -31,7 +31,21 @@ public class PlatformAwsSettingsTests
             throw new NotImplementedException();
     }
 
-    private static PlatformAwsSettingsService Service(MemoryStore store) => new(store, new UpdatePlatformAwsSettingsRequestValidator());
+    private sealed class FakeTester : IAwsConnectionTester
+    {
+        public AwsConnectionTestSettings? Received { get; private set; }
+
+        public AwsConnectionTestResultDto Result { get; set; } = new(true, "ok", new[] { new AwsConnectionStepDto("Write", true, null) });
+
+        public Task<AwsConnectionTestResultDto> TestAsync(AwsConnectionTestSettings settings, CancellationToken cancellationToken = default)
+        {
+            Received = settings;
+            return Task.FromResult(Result);
+        }
+    }
+
+    private static PlatformAwsSettingsService Service(MemoryStore store, FakeTester? tester = null) =>
+        new(store, new UpdatePlatformAwsSettingsRequestValidator(), tester ?? new FakeTester());
 
     private static UpdatePlatformAwsSettingsRequest Request(
         string provider = "S3", string bucket = "plat-media", string region = "ap-southeast-2", string prefix = "media",
@@ -176,6 +190,80 @@ public class PlatformAwsSettingsTests
         var settings = new ConfigurationBuilder().AddInMemoryCollection(store.Rows).Build().Get<TestRoot>()!;
 
         Assert.Equal("S3", settings.MediaStorage.Provider);
+    }
+
+    [Fact]
+    public async Task Testing_without_typing_the_keys_uses_the_stored_ones_and_saves_nothing()
+    {
+        var store = new MemoryStore();
+        var tester = new FakeTester();
+        var service = Service(store, tester);
+        await service.UpdateAsync(Request(), Guid.NewGuid());
+        var before = new Dictionary<string, string?>(store.Rows);
+
+        var result = await service.TestConnectionAsync(Request(bucket: "other-bucket", prefix: "/uploads/", accessKey: null, secret: null));
+
+        Assert.True(result.Success);
+        Assert.Equal("other-bucket", tester.Received!.BucketName);
+        Assert.Equal("uploads", tester.Received.KeyPrefix);
+        Assert.Equal("AKIAEXAMPLEKEY1234", tester.Received.AccessKeyId);
+        Assert.Equal("s3cr3t-value-9876", tester.Received.SecretAccessKey);
+        Assert.Equal(before.Count, store.Rows.Count);
+        Assert.Equal("plat-media", store.Rows[PlatformAwsSettingsService.BucketNameKey]);
+    }
+
+    [Fact]
+    public async Task Testing_with_typed_keys_uses_those_not_the_stored_ones()
+    {
+        var store = new MemoryStore();
+        var tester = new FakeTester();
+        var service = Service(store, tester);
+        await service.UpdateAsync(Request(), Guid.NewGuid());
+
+        await service.TestConnectionAsync(Request(accessKey: "AKIANEW", secret: "newsecret"));
+
+        Assert.Equal("AKIANEW", tester.Received!.AccessKeyId);
+        Assert.Equal("newsecret", tester.Received.SecretAccessKey);
+    }
+
+    [Fact]
+    public async Task Cleared_keys_test_with_the_servers_own_aws_role()
+    {
+        var tester = new FakeTester();
+
+        await Service(new MemoryStore(), tester).TestConnectionAsync(Request(accessKey: "", secret: ""));
+
+        Assert.Equal(string.Empty, tester.Received!.AccessKeyId);
+        Assert.Equal(string.Empty, tester.Received.SecretAccessKey);
+    }
+
+    [Fact]
+    public async Task A_failed_test_is_reported_not_thrown()
+    {
+        var tester = new FakeTester { Result = new(false, "Bucket 'x' does not exist in ap-southeast-2.", new[] { new AwsConnectionStepDto("Write", false, "no bucket") }) };
+
+        var result = await Service(new MemoryStore(), tester).TestConnectionAsync(Request());
+
+        Assert.False(result.Success);
+        Assert.Contains("does not exist", result.Message);
+    }
+
+    [Theory]
+    [InlineData("", "ap-southeast-2")]
+    [InlineData("plat-media", "")]
+    public async Task Testing_needs_a_bucket_and_region_and_never_reaches_aws_without_them(string bucket, string region)
+    {
+        var tester = new FakeTester();
+
+        await Assert.ThrowsAsync<ValidationException>(() => Service(new MemoryStore(), tester).TestConnectionAsync(Request(bucket: bucket, region: region)));
+
+        Assert.Null(tester.Received);
+    }
+
+    [Fact]
+    public async Task Testing_refuses_half_a_key_pair()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() => Service(new MemoryStore()).TestConnectionAsync(Request(accessKey: "AKIANEW", secret: "")));
     }
 
     private sealed class TestRoot

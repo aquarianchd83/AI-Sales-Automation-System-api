@@ -29,8 +29,26 @@ public record UpdatePlatformAwsSettingsRequest(
     string? AccessKeyId,
     string? SecretAccessKey);
 
+/// <summary>One check in a connection test: writing, reading back, or deleting a small test object.</summary>
+public record AwsConnectionStepDto(string Name, bool Passed, string? Detail);
+
+public record AwsConnectionTestResultDto(bool Success, string Message, IReadOnlyList<AwsConnectionStepDto> Steps);
+
+/// <summary>What the tester needs. Credentials empty = the server's own AWS identity.</summary>
+public record AwsConnectionTestSettings(string BucketName, string Region, string KeyPrefix, string AccessKeyId, string SecretAccessKey);
+
+/// <summary>Talks to AWS to prove a bucket and credentials work. Implemented in Infrastructure.</summary>
+public interface IAwsConnectionTester
+{
+    Task<AwsConnectionTestResultDto> TestAsync(AwsConnectionTestSettings settings, CancellationToken cancellationToken = default);
+}
+
 public interface IPlatformAwsSettingsService
 {
+    /// <summary>Tries the given settings against AWS without saving them: writes, reads back and deletes a small test object under the
+    /// folder - the three permissions media uploads need. A null access key / secret tests with the stored ones.</summary>
+    Task<AwsConnectionTestResultDto> TestConnectionAsync(UpdatePlatformAwsSettingsRequest request, CancellationToken cancellationToken = default);
+
     Task<PlatformAwsSettingsDto> GetAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Validates and stores the settings in the AppSettings table. Takes effect on the next request - no restart.</summary>
@@ -60,11 +78,26 @@ public class PlatformAwsSettingsService : IPlatformAwsSettingsService
 
     private readonly IAppSettingsStore _store;
     private readonly IValidator<UpdatePlatformAwsSettingsRequest> _validator;
+    private readonly IAwsConnectionTester _tester;
 
-    public PlatformAwsSettingsService(IAppSettingsStore store, IValidator<UpdatePlatformAwsSettingsRequest> validator)
+    public PlatformAwsSettingsService(IAppSettingsStore store, IValidator<UpdatePlatformAwsSettingsRequest> validator, IAwsConnectionTester tester)
     {
         _store = store;
         _validator = validator;
+        _tester = tester;
+    }
+
+    public async Task<AwsConnectionTestResultDto> TestConnectionAsync(UpdatePlatformAwsSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        await _validator.ValidateAndThrowAsync(request, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(request.BucketName) || string.IsNullOrWhiteSpace(request.Region))
+            throw new ValidationException("Enter a bucket name and region to test the connection.");
+
+        var (accessKey, secret) = await ResolveCredentialsAsync(request, cancellationToken);
+
+        return await _tester.TestAsync(new AwsConnectionTestSettings(
+            request.BucketName.Trim(), request.Region.Trim(), NormalizePrefix(request.KeyPrefix), accessKey, secret), cancellationToken);
     }
 
     public async Task<PlatformAwsSettingsDto> GetAsync(CancellationToken cancellationToken = default) =>
@@ -74,21 +107,14 @@ public class PlatformAwsSettingsService : IPlatformAwsSettingsService
     {
         await _validator.ValidateAndThrowAsync(request, cancellationToken);
 
-        var stored = await _store.GetAllAsync(cancellationToken);
-
-        var accessKey = Resolve(request.AccessKeyId, Get(stored, AccessKeyIdKey));
-        var secret = Resolve(request.SecretAccessKey, Get(stored, SecretAccessKeyKey));
-
-        // One half of a key pair is never usable, and would otherwise surface later as an AWS "signature does not match".
-        if ((accessKey.Length == 0) != (secret.Length == 0))
-            throw new ValidationException("The AWS access key ID and secret access key go together: provide both, or clear both to use the server's own AWS role.");
+        var (accessKey, secret) = await ResolveCredentialsAsync(request, cancellationToken);
 
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             [ProviderKey] = request.StorageProvider.Trim(),
             [BucketNameKey] = request.BucketName.Trim(),
             [RegionKey] = request.Region.Trim(),
-            [KeyPrefixKey] = string.IsNullOrWhiteSpace(request.KeyPrefix.Trim('/', ' ')) ? DefaultKeyPrefix : request.KeyPrefix.Trim().Trim('/'),
+            [KeyPrefixKey] = NormalizePrefix(request.KeyPrefix),
             [PublicBaseUrlKey] = request.PublicBaseUrl.Trim().TrimEnd('/'),
         };
 
@@ -102,6 +128,23 @@ public class PlatformAwsSettingsService : IPlatformAwsSettingsService
 
         return await GetAsync(cancellationToken);
     }
+
+    /// <summary>The credentials a request means: what it carries, else what is stored. Half a pair is never usable, and would otherwise
+    /// surface later as an AWS "signature does not match".</summary>
+    private async Task<(string AccessKey, string Secret)> ResolveCredentialsAsync(UpdatePlatformAwsSettingsRequest request, CancellationToken cancellationToken)
+    {
+        var stored = await _store.GetAllAsync(cancellationToken);
+        var accessKey = Resolve(request.AccessKeyId, Get(stored, AccessKeyIdKey));
+        var secret = Resolve(request.SecretAccessKey, Get(stored, SecretAccessKeyKey));
+
+        if ((accessKey.Length == 0) != (secret.Length == 0))
+            throw new ValidationException("The AWS access key ID and secret access key go together: provide both, or clear both to use the server's own AWS role.");
+
+        return (accessKey, secret);
+    }
+
+    private static string NormalizePrefix(string prefix) =>
+        string.IsNullOrWhiteSpace(prefix.Trim('/', ' ')) ? DefaultKeyPrefix : prefix.Trim().Trim('/');
 
     private static string Resolve(string? requested, string current) => requested is null ? current : requested.Trim();
 

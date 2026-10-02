@@ -32,6 +32,12 @@ public class PlatformAwsSettingsController : ControllerBase
     public async Task<ActionResult<PlatformAwsSettingsDto>> Get(CancellationToken cancellationToken)
         => Ok(await _awsSettings.GetAsync(cancellationToken));
 
+    /// <summary>Tries the settings in the request against AWS (write, read back, delete a small test file) WITHOUT saving them, so an admin
+    /// can check before committing. A null access key / secret tests with the stored ones. Always 200: the result says whether it worked.</summary>
+    [HttpPost("test-connection")]
+    public async Task<ActionResult<AwsConnectionTestResultDto>> TestConnection([FromBody] UpdatePlatformAwsSettingsRequest request, CancellationToken cancellationToken)
+        => Ok(await _awsSettings.TestConnectionAsync(request, cancellationToken));
+
     /// <summary>Takes effect on the next request, no restart. A null access key / secret keeps the stored one; an empty string clears it.</summary>
     [HttpPut]
     public async Task<ActionResult<PlatformAwsSettingsDto>> Update([FromBody] UpdatePlatformAwsSettingsRequest request, CancellationToken cancellationToken)
