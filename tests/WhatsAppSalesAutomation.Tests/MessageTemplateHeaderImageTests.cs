@@ -243,6 +243,8 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
 
         public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+        public string GetLocalPath(string storageKey) => $"/media/{storageKey}";
+
         public string GetPublicUrl(string storageKey) => $"https://cdn.example.test/{storageKey}";
 
         public bool IsPublicUrl(string url) => url.StartsWith("https://cdn.example.test");

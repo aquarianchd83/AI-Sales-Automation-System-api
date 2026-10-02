@@ -7,6 +7,7 @@ public record MediaAssetDto(
     long SizeBytes,
     string Url,
     DateTime CreatedAt,
-    bool IsPublicUrl);
+    bool IsPublicUrl,
+    string? PreviewUrl = null);
 
 public record AddMediaFromUrlRequest(string Url);

@@ -45,6 +45,8 @@ public class LocalFileMediaStorageService : IMediaStorageService
         return new MediaStorageResult(relativeKey, url);
     }
 
+    public string GetLocalPath(string storageKey) => $"{_settings.PublicBasePath}/{storageKey}";
+
     public string GetPublicUrl(string storageKey) =>
         $"{_settings.PublicBaseUrl?.Trim().TrimEnd('/')}{_settings.PublicBasePath}/{storageKey}";
 
