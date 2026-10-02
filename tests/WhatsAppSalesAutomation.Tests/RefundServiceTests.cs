@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Options;
+
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -22,6 +23,7 @@ public sealed class RefundServiceTests : IDisposable
     private readonly QuotaLedgerService _ledger;
     private readonly FakeRefundGateway _gateway = new();
     private readonly RecordingNotifier _notifier = new();
+    private readonly RecordingPlatformNotifier _operators = new();
     private readonly RefundService _refunds;
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme", CountryCode = "IN", RefundRequestsEnabled = true };
     private readonly Guid _tenantUser = Guid.NewGuid();
@@ -35,7 +37,7 @@ public sealed class RefundServiceTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        _refunds = new RefundService(_db, _ledger, _gateway, _notifier, _clock, new FixedOptions<RefundPolicyOptions>(new()));
+        _refunds = new RefundService(_db, _ledger, _gateway, _notifier, _clock, new FixedOptions<RefundPolicyOptions>(new()), _operators);
 
         _db.Tenants.Add(_tenant);
         _db.SaveChanges();
@@ -307,5 +309,58 @@ public sealed class RefundServiceTests : IDisposable
 
         Assert.Equal(RefundStatus.Refunded, result.Status);
         Assert.Equal(2000, result.RefundedAmountCents);
+    }
+
+    [Fact]
+    public async Task A_refund_request_tells_the_operators_it_is_waiting()
+    {
+        var payment = await BuyPackAsync();
+
+        var request = await _refunds.RequestAsync(_tenant.Id, payment.Id, "bought too many", _tenantUser);
+
+        var alert = Assert.Single(_operators.Sent);
+        Assert.Equal(PlatformNotificationKind.RefundRequested, alert.Kind);
+        Assert.Equal(_tenant.Id, alert.TenantId);
+        Assert.Contains("Acme", alert.Body);
+        Assert.Contains("bought too many", alert.Body);
+        Assert.Contains(request.Id.ToString("N"), alert.EpisodeKey);
+    }
+
+    [Fact]
+    public async Task A_long_reason_cannot_overflow_the_alert()
+    {
+        var payment = await BuyPackAsync();
+
+        await _refunds.RequestAsync(_tenant.Id, payment.Id, new string('x', 900), _tenantUser);
+
+        Assert.True(Assert.Single(_operators.Sent).Body.Length <= 1000);
+    }
+
+    [Fact]
+    public async Task A_refund_the_gateway_rejects_is_a_critical_alert_for_every_failed_attempt()
+    {
+        var payment = await BuyPackAsync();
+        var request = await _refunds.RequestAsync(_tenant.Id, payment.Id, "refund please", _tenantUser);
+        _gateway.Succeed = false;
+
+        await _refunds.ApproveAsync(request.Id, new ReviewRefundRequest("try"), _admin);
+        _clock.UtcNow = _clock.UtcNow.AddMinutes(5);
+        await _refunds.ApproveAsync(request.Id, new ReviewRefundRequest("again"), _admin);
+
+        var failures = _operators.Sent.Where(a => a.Kind == PlatformNotificationKind.RefundFailed).ToList();
+        Assert.Equal(2, failures.Count);
+        Assert.All(failures, a => Assert.Equal(PlatformNotificationSeverity.Critical, a.Severity));
+        Assert.Contains("gateway down", failures[0].Body);
+    }
+
+    [Fact]
+    public async Task A_refund_that_succeeds_raises_no_failure_alert()
+    {
+        var payment = await BuyPackAsync();
+        var request = await _refunds.RequestAsync(_tenant.Id, payment.Id, "refund please", _tenantUser);
+
+        await _refunds.ApproveAsync(request.Id, new ReviewRefundRequest("ok"), _admin);
+
+        Assert.DoesNotContain(_operators.Sent, a => a.Kind == PlatformNotificationKind.RefundFailed);
     }
 }

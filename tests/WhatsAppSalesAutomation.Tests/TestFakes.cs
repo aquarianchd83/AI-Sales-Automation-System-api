@@ -42,6 +42,25 @@ public sealed class FakeRefundGateway : IRefundGateway
     }
 }
 
+/// <summary>The operator-side counterpart: records the platform alerts raised and refuses a repeat of the same
+/// (kind, tenant, job, episode), like the real notifier's unique index.</summary>
+public sealed class RecordingPlatformNotifier : IPlatformNotifier
+{
+    private readonly HashSet<string> _seen = new();
+
+    public List<PlatformNotificationRequest> Sent { get; } = new();
+
+    public Task<bool> NotifyAsync(PlatformNotificationRequest request, CancellationToken cancellationToken = default)
+    {
+        var key = $"{request.Kind}|{request.TenantId}|{request.JobType}|{request.EpisodeKey}";
+        if (!_seen.Add(key))
+            return Task.FromResult(false);
+
+        Sent.Add(request);
+        return Task.FromResult(true);
+    }
+}
+
 /// <summary>Records what would have been sent and refuses a repeat of the same (tenant, kind, quota, episode),
 /// like the real notifier's unique index.</summary>
 public sealed class RecordingNotifier : ITenantNotifier

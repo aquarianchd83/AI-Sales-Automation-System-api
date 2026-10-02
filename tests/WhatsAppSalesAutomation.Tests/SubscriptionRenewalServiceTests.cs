@@ -22,6 +22,7 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
     private readonly QuotaLedgerService _ledger;
     private readonly SubscriptionRenewalService _renewal;
     private readonly RecordingNotifier _notifier = new();
+    private readonly RecordingPlatformNotifier _operators = new();
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme", CountryCode = "IN" };
     private readonly Plan _plan = new() { Code = "starter", Name = "Starter", PriceMonthlyCents = 3900 };
 
@@ -32,7 +33,7 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new NoTenant(), new NoUser());
         _db.Database.EnsureCreated();
         _ledger = new QuotaLedgerService(_db, _clock);
-        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock, TestPricing.NoTax(), _notifier);
+        _renewal = new SubscriptionRenewalService(_db, _ledger, _clock, TestPricing.NoTax(), _notifier, _operators);
 
         _db.Tenants.Add(_tenant);
         _db.Plans.Add(_plan);
@@ -140,5 +141,35 @@ public sealed class SubscriptionRenewalServiceTests : IDisposable
         public IReadOnlyList<string> Roles => Array.Empty<string>();
         public Guid? TenantId => null;
         public Guid? ImpersonatorUserId => null;
+    }
+
+    [Fact]
+    public async Task A_plan_that_cannot_renew_tells_the_tenant_and_the_operators_once_per_period()
+    {
+        // No price for the tenant's country: the plan cannot be sold there, so it cannot renew.
+        _db.PlanPrices.RemoveRange(await _db.PlanPrices.ToListAsync());
+        await _db.SaveChangesAsync();
+
+        var (renewed, _) = await _renewal.RunAsync();
+        await _renewal.RunAsync(); // the job runs often - it must not repeat itself
+
+        Assert.Equal(0, renewed);
+        var tenantNotice = Assert.Single(_notifier.Sent);
+        Assert.Equal(TenantNotificationKind.PlanRenewalFailed, tenantNotice.Kind);
+        Assert.Contains("Starter", tenantNotice.Title);
+        var operatorAlert = Assert.Single(_operators.Sent);
+        Assert.Equal(PlatformNotificationKind.PlanRenewalFailed, operatorAlert.Kind);
+        Assert.Equal(PlatformNotificationSeverity.Warning, operatorAlert.Severity);
+        Assert.Equal(_tenant.Id, operatorAlert.TenantId);
+        Assert.Contains("IN", operatorAlert.Body);
+    }
+
+    [Fact]
+    public async Task A_renewal_that_works_raises_no_failure_notice()
+    {
+        await _renewal.RunAsync();
+
+        Assert.DoesNotContain(_notifier.Sent, n => n.Kind == TenantNotificationKind.PlanRenewalFailed);
+        Assert.Empty(_operators.Sent);
     }
 }
