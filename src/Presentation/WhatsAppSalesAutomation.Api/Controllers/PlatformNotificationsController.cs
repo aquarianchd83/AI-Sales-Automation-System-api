@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Constants;
 
@@ -19,6 +20,12 @@ public class PlatformNotificationsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<PlatformNotificationDto>>> GetRecent(CancellationToken cancellationToken)
         => Ok(await _notifications.GetRecentAsync(cancellationToken));
+
+    /// <summary>The full inbox, paged - behind the bell's "More notifications" button. <c>?page=&amp;pageSize=&amp;search=&amp;unreadOnly=</c>.</summary>
+    [HttpGet("history")]
+    public async Task<ActionResult<PagedResult<PlatformNotificationDto>>> GetHistory(
+        [FromQuery] PagedRequest request, [FromQuery] bool unreadOnly, CancellationToken cancellationToken)
+        => Ok(await _notifications.GetHistoryAsync(request, unreadOnly, cancellationToken));
 
     [HttpPost("{id:guid}/acknowledge")]
     public async Task<IActionResult> Acknowledge(Guid id, CancellationToken cancellationToken)

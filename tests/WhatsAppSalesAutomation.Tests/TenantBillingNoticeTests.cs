@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
@@ -55,6 +56,52 @@ public sealed class TenantBillingNoticeTests : IDisposable
         Body = "b",
         AcknowledgedAtUtc = acknowledged ? DateTime.UtcNow : null,
     };
+
+    private TenantNotification RowAt(int minutesAgo, string episode, string title = "t", bool acknowledged = false)
+    {
+        var row = Row(episode, acknowledged);
+        row.Title = title;
+        row.CreatedAt = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc).AddMinutes(-minutesAgo);
+        return row;
+    }
+
+    [Fact]
+    public async Task History_pages_through_every_notification_newest_first_and_only_this_tenants()
+    {
+        var otherTenant = new Tenant { Name = "Other", Slug = "other", Status = TenantStatus.Active };
+        _db.Tenants.Add(otherTenant);
+        for (var i = 0; i < 60; i++)
+            _db.TenantNotifications.Add(RowAt(i, $"ep{i}", $"notice {i}"));
+        _db.TenantNotifications.Add(new TenantNotification { TenantId = otherTenant.Id, Kind = TenantNotificationKind.QuotaLow20, EpisodeKey = "x", Title = "not mine", Body = "b" });
+        await _db.SaveChangesAsync();
+
+        var first = await _service.GetHistoryAsync(_tenant.Id, new PagedRequest { Page = 1, PageSize = 25 }, unreadOnly: false);
+        var last = await _service.GetHistoryAsync(_tenant.Id, new PagedRequest { Page = 3, PageSize = 25 }, unreadOnly: false);
+
+        Assert.Equal(60, first.TotalCount);
+        Assert.Equal(3, first.TotalPages);
+        Assert.Equal("notice 0", first.Items[0].Title);
+        Assert.Equal(10, last.Items.Count);
+        Assert.Equal("notice 59", last.Items[^1].Title);
+        Assert.DoesNotContain(first.Items.Concat(last.Items), n => n.Title == "not mine");
+    }
+
+    [Fact]
+    public async Task History_can_show_only_unread_and_search_the_title_or_body()
+    {
+        _db.TenantNotifications.Add(RowAt(1, "a", "Credits running low"));
+        _db.TenantNotifications.Add(RowAt(2, "b", "Plan renewed", acknowledged: true));
+        _db.TenantNotifications.Add(RowAt(3, "c", "Credits added"));
+        await _db.SaveChangesAsync();
+
+        var unread = await _service.GetHistoryAsync(_tenant.Id, new PagedRequest(), unreadOnly: true);
+        var search = await _service.GetHistoryAsync(_tenant.Id, new PagedRequest { Search = "renewed" }, unreadOnly: false);
+
+        Assert.Equal(2, unread.TotalCount);
+        Assert.All(unread.Items, n => Assert.False(n.Acknowledged));
+        Assert.Equal("Plan renewed", search.Items.Single().Title);
+        Assert.True(search.Items.Single().Acknowledged);
+    }
 
     [Fact]
     public async Task Acknowledge_all_clears_every_open_notification_for_this_tenant_only()

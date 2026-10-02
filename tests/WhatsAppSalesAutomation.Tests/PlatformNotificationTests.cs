@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -88,6 +89,54 @@ public sealed class PlatformNotificationTests : IDisposable
 
         _db.PlatformNotifications.Add(Row(tenantId, "ep1"));
         await Assert.ThrowsAsync<DbUpdateException>(() => _db.SaveChangesAsync());
+    }
+
+    private static PlatformNotification At(int minutesAgo, string episode, string title = "t", Guid? tenantId = null, bool acknowledged = false)
+    {
+        var row = Row(tenantId, episode, acknowledged);
+        row.Title = title;
+        row.CreatedAt = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc).AddMinutes(-minutesAgo);
+        return row;
+    }
+
+    [Fact]
+    public async Task History_is_every_alert_newest_first_not_capped_at_the_bells_fifty()
+    {
+        for (var i = 0; i < 70; i++)
+            _db.PlatformNotifications.Add(At(minutesAgo: i, episode: $"ep{i}", title: $"alert {i}"));
+        await _db.SaveChangesAsync();
+
+        var first = await _service.GetHistoryAsync(new PagedRequest { Page = 1, PageSize = 50 }, unreadOnly: false);
+        var second = await _service.GetHistoryAsync(new PagedRequest { Page = 2, PageSize = 50 }, unreadOnly: false);
+
+        Assert.Equal(70, first.TotalCount);
+        Assert.Equal(2, first.TotalPages);
+        Assert.Equal(50, first.Items.Count);
+        Assert.Equal(20, second.Items.Count);
+        Assert.Equal("alert 0", first.Items[0].Title);
+        Assert.Equal("alert 69", second.Items[^1].Title);
+        Assert.Equal(70, first.Items.Concat(second.Items).Select(n => n.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task History_can_show_only_unread_and_search_title_body_or_tenant_name()
+    {
+        var acme = new Tenant { Name = "Acme Traders", Slug = "acme", Status = TenantStatus.Active };
+        _db.Tenants.Add(acme);
+        _db.PlatformNotifications.Add(At(1, "a", "Campaign sends failing", acme.Id));
+        _db.PlatformNotifications.Add(At(2, "b", "Token refresh failing", null, acknowledged: true));
+        _db.PlatformNotifications.Add(At(3, "c", "Lead discovery failing", null));
+        await _db.SaveChangesAsync();
+
+        var unread = await _service.GetHistoryAsync(new PagedRequest(), unreadOnly: true);
+        var byTitle = await _service.GetHistoryAsync(new PagedRequest { Search = "token" }, unreadOnly: false);
+        var byTenant = await _service.GetHistoryAsync(new PagedRequest { Search = "acme" }, unreadOnly: false);
+
+        Assert.Equal(2, unread.TotalCount);
+        Assert.All(unread.Items, n => Assert.False(n.Acknowledged));
+        Assert.Equal("Token refresh failing", byTitle.Items.Single().Title);
+        Assert.Equal("Campaign sends failing", byTenant.Items.Single().Title);
+        Assert.Equal("Acme Traders", byTenant.Items.Single().TenantName);
     }
 
     private static PlatformNotification Row(Guid? tenantId, string episode, bool acknowledged = false) => new()

@@ -3,6 +3,7 @@ using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -32,6 +33,10 @@ public interface ITenantBillingNoticeService
 
     /// <summary>Most recent first, capped - this is a bell, not an archive.</summary>
     Task<IReadOnlyList<TenantNotificationDto>> ListAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>The tenant's whole notification list, newest first, a page at a time - the bell's "More notifications" screen.
+    /// <paramref name="unreadOnly"/> narrows it; <see cref="PagedRequest.Search"/> matches the title or body.</summary>
+    Task<PagedResult<TenantNotificationDto>> GetHistoryAsync(Guid tenantId, PagedRequest request, bool unreadOnly, CancellationToken cancellationToken = default);
 
     Task AcknowledgeAsync(Guid tenantId, Guid notificationId, CancellationToken cancellationToken = default);
 
@@ -107,6 +112,33 @@ public partial class TenantBillingNoticeService : ITenantBillingNoticeService
 
         return rows.Select(n => new TenantNotificationDto(
             n.Id, n.Kind, n.QuotaType, n.Title, n.Body, n.EmailStatus, n.WhatsAppStatus, n.CreatedAt, n.AcknowledgedAtUtc is not null)).ToList();
+    }
+
+    public async Task<PagedResult<TenantNotificationDto>> GetHistoryAsync(Guid tenantId, PagedRequest request, bool unreadOnly, CancellationToken cancellationToken = default)
+    {
+        var query = _context.TenantNotifications.IgnoreQueryFilters().Where(n => n.TenantId == tenantId);
+
+        if (unreadOnly)
+            query = query.Where(n => n.AcknowledgedAtUtc == null);
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var term = request.Search.Trim();
+            query = query.Where(n => n.Title.Contains(term) || n.Body.Contains(term));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var rows = await query
+            .OrderByDescending(n => n.CreatedAt)
+            .ThenByDescending(n => n.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = rows.Select(n => new TenantNotificationDto(
+            n.Id, n.Kind, n.QuotaType, n.Title, n.Body, n.EmailStatus, n.WhatsAppStatus, n.CreatedAt, n.AcknowledgedAtUtc is not null)).ToList();
+
+        return new PagedResult<TenantNotificationDto>(items, total, request.Page, request.PageSize);
     }
 
     public async Task AcknowledgeAsync(Guid tenantId, Guid notificationId, CancellationToken cancellationToken = default)

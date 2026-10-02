@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
@@ -22,6 +24,11 @@ public interface IPlatformNotificationService
 {
     /// <summary>Unacknowledged alerts first, then the newest acknowledged ones, capped.</summary>
     Task<IReadOnlyList<PlatformNotificationDto>> GetRecentAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The whole inbox, newest first, a page at a time - the bell's "More notifications" screen. Unlike
+    /// <see cref="GetRecentAsync"/> nothing is dropped: <paramref name="unreadOnly"/> narrows it, and
+    /// <see cref="PagedRequest.Search"/> matches the title, body or tenant name.</summary>
+    Task<PagedResult<PlatformNotificationDto>> GetHistoryAsync(PagedRequest request, bool unreadOnly, CancellationToken cancellationToken = default);
 
     Task AcknowledgeAsync(Guid id, CancellationToken cancellationToken = default);
 
@@ -51,6 +58,41 @@ public class PlatformNotificationService : IPlatformNotificationService
             .Take(MaxReturned)
             .ToListAsync(cancellationToken);
 
+        return await ToDtosAsync(rows, cancellationToken);
+    }
+
+    public async Task<PagedResult<PlatformNotificationDto>> GetHistoryAsync(PagedRequest request, bool unreadOnly, CancellationToken cancellationToken = default)
+    {
+        var query = _context.PlatformNotifications.AsQueryable();
+
+        if (unreadOnly)
+            query = query.Where(n => n.AcknowledgedAtUtc == null);
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var term = request.Search.Trim();
+            // Tenant names live on another table, so the matching tenants are resolved first rather than joined per row.
+            var tenantIds = await _context.Tenants.IgnoreQueryFilters()
+                .Where(t => t.Name.Contains(term))
+                .Select(t => t.Id)
+                .ToListAsync(cancellationToken);
+
+            query = query.Where(n => n.Title.Contains(term) || n.Body.Contains(term) || (n.TenantId != null && tenantIds.Contains(n.TenantId.Value)));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var rows = await query
+            .OrderByDescending(n => n.CreatedAt)
+            .ThenByDescending(n => n.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<PlatformNotificationDto>(await ToDtosAsync(rows, cancellationToken), total, request.Page, request.PageSize);
+    }
+
+    private async Task<IReadOnlyList<PlatformNotificationDto>> ToDtosAsync(IReadOnlyList<PlatformNotification> rows, CancellationToken cancellationToken)
+    {
         var tenantIds = rows.Where(r => r.TenantId != null).Select(r => r.TenantId!.Value).Distinct().ToList();
         var names = await _context.Tenants.IgnoreQueryFilters()
             .Where(t => tenantIds.Contains(t.Id))
