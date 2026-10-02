@@ -59,6 +59,20 @@ public record BulkDeleteCustomersResultDto(
     int DeletedCount,
     IReadOnlyList<Guid> NotFoundIds);
 
+/// <summary>Adds the same tags to several customers at once.</summary>
+public record BulkAddCustomerTagsRequest(IReadOnlyList<Guid> Ids, IReadOnlyList<string> TagNames);
+
+/// <summary>
+/// Result of a bulk tag. <paramref name="UpdatedCount"/> is how many customers actually gained a tag - ones that
+/// already had every requested tag are found but not counted. Ids that matched nothing (unknown, deleted, or another
+/// tenant's) are reported in <paramref name="NotFoundIds"/> rather than failing the call.
+/// </summary>
+public record BulkAddCustomerTagsResultDto(
+    int RequestedCount,
+    int UpdatedCount,
+    IReadOnlyList<Guid> NotFoundIds,
+    IReadOnlyList<string> TagNames);
+
 public record CustomerImportResultDto(
     int TotalRows,
     int ImportedCount,

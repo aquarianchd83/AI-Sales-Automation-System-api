@@ -21,6 +21,10 @@ public interface ICustomerService
     /// </summary>
     Task<BulkDeleteCustomersResultDto> BulkDeleteAsync(BulkDeleteCustomersRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>Adds the same tags to many customers in one request - tags that do not exist yet are created once, and a customer that
+    /// already has a tag is left as it is.</summary>
+    Task<BulkAddCustomerTagsResultDto> BulkAddTagsAsync(BulkAddCustomerTagsRequest request, CancellationToken cancellationToken = default);
+
     Task<CustomerDto> AddTagsAsync(Guid id, AddCustomerTagsRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>

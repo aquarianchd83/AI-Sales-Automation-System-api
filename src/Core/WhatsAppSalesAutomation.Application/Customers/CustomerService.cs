@@ -18,6 +18,7 @@ public class CustomerService : ICustomerService
     private readonly IValidator<UpdateCustomerRequest> _updateValidator;
     private readonly IValidator<BulkDeleteCustomersRequest> _bulkDeleteValidator;
     private readonly IValidator<OptInCustomerRequest> _optInValidator;
+    private readonly IValidator<BulkAddCustomerTagsRequest> _bulkTagsValidator;
 
     public CustomerService(
         IApplicationDbContext context,
@@ -26,7 +27,8 @@ public class CustomerService : ICustomerService
         IValidator<CreateCustomerRequest> createValidator,
         IValidator<UpdateCustomerRequest> updateValidator,
         IValidator<BulkDeleteCustomersRequest> bulkDeleteValidator,
-        IValidator<OptInCustomerRequest> optInValidator)
+        IValidator<OptInCustomerRequest> optInValidator,
+        IValidator<BulkAddCustomerTagsRequest> bulkTagsValidator)
     {
         _context = context;
         _importService = importService;
@@ -35,6 +37,7 @@ public class CustomerService : ICustomerService
         _updateValidator = updateValidator;
         _bulkDeleteValidator = bulkDeleteValidator;
         _optInValidator = optInValidator;
+        _bulkTagsValidator = bulkTagsValidator;
     }
 
     public async Task<PagedResult<CustomerDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
@@ -179,6 +182,62 @@ public class CustomerService : ICustomerService
         var notFound = ids.Where(id => !foundIds.Contains(id)).ToList();
 
         return new BulkDeleteCustomersResultDto(ids.Count, customers.Count, notFound);
+    }
+
+    public async Task<BulkAddCustomerTagsResultDto> BulkAddTagsAsync(BulkAddCustomerTagsRequest request, CancellationToken cancellationToken = default)
+    {
+        await _bulkTagsValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var ids = request.Ids.Distinct().ToList();
+        var tagNames = request.TagNames
+            .Select(t => t.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // The global query filters scope this to the tenant and hide soft-deleted rows, so another tenant's or an already-deleted id
+        // falls through to NotFoundIds exactly as it does for bulk delete.
+        var customers = await _context.Customers.Include(c => c.Tags)
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync(cancellationToken);
+
+        // Each tag is resolved (or created) once, not once per customer.
+        var tags = new List<CustomerTag>();
+        foreach (var tagName in tagNames)
+        {
+            var tag = await _context.CustomerTags.FirstOrDefaultAsync(t => t.Name.ToLower() == tagName.ToLower(), cancellationToken);
+            if (tag is null)
+            {
+                tag = new CustomerTag { Name = tagName };
+                _context.CustomerTags.Add(tag);
+            }
+
+            tags.Add(tag);
+        }
+
+        var updated = 0;
+        foreach (var customer in customers)
+        {
+            var gained = false;
+            foreach (var tag in tags)
+            {
+                if (customer.Tags.All(t => t.Id != tag.Id))
+                {
+                    customer.Tags.Add(tag);
+                    gained = true;
+                }
+            }
+
+            if (gained)
+                updated++;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var foundIds = customers.Select(c => c.Id).ToHashSet();
+        var notFound = ids.Where(id => !foundIds.Contains(id)).ToList();
+
+        return new BulkAddCustomerTagsResultDto(ids.Count, updated, notFound, tagNames);
     }
 
     public async Task<CustomerDto> AddTagsAsync(Guid id, AddCustomerTagsRequest request, CancellationToken cancellationToken = default)
