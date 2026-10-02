@@ -151,7 +151,10 @@ public static class DependencyInjection
         services.AddScoped<ICustomerImportService, CustomerImportService>();
 
         services.Configure<LocalMediaStorageSettings>(configuration.GetSection("MediaStorage"));
-        services.AddScoped<IMediaStorageService, LocalFileMediaStorageService>();
+        services.Configure<S3MediaStorageSettings>(configuration.GetSection("MediaStorage:S3"));
+        services.AddScoped<LocalFileMediaStorageService>();
+        services.AddScoped<S3MediaStorageService>();
+        services.AddScoped<IMediaStorageService, RoutingMediaStorageService>();
 
         services.Configure<LocalLogFileReaderSettings>(configuration.GetSection("LogViewer"));
         services.AddScoped<ILogFileReaderService, LocalLogFileReaderService>();
