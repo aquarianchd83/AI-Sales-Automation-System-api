@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -19,7 +20,10 @@ public class TenantNotifier : ITenantNotifier
     private readonly INotificationBroadcaster _broadcaster;
     private readonly BillingAlertOptions _options;
     private readonly ILogger<TenantNotifier> _logger;
+    private readonly IPlatformNoticeTemplates? _templates;
 
+    /// <param name="templates">The platform's own WhatsApp templates, one per kind of notice. When absent (a caller that never sends on
+    /// WhatsApp) the single configured "billing_alert" template is used instead.</param>
     public TenantNotifier(
         IApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
@@ -27,8 +31,10 @@ public class TenantNotifier : ITenantNotifier
         IPlatformWhatsAppSender whatsApp,
         INotificationBroadcaster broadcaster,
         IOptionsSnapshot<BillingAlertOptions> options,
-        ILogger<TenantNotifier> logger)
+        ILogger<TenantNotifier> logger,
+        IPlatformNoticeTemplates? templates = null)
     {
+        _templates = templates;
         _context = context;
         _userManager = userManager;
         _email = email;
@@ -101,11 +107,26 @@ public class TenantNotifier : ITenantNotifier
             }
             else
             {
-                var sent = await _whatsApp.SendTemplateAsync(
-                    tenant.BillingAlertPhoneE164, _options.WhatsAppTemplateName, _options.WhatsAppTemplateLanguage,
-                    new[] { tenant.Name, request.Body }, cancellationToken);
+                DeliveryResult sent;
+                if (_templates is null)
+                {
+                    sent = await _whatsApp.SendTemplateAsync(
+                        tenant.BillingAlertPhoneE164, _options.WhatsAppTemplateName, _options.WhatsAppTemplateLanguage,
+                        new[] { tenant.Name, request.Body }, cancellationToken);
+                }
+                else
+                {
+                    // The platform admin owns one template per kind of notice; one that is missing, switched off or not yet approved by Meta
+                    // is skipped with the reason on the notification - never sent as something else.
+                    var resolution = await _templates.ResolveAsync(request.Kind, tenant.Name, request.Title, request.Body, cancellationToken);
+                    sent = resolution.Message is { } message
+                        ? await _whatsApp.SendTemplateAsync(
+                            tenant.BillingAlertPhoneE164, message.TemplateName, message.Language, message.Parameters, cancellationToken, message.MediaUrl)
+                        : new DeliveryResult(false, resolution.SkipNote, Skipped: true);
+                }
+
                 notification.WhatsAppStatus = sent.Skipped ? DeliveryStatus.Skipped : sent.Success ? DeliveryStatus.Sent : DeliveryStatus.Failed;
-                if (sent.Note is not null) notes.Add($"whatsapp: {sent.Note}");
+                if (sent.Note is not null) notes.Add(sent.Note.StartsWith("whatsapp:") ? sent.Note : $"whatsapp: {sent.Note}");
             }
 
             notification.DeliveryNote = notes.Count == 0 ? null : string.Join("; ", notes);

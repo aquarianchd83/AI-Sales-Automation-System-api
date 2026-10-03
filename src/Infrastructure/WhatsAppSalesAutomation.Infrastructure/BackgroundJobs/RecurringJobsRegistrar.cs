@@ -43,6 +43,11 @@ public static class RecurringJobsRegistrar
         // dead tokens, read notifications, old AI turns and audit rows). Idempotent, so a repeated or overlapping run is harmless.
         recurringJobs.AddOrUpdate<DataRetentionJob>(
             "data-retention", job => job.RunAsync(), "20 3 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Hourly at :40, clear of the subscription pass at :05 and the tenants' own template syncs at :00: sends the platform's notice
+        // templates to Meta and brings their review status back. A no-op until the platform WhatsApp number is set up.
+        recurringJobs.AddOrUpdate<PlatformTemplateSyncJob>(
+            "platform-template-sync", job => job.RunAsync(), "40 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
     }
 
     /// <summary>

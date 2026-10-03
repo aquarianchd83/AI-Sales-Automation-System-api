@@ -330,6 +330,10 @@ public static class DependencyInjection
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91Options>(configuration.GetSection("Sms:Msg91"));
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Notifications.ISmsOtpSender, WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91SmsSender>();
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IDeliveryTester, WhatsAppSalesAutomation.Infrastructure.Notifications.DeliveryTester>();
-        services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender, WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>();
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.WhatsApp.PlatformWhatsAppOptions>(configuration.GetSection("PlatformWhatsApp"));
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppTemplateAdmin>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
+        services.AddScoped<PlatformTemplateSyncJob>();
     }
 }

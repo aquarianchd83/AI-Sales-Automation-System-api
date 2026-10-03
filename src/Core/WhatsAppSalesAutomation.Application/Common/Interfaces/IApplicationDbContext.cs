@@ -142,6 +142,10 @@ public interface IApplicationDbContext
 
     DbSet<Announcement> Announcements { get; }
 
+    DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }
+
+    DbSet<PlatformMediaAsset> PlatformMediaAssets { get; }
+
     DbSet<PlatformNotification> PlatformNotifications { get; }
 
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }

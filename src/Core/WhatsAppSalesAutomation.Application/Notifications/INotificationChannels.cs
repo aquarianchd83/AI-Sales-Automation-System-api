@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
+
 namespace WhatsAppSalesAutomation.Application.Notifications;
 
 /// <summary><paramref name="Skipped"/> means the channel isn't set up on this platform (no SMTP host, no platform
@@ -26,5 +28,24 @@ public interface ISmsOtpSender
 /// </summary>
 public interface IPlatformWhatsAppSender
 {
-    Task<DeliveryResult> SendTemplateAsync(string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters, CancellationToken cancellationToken = default);
+    /// <param name="mediaUrl">The public link of the image the template shows as its header, when it has one.</param>
+    Task<DeliveryResult> SendTemplateAsync(
+        string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters,
+        CancellationToken cancellationToken = default, string? mediaUrl = null);
+}
+
+/// <summary>
+/// The platform's own WhatsApp Business Account, seen from the template side: what Meta has registered and reviewed, and creating or editing
+/// the platform's notice templates there. The credentials are the platform admin's (PlatformWhatsApp:* settings), never a tenant's.
+/// </summary>
+public interface IPlatformWhatsAppTemplateAdmin
+{
+    /// <summary>True when the platform number has credentials and has not been switched off.</summary>
+    Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default);
+
+    Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default);
+
+    Task<WhatsAppTemplateSubmitResult> UpdateTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default);
 }

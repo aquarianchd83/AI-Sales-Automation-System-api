@@ -420,6 +420,27 @@ request is a separate, per-customer action that does not exist yet.
 
 ---
 
+## 9c. The platform's own WhatsApp (tenant notices)
+
+Plan-expiring, credits-running-out, refund and similar notices reach a tenant on WhatsApp **from the platform's own number**, never a tenant's, so
+they work when the tenant's quota is zero and never spend it. The platform admin owns all of it from the Platform Admin Console:
+
+1. **Platform WhatsApp** page - the number's *phone number id*, *WhatsApp Business Account id* and a permanent System User *access token*
+   (stored in the `AppSettings` table, the token encrypted; keys `PlatformWhatsApp:*`, live on the next request). **Send test message** sends Meta's
+   own `hello_world` template from the saved number to prove the credentials. This is separate from the `WhatsApp:*` block, which is the shared Meta
+   app used for tenants' inbound webhooks: a deployment that used `WhatsApp:*` as the alert number must enter it on this page once.
+2. **Notice templates** page - one WhatsApp template per kind of notice (quota 20% / 5% / used up, credits expiring in 14 / 3 days, credits added,
+   plan expiring in 7 days / tomorrow, plan expired - renewal failed, refund approved / rejected / expired), **seeded at startup** (insert-only: a
+   restart never overwrites your edits; *Restore default* brings the text back). Edit the wording, give it an image, switch it off, **Sync with
+   Meta**, and **Send test** once approved. Placeholders: `{{TenantName}}`, `{{Title}}`, `{{Message}}`.
+3. **Media library** page - the images the templates show (JPEG or PNG, at most 5 MB, for a Meta header). Needs a public media address
+   (`MediaStorage` `PublicBaseUrl`, or S3) so Meta can fetch the image when a message is sent.
+
+A template is **Utility**, starts **Pending**, and is only sent once Meta marks it **Approved**; until then the notice goes by email and in-app, and
+the notification's delivery note says why WhatsApp was skipped. An hourly job (`platform-template-sync`, :40) pushes new and edited templates to Meta
+and pulls the review status back, so approvals appear without pressing Sync. Editing an approved template's wording sends it back to review.
+Meta fixes whether a template has an image header when it is first created: swap the image later, but choose it before the first sync.
+
 ## 10. Scaling
 
 Single-instance assumptions to resolve before running more than one:

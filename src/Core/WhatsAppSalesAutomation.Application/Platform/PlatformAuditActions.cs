@@ -40,6 +40,13 @@ public static class PlatformAuditActions
     public const string ConfigurationUpdated = "ConfigurationUpdated";
     public const string AwsSettingsUpdated = "AwsSettingsUpdated";
     public const string DeliverySettingsUpdated = "DeliverySettingsUpdated";
+    public const string PlatformWhatsAppSettingsUpdated = "PlatformWhatsAppSettingsUpdated";
+    public const string PlatformTemplateUpdated = "PlatformTemplateUpdated";
+    public const string PlatformTemplateRestored = "PlatformTemplateRestored";
+    public const string PlatformTemplatesSynced = "PlatformTemplatesSynced";
+    public const string PlatformMediaUploaded = "PlatformMediaUploaded";
+    public const string PlatformMediaReplaced = "PlatformMediaReplaced";
+    public const string PlatformMediaDeleted = "PlatformMediaDeleted";
     public const string FlowchartCreated = "FlowchartCreated";
     public const string FlowchartUpdated = "FlowchartUpdated";
     public const string FlowchartDeleted = "FlowchartDeleted";
