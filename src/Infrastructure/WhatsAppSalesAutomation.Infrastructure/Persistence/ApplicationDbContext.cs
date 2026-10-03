@@ -158,6 +158,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<PlatformMediaAsset> PlatformMediaAssets => Set<PlatformMediaAsset>();
 
+    public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder> RazorpayOrders => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder>();
+
+    public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent> RazorpayWebhookEvents => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent>();
+
     public DbSet<PlatformNotification> PlatformNotifications => Set<PlatformNotification>();
 
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();
