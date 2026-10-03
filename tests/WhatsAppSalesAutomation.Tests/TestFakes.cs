@@ -131,12 +131,15 @@ public sealed class FakePlatformWhatsApp : IPlatformWhatsAppSender
     public bool Configured { get; set; } = true;
     public List<(string To, IReadOnlyList<string> Parameters)> Sent { get; } = new();
 
-    public Task<DeliveryResult> SendTemplateAsync(string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters, CancellationToken cancellationToken = default)
+    public List<(string Template, string? MediaUrl)> Templates { get; } = new();
+
+    public Task<DeliveryResult> SendTemplateAsync(string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters, CancellationToken cancellationToken = default, string? mediaUrl = null)
     {
         if (!Configured)
             return Task.FromResult(new DeliveryResult(false, "not configured", Skipped: true));
 
         Sent.Add((toPhoneE164, parameters));
+        Templates.Add((templateName, mediaUrl));
         return Task.FromResult(new DeliveryResult(true));
     }
 }

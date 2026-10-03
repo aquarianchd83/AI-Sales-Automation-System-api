@@ -7,42 +7,52 @@ using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 namespace WhatsAppSalesAutomation.Infrastructure.Notifications;
 
 /// <summary>
-/// Sends from the platform's own WhatsApp number - the "WhatsApp" settings block, not any tenant's - so a
-/// billing alert works when the tenant's own quota is zero and never spends it. With no platform Meta
-/// credentials (Provider not "Meta", or no phone number id / token) the channel is Skipped rather than faked
-/// as sent: an alert the tenant never received must not be recorded as delivered.
+/// The platform's own WhatsApp number, as set on the Platform Admin Console's WhatsApp page ("PlatformWhatsApp" settings) - not any tenant's,
+/// so a billing alert works when the tenant's own quota is zero and never spends it. Sends the notice templates and, for the same account,
+/// creates and reviews them on Meta. With no credentials (or the number switched off) a send is Skipped rather than faked as sent: an alert
+/// the tenant never received must not be recorded as delivered.
 /// </summary>
-public class PlatformWhatsAppSender : IPlatformWhatsAppSender
+public class PlatformWhatsAppSender : IPlatformWhatsAppSender, IPlatformWhatsAppTemplateAdmin
 {
     private readonly MetaWhatsAppCloudApiClient _meta;
-    private readonly IOptionsSnapshot<WhatsAppSettings> _settings;
+    private readonly IOptionsSnapshot<PlatformWhatsAppOptions> _options;
     private readonly ILogger<PlatformWhatsAppSender> _logger;
 
-    public PlatformWhatsAppSender(MetaWhatsAppCloudApiClient meta, IOptionsSnapshot<WhatsAppSettings> settings, ILogger<PlatformWhatsAppSender> logger)
+    public PlatformWhatsAppSender(MetaWhatsAppCloudApiClient meta, IOptionsSnapshot<PlatformWhatsAppOptions> options, ILogger<PlatformWhatsAppSender> logger)
     {
         _meta = meta;
-        _settings = settings;
+        _options = options;
         _logger = logger;
     }
 
-    public async Task<DeliveryResult> SendTemplateAsync(string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters, CancellationToken cancellationToken = default)
+    private TenantWhatsAppCredentials? Credentials()
     {
-        var settings = _settings.Value;
-        if (!string.Equals(settings.Provider, "Meta", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(settings.PhoneNumberId)
-            || string.IsNullOrWhiteSpace(settings.AccessToken))
+        var o = _options.Value;
+        if (!o.IsConfigured)
+            return null;
+
+        return new TenantWhatsAppCredentials(
+            o.PhoneNumberId.Trim(), o.WhatsAppBusinessAccountId.Trim(), o.AccessToken.Trim(), string.Empty,
+            string.IsNullOrWhiteSpace(o.ApiVersion) ? "v19.0" : o.ApiVersion.Trim(),
+            string.IsNullOrWhiteSpace(o.ApiBaseUrl) ? "https://graph.facebook.com/" : o.ApiBaseUrl.Trim());
+    }
+
+    public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(Credentials() is not null);
+
+    public async Task<DeliveryResult> SendTemplateAsync(
+        string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters,
+        CancellationToken cancellationToken = default, string? mediaUrl = null)
+    {
+        var credentials = Credentials();
+        if (credentials is null)
         {
             _logger.LogInformation("WhatsApp alert to {To} not sent: the platform WhatsApp number isn't configured", toPhoneE164);
             return new DeliveryResult(false, "platform WhatsApp number not configured", Skipped: true);
         }
 
-        var credentials = new TenantWhatsAppCredentials(
-            settings.PhoneNumberId, settings.WhatsAppBusinessAccountId, settings.AccessToken,
-            settings.AppSecret, settings.ApiVersion, settings.ApiBaseUrl);
-
         try
         {
-            var result = await _meta.SendTemplateMessageAsync(credentials, toPhoneE164, templateName, languageCode, parameters, null, cancellationToken);
+            var result = await _meta.SendTemplateMessageAsync(credentials, toPhoneE164, templateName, languageCode, parameters, mediaUrl, cancellationToken);
             return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -50,5 +60,27 @@ public class PlatformWhatsAppSender : IPlatformWhatsAppSender
             _logger.LogWarning(ex, "WhatsApp alert to {To} failed", toPhoneE164);
             return new DeliveryResult(false, ex.Message);
         }
+    }
+
+    public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        var credentials = Credentials();
+        return credentials is null ? Array.Empty<WhatsAppRemoteTemplate>() : await _meta.GetMessageTemplatesAsync(credentials, cancellationToken);
+    }
+
+    public async Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        var credentials = Credentials();
+        return credentials is null
+            ? new WhatsAppTemplateSubmitResult(false, null, null, "The platform WhatsApp number is not configured.")
+            : await _meta.CreateMessageTemplateAsync(credentials, submission, cancellationToken);
+    }
+
+    public async Task<WhatsAppTemplateSubmitResult> UpdateTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
+    {
+        var credentials = Credentials();
+        return credentials is null
+            ? new WhatsAppTemplateSubmitResult(false, metaTemplateId, null, "The platform WhatsApp number is not configured.")
+            : await _meta.UpdateMessageTemplateAsync(credentials, metaTemplateId, submission, cancellationToken);
     }
 }

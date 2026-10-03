@@ -154,6 +154,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
+    public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();
+
+    public DbSet<PlatformMediaAsset> PlatformMediaAssets => Set<PlatformMediaAsset>();
+
     public DbSet<PlatformNotification> PlatformNotifications => Set<PlatformNotification>();
 
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();

@@ -217,6 +217,10 @@ try
         // own doc comment).
         await FaqSeeder.SeedAsync(scope.ServiceProvider);
 
+        // The platform's WhatsApp notice templates (plan expiring, credits running out ...) - one per kind of notice, insert-only, so
+        // the admin's edits survive a restart. Always runs: without them no tenant notice can go out on WhatsApp.
+        await PlatformTemplateSeeder.SeedAsync(scope.ServiceProvider);
+
         // Default qualification schema and scoring rules for every tenant, plus the backfill that
         // moves each lead's existing Budget/Interest/PurchaseTimeline into the new value rows - without
         // that, an upgraded tenant's agent would re-ask customers for what it was already told. Always

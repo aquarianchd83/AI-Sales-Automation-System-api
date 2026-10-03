@@ -97,7 +97,10 @@ public static class TemplatePlaceholderResolver
     /// editing a template - the same first-occurrence token order ExtractTokens/Resolve already use,
     /// so the position assigned here is exactly what Resolve's ParameterValues will fill at send time.
     /// </summary>
-    public static (string MetaBodyText, IReadOnlyList<string> ExampleValues) ToMetaTemplateBody(string bodyText)
+    /// <param name="examples">Example values by token, for a caller whose tokens are not a customer's (the platform's own
+    /// notices); a token missing from it, and from the customer fixtures, gets a generic one.</param>
+    public static (string MetaBodyText, IReadOnlyList<string> ExampleValues) ToMetaTemplateBody(
+        string bodyText, IReadOnlyDictionary<string, string>? examples = null)
     {
         var tokenOrder = ExtractTokens(bodyText);
 
@@ -111,10 +114,11 @@ public static class TemplatePlaceholderResolver
 
         var metaBodyText = TokenPattern.Replace(bodyText, match => $"{{{{{positionByToken[match.Groups[1].Value]}}}}}");
 
-        var examples = tokenOrder
-            .Select(token => ExampleValues.TryGetValue(token, out var v) ? v : "value")
+        var exampleValues = tokenOrder
+            .Select(token => examples is not null && examples.TryGetValue(token, out var custom) ? custom
+                : ExampleValues.TryGetValue(token, out var v) ? v : "value")
             .ToList();
 
-        return (metaBodyText, examples);
+        return (metaBodyText, exampleValues);
     }
 }
