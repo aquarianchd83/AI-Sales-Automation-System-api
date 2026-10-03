@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -132,6 +132,11 @@ public static class AppSettingCatalog
         new("PlatformWhatsApp:AccessToken", "PlatformWhatsApp", IsSecret: true, Description: "Access token for the platform's number - a permanent System User token."),
         new("PlatformWhatsApp:ApiVersion", "PlatformWhatsApp", IsSecret: false),
         new("PlatformWhatsApp:ApiBaseUrl", "PlatformWhatsApp", IsSecret: false),
+
+        // The platform's Razorpay account, kept on the Platform Admin Console's Razorpay test page (RazorpayService) and only in this table.
+        new("Razorpay:KeyId", "Razorpay", IsSecret: false, Description: "API key id - rzp_test_... or rzp_live_..."),
+        new("Razorpay:KeySecret", "Razorpay", IsSecret: true, Description: "API key secret. Signs checkout responses; never sent to a browser."),
+        new("Razorpay:WebhookSecret", "Razorpay", IsSecret: true, Description: "The secret set on the Razorpay webhook; verifies every webhook delivery."),
 
         // Retention - how long data the platform only needs for a while is kept, in days. 0 keeps it forever; 1-6 counts as 7. Read live by
         // the daily clean-up. Conversations and messages are deliberately not here.

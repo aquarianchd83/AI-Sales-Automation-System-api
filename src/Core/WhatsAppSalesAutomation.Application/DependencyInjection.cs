@@ -149,6 +149,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();
         services.AddScoped<IPlatformMediaService, PlatformMediaService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayService, WhatsAppSalesAutomation.Application.Razorpay.RazorpayService>();
         services.AddScoped<IPlanCostReportService, PlanCostReportService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
         services.AddScoped<IPlatformPaymentService, PlatformPaymentService>();

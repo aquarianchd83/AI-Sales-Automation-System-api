@@ -47,6 +47,8 @@ public static class PlatformAuditActions
     public const string PlatformMediaUploaded = "PlatformMediaUploaded";
     public const string PlatformMediaReplaced = "PlatformMediaReplaced";
     public const string PlatformMediaDeleted = "PlatformMediaDeleted";
+    public const string RazorpaySettingsUpdated = "RazorpaySettingsUpdated";
+    public const string RazorpayRefundIssued = "RazorpayRefundIssued";
     public const string FlowchartCreated = "FlowchartCreated";
     public const string FlowchartUpdated = "FlowchartUpdated";
     public const string FlowchartDeleted = "FlowchartDeleted";

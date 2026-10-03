@@ -335,5 +335,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppTemplateAdmin>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
         services.AddScoped<PlatformTemplateSyncJob>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayGateway, WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway>(client =>
+            client.BaseAddress = new Uri(WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway.DefaultBaseUrl));
     }
 }
