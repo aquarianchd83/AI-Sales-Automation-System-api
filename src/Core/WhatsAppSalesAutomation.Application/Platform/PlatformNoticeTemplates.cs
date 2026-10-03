@@ -11,7 +11,7 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 public record PlatformNoticeMessage(string TemplateName, string Language, IReadOnlyList<string> Parameters, string? MediaUrl);
 
 /// <summary>Either the message to send or the reason there isn't one - recorded on the notification, never thrown.</summary>
-public record PlatformNoticeResolution(PlatformNoticeMessage? Message, string? SkipNote);
+public record PlatformNoticeResolution(PlatformNoticeMessage? Message, string? SkipNote = null);
 
 /// <summary>Finds the platform's WhatsApp template for a kind of notice and fills it in for one tenant.</summary>
 public interface IPlatformNoticeTemplates
