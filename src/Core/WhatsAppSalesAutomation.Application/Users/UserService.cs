@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Audit;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -19,6 +20,7 @@ public class UserService : IUserService
     private readonly IValidator<CreateUserRequest> _createValidator;
     private readonly IValidator<UpdateUserRequest> _updateValidator;
     private readonly IValidator<AssignRolesRequest> _assignRolesValidator;
+    private readonly IAuditTrailWriter _audit;
 
     public UserService(
         UserManager<ApplicationUser> userManager,
@@ -27,8 +29,10 @@ public class UserService : IUserService
         IPlanLimitsService planLimits,
         IValidator<CreateUserRequest> createValidator,
         IValidator<UpdateUserRequest> updateValidator,
-        IValidator<AssignRolesRequest> assignRolesValidator)
+        IValidator<AssignRolesRequest> assignRolesValidator,
+        IAuditTrailWriter audit)
     {
+        _audit = audit;
         _userManager = userManager;
         _roleManager = roleManager;
         _tenantContext = tenantContext;
@@ -112,6 +116,7 @@ public class UserService : IUserService
         await _userManager.AddToRolesAsync(user, request.Roles);
 
         var roles = await _userManager.GetRolesAsync(user);
+        await RecordRolesAsync(user, Array.Empty<string>(), roles, cancellationToken);
         return user.ToDto(roles);
     }
 
@@ -160,7 +165,29 @@ public class UserService : IUserService
             await _userManager.AddToRolesAsync(user, toAdd);
 
         var roles = await _userManager.GetRolesAsync(user);
+        if (toRemove.Count > 0 || toAdd.Count > 0)
+            await RecordRolesAsync(user, currentRoles, roles, cancellationToken);
         return user.ToDto(roles);
+    }
+
+    /// <summary>Roles live in a join table, not on the user, so the save interceptor cannot see them change. Who gets to do what is
+    /// exactly what an admin will want to look back on.</summary>
+    private async Task RecordRolesAsync(ApplicationUser user, IEnumerable<string> before, IEnumerable<string> after, CancellationToken cancellationToken)
+    {
+        if (user.TenantId is not { } tenantId)
+            return;
+
+        await _audit.RecordAsync(
+            tenantId, "User", user.Id, Domain.Entities.Audit.AuditAction.Update,
+            new Dictionary<string, object?>
+            {
+                ["Roles"] = new Dictionary<string, object?>
+                {
+                    ["from"] = before.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
+                    ["to"] = after.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList()
+                }
+            },
+            cancellationToken);
     }
 
     /// <summary>Only the roles a tenant Admin can assign (<see cref="AppRoles.All"/>) - the same set

@@ -7,6 +7,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Domain.Enums;
 using Xunit;
 
 namespace WhatsAppSalesAutomation.Tests;
@@ -16,6 +17,8 @@ namespace WhatsAppSalesAutomation.Tests;
 public sealed class LoginSecurityTests : IDisposable
 {
     private readonly IdentityHarness _h = new();
+    private readonly RecordingNotifier _notices = new();
+    private ITenantNotifier Notifier => _notices;
 
     public void Dispose() => _h.Dispose();
 
@@ -36,7 +39,7 @@ public sealed class LoginSecurityTests : IDisposable
 
         return new AuthService(
             _h.Users, _h.Db, jwt, _h.Clock, null!, null!, null!, null!, null!, null!,
-            new LoginRequestValidator(), null!, new ChangePasswordRequestValidator(), null!, null!, recovery);
+            new LoginRequestValidator(), null!, new ChangePasswordRequestValidator(), null!, null!, recovery, Notifier);
     }
 
     private Task<TokenPairDto> Login(string password, string email = "asha@example.com") =>
@@ -58,6 +61,36 @@ public sealed class LoginSecurityTests : IDisposable
 
         Assert.Equal(AuthService.LockedOutMessage, fifth.Message);
         Assert.Equal(AuthService.LockedOutMessage, correct.Message);
+    }
+
+    [Fact]
+    public async Task The_workspace_admins_are_told_once_when_someone_is_locked_out()
+    {
+        var tenantId = Guid.NewGuid();
+        await _h.AddUserAsync(tenantId: tenantId);
+
+        for (var i = 0; i < 4; i++)
+            await Assert.ThrowsAsync<AuthenticationFailedException>(() => Login("Wrong-Passw0rd!"));
+        Assert.Empty(_notices.Sent);
+
+        await Assert.ThrowsAsync<AuthenticationFailedException>(() => Login("Wrong-Passw0rd!"));
+        await Assert.ThrowsAsync<AuthenticationFailedException>(() => Login("Wrong-Passw0rd!"));
+
+        var notice = Assert.Single(_notices.Sent);
+        Assert.Equal(TenantNotificationKind.AccountLocked, notice.Kind);
+        Assert.Equal(tenantId, notice.TenantId);
+        Assert.Contains("asha@example.com", notice.Body);
+    }
+
+    [Fact]
+    public async Task A_user_who_belongs_to_no_workspace_has_nobody_to_tell()
+    {
+        await _h.AddUserAsync();
+
+        for (var i = 0; i < 5; i++)
+            await Assert.ThrowsAsync<AuthenticationFailedException>(() => Login("Wrong-Passw0rd!"));
+
+        Assert.Empty(_notices.Sent);
     }
 
     [Fact]

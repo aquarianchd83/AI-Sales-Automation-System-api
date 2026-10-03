@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
+using WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
 
 namespace WhatsAppSalesAutomation.Tests;
 
@@ -23,10 +25,16 @@ public sealed class IdentityHarness : IDisposable
 
     public TestClock Clock { get; } = new();
 
-    public IdentityHarness()
+    /// <summary>Who the audit trail will say did it (and from where), when the harness is built with the audit interceptor.</summary>
+    public ActingUser Actor { get; } = new();
+
+    public IdentityHarness(bool withAudit = false)
     {
         _connection.Open();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        var builder = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection);
+        if (withAudit)
+            builder.AddInterceptors(new AuditTrailSaveChangesInterceptor(Actor, Clock));
+        var options = builder.Options;
         Db = new SqliteApplicationDbContext(options, new PlatformContext(), new AnonymousUser());
         Db.Database.EnsureCreated();
 
@@ -55,11 +63,11 @@ public sealed class IdentityHarness : IDisposable
     }
 
     public async Task<ApplicationUser> AddUserAsync(
-        string email = "asha@example.com", string? phone = null, bool phoneConfirmed = false, bool emailConfirmed = true)
+        string email = "asha@example.com", string? phone = null, bool phoneConfirmed = false, bool emailConfirmed = true, Guid? tenantId = null)
     {
         var user = new ApplicationUser
         {
-            UserName = email, Email = email, FullName = "Asha", IsActive = true,
+            UserName = email, Email = email, FullName = "Asha", IsActive = true, TenantId = tenantId,
             EmailConfirmed = emailConfirmed, PhoneNumber = phone, PhoneNumberConfirmed = phoneConfirmed
         };
         var result = await Users.CreateAsync(user, Password);
@@ -73,4 +81,14 @@ public sealed class IdentityHarness : IDisposable
         _provider.Dispose();
         _connection.Dispose();
     }
+}
+
+public sealed class ActingUser : ICurrentUserService
+{
+    public Guid? UserId { get; set; }
+    public string? Email => null;
+    public IReadOnlyList<string> Roles => Array.Empty<string>();
+    public Guid? TenantId => null;
+    public Guid? ImpersonatorUserId => null;
+    public string? IpAddress { get; set; }
 }

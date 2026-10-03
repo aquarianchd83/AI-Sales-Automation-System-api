@@ -322,6 +322,8 @@ public static class DependencyInjection
         services.AddScoped<TenantJobReconciliationJob>();
         services.AddScoped<SubscriptionMaintenanceJob>();
         services.AddScoped<QuotaAlertJob>();
+        services.AddScoped<DataRetentionJob>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Common.Interfaces.IDataRetentionService, WhatsAppSalesAutomation.Infrastructure.Maintenance.DataRetentionService>();
 
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpOptions>(configuration.GetSection("Email:Smtp"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IEmailSender, WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpEmailSender>();

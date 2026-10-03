@@ -396,6 +396,30 @@ against the same five-strike lockout.
 
 ---
 
+## 9b. Audit trail and data retention
+
+**What the tenant audit trail records.** Besides leads, campaigns, conversations, handoffs, customer opt-in and knowledge articles, it now
+records: users (each wrong password with the address it came from, lockouts, password changes - as "changed" only, deactivation, email and phone
+confirmation), changes of a user's roles, the tenant's WhatsApp and AI-provider credentials (names only, **never a key or token**), message
+templates, qualification fields and scoring rules. Admins read it on the Audit Log screen and are notified once when someone is locked out.
+
+**Data retention.** A daily job (03:20 UTC, `data-retention`) deletes what has outlived its period. Every period is a setting under
+`Retention:*` (editable in Settings, live): `0` keeps that data forever, `1`-`6` counts as `7`.
+
+| Setting | Default | What goes |
+|---|---|---|
+| `WebhookEventDays` | 90 | processed or failed raw webhook payloads (unprocessed ones are never touched) |
+| `RefreshTokenDays` | 30 | refresh tokens that expired or were revoked this long ago |
+| `NotificationDays` | 180 | notifications someone has already read (unread ones stay) |
+| `AiInteractionDays` | 365 | AI turn records (their sources and validation failures go with them) |
+| `AuditLogDays` | 730 | audit trail entries - the trail is append-only for everyone else; this age cut-off is the one way rows leave it |
+| `BatchSize` | 2000 | rows removed per statement, so a pass never holds a long lock |
+
+Conversations and messages are **not** touched: they are the customer relationship and the billing evidence. Erasing one person's data on
+request is a separate, per-customer action that does not exist yet.
+
+---
+
 ## 10. Scaling
 
 Single-instance assumptions to resolve before running more than one:
@@ -427,3 +451,4 @@ Single-instance assumptions to resolve before running more than one:
 - [ ] Stripe webhook registered and `Stripe:WebhookSecret` set, or billing left deliberately off
 - [ ] `App_Data/keys` and `App_Data/media` on persistent storage and in the backup set
 - [ ] Alerting on `Warning`-level rate-limit rejections against `/api/v1/auth/*`
+- [ ] `Retention:*` periods reviewed against your own legal and contractual retention needs (the defaults are a starting point, not advice)

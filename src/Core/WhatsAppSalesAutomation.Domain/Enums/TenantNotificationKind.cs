@@ -31,5 +31,8 @@ public enum TenantNotificationKind
     PlanRenewalFailed = 15,
     // The WhatsApp access token could not be renewed, or will lapse with nothing able to renew it. When it does,
     // every send stops - and only the tenant can paste a new token.
-    WhatsAppTokenFailing = 16
+    WhatsAppTokenFailing = 16,
+    // Someone's account was locked after repeated wrong passwords. Tells the tenant's admins while it is happening - it is
+    // either a forgotten password or somebody guessing, and only a person can tell which.
+    AccountLocked = 17
 }
