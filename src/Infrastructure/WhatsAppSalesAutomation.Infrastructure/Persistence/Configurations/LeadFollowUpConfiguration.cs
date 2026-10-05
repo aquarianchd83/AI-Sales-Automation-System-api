@@ -21,12 +21,13 @@ public class LeadFollowUpConfiguration : IEntityTypeConfiguration<LeadFollowUp>
         // What the sender job and the follow-up list both read: the Scheduled rows, soonest first.
         builder.HasIndex(f => new { f.TenantId, f.Status, f.DueAt });
 
-        // At most one pending follow-up per lead, enforced here as well as in LeadFollowUpService - two
-        // agents scheduling at the same moment must not leave a customer with two reminders queued.
+        // At most one open follow-up (scheduled, or suggested by the AI) per lead, enforced here as well as in
+        // LeadFollowUpService - two agents scheduling at the same moment must not leave a customer with two
+        // reminders queued.
         builder.HasIndex(f => f.LeadId)
             .IsUnique()
-            .HasFilter("[Status] = 'Scheduled'")
-            .HasDatabaseName("IX_LeadFollowUps_LeadId_Scheduled");
+            .HasFilter("[Status] IN ('Scheduled', 'Suggested')")
+            .HasDatabaseName("IX_LeadFollowUps_LeadId_Open");
 
         builder.HasOne<Lead>()
             .WithMany()

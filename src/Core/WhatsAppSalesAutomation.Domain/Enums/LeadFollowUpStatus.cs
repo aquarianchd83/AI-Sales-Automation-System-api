@@ -19,5 +19,9 @@ public enum LeadFollowUpStatus
     Skipped = 3,
 
     /// <summary>WhatsApp refused the send. A person can retry it with Send now.</summary>
-    Failed = 4
+    Failed = 4,
+
+    /// <summary>The AI noticed the customer is interested but cannot proceed and proposed a follow-up. Nothing is
+    /// ever sent from this state: a person confirms it (which schedules it with a template) or dismisses it.</summary>
+    Suggested = 5
 }

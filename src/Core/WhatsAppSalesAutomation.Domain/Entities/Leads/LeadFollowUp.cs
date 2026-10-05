@@ -8,8 +8,8 @@ namespace WhatsAppSalesAutomation.Domain.Entities.Leads;
 /// parked to be contacted again after a chosen wait - typically 1, 2 or 3 months. Campaign follow-ups cannot
 /// cover this: they only chase customers who have not replied, and stop for good the moment someone does.
 ///
-/// A lead has at most one <see cref="LeadFollowUpStatus.Scheduled"/> row at a time; scheduling another
-/// cancels the earlier one. The rows that are no longer Scheduled stay as the history of how often this
+/// A lead has at most one open row (<see cref="LeadFollowUpStatus.Scheduled"/> or the AI's
+/// <see cref="LeadFollowUpStatus.Suggested"/>) at a time; scheduling another cancels the earlier one. The rows that are no longer Scheduled stay as the history of how often this
 /// customer has been nudged - which is what the per-lead cap on follow-ups counts.
 /// </summary>
 public class LeadFollowUp : BaseEntity, ITenantOwned
@@ -35,8 +35,8 @@ public class LeadFollowUp : BaseEntity, ITenantOwned
     public string? Reason { get; set; }
 
     /// <summary>The approved template the follow-up goes out as. A business-initiated message outside WhatsApp's
-    /// 24-hour window must be a template.</summary>
-    public Guid MessageTemplateId { get; set; }
+    /// 24-hour window must be a template. Null only while the AI's suggestion has not been confirmed.</summary>
+    public Guid? MessageTemplateId { get; set; }
 
     /// <summary>Which follow-up this is for the lead: 1 for the first, 2 for the next. Set when it is scheduled.</summary>
     public int FollowUpNumber { get; set; }
@@ -53,6 +53,6 @@ public class LeadFollowUp : BaseEntity, ITenantOwned
     /// and after a clean send.</summary>
     public string? OutcomeNote { get; set; }
 
-    /// <summary>The agent who scheduled it.</summary>
+    /// <summary>The agent who scheduled it. Null for a follow-up the AI suggested and nobody has confirmed yet.</summary>
     public Guid? ScheduledBy { get; set; }
 }

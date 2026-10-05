@@ -408,6 +408,138 @@ public sealed class LeadFollowUpTests : IDisposable
         Assert.Equal(1, summary.DueWithin30Days);
     }
 
+    // ── AI suggestions ───────────────────────────────────────────────────────────────────────
+
+    private async Task<bool> SuggestAsync(string? reason = "Budget frozen", int? months = 2)
+    {
+        var added = await _service.SuggestAsync(_lead.Id, reason, months);
+        await _db.SaveChangesAsync(); // the orchestrator saves the staged row with the rest of its turn
+        return added;
+    }
+
+    [Fact]
+    public async Task The_AI_can_suggest_a_follow_up_that_nothing_will_ever_send_until_a_person_confirms_it()
+    {
+        await Fund(5);
+
+        Assert.True(await SuggestAsync());
+
+        var row = await _db.LeadFollowUps.SingleAsync();
+        Assert.Equal(LeadFollowUpStatus.Suggested, row.Status);
+        Assert.Null(row.MessageTemplateId);
+        Assert.Null(row.ScheduledBy);
+        Assert.Equal(_clock.UtcNow.AddMonths(2), row.DueAt);
+        Assert.Equal("Budget frozen", row.Reason);
+        Assert.Contains(await _db.LeadActivities.ToListAsync(), a => a.ActivityType == LeadActivityType.FollowUpSuggested && a.CreatedBy == null);
+
+        _clock.UtcNow = _clock.UtcNow.AddMonths(3);
+        Assert.Equal(0, (await _service.ProcessDueAsync()).Considered);
+        Assert.Equal(0, _whatsApp.Calls);
+        await Assert.ThrowsAsync<ConflictException>(() => _service.SendNowAsync(row.Id));
+    }
+
+    [Fact]
+    public async Task With_no_wait_named_the_AI_proposes_one_month_and_a_long_one_is_capped_at_a_year()
+    {
+        await SuggestAsync(months: null);
+        Assert.Equal(_clock.UtcNow.AddMonths(1), (await _db.LeadFollowUps.SingleAsync()).DueAt);
+
+        _db.LeadFollowUps.RemoveRange(await _db.LeadFollowUps.ToListAsync());
+        await _db.SaveChangesAsync();
+        await SuggestAsync(months: 99);
+        Assert.Equal(_clock.UtcNow.AddMonths(LeadFollowUpPolicy.MaxMonths), (await _db.LeadFollowUps.SingleAsync()).DueAt);
+    }
+
+    [Fact]
+    public async Task A_second_suggestion_does_not_stack_but_keeps_the_latest_reason()
+    {
+        await SuggestAsync("Budget frozen");
+
+        Assert.False(await SuggestAsync("Needs the director's sign-off"));
+
+        var row = await _db.LeadFollowUps.SingleAsync();
+        Assert.Equal("Needs the director's sign-off", row.Reason);
+    }
+
+    [Fact]
+    public async Task Nothing_is_suggested_over_a_follow_up_a_person_already_scheduled()
+    {
+        await ScheduleAsync(3);
+
+        Assert.False(await SuggestAsync());
+
+        Assert.Equal(LeadFollowUpStatus.Scheduled, (await _db.LeadFollowUps.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Nothing_is_suggested_for_an_opted_out_customer_a_closed_lead_or_one_followed_up_three_times()
+    {
+        _customer.OptInStatus = OptInStatus.OptedOut;
+        await _db.SaveChangesAsync();
+        Assert.False(await SuggestAsync());
+
+        _customer.OptInStatus = OptInStatus.OptedIn;
+        _lead.Stage = LeadStage.Won;
+        await _db.SaveChangesAsync();
+        Assert.False(await SuggestAsync());
+
+        _lead.Stage = LeadStage.Qualified;
+        for (var i = 1; i <= LeadFollowUpPolicy.MaxSentPerLead; i++)
+            _db.LeadFollowUps.Add(new LeadFollowUp { LeadId = _lead.Id, CustomerId = _customer.Id, Status = LeadFollowUpStatus.Sent, MessageTemplateId = _template.Id, FollowUpNumber = i });
+        await _db.SaveChangesAsync();
+        Assert.False(await SuggestAsync());
+
+        Assert.Equal(0, await _db.LeadFollowUps.CountAsync(f => f.Status == LeadFollowUpStatus.Suggested));
+    }
+
+    [Fact]
+    public async Task A_dismissed_suggestion_is_not_made_again_for_a_month()
+    {
+        await SuggestAsync();
+        var suggestion = await _db.LeadFollowUps.SingleAsync();
+        var dismissed = await _service.CancelAsync(suggestion.Id, _agent);
+        Assert.Equal("Cancelled", dismissed.Status);
+        Assert.Contains("dismissed", dismissed.OutcomeNote);
+        (await _db.LeadFollowUps.SingleAsync()).UpdatedAt = _clock.UtcNow; // the test db does not stamp it
+        await _db.SaveChangesAsync();
+
+        Assert.False(await SuggestAsync());
+
+        _clock.UtcNow = _clock.UtcNow.AddDays(LeadFollowUpPolicy.SuggestionCooldownDays + 1);
+        Assert.True(await SuggestAsync());
+    }
+
+    [Fact]
+    public async Task Confirming_a_suggestion_schedules_it_with_a_template_and_retires_the_suggestion()
+    {
+        await Fund(5);
+        await SuggestAsync();
+        var suggestion = await _db.LeadFollowUps.SingleAsync();
+
+        var confirmed = await ScheduleAsync(2);
+
+        Assert.Equal("Scheduled", confirmed.Status);
+        Assert.Equal(_template.Id, confirmed.MessageTemplateId);
+        var old = await RowAsync(suggestion.Id);
+        Assert.Equal(LeadFollowUpStatus.Cancelled, old.Status);
+        Assert.Equal("Confirmed as a scheduled follow-up.", old.OutcomeNote);
+        Assert.Equal(1, await _db.LeadFollowUps.CountAsync(f => f.Status == LeadFollowUpStatus.Scheduled || f.Status == LeadFollowUpStatus.Suggested));
+    }
+
+    [Fact]
+    public async Task Suggestions_are_listed_on_their_own_and_counted_in_the_summary()
+    {
+        await SuggestAsync();
+
+        var page = await _service.GetPagedAsync(new Application.Common.Models.PagedRequest(), status: "Suggested");
+        var waiting = await _service.GetPagedAsync(new Application.Common.Models.PagedRequest());
+
+        Assert.Equal("Asha", page.Items.Single().CustomerName);
+        Assert.Null(page.Items.Single().MessageTemplateId);
+        Assert.Empty(waiting.Items);
+        Assert.Equal(1, (await _service.GetSummaryAsync()).Suggested);
+    }
+
     private sealed class FakeWhatsApp : IWhatsAppService
     {
         public bool Succeed { get; set; } = true;

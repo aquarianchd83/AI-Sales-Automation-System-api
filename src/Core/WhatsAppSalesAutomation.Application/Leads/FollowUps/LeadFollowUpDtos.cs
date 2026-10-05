@@ -11,7 +11,7 @@ public record LeadFollowUpDto(
     DateTime DueAt,
     int? IntervalMonths,
     string? Reason,
-    Guid MessageTemplateId,
+    Guid? MessageTemplateId,
     string? MessageTemplateName,
     int FollowUpNumber,
     DateTime? SentAt,
@@ -22,8 +22,9 @@ public record LeadFollowUpDto(
 /// a year) or <paramref name="DueAt"/> (an exact date) is given. Replaces any follow-up already scheduled for the lead.</summary>
 public record ScheduleLeadFollowUpRequest(int? Months, DateTime? DueAt, Guid MessageTemplateId, string? Reason);
 
-/// <summary>Header numbers for the follow-up list.</summary>
-public record LeadFollowUpSummaryDto(int Scheduled, int DueNow, int DueWithin30Days, int Sent);
+/// <summary>Header numbers for the follow-up list. <paramref name="Suggested"/> is what the AI proposed and nobody
+/// has confirmed or dismissed yet.</summary>
+public record LeadFollowUpSummaryDto(int Scheduled, int DueNow, int DueWithin30Days, int Sent, int Suggested);
 
 /// <summary>What one pass of the sender did.</summary>
 public record LeadFollowUpRunResult(int Considered, int Sent, int Failed, int Skipped, int Deferred, int Cancelled)

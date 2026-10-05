@@ -27,4 +27,11 @@ public static class LeadFollowUpPolicy
     /// <summary>A due follow-up waits if the customer was messaged by anything else (a campaign step, an agent
     /// reply) within this many days, so two messages never arrive back to back.</summary>
     public const int QuietDaysAfterAnyMessage = 7;
+
+    /// <summary>After a person dismisses the AI's suggestion for a lead, it does not suggest again for this many
+    /// days - the same "not now" said over several messages is one "not now", not several.</summary>
+    public const int SuggestionCooldownDays = 30;
+
+    /// <summary>The wait the AI proposes when the customer named none.</summary>
+    public const int DefaultSuggestedMonths = 1;
 }

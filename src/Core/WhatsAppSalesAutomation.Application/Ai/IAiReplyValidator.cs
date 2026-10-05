@@ -39,7 +39,10 @@ public record ValidatedReply(
     bool OptOutRequested,
     string? AskedFieldKey,
     string? DetectedLanguage,
-    string? AgentNote)
+    string? AgentNote,
+    bool CannotProceedNow = false,
+    string? CannotProceedReason = null,
+    int? FollowUpInMonths = null)
 {
     public bool HasFailures => Failures.Count > 0;
 

@@ -105,7 +105,8 @@ public class LeadFollowUpService : ILeadFollowUpService
             await scheduled.CountAsync(cancellationToken),
             await scheduled.CountAsync(f => f.DueAt <= now, cancellationToken),
             await scheduled.CountAsync(f => f.DueAt <= in30Days, cancellationToken),
-            await _context.LeadFollowUps.CountAsync(f => f.Status == LeadFollowUpStatus.Sent, cancellationToken));
+            await _context.LeadFollowUps.CountAsync(f => f.Status == LeadFollowUpStatus.Sent, cancellationToken),
+            await _context.LeadFollowUps.CountAsync(f => f.Status == LeadFollowUpStatus.Suggested, cancellationToken));
     }
 
     public async Task<IReadOnlyList<LeadFollowUpDto>> GetForLeadAsync(Guid leadId, CancellationToken cancellationToken = default)
@@ -169,11 +170,13 @@ public class LeadFollowUpService : ILeadFollowUpService
 
         // The earlier reminder is cancelled and saved BEFORE the new one is added: the one-Scheduled-per-lead
         // unique index would reject a single SaveChanges in which EF happens to insert before it updates.
-        var current = await _context.LeadFollowUps.FirstOrDefaultAsync(f => f.LeadId == leadId && f.Status == LeadFollowUpStatus.Scheduled, cancellationToken);
+        var current = await _context.LeadFollowUps.FirstOrDefaultAsync(f => f.LeadId == leadId && (f.Status == LeadFollowUpStatus.Scheduled || f.Status == LeadFollowUpStatus.Suggested), cancellationToken);
         if (current is not null)
         {
+            current.OutcomeNote = current.Status == LeadFollowUpStatus.Suggested
+                ? "Confirmed as a scheduled follow-up."
+                : "Replaced by a newer follow-up.";
             current.Status = LeadFollowUpStatus.Cancelled;
-            current.OutcomeNote = "Replaced by a newer follow-up.";
             await _context.SaveChangesAsync(cancellationToken);
         }
 
@@ -200,19 +203,77 @@ public class LeadFollowUpService : ILeadFollowUpService
         return ToDto(followUp, customer, lead, template.Name);
     }
 
+    public async Task<bool> SuggestAsync(Guid leadId, string? reason, int? months, CancellationToken cancellationToken = default)
+    {
+        var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
+        if (lead is null || lead.Stage is LeadStage.Won or LeadStage.Lost)
+            return false;
+
+        // Only a customer we may message at all is worth proposing a later message to.
+        var optedIn = await _context.Customers.AnyAsync(c => c.Id == lead.CustomerId && c.OptInStatus == OptInStatus.OptedIn, cancellationToken);
+        if (!optedIn)
+            return false;
+
+        var sent = await _context.LeadFollowUps.CountAsync(f => f.LeadId == leadId && f.Status == LeadFollowUpStatus.Sent, cancellationToken);
+        if (sent >= LeadFollowUpPolicy.MaxSentPerLead)
+            return false;
+
+        var cleanReason = string.IsNullOrWhiteSpace(reason) ? null : Truncate(reason.Trim(), 500);
+
+        // A person already decided (scheduled), or has yet to decide on an earlier suggestion: do not stack a
+        // second row on top. A fresh reason on an open suggestion is kept, since it is the latest word.
+        var open = await _context.LeadFollowUps.FirstOrDefaultAsync(
+            f => f.LeadId == leadId && (f.Status == LeadFollowUpStatus.Scheduled || f.Status == LeadFollowUpStatus.Suggested), cancellationToken);
+        if (open is not null)
+        {
+            if (open.Status == LeadFollowUpStatus.Suggested && cleanReason is not null)
+                open.Reason = cleanReason;
+            return false;
+        }
+
+        var now = _dateTime.UtcNow;
+        var dismissedSince = now.AddDays(-LeadFollowUpPolicy.SuggestionCooldownDays);
+        var recentlyDismissed = await _context.LeadFollowUps.AnyAsync(
+            f => f.LeadId == leadId && f.ScheduledBy == null && f.Status == LeadFollowUpStatus.Cancelled && f.UpdatedAt > dismissedSince, cancellationToken);
+        if (recentlyDismissed)
+            return false;
+
+        var wait = Math.Clamp(months ?? LeadFollowUpPolicy.DefaultSuggestedMonths, 1, LeadFollowUpPolicy.MaxMonths);
+        var dueAt = now.AddMonths(wait);
+
+        // Staged, not saved: the caller (an AI turn) saves everything it did in one go.
+        _context.LeadFollowUps.Add(new LeadFollowUp
+        {
+            LeadId = leadId,
+            CustomerId = lead.CustomerId,
+            Status = LeadFollowUpStatus.Suggested,
+            DueAt = dueAt,
+            IntervalMonths = wait,
+            Reason = cleanReason,
+            FollowUpNumber = sent + 1
+        });
+        AddActivity(lead, LeadActivityType.FollowUpSuggested, null, dueAt.ToString("yyyy-MM-dd"),
+            $"AI noticed the customer cannot proceed right now" + (cleanReason is null ? "" : $" ({cleanReason})") +
+            $" and suggests following up in {wait} month{(wait == 1 ? "" : "s")}. Confirm it to schedule it.", null);
+
+        return true;
+    }
+
     public async Task<LeadFollowUpDto> CancelAsync(Guid id, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
         var followUp = await FindOrThrowAsync(id, cancellationToken);
-        if (followUp.Status is not (LeadFollowUpStatus.Scheduled or LeadFollowUpStatus.Failed))
+        if (followUp.Status is not (LeadFollowUpStatus.Scheduled or LeadFollowUpStatus.Failed or LeadFollowUpStatus.Suggested))
             throw new ConflictException($"This follow-up is already {followUp.Status}; there is nothing to cancel.");
 
         var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == followUp.LeadId, cancellationToken);
 
+        var wasSuggestion = followUp.Status == LeadFollowUpStatus.Suggested;
         followUp.Status = LeadFollowUpStatus.Cancelled;
-        followUp.OutcomeNote = "Cancelled by a team member.";
+        followUp.OutcomeNote = wasSuggestion ? "Suggestion dismissed by a team member." : "Cancelled by a team member.";
         if (lead is not null)
         {
-            AddActivity(lead, LeadActivityType.FollowUpCancelled, followUp.DueAt.ToString("yyyy-MM-dd"), null, "Follow-up cancelled.", cancelledByUserId);
+            AddActivity(lead, LeadActivityType.FollowUpCancelled, followUp.DueAt.ToString("yyyy-MM-dd"), null,
+                wasSuggestion ? "Follow-up suggestion dismissed." : "Follow-up cancelled.", cancelledByUserId);
             lead.LastActivityAt = _dateTime.UtcNow;
         }
 
@@ -224,6 +285,8 @@ public class LeadFollowUpService : ILeadFollowUpService
     public async Task<LeadFollowUpDto> SendNowAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var followUp = await FindOrThrowAsync(id, cancellationToken);
+        if (followUp.Status == LeadFollowUpStatus.Suggested)
+            throw new ConflictException("This follow-up was only suggested by the AI. Confirm it first - choose the message and date - and then it can be sent.");
         if (followUp.Status is not (LeadFollowUpStatus.Scheduled or LeadFollowUpStatus.Failed))
             throw new ConflictException($"This follow-up is already {followUp.Status}; it cannot be sent again.");
 
@@ -323,7 +386,9 @@ public class LeadFollowUpService : ILeadFollowUpService
             }
         }
 
-        var template = await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == followUp.MessageTemplateId, cancellationToken);
+        var template = followUp.MessageTemplateId is { } templateId
+            ? await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken)
+            : null;
         if (template is null || !IsUsable(template))
         {
             _logger.LogWarning("Lead follow-up {FollowUpId} not sent: its template is missing or not Approved", followUp.Id);
@@ -436,7 +501,7 @@ public class LeadFollowUpService : ILeadFollowUpService
         from f in _context.LeadFollowUps
         join l in _context.Leads on f.LeadId equals l.Id
         join c in _context.Customers on f.CustomerId equals c.Id
-        join t in _context.MessageTemplates on f.MessageTemplateId equals t.Id into templates
+        join t in _context.MessageTemplates on f.MessageTemplateId equals (Guid?)t.Id into templates
         from t in templates.DefaultIfEmpty()
         select new FollowUpRow { FollowUp = f, Lead = l, Customer = c, TemplateName = t == null ? null : t.Name };
 

@@ -9,5 +9,6 @@ public enum LeadActivityType
     AssignmentChanged = 3,
     FollowUpScheduled = 4,
     FollowUpSent = 5,
-    FollowUpCancelled = 6
+    FollowUpCancelled = 6,
+    FollowUpSuggested = 7
 }

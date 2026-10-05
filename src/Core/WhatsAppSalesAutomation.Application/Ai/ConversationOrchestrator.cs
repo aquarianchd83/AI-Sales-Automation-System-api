@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
+using WhatsAppSalesAutomation.Application.Leads.FollowUps;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
@@ -46,6 +47,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly ILeadScoringService _scoring;
     private readonly IAiReplyValidator _validator;
     private readonly ICrmContextBuilder _crm;
+    private readonly ILeadFollowUpService _followUps;
     private readonly ILogger<ConversationOrchestrator> _logger;
 
     public ConversationOrchestrator(
@@ -64,6 +66,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ILeadScoringService scoring,
         IAiReplyValidator validator,
         ICrmContextBuilder crm,
+        ILeadFollowUpService followUps,
         ILogger<ConversationOrchestrator> logger)
     {
         _quota = quota;
@@ -81,6 +84,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         _scoring = scoring;
         _validator = validator;
         _crm = crm;
+        _followUps = followUps;
         _logger = logger;
     }
 
@@ -215,6 +219,19 @@ public class ConversationOrchestrator : IConversationOrchestrator
             _logger.LogInformation(
                 "AI detected an opt-out from customer {CustomerId} on conversation {ConversationId}",
                 customerId, conversationId);
+        }
+
+        // Interested but cannot go ahead right now: leave a suggestion for the team to confirm. Never a send, and
+        // never a promise - the reply itself was told not to commit to getting back to them.
+        if (validated.CannotProceedNow && !validated.OptOutRequested)
+        {
+            var suggested = await _followUps.SuggestAsync(leadId, validated.CannotProceedReason, validated.FollowUpInMonths, cancellationToken);
+            if (suggested)
+            {
+                _logger.LogInformation(
+                    "AI suggested a follow-up for lead {LeadId} on conversation {ConversationId}: {Reason}",
+                    leadId, conversationId, validated.CannotProceedReason);
+            }
         }
 
         var accepted = await _qualification.CaptureAsync(
