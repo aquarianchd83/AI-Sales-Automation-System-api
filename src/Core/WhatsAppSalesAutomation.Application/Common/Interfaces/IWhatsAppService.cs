@@ -89,8 +89,9 @@ public record WhatsAppTemplateSubmission(
     IReadOnlyList<string> ExampleValues,
     WhatsAppTemplateHeaderImage? HeaderImage = null);
 
-/// <summary>The image a template shows above its body. Meta needs a sample of it to review the template, so the
-/// file itself is handed over rather than just a link.</summary>
+/// <summary>The image or video a template shows above its body (which one follows from <paramref name="ContentType"/>,
+/// see <c>TemplateHeaderMedia.FormatOf</c>). Meta needs a sample of it to review the template, so the file itself is
+/// handed over rather than just a link.</summary>
 public record WhatsAppTemplateHeaderImage(string FileName, string ContentType, byte[] Content);
 
 /// <summary><paramref name="Status"/> is Meta's raw string, same convention as WhatsAppRemoteTemplate.

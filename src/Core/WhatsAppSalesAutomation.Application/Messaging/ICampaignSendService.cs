@@ -47,9 +47,12 @@ public interface ICampaignSendService
 
     /// <summary>Closes every Running campaign that is done - no audience member still Pending or
     /// awaiting a follow-up, or the campaign's expected end date has passed - by marking it Completed.
-    /// Driven by its own twice-daily job, not by the send jobs. Returns how many were closed.</summary>
-    Task<int> CompleteFinishedCampaignsAsync(CancellationToken cancellationToken = default);
+    /// Driven by its own twice-daily job, not by the send jobs. Returns which were closed and which stay running, by name.</summary>
+    Task<CampaignCompletionResult> CompleteFinishedCampaignsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default);
 }
+
+/// <summary>What one completion run did, by campaign name, so the tenant's "finished running" notice can say which.</summary>
+public record CampaignCompletionResult(IReadOnlyList<string> Completed, IReadOnlyList<string> StillRunning);
 
 public record SendRunResult(int Considered, int Sent, int Failed, int Skipped)
 {

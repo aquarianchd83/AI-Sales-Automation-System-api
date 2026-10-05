@@ -66,10 +66,6 @@ public interface IPlatformMessageTemplateService
 
 public class PlatformMessageTemplateService : IPlatformMessageTemplateService
 {
-    /// <summary>Meta's limits for an image header: JPEG or PNG, at most 5 MB.</summary>
-    private const long MaxHeaderImageBytes = 5 * 1024 * 1024;
-    private static readonly string[] HeaderImageContentTypes = { "image/jpeg", "image/png" };
-
     private readonly IApplicationDbContext _context;
     private readonly IPlatformWhatsAppTemplateAdmin _admin;
     private readonly IPlatformWhatsAppSender _sender;
@@ -147,8 +143,8 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             var addsOrRemoves = newHeaderId is null || template.HeaderMediaAssetId is null;
             if (addsOrRemoves || !template.HeaderOnMeta)
                 throw new ConflictException(
-                    $"'{template.WhatsAppTemplateName}' is already on Meta {(template.HeaderOnMeta ? "with" : "without")} an image, and Meta fixes that when a template is created. " +
-                    "You can swap the image of a template that has one; to add or remove the image, restore the default text and use a new template name.");
+                    $"'{template.WhatsAppTemplateName}' is already on Meta {(template.HeaderOnMeta ? "with" : "without")} an image or video, and Meta fixes that when a template is created. " +
+                    "You can swap the image or video of a template that has one; to add or remove it, restore the default text and use a new template name.");
         }
 
         if (newHeaderId is { } id)
@@ -156,10 +152,17 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             var asset = await _context.PlatformMediaAssets.FirstOrDefaultAsync(m => m.Id == id, cancellationToken)
                 ?? throw new NotFoundException(nameof(PlatformMediaAsset), id);
 
-            if (!HeaderImageContentTypes.Contains(asset.ContentType, StringComparer.OrdinalIgnoreCase))
-                throw new ConflictException($"'{asset.FileName}' can't be a template image: Meta accepts JPEG or PNG for a message header.");
-            if (asset.SizeBytes > MaxHeaderImageBytes)
-                throw new ConflictException($"'{asset.FileName}' is too large for a template image: Meta allows at most 5 MB.");
+            TemplateHeaderMedia.EnsureUsable(asset.FileName, asset.ContentType, asset.SizeBytes);
+
+            // A swap on Meta must keep the kind (image or video) Meta created the template with.
+            if (template.MetaTemplateId is not null && template.HeaderMediaAssetId is { } currentId)
+            {
+                var currentType = await _context.PlatformMediaAssets
+                    .Where(m => m.Id == currentId)
+                    .Select(m => m.ContentType)
+                    .FirstOrDefaultAsync(cancellationToken);
+                TemplateHeaderMedia.EnsureSameKind(template.WhatsAppTemplateName, currentType, asset.ContentType);
+            }
         }
 
         template.HeaderMediaAssetId = newHeaderId;

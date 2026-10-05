@@ -11,6 +11,10 @@ public static class MediaAssetLinks
     public static string PublicUrl(string storageProvider, string storageKey, string storedUrl, IMediaStorageService? storage) =>
         storageProvider == ExternalProvider || storage is null ? storedUrl : storage.GetPublicUrl(storageKey);
 
+    /// <summary>Where the portal loads a video's still frame from; null when it has none (images, linked files, older videos).</summary>
+    public static string? ThumbnailUrl(string storageProvider, string? thumbnailStorageKey, IMediaStorageService? storage) =>
+        storageProvider == ExternalProvider || storage is null || string.IsNullOrEmpty(thumbnailStorageKey) ? null : storage.GetLocalPath(thumbnailStorageKey);
+
     /// <summary>What the portal loads to show the file: the tenant's own link for an external file, otherwise the path this
     /// API serves it from.</summary>
     public static string PreviewUrl(string storageProvider, string storageKey, string storedUrl, IMediaStorageService? storage) =>

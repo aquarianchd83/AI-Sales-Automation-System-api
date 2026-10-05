@@ -81,7 +81,10 @@ public class TenantJobRunner
         // template sync/token refresh are integration plumbing the tenant has no context for, so those
         // stay silent here the same way they're hidden from that tenant-facing screen.
         var notifyTenant = TenantJobCatalog.SelfServiceKeys.Contains(jobType);
-        if (notifyTenant)
+        // The campaign jobs tell the tenant campaign by campaign, by name (CampaignJobNotices), instead of one notice that
+        // does not say which campaign it was about.
+        var announce = notifyTenant && !CampaignJobNotices.PerCampaignJobTypes.Contains(jobType);
+        if (announce)
             await NotifyTenantJobEventAsync(services, tenantId, jobType, started: true, summary: null, cancellationToken);
         if (notifyTenant && services.GetService<INotificationBroadcaster>() is { } startedBroadcaster)
             await startedBroadcaster.NotifyTenantJobStartedAsync(tenantId, jobType, cancellationToken);
@@ -91,7 +94,7 @@ public class TenantJobRunner
         {
             var summary = await runForTenantAsync(services, cancellationToken);
             stopwatch.Stop();
-            if (notifyTenant)
+            if (announce)
                 await NotifyTenantJobEventAsync(services, tenantId, jobType, started: false, summary, cancellationToken);
             await RecordAsync(tenantId, jobType, TenantJobRunOutcome.Succeeded, summary, (int)stopwatch.ElapsedMilliseconds, cancellationToken);
             if (notifyTenant)

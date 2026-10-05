@@ -296,9 +296,11 @@ public sealed class CampaignSendQuotaTests : IDisposable
         Seed(TemplateCategory.Marketing, customers: 2);
         await SetAudienceState(CampaignCustomerStatus.AwaitingResponse);
 
-        await _sender.CompleteFinishedCampaignsAsync();
+        var result = await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Running, (await _db.Campaigns.SingleAsync()).Status);
+        Assert.Empty(result.Completed);
+        Assert.Equal(new[] { _campaign.Name }, result.StillRunning); // named, so the job's notice can say which campaign it left running
     }
 
     [Fact]
@@ -320,9 +322,11 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _campaign.Steps.Single().DelayDaysAfterPrevious = 1;
         await _db.SaveChangesAsync();
 
-        await _sender.CompleteFinishedCampaignsAsync();
+        var result = await _sender.CompleteFinishedCampaignsAsync();
 
         Assert.Equal(CampaignStatus.Completed, (await _db.Campaigns.SingleAsync()).Status);
+        Assert.Equal(new[] { _campaign.Name }, result.Completed);
+        Assert.Empty(result.StillRunning);
     }
 
     [Fact]

@@ -19,9 +19,14 @@ public class MessageStatusRetryJob
     public Task RunAsync(Guid tenantId) =>
         _runner.RunAsync(tenantId, TenantJobTypes.CampaignSendRetries, async (services, cancellationToken) =>
         {
-            var sendService = services.GetRequiredService<ICampaignSendService>();
-            var result = await sendService.RetryFailedSendsAsync(cancellationToken: cancellationToken);
+            var summary = await CampaignJobNotices.RunAsync(services, tenantId, "send retries", includeDueScheduled: false,
+                async (sendService, campaignId) =>
+                    CampaignJobNotices.Describe(await sendService.RetryFailedSendsAsync(campaignId, cancellationToken)),
+                cancellationToken);
 
-            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+            // Messages that belong to no campaign (a reply, a one-off send) fail too and are retried here as well; they have
+            // no campaign to name, so they are retried without a notice of their own.
+            var others = await services.GetRequiredService<ICampaignSendService>().RetryFailedSendsAsync(cancellationToken: cancellationToken);
+            return $"{summary} Other messages: {CampaignJobNotices.Describe(others)}";
         });
 }

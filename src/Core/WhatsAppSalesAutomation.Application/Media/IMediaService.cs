@@ -14,6 +14,9 @@ public interface IMediaService
     /// </summary>
     Task<MediaAssetDto> UploadAsync(Stream content, string fileName, string contentType, long sizeBytes, Guid? uploadedBy, CancellationToken cancellationToken = default);
 
+    /// <summary>Stores a still frame cut from a video as that entry's thumbnail (a JPEG, PNG or WebP), replacing any earlier one.</summary>
+    Task<MediaAssetDto> SetThumbnailAsync(Guid id, Stream content, string contentType, long sizeBytes, CancellationToken cancellationToken = default);
+
     /// <summary>Swaps the file behind an existing entry for a new one. The entry keeps its id, so templates and steps using it
     /// carry the new file; the old stored copy is removed.</summary>
     Task<MediaAssetDto> ReplaceAsync(Guid id, Stream content, string fileName, string contentType, long sizeBytes, CancellationToken cancellationToken = default);

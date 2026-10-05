@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Infrastructure.WhatsApp;
@@ -59,12 +60,12 @@ public class MetaWhatsAppCloudApiClient
 
         if (!string.IsNullOrWhiteSpace(mediaUrl))
         {
-            // Meta downloads the header image from this link, so it has to be a public absolute URL. A relative
-            // one (the local media folder with no PublicBaseUrl set) can never work; say so instead of letting Meta
-            // answer with a vague media error.
+            // Meta downloads the header image or video from this link, so it has to be a public absolute URL. A
+            // relative one (the local media folder with no PublicBaseUrl set) can never work; say so instead of
+            // letting Meta answer with a vague media error.
             if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var mediaUri) || (mediaUri.Scheme != Uri.UriSchemeHttp && mediaUri.Scheme != Uri.UriSchemeHttps))
                 return WhatsAppSendResult.Failed(
-                    "The template's header image isn't reachable by Meta: its address is not a public URL. Set the media storage PublicBaseUrl to this API's public address.");
+                    "The template's header image or video isn't reachable by Meta: its address is not a public URL. Set the media storage PublicBaseUrl to this API's public address.");
 
             // Anonymous types cannot have a computed member name, so the "image"/"video" branch
             // is spelled out explicitly rather than building the property name from mediaKind.
@@ -336,13 +337,13 @@ public class MetaWhatsAppCloudApiClient
         if (headerImageHandle is null)
             return new object[] { component };
 
-        // An image header is defined here, once, with a handle to a sample of it (from the Resumable Upload
-        // API): Meta reviews the template against that sample and afterwards only accepts an image header
-        // parameter for it. The image actually shown to a customer is supplied per send, by link.
+        // An image or video header is defined here, once, with a handle to a sample of it (from the Resumable
+        // Upload API): Meta reviews the template against that sample and afterwards only accepts a header
+        // parameter of that kind for it. The file actually shown to a customer is supplied per send, by link.
         var header = new Dictionary<string, object?>
         {
             ["type"] = "HEADER",
-            ["format"] = "IMAGE",
+            ["format"] = TemplateHeaderMedia.FormatOf(submission.HeaderImage!.ContentType) ?? TemplateHeaderMedia.Image,
             ["example"] = new { header_handle = new[] { headerImageHandle } }
         };
 
@@ -378,7 +379,9 @@ public class MetaWhatsAppCloudApiClient
             if (string.IsNullOrEmpty(sessionId))
                 return (null, "Meta did not return an upload session for the header image.");
 
-            using var uploadRequest = new HttpRequestMessage(HttpMethod.Post, new Uri(versioned, sessionId))
+            // Meta's session id looks like "upload:MTph...". Resolving it as a relative Uri would read "upload:" as a
+            // URL scheme, so it is appended to the versioned base as plain text instead.
+            using var uploadRequest = new HttpRequestMessage(HttpMethod.Post, new Uri($"{versioned}{sessionId}"))
             {
                 Content = new ByteArrayContent(image.Content)
             };

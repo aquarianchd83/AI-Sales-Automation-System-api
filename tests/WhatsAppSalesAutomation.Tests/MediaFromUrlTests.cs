@@ -158,6 +158,33 @@ public class MediaFromUrlTests : IDisposable
             Failure is not null ? throw new MediaUrlFetchException(Failure) : Task.FromResult(Result!);
     }
 
+    [Fact]
+    public async Task A_video_uploaded_with_a_frame_gets_a_thumbnail_link_that_an_image_does_not()
+    {
+        var service = Service();
+        var video = await service.UploadAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "promo.mp4", "video/mp4", 3, null);
+        Assert.Null(video.ThumbnailUrl);
+
+        var withThumb = await service.SetThumbnailAsync(video.Id, new MemoryStream(new byte[] { 9, 9 }), "image/jpeg", 2);
+
+        Assert.StartsWith("/media/", withThumb.ThumbnailUrl);
+        Assert.NotEqual(withThumb.PreviewUrl, withThumb.ThumbnailUrl);
+        Assert.Equal(withThumb.ThumbnailUrl, (await service.GetByIdAsync(video.Id)).ThumbnailUrl);
+
+        var image = await service.UploadAsync(new MemoryStream(new byte[] { 4, 5 }), "logo.png", "image/png", 2, null);
+        await Assert.ThrowsAsync<ValidationException>(() => service.SetThumbnailAsync(image.Id, new MemoryStream(new byte[] { 9 }), "image/jpeg", 1));
+    }
+
+    [Fact]
+    public async Task A_thumbnail_must_be_a_small_picture()
+    {
+        var service = Service();
+        var video = await service.UploadAsync(new MemoryStream(new byte[] { 1, 2, 3 }), "promo.mp4", "video/mp4", 3, null);
+
+        await Assert.ThrowsAsync<ValidationException>(() => service.SetThumbnailAsync(video.Id, new MemoryStream(new byte[] { 1 }), "video/mp4", 1));
+        await Assert.ThrowsAsync<ValidationException>(() => service.SetThumbnailAsync(video.Id, new MemoryStream(), "image/jpeg", MediaThumbnails.MaxSizeBytes + 1));
+    }
+
     private sealed class Storage : IMediaStorageService
     {
         public Task<MediaStorageResult> UploadAsync(Stream content, string fileName, string contentType, CancellationToken cancellationToken = default) =>

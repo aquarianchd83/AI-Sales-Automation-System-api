@@ -19,9 +19,9 @@ public class FollowUpSchedulerJob
     public Task RunAsync(Guid tenantId) =>
         _runner.RunAsync(tenantId, TenantJobTypes.CampaignFollowUps, async (services, cancellationToken) =>
         {
-            var sendService = services.GetRequiredService<ICampaignSendService>();
-            var result = await sendService.ProcessFollowUpsAsync(cancellationToken: cancellationToken);
-
-            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+            return await CampaignJobNotices.RunAsync(services, tenantId, "follow-ups", includeDueScheduled: false,
+                async (sendService, campaignId) =>
+                    CampaignJobNotices.Describe(await sendService.ProcessFollowUpsAsync(campaignId, cancellationToken)),
+                cancellationToken);
         });
 }

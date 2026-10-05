@@ -70,7 +70,8 @@ public sealed class MetaTemplateHeaderImageTests
         Assert.Equal("OAuth token-1", open.Authorization);
 
         var upload = meta.Requests[1];
-        Assert.Contains("upload:SESSION123", upload.Url);
+        // The session id starts "upload:", which must not be read as a URL scheme (that was a 500 on Sync).
+        Assert.Equal("https://graph.example.test/v19.0/upload:SESSION123", upload.Url);
         Assert.Equal("0", upload.FileOffset);
         Assert.Equal(5, upload.BodyLength);
 
@@ -80,6 +81,23 @@ public sealed class MetaTemplateHeaderImageTests
         Assert.Equal("IMAGE", components[0].GetProperty("format").GetString());
         Assert.Equal("4::HANDLE-XYZ", components[0].GetProperty("example").GetProperty("header_handle")[0].GetString());
         Assert.Equal("BODY", components[1].GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task Creating_a_template_with_a_video_defines_a_video_header()
+    {
+        var meta = HappyMeta();
+        var submission = Submission(withImage: false) with
+        {
+            HeaderImage = new WhatsAppTemplateHeaderImage("promo.mp4", "video/mp4", new byte[] { 1, 2, 3 })
+        };
+
+        var result = await Client(meta).CreateMessageTemplateAsync(Credentials(), submission, default);
+
+        Assert.True(result.Success);
+        Assert.Contains("file_type=video%2Fmp4", meta.Requests[0].Url);
+        using var payload = JsonDocument.Parse(meta.Requests[2].Body);
+        Assert.Equal("VIDEO", payload.RootElement.GetProperty("components")[0].GetProperty("format").GetString());
     }
 
     [Fact]

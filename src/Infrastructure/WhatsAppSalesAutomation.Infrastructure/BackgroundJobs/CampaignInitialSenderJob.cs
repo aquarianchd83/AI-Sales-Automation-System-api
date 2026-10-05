@@ -27,9 +27,9 @@ public class CampaignInitialSenderJob
     public Task RunAsync(Guid tenantId) =>
         _runner.RunAsync(tenantId, TenantJobTypes.CampaignInitialSends, async (services, cancellationToken) =>
         {
-            var sendService = services.GetRequiredService<ICampaignSendService>();
-            var result = await sendService.ProcessInitialSendsAsync(cancellationToken: cancellationToken);
-
-            return $"considered={result.Considered} sent={result.Sent} failed={result.Failed} skipped={result.Skipped}";
+            return await CampaignJobNotices.RunAsync(services, tenantId, "initial sends", includeDueScheduled: true,
+                async (sendService, campaignId) =>
+                    CampaignJobNotices.Describe(await sendService.ProcessInitialSendsAsync(campaignId, cancellationToken)),
+                cancellationToken);
         });
 }
