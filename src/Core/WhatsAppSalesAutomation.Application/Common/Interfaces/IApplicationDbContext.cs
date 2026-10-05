@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
+using WhatsAppSalesAutomation.Domain.Entities.Packages;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
@@ -32,6 +33,10 @@ public interface IApplicationDbContext
     DbSet<Customer> Customers { get; }
 
     DbSet<CustomerTag> CustomerTags { get; }
+
+    DbSet<SalesPackage> SalesPackages { get; }
+
+    DbSet<PackageSale> PackageSales { get; }
 
     DbSet<RefreshToken> RefreshTokens { get; }
 
@@ -87,6 +92,8 @@ public interface IApplicationDbContext
     DbSet<Lead> Leads { get; }
 
     DbSet<LeadActivity> LeadActivities { get; }
+
+    DbSet<LeadFollowUp> LeadFollowUps { get; }
 
     DbSet<QualificationField> QualificationFields { get; }
 

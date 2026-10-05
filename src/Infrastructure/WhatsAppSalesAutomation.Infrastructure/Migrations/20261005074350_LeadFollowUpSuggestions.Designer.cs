@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261005074350_LeadFollowUpSuggestions")]
+    partial class LeadFollowUpSuggestions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3515,97 +3518,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("MessageTemplates", (string)null);
                 });
 
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.PackageSale", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("CustomerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PackageId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("SoldAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CustomerId");
-
-                    b.HasIndex("PackageId");
-
-                    b.HasIndex("TenantId", "SoldAt");
-
-                    b.ToTable("PackageSales", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.SalesPackage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("DurationUnit")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<int>("DurationValue")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ExpectedSales")
-                        .HasColumnType("int");
-
-                    b.Property<string>("FeaturesText")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<decimal>("Price")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Name")
-                        .IsUnique();
-
-                    b.ToTable("SalesPackages", (string)null);
-                });
-
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4878,20 +4790,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("HeaderMediaAssetId")
                         .OnDelete(DeleteBehavior.Restrict);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.PackageSale", b =>
-                {
-                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Customers.Customer", null)
-                        .WithMany()
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Packages.SalesPackage", null)
-                        .WithMany()
-                        .HasForeignKey("PackageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Platform.PlatformMessageTemplate", b =>

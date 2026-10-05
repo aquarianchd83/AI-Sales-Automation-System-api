@@ -91,6 +91,9 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             case TenantJobTypes.LeadDiscovery:
                 _recurringJobs.AddOrUpdate<LeadDiscoveryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
+            case TenantJobTypes.LeadFollowUps:
+                _recurringJobs.AddOrUpdate<LeadFollowUpJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
+                break;
             default:
                 // Reachable only from a schedule row for a job type this build no longer knows about -
                 // the provisioner already skips those, so this is the belt-and-braces half of that guard.
@@ -117,6 +120,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             TenantJobTypes.WhatsAppTemplateSync => _backgroundJobs.Enqueue<MessageTemplateSyncJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTokenRefresh => _backgroundJobs.Enqueue<WhatsAppTokenRefreshJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.LeadDiscovery => _backgroundJobs.Enqueue<LeadDiscoveryJob>(job => job.RunAsync(tenantId)),
+            TenantJobTypes.LeadFollowUps => _backgroundJobs.Enqueue<LeadFollowUpJob>(job => job.RunAsync(tenantId)),
             _ => throw new ArgumentOutOfRangeException(nameof(jobType), jobType, "Not a per-tenant background job.")
         };
     }

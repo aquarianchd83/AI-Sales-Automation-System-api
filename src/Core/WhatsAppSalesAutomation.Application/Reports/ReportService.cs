@@ -13,6 +13,9 @@ public interface IReportService
     Task<HumanAgentPerformanceReportDto> GetAgentPerformanceAsync(int days, CancellationToken cancellationToken = default);
 
     Task<AiPerformanceReportDto> GetAiPerformanceAsync(int days, CancellationToken cancellationToken = default);
+
+    /// <summary>Package sales revenue over the last <paramref name="months"/> calendar months (this one included).</summary>
+    Task<RevenueReportDto> GetRevenueAsync(int months, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -27,6 +30,9 @@ public sealed class ReportService : IReportService
     public const int MinDays = 1;
     public const int MaxDays = 365;
     public const int DefaultDays = 30;
+    public const int MinMonths = 1;
+    public const int MaxMonths = 24;
+    public const int DefaultMonths = 3;
 
     private readonly IApplicationDbContext _context;
     private readonly IDateTimeProvider _clock;
@@ -279,4 +285,111 @@ public sealed class ReportService : IReportService
                 m.Latency is null ? null : Math.Round(m.Latency.Value, 1))).ToList(),
             daily.Select(d => new AiDailyRow(d.Date, d.Count, d.Escalated)).ToList());
     }
+    // ── Revenue ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The period is whole calendar months ending now: "3 months" is the first day of the month two months
+    /// back through today. It is compared with the equally long period straight before it. Sales are read
+    /// into memory and grouped there - a tenant's package sales over two years is a small set, and SQLite
+    /// (used by the tests) cannot SUM a decimal in SQL.
+    /// </summary>
+    public async Task<RevenueReportDto> GetRevenueAsync(int months, CancellationToken cancellationToken = default)
+    {
+        months = Math.Clamp(months, MinMonths, MaxMonths);
+        var to = _clock.UtcNow;
+        var from = new DateTime(to.Year, to.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-(months - 1));
+        var previousFrom = from.AddMonths(-months);
+
+        var sales = await _context.PackageSales
+            .Where(s => s.SoldAt >= previousFrom && s.SoldAt <= to)
+            .Select(s => new { s.PackageId, s.CustomerId, s.Amount, s.SoldAt })
+            .ToListAsync(cancellationToken);
+
+        var packages = await _context.SalesPackages
+            .Select(p => new { p.Id, p.Name, p.IsActive, p.Price, p.ExpectedSales })
+            .ToListAsync(cancellationToken);
+
+        var current = sales.Where(s => s.SoldAt >= from).ToList();
+        var previous = sales.Where(s => s.SoldAt < from).ToList();
+
+        var totalRevenue = current.Sum(s => s.Amount);
+        var previousRevenue = previous.Sum(s => s.Amount);
+
+        // A package is listed if it is active (so an unsold one is visible) or if it sold in the period.
+        var soldIds = current.Select(s => s.PackageId).ToHashSet();
+        var rows = packages
+            .Where(p => p.IsActive || soldIds.Contains(p.Id))
+            .Select(p =>
+            {
+                var own = current.Where(s => s.PackageId == p.Id).ToList();
+                var revenue = own.Sum(s => s.Amount);
+                return new PackageRevenueRowDto(
+                    p.Id,
+                    p.Name,
+                    p.IsActive,
+                    p.Price,
+                    own.Count,
+                    revenue,
+                    Percent(own.Count, current.Count),
+                    Percent(revenue, totalRevenue),
+                    own.Where(s => s.CustomerId != null).Select(s => s.CustomerId).Distinct().Count(),
+                    p.ExpectedSales * months,
+                    0);
+            })
+            .OrderByDescending(r => r.SalesCount)
+            .ThenByDescending(r => r.Revenue)
+            .ThenBy(r => r.Name)
+            .Select((r, i) => r with { Rank = r.SalesCount > 0 ? i + 1 : 0 })
+            .ToList();
+
+        var expected = packages.Where(p => p.IsActive).Sum(p => p.Price * p.ExpectedSales) * months;
+
+        return new RevenueReportDto(
+            months,
+            months == 1 ? "Day" : "Month",
+            from,
+            to,
+            totalRevenue,
+            current.Count,
+            current.Count == 0 ? 0 : Math.Round(totalRevenue / current.Count, 2),
+            current.Where(s => s.CustomerId != null).Select(s => s.CustomerId).Distinct().Count(),
+            previousRevenue,
+            previous.Count,
+            previousRevenue == 0 ? null : Math.Round((double)((totalRevenue - previousRevenue) / previousRevenue) * 100, 1),
+            expected,
+            Percent(totalRevenue, expected),
+            rows.FirstOrDefault(r => r.SalesCount > 0)?.Name,
+            rows.Where(r => r.Revenue > 0).OrderByDescending(r => r.Revenue).FirstOrDefault()?.Name,
+            BuildTrend(current.Select(s => (s.SoldAt, s.Amount)).ToList(), from, to, months),
+            rows);
+    }
+
+    private static IReadOnlyList<RevenueTrendPointDto> BuildTrend(
+        IReadOnlyList<(DateTime SoldAt, decimal Amount)> sales, DateTime from, DateTime to, int months)
+    {
+        var points = new List<RevenueTrendPointDto>();
+        if (months == 1)
+        {
+            for (var day = from; day.Date <= to.Date; day = day.AddDays(1))
+            {
+                var own = sales.Where(s => s.SoldAt.Date == day.Date).ToList();
+                points.Add(new RevenueTrendPointDto(day.Date, own.Sum(s => s.Amount), own.Count));
+            }
+            return points;
+        }
+
+        for (var i = 0; i < months; i++)
+        {
+            var start = from.AddMonths(i);
+            var own = sales.Where(s => s.SoldAt.Year == start.Year && s.SoldAt.Month == start.Month).ToList();
+            points.Add(new RevenueTrendPointDto(start, own.Sum(s => s.Amount), own.Count));
+        }
+        return points;
+    }
+
+    private static double? Percent(decimal part, decimal whole) =>
+        whole == 0 ? null : Math.Round((double)(part / whole) * 100, 1);
+
+    private static double? Percent(int part, int whole) =>
+        whole == 0 ? null : Math.Round((double)part / whole * 100, 1);
 }

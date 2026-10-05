@@ -17,6 +17,7 @@ public static class TenantJobTypes
     public const string WhatsAppTemplateSync = "whatsapp-template-sync";
     public const string WhatsAppTokenRefresh = "whatsapp-token-refresh";
     public const string LeadDiscovery = "lead-discovery";
+    public const string LeadFollowUps = "lead-follow-ups";
 }
 
 /// <summary>One per-tenant job as the Platform Admin Console needs to describe it. <see cref="Key"/> is
@@ -78,7 +79,12 @@ public static class TenantJobCatalog
             TenantJobTypes.LeadDiscovery,
             "Lead discovery",
             "Searches the web for businesses matching the tenant's lead discovery profile, verifies their contact details and saves the qualified, new ones. Does nothing until the tenant enables a profile.",
-            "0 2 * * *")
+            "0 2 * * *"),
+        new TenantJobDefinition(
+            TenantJobTypes.LeadFollowUps,
+            "Lead follow-ups",
+            "Sends the \"follow up later\" reminder to leads who were interested but could not go ahead, once the 1, 2 or 3 months chosen for them have passed. Sends only between 9am and 8pm in the tenant's timezone, and never to someone who has opted out, written in since, or been messaged in the last week.",
+            "15 * * * *")
     };
 
     /// <summary>Job types a tenant's own Admin may view, reschedule and trigger via the tenant-facing
@@ -94,6 +100,7 @@ public static class TenantJobCatalog
         TenantJobTypes.CampaignSendRetries,
         TenantJobTypes.CampaignCompletion,
         TenantJobTypes.LeadDiscovery,
+        TenantJobTypes.LeadFollowUps,
     };
 
     public static TenantJobDefinition? Find(string jobType) =>

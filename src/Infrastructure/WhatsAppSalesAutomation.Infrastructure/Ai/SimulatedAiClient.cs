@@ -23,6 +23,12 @@ public class SimulatedAiClient : IAiService
     private static readonly string[] PriceKeywords = { "price", "cost", "how much", "rate", "charges" };
     private static readonly string[] BuyingKeywords = { "want to buy", "how do i pay", "payment", "purchase", "book it", "ready to buy" };
     private static readonly string[] DemoKeywords = { "demo", "site visit", "appointment", "trial", "show me" };
+    private static readonly string[] CannotProceedKeywords =
+    {
+        "not right now", "not now", "maybe later", "maybe next", "next quarter", "can't afford", "cannot afford",
+        "budget is tight", "budget is low", "call me after", "come back in", "ask me in", "after a few months"
+    };
+    private static readonly Regex MonthsPattern = new(@"\b(\d{1,2})\s*months?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly string[] FaqKeywords = { "hours", "location", "hello", "hi", "info", "information" };
 
     private static readonly Regex BudgetPattern = new(@"(?:₹|rs\.?|inr|\$)\s?[\d,]+(?:k)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -51,6 +57,7 @@ public class SimulatedAiClient : IAiService
         }
 
         var (intent, confidence) = DetectIntent(text);
+        var cannotProceed = intent == nameof(CustomerIntent.Interested) && ContainsAny(text, CannotProceedKeywords);
         var extractedFields = ExtractFields(text, context.SchemaFields);
         var entities = ToLegacyEntities(extractedFields);
         var citedChunkIds = new List<Guid>();
@@ -95,6 +102,9 @@ public class SimulatedAiClient : IAiService
             BuyingIntentDetected: intent is nameof(CustomerIntent.PurchaseIntent) or nameof(CustomerIntent.DemoRequest),
             HumanRequested: intent == nameof(CustomerIntent.HumanRequest),
             OptOutRequested: false,
+            CannotProceedNow: cannotProceed,
+            CannotProceedReason: cannotProceed ? Truncate(text, 120) : null,
+            FollowUpInMonths: cannotProceed ? SuggestedMonths(text) : null,
             AskedFieldKey: context.FieldsToAsk.Count > 0 ? context.FieldsToAsk[0].FieldKey : null,
             DetectedLanguage: "en",
             AgentNote: $"Simulated turn; detected {intent}."));
@@ -107,6 +117,8 @@ public class SimulatedAiClient : IAiService
     {
         if (ContainsAny(text, ComplaintKeywords)) return (nameof(CustomerIntent.Complaint), 0.9);
         if (ContainsAny(text, HumanRequestKeywords)) return (nameof(CustomerIntent.HumanRequest), 0.9);
+        // Before buying: "not ready to buy right now" contains "ready to buy" and is the opposite of it.
+        if (ContainsAny(text, CannotProceedKeywords)) return (nameof(CustomerIntent.Interested), 0.85);
         if (ContainsAny(text, BuyingKeywords)) return (nameof(CustomerIntent.PurchaseIntent), 0.9);
         if (ContainsAny(text, DemoKeywords)) return (nameof(CustomerIntent.DemoRequest), 0.9);
         if (ContainsAny(text, NegotiationKeywords)) return (nameof(CustomerIntent.Negotiation), 0.85);
@@ -117,6 +129,16 @@ public class SimulatedAiClient : IAiService
         // Unrecognized phrasing - stay cautious rather than guess, so it escalates against the default
         // AiOptions.ConfidenceThreshold (0.6) instead of confidently auto-replying with a canned guess.
         return (nameof(CustomerIntent.Unknown), 0.5);
+    }
+
+    /// <summary>The wait they named, as the nearest of 1, 2 or 3 months - null when they named none.</summary>
+    private static int? SuggestedMonths(string text)
+    {
+        var match = MonthsPattern.Match(text);
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var months))
+            return Math.Clamp(months, 1, 3);
+
+        return text.Contains("next quarter", StringComparison.OrdinalIgnoreCase) ? 3 : null;
     }
 
     private static bool ContainsAny(string text, string[] keywords) =>

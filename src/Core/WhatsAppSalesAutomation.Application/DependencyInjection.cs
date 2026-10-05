@@ -24,6 +24,7 @@ using WhatsAppSalesAutomation.Application.MessageTemplates;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Settings;
+using WhatsAppSalesAutomation.Application.Packages;
 using WhatsAppSalesAutomation.Application.Tags;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
@@ -96,6 +97,7 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ITagService, TagService>();
+        services.AddScoped<IPackageService, PackageService>();
         services.AddScoped<IMediaService, MediaService>();
         services.AddScoped<IMessageTemplateService, MessageTemplateService>();
         services.AddScoped<ICampaignService, CampaignService>();
@@ -108,6 +110,7 @@ public static class DependencyInjection
         services.AddScoped<IQualificationPlanner, QualificationPlanner>();
         services.AddScoped<ICrmContextBuilder, CrmContextBuilder>();
         services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Leads.FollowUps.ILeadFollowUpService, WhatsAppSalesAutomation.Application.Leads.FollowUps.LeadFollowUpService>();
         services.AddScoped<IQualificationAdminService, QualificationAdminService>();
         services.AddScoped<ILeadScoringAdminService, LeadScoringAdminService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();

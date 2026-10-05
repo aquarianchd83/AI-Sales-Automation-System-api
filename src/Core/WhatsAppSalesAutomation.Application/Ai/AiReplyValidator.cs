@@ -144,7 +144,11 @@ public class AiReplyValidator : IAiReplyValidator
             OptOutRequested: result.OptOutRequested,
             AskedFieldKey: askedFieldKey,
             DetectedLanguage: result.DetectedLanguage,
-            AgentNote: Truncate(result.AgentNote, 500));
+            AgentNote: Truncate(result.AgentNote, 500),
+            // Someone who asked us to stop is not "interested but not now", whatever else the model reported.
+            CannotProceedNow: result.CannotProceedNow && !result.OptOutRequested,
+            CannotProceedReason: Truncate(result.CannotProceedReason, 300),
+            FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null);
     }
 
     /// <summary>

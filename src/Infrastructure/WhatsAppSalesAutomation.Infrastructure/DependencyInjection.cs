@@ -314,6 +314,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppTokenRefreshJob>();
         services.AddScoped<MessageTemplateSyncJob>();
         services.AddScoped<LeadDiscoveryJob>();
+        services.AddScoped<LeadFollowUpJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.LeadDiscovery.ILeadDiscoveryRetryScheduler, HangfireLeadDiscoveryRetryScheduler>();
         // Scoped, though it keeps no state: every call opens its own scope, so the lease heartbeat can use it
         // from a background thread while the execution's own DbContext is busy.

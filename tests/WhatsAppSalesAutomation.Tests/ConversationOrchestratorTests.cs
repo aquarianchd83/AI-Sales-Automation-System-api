@@ -8,6 +8,7 @@ using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
+using WhatsAppSalesAutomation.Application.Leads.FollowUps;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
@@ -40,6 +41,7 @@ public sealed class ConversationOrchestratorTests : IDisposable
     private readonly ScriptedAi _ai = new();
     private readonly List<string> _sent = new();
     private bool _hot;
+    private readonly List<(Guid LeadId, string? Reason, int? Months)> _suggested = new();
 
     public ConversationOrchestratorTests()
     {
@@ -93,13 +95,21 @@ public sealed class ConversationOrchestratorTests : IDisposable
                 ? Task.FromResult(new LeadScoreResult(_hot ? 80 : 10, _hot ? 80 : 10, _hot ? "Hot" : "Cold", _hot, _hot ? "asked to book" : null, Array.Empty<LeadScoreContributionDto>()))
                 : throw new NotImplementedException(m.Name));
 
+        var followUps = Fake.Of<ILeadFollowUpService>((m, a) =>
+        {
+            if (m.Name != nameof(ILeadFollowUpService.SuggestAsync))
+                throw new NotImplementedException(m.Name);
+            _suggested.Add(((Guid)a![0]!, (string?)a[1], (int?)a[2]));
+            return Task.FromResult(true);
+        });
+
         return new ConversationOrchestrator(
             _db, _clock, _ai, knowledge, leads,
             new HandoffService(_db, _clock, null!),
             new HandoffSummaryBuilder(_db, _clock, config),
             whatsApp, notifications, config, quota,
             new QualificationPlanner(_db, config, NullLogger<QualificationPlanner>.Instance),
-            scoring, new AiReplyValidator(), new CrmContextBuilder(_db),
+            scoring, new AiReplyValidator(), new CrmContextBuilder(_db), followUps,
             NullLogger<ConversationOrchestrator>.Instance);
     }
 
@@ -126,6 +136,53 @@ public sealed class ConversationOrchestratorTests : IDisposable
         ExtractedEntities: new AiExtractedEntities(null, null, null), UpdatedSummary: "Customer is asking about flats.",
         ModelUsed: "Test:fake", PromptTokens: 10, CompletionTokens: 5, LatencyMs: 1, CitedChunkIds: Array.Empty<Guid>(),
         ExtractedFields: fields, BuyingIntentDetected: buying, AskedFieldKey: asked);
+
+    private static AiReplyResult CannotProceed(string text, string? reason, int? months, bool optOut = false) =>
+        Reply(text, intent: "Interested") with { CannotProceedNow = true, CannotProceedReason = reason, FollowUpInMonths = months, OptOutRequested = optOut };
+
+    // ── Interested but cannot go ahead ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task A_customer_who_cannot_proceed_now_gets_a_follow_up_suggested_and_a_normal_reply()
+    {
+        _ai.Replies.Enqueue(CannotProceed("No problem at all - whenever you are ready.", "Budget frozen until April", 2));
+
+        await ReceiveAsync("We like it but the budget is frozen until April", ConversationMode.AI);
+
+        Assert.Equal(new[] { (_leadId, (string?)"Budget frozen until April", (int?)2) }, _suggested);
+        Assert.Equal(new[] { "No problem at all - whenever you are ready." }, _sent);
+        Assert.Empty(await _db.HumanHandoffs.ToListAsync()); // not an escalation: nobody needs to jump in
+    }
+
+    [Fact]
+    public async Task A_wait_outside_what_a_follow_up_can_be_is_clamped_before_it_is_suggested()
+    {
+        _ai.Replies.Enqueue(CannotProceed("Of course.", "After the move", 40));
+
+        await ReceiveAsync("Ask me in about three years", ConversationMode.AI);
+
+        Assert.Equal(12, _suggested.Single().Months);
+    }
+
+    [Fact]
+    public async Task Someone_who_asks_us_to_stop_is_never_suggested_a_follow_up()
+    {
+        _ai.Replies.Enqueue(CannotProceed("Understood.", "Not now", 1, optOut: true));
+
+        await ReceiveAsync("Not now, and please stop messaging me", ConversationMode.AI);
+
+        Assert.Empty(_suggested);
+    }
+
+    [Fact]
+    public async Task A_turn_that_does_not_report_it_suggests_nothing()
+    {
+        _ai.Replies.Enqueue(Reply("We have 2BHK flats in Baner and Wakad."));
+
+        await ReceiveAsync("Do you have 2BHK flats?", ConversationMode.AI);
+
+        Assert.Empty(_suggested);
+    }
 
     // ── The three modes ──────────────────────────────────────────────────────────────────────
 

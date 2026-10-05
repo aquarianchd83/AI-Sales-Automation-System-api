@@ -10,6 +10,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
+using WhatsAppSalesAutomation.Domain.Entities.Packages;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
@@ -45,6 +46,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Customer> Customers => Set<Customer>();
 
     public DbSet<CustomerTag> CustomerTags => Set<CustomerTag>();
+
+    public DbSet<SalesPackage> SalesPackages => Set<SalesPackage>();
+
+    public DbSet<PackageSale> PackageSales => Set<PackageSale>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
@@ -90,6 +95,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Lead> Leads => Set<Lead>();
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
+
+    public DbSet<LeadFollowUp> LeadFollowUps => Set<LeadFollowUp>();
 
     public DbSet<QualificationField> QualificationFields => Set<QualificationField>();
 
