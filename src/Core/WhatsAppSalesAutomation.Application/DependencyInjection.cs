@@ -24,6 +24,7 @@ using WhatsAppSalesAutomation.Application.MessageTemplates;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Settings;
+using WhatsAppSalesAutomation.Application.Setup;
 using WhatsAppSalesAutomation.Application.Packages;
 using WhatsAppSalesAutomation.Application.SocialAds;
 using WhatsAppSalesAutomation.Application.Tags;
@@ -53,6 +54,8 @@ public static class DependencyInjection
         services.Configure<TaxOptions>(configuration.GetSection("Tax"));
         services.Configure<CostAssumptionsOptions>(configuration.GetSection("Costing"));
         services.Configure<FxOptions>(configuration.GetSection("Fx"));
+        services.AddScoped<ISetupAdminService, SetupAdminService>();
+        services.AddScoped<IApplicationSetupService, ApplicationSetupService>();
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<IAiSpendEstimator, AiSpendEstimator>();
 

@@ -38,6 +38,7 @@ public class ExceptionHandlingMiddleware
             FeatureDisabledException disabled => (StatusCodes.Status403Forbidden, disabled.Message, null),
             AuthenticationFailedException auth => (StatusCodes.Status401Unauthorized, auth.Message, null),
             StorageUnavailableException storage => (StatusCodes.Status503ServiceUnavailable, storage.Message, null),
+            SetupIncompleteException incomplete => (StatusCodes.Status409Conflict, incomplete.Message, (IReadOnlyList<string>?)incomplete.Missing),
             PlanLimitExceededException planLimit => (StatusCodes.Status402PaymentRequired, planLimit.Message, null),
             FluentValidation.ValidationException validation =>
                 (StatusCodes.Status400BadRequest, "One or more validation errors occurred.", (IReadOnlyList<string>?)validation.Errors.Select(e => e.ErrorMessage).ToList()),
