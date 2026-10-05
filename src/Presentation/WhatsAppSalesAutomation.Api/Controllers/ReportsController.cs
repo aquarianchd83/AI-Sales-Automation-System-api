@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Reports;
+using WhatsAppSalesAutomation.Application.SocialAds;
 using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
@@ -20,10 +21,12 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class ReportsController : ControllerBase
 {
     private readonly IReportService _reports;
+    private readonly IMarketingComparisonService _marketing;
 
-    public ReportsController(IReportService reports)
+    public ReportsController(IReportService reports, IMarketingComparisonService marketing)
     {
         _reports = reports;
+        _marketing = marketing;
     }
 
     /// <summary>Per campaign: delivery, reads, responses and opt-outs. Optionally one campaign.</summary>
@@ -58,4 +61,14 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<RevenueReportDto>> Revenue(
         [FromQuery] int months = ReportService.DefaultMonths, CancellationToken cancellationToken = default)
         => Ok(await _reports.GetRevenueAsync(months, cancellationToken));
+
+    /// <summary>
+    /// Social media ads against WhatsApp automation over the same <c>months</c> period as <c>revenue</c>: spend, clicks, leads,
+    /// cost per sale and which channel is cheaper. Spend comes from the connected Facebook / Instagram ad account, or from
+    /// months the tenant typed in.
+    /// </summary>
+    [HttpGet("revenue/marketing-comparison")]
+    public async Task<ActionResult<MarketingComparisonDto>> MarketingComparison(
+        [FromQuery] int months = ReportService.DefaultMonths, CancellationToken cancellationToken = default)
+        => Ok(await _marketing.GetAsync(months, cancellationToken));
 }

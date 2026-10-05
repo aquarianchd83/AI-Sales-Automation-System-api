@@ -216,6 +216,14 @@ public static class DependencyInjection
         services.AddScoped<SimulatedWhatsAppClient>();
         services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
 
+        // Facebook / Instagram ad spend for the Revenue report. RemoveAllLoggers is a security requirement, as above: the code
+        // exchange carries the App Secret and tokens in the query string.
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.SocialAds.MetaAdsOptions>(configuration.GetSection("MetaAds"));
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.SocialAds.IMetaAdsClient, WhatsAppSalesAutomation.Infrastructure.SocialAds.MetaAdsClient>()
+            .RemoveAllLoggers();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.Common.Interfaces.ISecretProtector, WhatsAppSalesAutomation.Infrastructure.SocialAds.SecretProtector>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.BackgroundJobs.SocialAdSyncJob>();
+
         services.AddScoped<ITenantWhatsAppConfigProvider, TenantWhatsAppConfigProvider>();
         services.AddScoped<ITenantConfigOverrideProvider, TenantConfigOverrideProvider>();
         services.AddScoped<ITenantTimeZoneProvider, TenantTimeZoneProvider>();

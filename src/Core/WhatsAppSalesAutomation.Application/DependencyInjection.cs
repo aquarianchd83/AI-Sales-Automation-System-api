@@ -25,6 +25,7 @@ using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Application.Packages;
+using WhatsAppSalesAutomation.Application.SocialAds;
 using WhatsAppSalesAutomation.Application.Tags;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Application.Users;
@@ -98,6 +99,9 @@ public static class DependencyInjection
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IPackageService, PackageService>();
+        services.AddScoped<ISocialAdsService, SocialAdsService>();
+        services.AddScoped<ISocialAdSyncService, SocialAdSyncService>();
+        services.AddScoped<IMarketingComparisonService, MarketingComparisonService>();
         services.AddScoped<IMediaService, MediaService>();
         services.AddScoped<IMessageTemplateService, MessageTemplateService>();
         services.AddScoped<ICampaignService, CampaignService>();

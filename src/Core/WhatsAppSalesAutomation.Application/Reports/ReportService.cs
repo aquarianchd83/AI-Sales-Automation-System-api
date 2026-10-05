@@ -295,9 +295,10 @@ public sealed class ReportService : IReportService
     /// </summary>
     public async Task<RevenueReportDto> GetRevenueAsync(int months, CancellationToken cancellationToken = default)
     {
-        months = Math.Clamp(months, MinMonths, MaxMonths);
-        var to = _clock.UtcNow;
-        var from = new DateTime(to.Year, to.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-(months - 1));
+        var period = RevenuePeriod.Resolve(months, _clock.UtcNow);
+        months = period.Months;
+        var from = period.From;
+        var to = period.To;
         var previousFrom = from.AddMonths(-months);
 
         var sales = await _context.PackageSales

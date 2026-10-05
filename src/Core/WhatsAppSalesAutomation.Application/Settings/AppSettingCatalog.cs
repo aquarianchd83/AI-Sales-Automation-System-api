@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -47,6 +47,15 @@ public static class AppSettingCatalog
         new("WhatsApp:AppSecret", "WhatsApp", IsSecret: true),
         new("WhatsApp:AppId", "WhatsApp", IsSecret: false),
         new("WhatsApp:WebhookVerifyToken", "WhatsApp", IsSecret: true),
+
+        // MetaAds - the Facebook/Instagram ad-spend connection on the tenants' Settings and Revenue report. AppId/AppSecret may
+        // be left empty to reuse the Meta App set up for WhatsApp (WhatsApp:AppId / WhatsApp:AppSecret). All are live: the
+        // client reads them through IOptionsSnapshot. Needs the app's "Facebook Login" product with the redirect address added.
+        new("MetaAds:AppId", "MetaAds", IsSecret: false, Description: "Meta App ID for the ad-spend login. Empty reuses WhatsApp:AppId."),
+        new("MetaAds:AppSecret", "MetaAds", IsSecret: true, Description: "Meta App Secret for the ad-spend login. Empty reuses WhatsApp:AppSecret."),
+        new("MetaAds:ApiVersion", "MetaAds", IsSecret: false, Description: "Graph API version, e.g. v21.0."),
+        new("MetaAds:ApiBaseUrl", "MetaAds", IsSecret: false),
+        new("MetaAds:DialogBaseUrl", "MetaAds", IsSecret: false, Description: "Where the Facebook login dialog is served from (https://www.facebook.com/)."),
 
         // AiProviders - Provider/EmbeddingProvider stay restart-required, same reasoning as above.
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - restart required to take effect."),
