@@ -49,6 +49,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<SalesPackage> SalesPackages => Set<SalesPackage>();
 
+    public DbSet<PackageSale> PackageSales => Set<PackageSale>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();

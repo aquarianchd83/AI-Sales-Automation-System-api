@@ -49,4 +49,13 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<AiPerformanceReportDto>> AiPerformance(
         [FromQuery] int days = ReportService.DefaultDays, CancellationToken cancellationToken = default)
         => Ok(await _reports.GetAiPerformanceAsync(days, cancellationToken));
+
+    /// <summary>
+    /// Package sales revenue over the last <c>months</c> calendar months (1-24, default 3): totals against
+    /// the period before, a trend, and the packages ranked by how many customers bought them.
+    /// </summary>
+    [HttpGet("revenue")]
+    public async Task<ActionResult<RevenueReportDto>> Revenue(
+        [FromQuery] int months = ReportService.DefaultMonths, CancellationToken cancellationToken = default)
+        => Ok(await _reports.GetRevenueAsync(months, cancellationToken));
 }

@@ -23,3 +23,13 @@ public class SavePackageRequestValidator : AbstractValidator<SavePackageRequest>
             .WithMessage($"A feature can be at most {MaxFeatureLength} characters.");
     }
 }
+
+public class RecordPackageSaleRequestValidator : AbstractValidator<RecordPackageSaleRequest>
+{
+    public RecordPackageSaleRequestValidator()
+    {
+        RuleFor(x => x.PackageId).NotEmpty();
+        RuleFor(x => x.Amount).GreaterThanOrEqualTo(0m).LessThanOrEqualTo(1_000_000_000m).PrecisionScale(18, 2, false)
+            .When(x => x.Amount.HasValue);
+    }
+}

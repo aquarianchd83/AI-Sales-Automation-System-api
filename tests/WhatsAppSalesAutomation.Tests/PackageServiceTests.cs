@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Packages;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -17,6 +18,7 @@ public sealed class PackageServiceTests : IDisposable
     private readonly SqliteApplicationDbContext _db;
     private readonly PackageService _service;
     private readonly Guid _tenant = Guid.NewGuid();
+    private readonly TestClock _clock = new();
 
     public PackageServiceTests()
     {
@@ -24,7 +26,7 @@ public sealed class PackageServiceTests : IDisposable
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new Ambient(_tenant), new AnonymousUser()) { StampTenantId = _tenant };
         _db.Database.EnsureCreated();
-        _service = new PackageService(_db, new SavePackageRequestValidator());
+        _service = new PackageService(_db, new SavePackageRequestValidator(), new RecordPackageSaleRequestValidator(), _clock);
     }
 
     public void Dispose()
@@ -81,5 +83,66 @@ public sealed class PackageServiceTests : IDisposable
         var page = await _service.GetPagedAsync(new PagedRequest());
         Assert.Empty(page.Items);
         await Assert.ThrowsAsync<NotFoundException>(() => _service.GetByIdAsync(dto.Id));
+    }
+
+    [Fact]
+    public async Task Recording_a_sale_defaults_to_the_package_price_and_now()
+    {
+        var gold = await _service.CreateAsync(Request("Gold", 5000m));
+
+        var sale = await _service.RecordSaleAsync(new RecordPackageSaleRequest(gold.Id, null, null, null));
+
+        Assert.Equal(5000m, sale.Amount);
+        Assert.Equal(_clock.UtcNow, sale.SoldAt);
+        Assert.Equal("Gold", sale.PackageName);
+    }
+
+    [Fact]
+    public async Task A_discounted_amount_and_an_earlier_date_are_kept()
+    {
+        var gold = await _service.CreateAsync(Request("Gold", 5000m));
+        var earlier = _clock.UtcNow.AddDays(-40);
+
+        var sale = await _service.RecordSaleAsync(new RecordPackageSaleRequest(gold.Id, null, 4500m, earlier));
+
+        Assert.Equal(4500m, sale.Amount);
+        Assert.Equal(earlier, sale.SoldAt);
+    }
+
+    [Fact]
+    public async Task A_future_dated_sale_is_rejected()
+    {
+        var gold = await _service.CreateAsync(Request("Gold"));
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            _service.RecordSaleAsync(new RecordPackageSaleRequest(gold.Id, null, null, _clock.UtcNow.AddDays(10))));
+    }
+
+    [Fact]
+    public async Task A_sale_for_an_unknown_package_is_not_found()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            _service.RecordSaleAsync(new RecordPackageSaleRequest(Guid.NewGuid(), null, null, null)));
+    }
+
+    [Fact]
+    public async Task A_package_with_sales_cannot_be_deleted_until_the_sale_is_removed()
+    {
+        var gold = await _service.CreateAsync(Request("Gold"));
+        var sale = await _service.RecordSaleAsync(new RecordPackageSaleRequest(gold.Id, null, null, null));
+
+        await Assert.ThrowsAsync<ConflictException>(() => _service.DeleteAsync(gold.Id));
+
+        await _service.DeleteSaleAsync(sale.Id);
+        await _service.DeleteAsync(gold.Id);
+        Assert.Empty((await _service.GetPagedAsync(new PagedRequest())).Items);
+    }
+
+    private sealed class Ambient : ITenantContext
+    {
+        public Ambient(Guid tenantId) => TenantId = tenantId;
+        public Guid? TenantId { get; private set; }
+        public bool IsPlatformSuperAdmin => false;
+        public void SetTenant(Guid tenantId) => TenantId = tenantId;
     }
 }

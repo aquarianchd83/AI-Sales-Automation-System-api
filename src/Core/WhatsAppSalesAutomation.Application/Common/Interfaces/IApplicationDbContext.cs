@@ -36,6 +36,8 @@ public interface IApplicationDbContext
 
     DbSet<SalesPackage> SalesPackages { get; }
 
+    DbSet<PackageSale> PackageSales { get; }
+
     DbSet<RefreshToken> RefreshTokens { get; }
 
     DbSet<MediaAsset> MediaAssets { get; }

@@ -26,6 +26,26 @@ public class PackagesController : ControllerBase
     public async Task<ActionResult<PackageSummaryDto>> GetSummary(CancellationToken cancellationToken)
         => Ok(await _packageService.GetSummaryAsync(cancellationToken));
 
+    /// <summary>Recent sales, newest first.</summary>
+    [HttpGet("sales")]
+    public async Task<ActionResult<PagedResult<PackageSaleDto>>> GetSales([FromQuery] PagedRequest request, CancellationToken cancellationToken)
+        => Ok(await _packageService.GetSalesPagedAsync(request, cancellationToken));
+
+    /// <summary>Records that a customer bought a package - the data the Revenue report is built from.</summary>
+    [HttpPost("sales")]
+    public async Task<ActionResult<PackageSaleDto>> RecordSale([FromBody] RecordPackageSaleRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _packageService.RecordSaleAsync(request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpDelete("sales/{id:guid}")]
+    public async Task<IActionResult> DeleteSale(Guid id, CancellationToken cancellationToken)
+    {
+        await _packageService.DeleteSaleAsync(id, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<PackageDto>> GetById(Guid id, CancellationToken cancellationToken)
         => Ok(await _packageService.GetByIdAsync(id, cancellationToken));

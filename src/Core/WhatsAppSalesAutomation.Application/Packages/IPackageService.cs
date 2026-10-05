@@ -16,4 +16,13 @@ public interface IPackageService
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<PackageSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Records that a customer bought a package. Feeds the Revenue report.</summary>
+    Task<PackageSaleDto> RecordSaleAsync(RecordPackageSaleRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Most recent sales first.</summary>
+    Task<PagedResult<PackageSaleDto>> GetSalesPagedAsync(PagedRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a sale recorded by mistake.</summary>
+    Task DeleteSaleAsync(Guid id, CancellationToken cancellationToken = default);
 }

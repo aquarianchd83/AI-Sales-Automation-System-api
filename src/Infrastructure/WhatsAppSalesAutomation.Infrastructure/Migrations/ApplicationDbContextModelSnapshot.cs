@@ -3515,6 +3515,44 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("MessageTemplates", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.PackageSale", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PackageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("SoldAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("PackageId");
+
+                    b.HasIndex("TenantId", "SoldAt");
+
+                    b.ToTable("PackageSales", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.SalesPackage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4840,6 +4878,20 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("HeaderMediaAssetId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Packages.PackageSale", b =>
+                {
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Customers.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Packages.SalesPackage", null)
+                        .WithMany()
+                        .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Platform.PlatformMessageTemplate", b =>
