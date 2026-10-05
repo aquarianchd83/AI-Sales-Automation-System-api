@@ -146,6 +146,10 @@ public interface IApplicationDbContext
 
     DbSet<PlatformMediaAsset> PlatformMediaAssets { get; }
 
+    DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder> RazorpayOrders { get; }
+
+    DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent> RazorpayWebhookEvents { get; }
+
     DbSet<PlatformNotification> PlatformNotifications { get; }
 
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
