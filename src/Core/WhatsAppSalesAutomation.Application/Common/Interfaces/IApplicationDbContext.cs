@@ -88,6 +88,8 @@ public interface IApplicationDbContext
 
     DbSet<LeadActivity> LeadActivities { get; }
 
+    DbSet<LeadFollowUp> LeadFollowUps { get; }
+
     DbSet<QualificationField> QualificationFields { get; }
 
     DbSet<LeadQualificationValue> LeadQualificationValues { get; }

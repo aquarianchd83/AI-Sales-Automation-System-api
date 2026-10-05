@@ -6,5 +6,8 @@ public enum LeadActivityType
     ScoreChanged = 0,
     StageChanged = 1,
     Note = 2,
-    AssignmentChanged = 3
+    AssignmentChanged = 3,
+    FollowUpScheduled = 4,
+    FollowUpSent = 5,
+    FollowUpCancelled = 6
 }
