@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.AddScoped<IQualificationPlanner, QualificationPlanner>();
         services.AddScoped<ICrmContextBuilder, CrmContextBuilder>();
         services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Leads.FollowUps.ILeadFollowUpService, WhatsAppSalesAutomation.Application.Leads.FollowUps.LeadFollowUpService>();
         services.AddScoped<IQualificationAdminService, QualificationAdminService>();
         services.AddScoped<ILeadScoringAdminService, LeadScoringAdminService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();

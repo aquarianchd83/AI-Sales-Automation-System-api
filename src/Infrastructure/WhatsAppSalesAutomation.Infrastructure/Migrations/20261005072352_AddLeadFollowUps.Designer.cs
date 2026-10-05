@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using WhatsAppSalesAutomation.Infrastructure.Persistence;
 namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261005072352_AddLeadFollowUps")]
+    partial class AddLeadFollowUps
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2978,7 +2981,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("MessageId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("MessageTemplateId")
+                    b.Property<Guid>("MessageTemplateId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("OutcomeNote")
@@ -3012,8 +3015,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("LeadId")
                         .IsUnique()
-                        .HasDatabaseName("IX_LeadFollowUps_LeadId_Open")
-                        .HasFilter("[Status] IN ('Scheduled', 'Suggested')");
+                        .HasDatabaseName("IX_LeadFollowUps_LeadId_Scheduled")
+                        .HasFilter("[Status] = 'Scheduled'");
 
                     b.HasIndex("TenantId", "Status", "DueAt");
 

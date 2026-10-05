@@ -91,6 +91,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LeadActivity> LeadActivities => Set<LeadActivity>();
 
+    public DbSet<LeadFollowUp> LeadFollowUps => Set<LeadFollowUp>();
+
     public DbSet<QualificationField> QualificationFields => Set<QualificationField>();
 
     public DbSet<LeadQualificationValue> LeadQualificationValues => Set<LeadQualificationValue>();

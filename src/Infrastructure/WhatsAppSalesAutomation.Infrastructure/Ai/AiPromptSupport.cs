@@ -116,6 +116,16 @@ internal static class AiPromptSupport
         Set opt_out_requested when they ask to stop receiving messages, in any wording, in any
         language. Do not argue, do not offer alternatives, do not ask why. Acknowledge briefly and stop.
 
+        Set cannot_proceed_now when the customer IS interested in buying or subscribing but says they
+        cannot go ahead right now: the budget is not there yet, the timing is wrong, a decision-maker
+        has to agree first, "call me after Diwali", "maybe next quarter". It is not for someone who
+        is simply not interested (use intent not_interested) and not for someone ready to proceed.
+        When you set it: reply warmly and briefly, accept the delay, and do not pressure them, offer a
+        discount, ask them to commit, or ask why again. Do NOT promise to get back to them or name a
+        date - the team decides that. Put what held them back in cannot_proceed_reason, in a few words
+        and in English whatever language they wrote in. Set follow_up_in_months to 1, 2 or 3 - whichever
+        is nearest to the wait they described - and leave it out if they gave no idea of how long.
+
         ============================================================================
         TONE AND LANGUAGE
         ============================================================================
@@ -399,6 +409,25 @@ internal static class AiPromptSupport
             ["buying_intent_detected"] = new Dictionary<string, object> { ["type"] = "boolean" },
             ["human_requested"] = new Dictionary<string, object> { ["type"] = "boolean" },
             ["opt_out_requested"] = new Dictionary<string, object> { ["type"] = "boolean" },
+            // Optional (not in "required"): absent means false, so a provider that omits it changes nothing.
+            ["cannot_proceed_now"] = new Dictionary<string, object>
+            {
+                ["type"] = "boolean",
+                ["description"] =
+                    "True when the customer is interested but cannot go ahead right now (budget, timing, "
+                    + "a pending decision). Not for disinterest and not for opt-out."
+            },
+            ["cannot_proceed_reason"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["description"] = "What held them back, in a few words, in English. Only with cannot_proceed_now."
+            },
+            ["follow_up_in_months"] = new Dictionary<string, object>
+            {
+                ["type"] = "integer",
+                ["enum"] = new[] { 1, 2, 3 },
+                ["description"] = "The wait they described, as the nearest of 1, 2 or 3 months. Omit if they gave none."
+            },
             ["asked_field_key"] = new Dictionary<string, object>
             {
                 ["type"] = "string",
@@ -489,7 +518,10 @@ internal static class AiPromptSupport
             payload.OptOutRequested,
             string.IsNullOrWhiteSpace(payload.AskedFieldKey) ? null : payload.AskedFieldKey.Trim(),
             string.IsNullOrWhiteSpace(payload.DetectedLanguage) ? null : payload.DetectedLanguage.Trim(),
-            string.IsNullOrWhiteSpace(payload.AgentNote) ? null : payload.AgentNote.Trim());
+            string.IsNullOrWhiteSpace(payload.AgentNote) ? null : payload.AgentNote.Trim(),
+            payload.CannotProceedNow,
+            string.IsNullOrWhiteSpace(payload.CannotProceedReason) ? null : payload.CannotProceedReason.Trim(),
+            payload.FollowUpInMonths);
     }
 
     /// <summary>Projects the three well-known field keys out of the dynamic extraction, so every caller
@@ -545,6 +577,15 @@ internal class ToolResultPayload
 
     [JsonPropertyName("opt_out_requested")]
     public bool OptOutRequested { get; set; }
+
+    [JsonPropertyName("cannot_proceed_now")]
+    public bool CannotProceedNow { get; set; }
+
+    [JsonPropertyName("cannot_proceed_reason")]
+    public string? CannotProceedReason { get; set; }
+
+    [JsonPropertyName("follow_up_in_months")]
+    public int? FollowUpInMonths { get; set; }
 
     [JsonPropertyName("asked_field_key")]
     public string? AskedFieldKey { get; set; }

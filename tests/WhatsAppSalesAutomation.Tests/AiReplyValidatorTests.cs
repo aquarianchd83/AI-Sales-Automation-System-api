@@ -197,6 +197,51 @@ public class AiReplyValidatorTests
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────
 
+    // ── Interested but cannot proceed ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void The_cannot_proceed_report_passes_through_with_the_reason_and_wait()
+    {
+        var reply = Reply("No problem at all.") with { CannotProceedNow = true, CannotProceedReason = "Budget frozen", FollowUpInMonths = 2 };
+
+        var result = _validator.Validate(reply, Context());
+
+        Assert.True(result.CannotProceedNow);
+        Assert.Equal("Budget frozen", result.CannotProceedReason);
+        Assert.Equal(2, result.FollowUpInMonths);
+    }
+
+    [Fact]
+    public void An_opt_out_wins_over_a_cannot_proceed_report()
+    {
+        var reply = Reply("Understood.") with { CannotProceedNow = true, OptOutRequested = true };
+
+        Assert.False(_validator.Validate(reply, Context()).CannotProceedNow);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-4, 1)]
+    [InlineData(3, 3)]
+    [InlineData(40, 12)]
+    public void The_suggested_wait_is_kept_within_what_a_follow_up_allows(int reported, int expected)
+    {
+        var reply = Reply("Of course.") with { CannotProceedNow = true, FollowUpInMonths = reported };
+
+        Assert.Equal(expected, _validator.Validate(reply, Context()).FollowUpInMonths);
+    }
+
+    [Fact]
+    public void A_very_long_reason_is_truncated_and_no_wait_stays_unset()
+    {
+        var reply = Reply("Of course.") with { CannotProceedNow = true, CannotProceedReason = new string('x', 900) };
+
+        var result = _validator.Validate(reply, Context());
+
+        Assert.True(result.CannotProceedReason!.Length <= 300);
+        Assert.Null(result.FollowUpInMonths);
+    }
+
     private static AiReplyResult Reply(string text) => new(
         ResponseText: text,
         DetectedIntent: nameof(CustomerIntent.PriceEnquiry),

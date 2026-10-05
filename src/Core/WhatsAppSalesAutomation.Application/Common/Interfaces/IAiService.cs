@@ -144,7 +144,15 @@ public record AiReplyResult(
     string? DetectedLanguage = null,
     /// <summary>At most one sentence of operational conclusion for the sales team. Not chain-of-thought:
     /// the model is asked for what it concluded, not how, and the value is truncated on write.</summary>
-    string? AgentNote = null);
+    string? AgentNote = null,
+    /// <summary>The customer is interested but cannot go ahead right now (budget, timing, a decision still
+    /// pending). Not a refusal and not an opt-out. A report, like the other signals: the orchestrator turns it
+    /// into a follow-up suggestion for a person to confirm.</summary>
+    bool CannotProceedNow = false,
+    /// <summary>What they said stopped them, in a few words.</summary>
+    string? CannotProceedReason = null,
+    /// <summary>The wait that matches what they said (1, 2 or 3 months), or null when they named none.</summary>
+    int? FollowUpInMonths = null);
 
 /// <summary>One qualification value the model claims the customer supplied. Claims, not facts - the
 /// validator checks the key is in this tenant's schema and the value fits the field's type before any
