@@ -141,6 +141,39 @@ public sealed class MessageTemplateHeaderImageTests : IDisposable
     }
 
     [Fact]
+    public async Task A_template_can_carry_a_video_within_metas_limits()
+    {
+        var mp4 = Image("video/mp4", sizeBytes: 12 * 1024 * 1024, name: "promo.mp4");
+        var created = await Service().CreateAsync(NewTemplate(mp4.Id));
+        Assert.Equal(mp4.Id, created.HeaderMediaAssetId);
+
+        var huge = Image("video/mp4", sizeBytes: 17 * 1024 * 1024, name: "huge.mp4");
+        var tooBig = await Assert.ThrowsAsync<ConflictException>(() =>
+            Service().CreateAsync(NewTemplate(huge.Id) with { WhatsAppTemplateName = "too_big" }));
+        Assert.Contains("16 MB", tooBig.Message);
+
+        await Service().SyncOneAsync(created.Id);
+        Assert.Equal("video/mp4", Assert.Single(_created).HeaderImage!.ContentType);
+    }
+
+    [Fact]
+    public async Task On_meta_a_video_can_only_be_swapped_for_another_video()
+    {
+        var video = Image("video/mp4", name: "promo.mp4");
+        var otherVideo = Image("video/3gpp", name: "promo.3gp");
+        var picture = Image();
+        var created = await Service().CreateAsync(NewTemplate(video.Id));
+        await Service().SyncOneAsync(created.Id);
+
+        var error = await Assert.ThrowsAsync<ConflictException>(() =>
+            Service().UpdateAsync(created.Id, new UpdateMessageTemplateRequest("Hi {{FirstName}}", true, HeaderMediaAssetId: picture.Id)));
+        Assert.Contains("another video", error.Message);
+
+        var swapped = await Service().UpdateAsync(created.Id, new UpdateMessageTemplateRequest("Hi {{FirstName}}", true, HeaderMediaAssetId: otherVideo.Id));
+        Assert.Equal(otherVideo.Id, swapped.HeaderMediaAssetId);
+    }
+
+    [Fact]
     public async Task Syncing_a_new_template_with_an_image_hands_the_file_to_meta_and_remembers_it_has_a_header()
     {
         var image = Image();

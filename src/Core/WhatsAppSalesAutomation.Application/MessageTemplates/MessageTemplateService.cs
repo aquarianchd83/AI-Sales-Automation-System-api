@@ -21,10 +21,6 @@ public class MessageTemplateService : IMessageTemplateService
     private readonly IMediaStorageService? _mediaStorage;
     private readonly ITenantNotifier? _notifier;
 
-    /// <summary>Meta's limits for an image header: JPEG or PNG, at most 5 MB.</summary>
-    private const long MaxHeaderImageBytes = 5 * 1024 * 1024;
-    private static readonly string[] HeaderImageContentTypes = { "image/jpeg", "image/png" };
-
     public MessageTemplateService(
         IApplicationDbContext context,
         IWhatsAppService whatsApp,
@@ -77,7 +73,7 @@ public class MessageTemplateService : IMessageTemplateService
             throw new ConflictException($"A template named '{request.WhatsAppTemplateName}' already exists for language '{request.Language}'.");
 
         if (request.HeaderMediaAssetId is { } headerId)
-            await EnsureUsableHeaderImageAsync(headerId, cancellationToken);
+            await EnsureUsableHeaderMediaAsync(headerId, cancellationToken);
 
         var template = new MessageTemplate
         {
@@ -182,26 +178,35 @@ public class MessageTemplateService : IMessageTemplateService
             var addsOrRemoves = newHeaderId is null || template.HeaderMediaAssetId is null;
             if (addsOrRemoves || !template.HeaderOnMeta)
                 throw new ConflictException(
-                    $"'{template.WhatsAppTemplateName}' is already on Meta {(template.HeaderOnMeta ? "with" : "without")} an image, and Meta fixes that when a template is created. " +
-                    "You can swap the image of a template that has one, but to add or remove the image create a new template.");
+                    $"'{template.WhatsAppTemplateName}' is already on Meta {(template.HeaderOnMeta ? "with" : "without")} an image or video, and Meta fixes that when a template is created. " +
+                    "You can swap the image or video of a template that has one, but to add or remove it create a new template.");
         }
 
         if (newHeaderId is { } id)
-            await EnsureUsableHeaderImageAsync(id, cancellationToken);
+        {
+            var asset = await EnsureUsableHeaderMediaAsync(id, cancellationToken);
+
+            // A swap on Meta must keep the kind (image or video) Meta created the template with.
+            if (template.MetaTemplateId is not null && template.HeaderMediaAssetId is { } currentId)
+            {
+                var currentType = await _context.MediaAssets
+                    .Where(m => m.Id == currentId)
+                    .Select(m => m.ContentType)
+                    .FirstOrDefaultAsync(cancellationToken);
+                TemplateHeaderMedia.EnsureSameKind(template.WhatsAppTemplateName, currentType, asset.ContentType);
+            }
+        }
 
         template.HeaderMediaAssetId = newHeaderId;
     }
 
-    private async Task EnsureUsableHeaderImageAsync(Guid mediaAssetId, CancellationToken cancellationToken)
+    private async Task<Domain.Entities.Media.MediaAsset> EnsureUsableHeaderMediaAsync(Guid mediaAssetId, CancellationToken cancellationToken)
     {
         var asset = await _context.MediaAssets.FirstOrDefaultAsync(m => m.Id == mediaAssetId, cancellationToken)
             ?? throw new NotFoundException(nameof(Domain.Entities.Media.MediaAsset), mediaAssetId);
 
-        if (!HeaderImageContentTypes.Contains(asset.ContentType, StringComparer.OrdinalIgnoreCase))
-            throw new ConflictException($"'{asset.FileName}' can't be a template image: Meta accepts JPEG or PNG for a message header.");
-
-        if (asset.SizeBytes > MaxHeaderImageBytes)
-            throw new ConflictException($"'{asset.FileName}' is too large for a template image: Meta allows at most 5 MB.");
+        TemplateHeaderMedia.EnsureUsable(asset.FileName, asset.ContentType, asset.SizeBytes);
+        return asset;
     }
 
     /// <summary>The header sample Meta needs when a template with an image is created or edited there, or null when

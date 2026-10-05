@@ -19,6 +19,9 @@ public interface IPlatformMediaService
 
     Task<MediaAssetDto> UploadAsync(Stream content, string fileName, string contentType, long sizeBytes, Guid? uploadedBy, CancellationToken cancellationToken = default);
 
+    /// <summary>Stores a still frame cut from a video as that entry's thumbnail, replacing any earlier one.</summary>
+    Task<MediaAssetDto> SetThumbnailAsync(Guid id, Stream content, string contentType, long sizeBytes, CancellationToken cancellationToken = default);
+
     /// <summary>Swaps the file of an entry, keeping its id so every template using it shows the new one.</summary>
     Task<MediaAssetDto> ReplaceAsync(Guid id, Stream content, string fileName, string contentType, long sizeBytes, CancellationToken cancellationToken = default);
 
@@ -85,6 +88,37 @@ public class PlatformMediaService : IPlatformMediaService
         return ToDto(asset);
     }
 
+    public async Task<MediaAssetDto> SetThumbnailAsync(Guid id, Stream content, string contentType, long sizeBytes, CancellationToken cancellationToken = default)
+    {
+        var asset = await FindOrThrowAsync(id, cancellationToken);
+        if (!asset.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+            throw Invalid("thumbnail", "Only a video has a thumbnail.");
+
+        MediaThumbnails.Check(sizeBytes, contentType);
+
+        var stored = await _storage.UploadAsync(content, MediaThumbnails.FileNameFor(asset.FileName, contentType), contentType, cancellationToken);
+        var oldKey = asset.ThumbnailStorageKey;
+        asset.ThumbnailStorageKey = stored.StorageKey;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await DeleteQuietlyAsync(oldKey, cancellationToken);
+        return ToDto(asset);
+    }
+
+    private async Task DeleteQuietlyAsync(string? storageKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(storageKey))
+            return;
+        try
+        {
+            await _storage.DeleteAsync(storageKey, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // An orphaned file is harmless; failing the request after its real work succeeded would not be.
+        }
+    }
+
     public async Task<MediaAssetDto> ReplaceAsync(
         Guid id, Stream content, string fileName, string contentType, long sizeBytes, CancellationToken cancellationToken = default)
     {
@@ -107,16 +141,12 @@ public class PlatformMediaService : IPlatformMediaService
         asset.StorageKey = stored.StorageKey;
         asset.Url = stored.Url;
         asset.Checksum = checksum;
+        var oldThumbnailKey = asset.ThumbnailStorageKey;
+        asset.ThumbnailStorageKey = null; // a frame of the old video; the caller sends a new one with the new file
         await _context.SaveChangesAsync(cancellationToken);
 
-        try
-        {
-            await _storage.DeleteAsync(oldKey, cancellationToken);
-        }
-        catch (Exception)
-        {
-            // An orphaned old file is harmless; failing the replace after it succeeded would not be.
-        }
+        await DeleteQuietlyAsync(oldKey, cancellationToken);
+        await DeleteQuietlyAsync(oldThumbnailKey, cancellationToken);
 
         return ToDto(asset);
     }
@@ -130,6 +160,7 @@ public class PlatformMediaService : IPlatformMediaService
             throw new ConflictException($"'{asset.FileName}' is the image of the template \"{user}\". Change or remove it there before deleting the file.");
 
         await _storage.DeleteAsync(asset.StorageKey, cancellationToken);
+        await DeleteQuietlyAsync(asset.ThumbnailStorageKey, cancellationToken);
         _context.PlatformMediaAssets.Remove(asset);
         await _context.SaveChangesAsync(cancellationToken);
     }
@@ -153,7 +184,8 @@ public class PlatformMediaService : IPlatformMediaService
     {
         var url = MediaAssetLinks.PublicUrl(m.StorageProvider, m.StorageKey, m.Url, _storage);
         return new MediaAssetDto(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url),
-            MediaAssetLinks.PreviewUrl(m.StorageProvider, m.StorageKey, m.Url, _storage));
+            MediaAssetLinks.PreviewUrl(m.StorageProvider, m.StorageKey, m.Url, _storage),
+            MediaAssetLinks.ThumbnailUrl(m.StorageProvider, m.ThumbnailStorageKey, _storage));
     }
 
     private static ValidationException Invalid(string property, string message) => new(new[] { new ValidationFailure(property, message) });

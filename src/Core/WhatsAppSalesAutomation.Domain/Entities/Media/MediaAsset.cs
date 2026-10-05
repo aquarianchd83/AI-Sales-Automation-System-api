@@ -23,6 +23,10 @@ public class MediaAsset : BaseEntity, ITenantOwned
 
     public string Url { get; set; } = string.Empty;
 
+    /// <summary>Storage key of a still frame cut from a video when it was uploaded, kept beside the video so lists can show
+    /// a picture instead of a blank box. Null for images and for videos added without one.</summary>
+    public string? ThumbnailStorageKey { get; set; }
+
     /// <summary>
     /// SHA-256 of the file content, hex-encoded. Two uploads of the same bytes resolve to one
     /// MediaAsset instead of duplicate storage entries.

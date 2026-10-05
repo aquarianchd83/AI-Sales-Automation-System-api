@@ -15,6 +15,7 @@ public class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsset>
         builder.Property(m => m.ContentType).IsRequired().HasMaxLength(100);
         builder.Property(m => m.StorageProvider).IsRequired().HasMaxLength(50);
         builder.Property(m => m.StorageKey).IsRequired().HasMaxLength(500);
+        builder.Property(m => m.ThumbnailStorageKey).HasMaxLength(500);
         builder.Property(m => m.Url).IsRequired().HasMaxLength(1000);
         builder.Property(m => m.Checksum).IsRequired().HasMaxLength(64);
         builder.Property(m => m.WhatsAppMediaId).HasMaxLength(200);

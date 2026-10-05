@@ -31,13 +31,14 @@ public class PlatformMediaController : ControllerBase
 
     [HttpPost("upload")]
     [RequestSizeLimit(20_000_000)]
-    public async Task<ActionResult<MediaAssetDto>> Upload(IFormFile file, CancellationToken cancellationToken)
+    public async Task<ActionResult<MediaAssetDto>> Upload(IFormFile file, IFormFile? thumbnail, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0)
             return BadRequest("A non-empty file is required.");
 
         await using var stream = file.OpenReadStream();
         var result = await _media.UploadAsync(stream, file.FileName, file.ContentType, file.Length, _currentUser.UserId, cancellationToken);
+        result = await AttachThumbnailAsync(result, thumbnail, cancellationToken);
         await LogAsync(PlatformAuditActions.PlatformMediaUploaded, $"Uploaded \"{result.FileName}\" to the platform media library", cancellationToken);
         return Ok(result);
     }
@@ -45,13 +46,14 @@ public class PlatformMediaController : ControllerBase
     /// <summary>Replaces the file of an existing entry (same id, so every template using it follows).</summary>
     [HttpPost("{id:guid}/replace")]
     [RequestSizeLimit(20_000_000)]
-    public async Task<ActionResult<MediaAssetDto>> Replace(Guid id, IFormFile file, CancellationToken cancellationToken)
+    public async Task<ActionResult<MediaAssetDto>> Replace(Guid id, IFormFile file, IFormFile? thumbnail, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0)
             return BadRequest("A non-empty file is required.");
 
         await using var stream = file.OpenReadStream();
         var result = await _media.ReplaceAsync(id, stream, file.FileName, file.ContentType, file.Length, cancellationToken);
+        result = await AttachThumbnailAsync(result, thumbnail, cancellationToken);
         await LogAsync(PlatformAuditActions.PlatformMediaReplaced, $"Replaced the platform media file with \"{result.FileName}\"", cancellationToken);
         return Ok(result);
     }
@@ -62,6 +64,23 @@ public class PlatformMediaController : ControllerBase
         await _media.DeleteAsync(id, cancellationToken);
         await LogAsync(PlatformAuditActions.PlatformMediaDeleted, "Deleted a file from the platform media library", cancellationToken);
         return NoContent();
+    }
+
+    /// <summary>The still frame the browser cut from a video, sent in the same request. Only a video takes one, and a thumbnail
+    /// that cannot be stored never fails an upload that already succeeded - the list just shows no picture for it.</summary>
+    private async Task<MediaAssetDto> AttachThumbnailAsync(MediaAssetDto asset, IFormFile? thumbnail, CancellationToken cancellationToken)
+    {
+        if (thumbnail is null || thumbnail.Length == 0 || !asset.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+            return asset;
+        try
+        {
+            await using var stream = thumbnail.OpenReadStream();
+            return await _media.SetThumbnailAsync(asset.Id, stream, thumbnail.ContentType, thumbnail.Length, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return asset;
+        }
     }
 
     private Task LogAsync(string action, string details, CancellationToken cancellationToken) =>

@@ -91,6 +91,37 @@ public class MediaService : IMediaService
         return ToDto(asset);
     }
 
+    public async Task<MediaAssetDto> SetThumbnailAsync(Guid id, Stream content, string contentType, long sizeBytes, CancellationToken cancellationToken = default)
+    {
+        var asset = await FindOrThrowAsync(id, cancellationToken);
+        if (!asset.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+            throw Invalid("thumbnail", "Only a video has a thumbnail.");
+
+        MediaThumbnails.Check(sizeBytes, contentType);
+
+        var stored = await _storage.UploadAsync(content, MediaThumbnails.FileNameFor(asset.FileName, contentType), contentType, cancellationToken);
+        var oldKey = asset.ThumbnailStorageKey;
+        asset.ThumbnailStorageKey = stored.StorageKey;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await DeleteQuietlyAsync(oldKey, cancellationToken);
+        return ToDto(asset);
+    }
+
+    private async Task DeleteQuietlyAsync(string? storageKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(storageKey))
+            return;
+        try
+        {
+            await _storage.DeleteAsync(storageKey, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // An orphaned file is harmless; failing the request after its real work succeeded would not be.
+        }
+    }
+
     /// <summary>Size/type checks shared by upload and replace. The media options are resolved per call (not once per DI scope) -
     /// they merge this tenant's Media:* overrides, if any, over the platform default.</summary>
     private async Task CheckFileAsync(Stream content, long sizeBytes, string contentType, CancellationToken cancellationToken)
@@ -137,16 +168,12 @@ public class MediaService : IMediaService
         asset.Url = stored.Url;
         asset.Checksum = checksum;
         asset.WhatsAppMediaId = null;
+        var oldThumbnailKey = asset.ThumbnailStorageKey;
+        asset.ThumbnailStorageKey = null; // a frame of the old video; the caller sends a new one with the new file
         await _context.SaveChangesAsync(cancellationToken);
 
-        try
-        {
-            await _storage.DeleteAsync(oldKey, cancellationToken);
-        }
-        catch (Exception)
-        {
-            // An orphaned old file is harmless; failing the replace after it succeeded would not be.
-        }
+        await DeleteQuietlyAsync(oldKey, cancellationToken);
+        await DeleteQuietlyAsync(oldThumbnailKey, cancellationToken);
 
         return ToDto(asset);
     }
@@ -256,6 +283,7 @@ public class MediaService : IMediaService
         }
 
         await _storage.DeleteAsync(asset.StorageKey, cancellationToken);
+        await DeleteQuietlyAsync(asset.ThumbnailStorageKey, cancellationToken);
 
         _context.MediaAssets.Remove(asset);
         await _context.SaveChangesAsync(cancellationToken);
@@ -269,7 +297,8 @@ public class MediaService : IMediaService
     {
         var url = MediaAssetLinks.PublicUrl(m.StorageProvider, m.StorageKey, m.Url, _storage);
         return new(m.Id, m.FileName, m.ContentType, m.SizeBytes, url, m.CreatedAt, _storage.IsPublicUrl(url),
-            MediaAssetLinks.PreviewUrl(m.StorageProvider, m.StorageKey, m.Url, _storage));
+            MediaAssetLinks.PreviewUrl(m.StorageProvider, m.StorageKey, m.Url, _storage),
+            MediaAssetLinks.ThumbnailUrl(m.StorageProvider, m.ThumbnailStorageKey, _storage));
     }
 
     /// <summary>File-level checks (size/type) do not go through FluentValidation - there is no DTO

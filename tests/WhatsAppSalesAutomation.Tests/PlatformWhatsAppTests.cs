@@ -380,17 +380,23 @@ public sealed class PlatformWhatsAppTests : IDisposable
     }
 
     [Fact]
-    public async Task Only_a_small_jpeg_or_png_can_be_a_template_image()
+    public async Task Only_a_small_jpeg_png_or_video_can_be_a_template_header()
     {
         await SeedAsync();
         var t = await TemplateAsync(TenantNotificationKind.CreditsAdded);
 
-        var video = await AssetAsync("clip.mp4", "video/mp4");
+        var gif = await AssetAsync("clip.gif", "image/gif");
         var huge = await AssetAsync("huge.png", "image/png", 6 * 1024 * 1024);
+        var hugeVideo = await AssetAsync("huge.mp4", "video/mp4", 17 * 1024 * 1024);
+        var video = await AssetAsync("clip.mp4", "video/mp4", 10 * 1024 * 1024);
         var good = await AssetAsync();
 
-        await Assert.ThrowsAsync<ConflictException>(() => Templates().UpdateAsync(t.Id, Edit(t, header: video.Id)));
+        await Assert.ThrowsAsync<ConflictException>(() => Templates().UpdateAsync(t.Id, Edit(t, header: gif.Id)));
         await Assert.ThrowsAsync<ConflictException>(() => Templates().UpdateAsync(t.Id, Edit(t, header: huge.Id)));
+        await Assert.ThrowsAsync<ConflictException>(() => Templates().UpdateAsync(t.Id, Edit(t, header: hugeVideo.Id)));
+
+        var withVideo = await Templates().UpdateAsync(t.Id, Edit(t, header: video.Id));
+        Assert.Equal(video.Id, withVideo.HeaderMediaAssetId);
 
         var dto = await Templates().UpdateAsync(t.Id, Edit(t, header: good.Id));
         Assert.Equal(good.Id, dto.HeaderMediaAssetId);
