@@ -13,6 +13,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
+using WhatsAppSalesAutomation.Domain.Entities.Setup;
 using WhatsAppSalesAutomation.Infrastructure.Tenancy;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Interceptors;
@@ -39,7 +40,7 @@ public sealed record AuditedEntity(string Name, IReadOnlyList<string> Properties
 public static class AuditedEntityCatalog
 {
     /// <summary>Names of properties whose change makes an Update a StatusChange.</summary>
-    private static readonly HashSet<string> LifecycleProperties = new(StringComparer.Ordinal) { "Status", "Stage", "Mode", "IsActive" };
+    private static readonly HashSet<string> LifecycleProperties = new(StringComparer.Ordinal) { "Status", "Stage", "Mode", "IsActive", "SetupStatus" };
 
     private static readonly IReadOnlyDictionary<Type, AuditedEntity> Entities = new Dictionary<Type, AuditedEntity>
     {
@@ -72,6 +73,10 @@ public static class AuditedEntityCatalog
             new[] { "Name", "Language", "Category", "WhatsAppTemplateName", "WhatsAppTemplateStatus", "IsActive" },
             new[] { "BodyText" }),
         [typeof(QualificationField)] = new("QualificationField", new[] { "FieldKey", "DisplayName", "IsActive", "IsRequired", "Priority", "ScoreWeight" }),
+
+        // An application's lifecycle and setup state. The answers themselves are NOT here - they have their own richer,
+        // append-only history (ApplicationSetupAuditEntry, with previous/new value, reason and plan version).
+        [typeof(PlanApplication)] = new("Application", new[] { "Name", "Status", "SetupStatus", "PlanId", "PlanSetupVersionId" }),
         [typeof(LeadScoringRule)] = new("ScoringRule", new[] { "RuleKey", "DisplayName", "Points", "IsActive", "MarksLeadHot", "MatchValue" })
     };
 
@@ -122,7 +127,7 @@ public sealed class AuditTrailSaveChangesInterceptor : SaveChangesInterceptor
 
         var entries = context.ChangeTracker.Entries().ToList();
 
-        foreach (var entry in entries.Where(e => e.Entity is AuditLog && e.State is EntityState.Modified or EntityState.Deleted))
+        foreach (var entry in entries.Where(e => e.Entity is (AuditLog or ApplicationSetupAuditEntry) && e.State is (EntityState.Modified or EntityState.Deleted)))
         {
             throw new InvalidOperationException(
                 "Audit log entries are append-only and cannot be modified or deleted.");

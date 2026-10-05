@@ -38,6 +38,7 @@ public class ExceptionHandlingMiddleware
             FeatureDisabledException disabled => (StatusCodes.Status403Forbidden, disabled.Message, null),
             AuthenticationFailedException auth => (StatusCodes.Status401Unauthorized, auth.Message, null),
             StorageUnavailableException storage => (StatusCodes.Status503ServiceUnavailable, storage.Message, null),
+            SetupIncompleteException incomplete => (StatusCodes.Status409Conflict, incomplete.Message, null),
             PlanLimitExceededException planLimit => (StatusCodes.Status402PaymentRequired, planLimit.Message, null),
             FluentValidation.ValidationException validation =>
                 (StatusCodes.Status400BadRequest, "One or more validation errors occurred.", (IReadOnlyList<string>?)validation.Errors.Select(e => e.ErrorMessage).ToList()),
@@ -58,6 +59,11 @@ public class ExceptionHandlingMiddleware
 
         if (errors is { Count: > 0 })
             problemDetails.Extensions["errors"] = errors;
+
+        // Not under "errors": clients show that list as the message, and here the message is the title - the outstanding
+        // fields are for the setup wizard to point at.
+        if (exception is SetupIncompleteException setupIncomplete)
+            problemDetails.Extensions["missing"] = setupIncomplete.Missing;
 
         context.Response.ContentType = "application/problem+json";
         context.Response.StatusCode = statusCode;

@@ -11,6 +11,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
+using WhatsAppSalesAutomation.Domain.Entities.Setup;
 using WhatsAppSalesAutomation.Domain.Entities.SocialAds;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Audit;
@@ -49,6 +50,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<CustomerTag> CustomerTags => Set<CustomerTag>();
 
     public DbSet<SalesPackage> SalesPackages => Set<SalesPackage>();
+
+    // Plan-driven setup. PlanSetupVersion/PlanRequirement are platform-global (like Plan); the rest is tenant-owned.
+    public DbSet<PlanSetupVersion> PlanSetupVersions => Set<PlanSetupVersion>();
+
+    public DbSet<PlanRequirement> PlanRequirements => Set<PlanRequirement>();
+
+    public DbSet<PlanApplication> PlanApplications => Set<PlanApplication>();
+
+    public DbSet<ApplicationSetupValue> ApplicationSetupValues => Set<ApplicationSetupValue>();
+
+    public DbSet<ApplicationSetupAuditEntry> ApplicationSetupAuditEntries => Set<ApplicationSetupAuditEntry>();
+
+    public DbSet<ApplicationExecution> ApplicationExecutions => Set<ApplicationExecution>();
 
     public DbSet<PackageSale> PackageSales => Set<PackageSale>();
 

@@ -62,4 +62,10 @@ public static class PlatformAuditActions
     public const string KnowledgeArticleDeprecated = "KnowledgeArticleDeprecated";
     public const string KnowledgeArticleDeleted = "KnowledgeArticleDeleted";
     public const string KnowledgeReindexed = "KnowledgeReindexed";
+    public const string SetupVersionCreated = "SetupVersionCreated";
+    public const string SetupVersionUpdated = "SetupVersionUpdated";
+    public const string SetupVersionPublished = "SetupVersionPublished";
+    public const string SetupVersionDeleted = "SetupVersionDeleted";
+    public const string SetupRequirementSaved = "SetupRequirementSaved";
+    public const string SetupRequirementDeleted = "SetupRequirementDeleted";
 }
