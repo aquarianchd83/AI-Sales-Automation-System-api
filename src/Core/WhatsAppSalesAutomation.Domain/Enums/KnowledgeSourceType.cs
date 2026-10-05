@@ -30,5 +30,10 @@ public enum KnowledgeSourceType
     /// rows migrate to. Rank 30, which is <c>KnowledgeAuthority.TenantMaxRank</c>.</summary>
     AdminConfiguredArticle = 13,
 
-    HistoricalDocumentation = 14
+    HistoricalDocumentation = 14,
+
+    /// <summary>Voucher / promo / coupon documents (codes, discounts, validity, redemption terms).
+    /// Authorable by tenants and platform admins alike; like every tenant-authored type it ranks at
+    /// most <c>KnowledgeAuthority.TenantMaxRank</c>, so a voucher can never override a platform policy.</summary>
+    Voucher = 15
 }

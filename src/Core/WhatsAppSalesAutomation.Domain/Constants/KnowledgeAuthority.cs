@@ -39,6 +39,7 @@ public static class KnowledgeAuthority
             [KnowledgeSourceType.KnownIssue] = 45,
             [KnowledgeSourceType.ReleaseChangeNote] = 40,
             [KnowledgeSourceType.AdminConfiguredArticle] = 30,
+            [KnowledgeSourceType.Voucher] = 30,
             [KnowledgeSourceType.HistoricalDocumentation] = 10
         };
 
@@ -89,6 +90,8 @@ public static class KnowledgeAuthority
     {
         KnowledgeSourceType.KnownIssue => 30,
         KnowledgeSourceType.ReleaseChangeNote => 90,
+        // Vouchers expire; ask for re-confirmation far more often than for a general article.
+        KnowledgeSourceType.Voucher => 30,
         KnowledgeSourceType.PlatformPolicy or KnowledgeSourceType.LegalCompliance
             or KnowledgeSourceType.RefundCancellationPolicy or KnowledgeSourceType.BillingRule => 180,
         KnowledgeSourceType.ProductDocumentation or KnowledgeSourceType.FeatureModuleDocumentation
