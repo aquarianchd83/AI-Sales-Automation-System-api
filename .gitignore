@@ -12,6 +12,8 @@ logs/
 ## EF Core / secrets
 *.db
 appsettings.*.local.json
+docs/credentials/
+*accessKeys*.csv
 
 ## Local media storage (LocalFileMediaStorageService) - runtime-uploaded files, not source
 src/Presentation/WhatsAppSalesAutomation.Api/App_Data/
