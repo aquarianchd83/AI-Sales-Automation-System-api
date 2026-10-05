@@ -1,7 +1,13 @@
+using System.Text.Json.Serialization;
+
 namespace WhatsAppSalesAutomation.Domain.Enums;
+
+// Every enum here travels over the API by NAME ("Currency", "RequiresUpdate"), not by number: the setup screens are driven
+// by these values, and a renumbered enum must not silently change what a stored or in-flight value means.
 
 /// <summary>The kinds of answer a plan can ask a tenant for. The Talent UI renders one input per type, so a new
 /// plan never needs new UI - only a new type does.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SetupFieldType
 {
     Text = 0,
@@ -21,6 +27,7 @@ public enum SetupFieldType
 }
 
 /// <summary>How a requirement decides whether it is shown (and therefore required) based on another field's answer.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SetupConditionOperator
 {
     Equals = 0,
@@ -39,6 +46,7 @@ public enum SetupConditionOperator
 /// applications, and publishing the next one marks the previous Superseded (it stays readable - existing
 /// applications keep using it until migrated).
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SetupVersionStatus
 {
     Draft = 0,
@@ -46,6 +54,7 @@ public enum SetupVersionStatus
     Superseded = 2
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ApplicationSetupStatus
 {
     NotStarted = 0,
@@ -59,12 +68,14 @@ public enum ApplicationSetupStatus
     RequiresUpdate = 5
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ApplicationStatus
 {
     Active = 0,
     Archived = 1
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SetupAuditAction
 {
     ApplicationCreated = 0,

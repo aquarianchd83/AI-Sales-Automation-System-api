@@ -34,7 +34,7 @@ public static class SetupRequirementSeeder
         new Spec("business_description", "Business description", SetupFieldType.MultilineText, S, true,
             "What you do and what makes you different, in a few sentences.", Rules: new(null, null, 20, 1000, null, null)),
         new Spec("website", "Website", SetupFieldType.Url, S, false, "Include https://"),
-        new Spec("logo", "Logo", SetupFieldType.FileUpload, S, false, "PNG or JPG, used on posts and creatives."),
+        new Spec("logo", "Logo", SetupFieldType.FileUpload, S, false, "PNG, JPG or WebP - used on posts and creatives."),
 
         new Spec("target_audience", "Target audience", SetupFieldType.MultilineText, A, true,
             "Who should see your content? Age, interests, where they live, what they need."),
@@ -114,7 +114,7 @@ public static class SetupRequirementSeeder
         new Spec("pricing", "Pricing", SetupFieldType.MultilineText, P, true, "Your prices, plans and any discounts the assistant may mention."),
         new Spec("package_price", "Average price per customer", SetupFieldType.Currency, P, false, "Used to estimate your revenue.", Metric: SetupMetrics.PackagePrice),
         new Spec("faqs", "Frequently asked questions", SetupFieldType.MultilineText, P, true, "Questions customers ask, with your answers."),
-        new Spec("knowledge_base_file", "Knowledge base document", SetupFieldType.FileUpload, P, false, "A brochure or price list the assistant can learn from."),
+        new Spec("knowledge_base_file", "Product catalogue or brochure", SetupFieldType.FileUpload, P, false, "An image of your catalogue or price list (JPG, PNG or WebP)."),
         new Spec("sales_pitch", "Sales pitch", SetupFieldType.MultilineText, P, true, "How you would pitch to a new customer, in your own words."),
 
         new Spec("lead_qualification_criteria", "Lead qualification criteria", SetupFieldType.MultilineText, C, true, "When is a lead ready to be handed to your team?"),

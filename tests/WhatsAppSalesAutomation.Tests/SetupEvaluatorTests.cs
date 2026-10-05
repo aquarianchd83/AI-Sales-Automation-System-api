@@ -286,3 +286,38 @@ public sealed class SetupEvaluatorTests
         Assert.Equal(new[] { "Package price", "Expected customers" }, partial.MissingInputs);
     }
 }
+
+/// <summary>The setup screens are driven by enum values, so they must cross the API by name and be accepted by name.</summary>
+public sealed class SetupWireFormatTests
+{
+    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+
+    [Fact]
+    public void Enums_are_written_as_names()
+    {
+        var field = new SetupFieldDto(Guid.NewGuid(), "k", "K", null, SetupFieldType.Currency, true, null,
+            Array.Empty<SetupOptionDto>(), null, 1, "business",
+            new SetupConditionDto("other", SetupConditionOperator.NotEmpty, null), null, true);
+
+        var json = JsonSerializer.Serialize(field, Web);
+
+        Assert.Contains("\"fieldType\":\"Currency\"", json);
+        Assert.Contains("\"operator\":\"NotEmpty\"", json);
+    }
+
+    [Fact]
+    public void Requests_accept_enum_names_and_a_save_request_accepts_mixed_json_values()
+    {
+        var requirement = JsonSerializer.Deserialize<SaveRequirementRequest>(
+            "{\"fieldKey\":\"a_b\",\"label\":\"A\",\"fieldType\":\"MultiSelect\",\"isRequired\":true,\"displayOrder\":1,\"section\":\"x\",\"isActive\":true," +
+            "\"condition\":{\"fieldKey\":\"c\",\"operator\":\"Contains\",\"value\":\"v\"}}", Web)!;
+        Assert.Equal(SetupFieldType.MultiSelect, requirement.FieldType);
+        Assert.Equal(SetupConditionOperator.Contains, requirement.Condition!.Operator);
+
+        var save = JsonSerializer.Deserialize<SaveSetupRequest>(
+            "{\"values\":{\"a\":\"text\",\"b\":12.5,\"c\":true,\"d\":[\"x\",\"y\"],\"e\":null},\"complete\":true}", Web)!;
+        Assert.True(save.Complete);
+        Assert.Equal(5, save.Values!.Count);
+        Assert.Equal(JsonValueKind.Null, save.Values["e"].ValueKind);
+    }
+}
