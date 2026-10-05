@@ -44,6 +44,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<DataRetentionJob>(
             "data-retention", job => job.RunAsync(), "20 3 * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Daily at 04:10 UTC (after the data-retention pass at 03:20): refreshes every connected tenant's Facebook / Instagram
+        // ad spend for the Revenue report. Idempotent - it re-reads the last 35 days and overwrites them - so a repeat is harmless.
+        recurringJobs.AddOrUpdate<SocialAdSyncJob>(
+            "social-ad-sync", job => job.RunAsync(), "10 4 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Hourly at :40, clear of the subscription pass at :05 and the tenants' own template syncs at :00: sends the platform's notice
         // templates to Meta and brings their review status back. A no-op until the platform WhatsApp number is set up.
         recurringJobs.AddOrUpdate<PlatformTemplateSyncJob>(
