@@ -39,7 +39,8 @@ public readonly record struct ChunkingParameters(int TargetTokens, int MaxTokens
             => new(450, 900, 150, 60),
 
         // Small independent items.
-        KnowledgeSourceType.KnownIssue or KnowledgeSourceType.ReleaseChangeNote
+        // A voucher is a small self-contained offer (code + terms): keep it in one chunk.
+        KnowledgeSourceType.KnownIssue or KnowledgeSourceType.ReleaseChangeNote or KnowledgeSourceType.Voucher
             => new(300, 600, 80, 30),
 
         _ => new(500, 1000, 150, 80)
