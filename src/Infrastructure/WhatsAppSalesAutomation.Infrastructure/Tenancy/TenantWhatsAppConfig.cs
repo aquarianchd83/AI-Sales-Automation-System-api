@@ -72,6 +72,22 @@ public class TenantWhatsAppConfig : ITenantOwned
     /// tenant's WABA usable" flag for the frontend, not a live Meta connectivity check.</summary>
     public bool IsConnected { get; set; }
 
+    // ---- Live verification: "Verify connection" asks Meta for the phone number with the stored token. Every
+    // save clears these, so a verified tick always describes the credentials as they are now. ----
+
+    /// <summary>When Meta last confirmed these credentials can read the phone number. Null: never verified
+    /// since the last save, or the last attempt failed (see <see cref="VerificationError"/>).</summary>
+    public DateTime? VerifiedAtUtc { get; set; }
+
+    /// <summary>Why the last verification failed, in Meta's words. Null after a success or a save.</summary>
+    public string? VerificationError { get; set; }
+
+    /// <summary>The number as Meta reports it, e.g. "+91 98765 43210" - proof the right number is connected.</summary>
+    public string? VerifiedDisplayPhoneNumber { get; set; }
+
+    /// <summary>The business display name Meta has approved for the number.</summary>
+    public string? VerifiedName { get; set; }
+
     public DateTime UpdatedAtUtc { get; set; }
 
     public Guid? UpdatedByUserId { get; set; }

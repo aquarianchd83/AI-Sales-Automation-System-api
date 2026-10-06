@@ -24,7 +24,6 @@ using WhatsAppSalesAutomation.Application.MessageTemplates;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Settings;
-using WhatsAppSalesAutomation.Application.Setup;
 using WhatsAppSalesAutomation.Application.Packages;
 using WhatsAppSalesAutomation.Application.SocialAds;
 using WhatsAppSalesAutomation.Application.Tags;
@@ -54,9 +53,9 @@ public static class DependencyInjection
         services.Configure<TaxOptions>(configuration.GetSection("Tax"));
         services.Configure<CostAssumptionsOptions>(configuration.GetSection("Costing"));
         services.Configure<FxOptions>(configuration.GetSection("Fx"));
-        services.AddScoped<ISetupAdminService, SetupAdminService>();
-        services.AddScoped<IApplicationSetupService, ApplicationSetupService>();
         services.AddScoped<IPricingService, PricingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Onboarding.IOnboardingService, WhatsAppSalesAutomation.Application.Onboarding.OnboardingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Tenancy.IKeywordSuggestionService, WhatsAppSalesAutomation.Application.Tenancy.KeywordSuggestionService>();
         services.AddScoped<IAiSpendEstimator, AiSpendEstimator>();
 
         // Phase 6 ingestion. The chunker and counter are stateless; the batcher and services are

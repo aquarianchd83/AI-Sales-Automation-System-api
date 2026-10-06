@@ -26,7 +26,11 @@ public record TenantProfileDto(
     IReadOnlyList<string> DomainKeywords,
     string Timezone,
     string? CountryCode,
-    string? StateCode = null)
+    string? StateCode = null,
+    string? WorkingHours = null,
+    string? TargetAudience = null,
+    string? TargetLocation = null,
+    string? TargetCustomerType = null)
 {
     /// <summary>Shared by the tenant's self-service endpoints and the Platform Admin Console's
     /// timezone/country overrides, so every path returns the same effective values.</summary>
@@ -41,7 +45,11 @@ public record TenantProfileDto(
         tenant.DomainKeywords.ToList(),
         string.IsNullOrWhiteSpace(tenant.Timezone) ? TimeZoneCatalog.DefaultId : tenant.Timezone,
         tenant.CountryCode,
-        tenant.StateCode);
+        tenant.StateCode,
+        tenant.WorkingHours,
+        tenant.TargetAudience,
+        tenant.TargetLocation,
+        tenant.TargetCustomerType);
 }
 
 /// <summary>Body of PUT the tenant's own business profile - replaces every business field at once, so
@@ -57,7 +65,11 @@ public record UpdateTenantBusinessProfileRequest(
     string? WebsiteUrl,
     string? SupportEmail,
     string? SupportPhone,
-    IReadOnlyList<string>? DomainKeywords) : ITenantBusinessDetails;
+    IReadOnlyList<string>? DomainKeywords,
+    string? WorkingHours = null,
+    string? TargetAudience = null,
+    string? TargetLocation = null,
+    string? TargetCustomerType = null) : ITenantBusinessDetails;
 
 /// <summary>Body of PUT the tenant's own timezone - see TenantProfileDto's own doc comment for why
 /// this is never blank on the way out; on the way in it must be one of TimeZoneCatalog.All (see

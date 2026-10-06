@@ -109,7 +109,10 @@ public class AuthService : IAuthService
             // to anyway. Keeps the column non-null for every tenant going forward, matching the
             // AddTenantTimezone migration's one-time backfill of pre-existing tenants.
             Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone,
-            ProductName = TenantBusinessDetails.Clean(request.ProductName)
+            ProductName = TenantBusinessDetails.Clean(request.ProductName),
+            // The address given at registration is where the business can be reached until it says otherwise, so the
+            // Business Profile's contact details start from it instead of blank. Editable there.
+            SupportEmail = TenantBusinessDetails.Clean(request.Email)
         };
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);

@@ -65,6 +65,22 @@ public class Tenant : BaseEntity
 
     public string? SupportPhone { get; set; }
 
+    /// <summary>When the tenant finished every onboarding step (see TenantOnboardingStep). Null while onboarding
+    /// is still in progress; until then the tenant's users are held in the onboarding wizard.</summary>
+    public DateTime? OnboardingCompletedAt { get; set; }
+
+    // ---- Audience - who the business sells to. Edited on the Business Profile page. ----
+
+    /// <summary>Who the business wants to reach: age, interests, where they live, what they need.</summary>
+    public string? TargetAudience { get; set; }
+
+    /// <summary>The cities or regions customers are sought in. Not <see cref="BusinessLocation"/>, which is where
+    /// the business itself operates.</summary>
+    public string? TargetLocation { get; set; }
+
+    /// <summary>The kind of customer targeted - a setup option value such as "smb" or "consumers".</summary>
+    public string? TargetCustomerType { get; set; }
+
     /// <summary>Where the business operates, as a customer would understand it, e.g. "Mohali, Punjab"
     /// or "Pan-India (online)". Free text rather than derived from <see cref="CountryCode"/>/
     /// <see cref="StateCode"/>: those exist for tax and pricing, and neither answers "where are you

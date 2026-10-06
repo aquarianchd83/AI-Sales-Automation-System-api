@@ -30,4 +30,9 @@ public class SalesPackage : BaseEntity, ITenantOwned
     public int ExpectedSales { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>The platform plan the tenant was subscribed to when it created this package - what the package is
+    /// built on. Set on creation and never changed by an edit. A plain Guid, not a foreign key: a plan can be
+    /// retired without touching the packages built on it. Null only for packages created before this existed.</summary>
+    public Guid? PlatformPlanId { get; set; }
 }

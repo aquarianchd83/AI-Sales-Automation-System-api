@@ -16,6 +16,9 @@ public class TenantWhatsAppConfigConfiguration : IEntityTypeConfiguration<Tenant
         builder.Property(c => c.AppId).HasMaxLength(64);
         builder.Property(c => c.ApiVersion).HasMaxLength(20);
         builder.Property(c => c.ApiBaseUrl).HasMaxLength(500);
+        builder.Property(c => c.VerificationError).HasMaxLength(300);
+        builder.Property(c => c.VerifiedDisplayPhoneNumber).HasMaxLength(40);
+        builder.Property(c => c.VerifiedName).HasMaxLength(200);
 
         // The webhook routing key (WebhooksController.Receive resolves the inbound tenant off Meta's
         // metadata.phone_number_id before anything else) - one tenant's WABA phone number can never

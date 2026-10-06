@@ -32,6 +32,14 @@ public class TenantProfileController : ControllerBase
     public async Task<ActionResult<TenantProfileDto>> UpdateBusinessProfile([FromBody] UpdateTenantBusinessProfileRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateBusinessProfileForCurrentTenantAsync(request, cancellationToken));
 
+    /// <summary>Suggests domain keywords for an industry: from the tenant's own AI provider when one is really
+    /// configured, otherwise from a built-in list of common terms. Says which in <c>source</c>. Nothing is saved - the
+    /// screen decides which to add.</summary>
+    [HttpPost("keyword-suggestions")]
+    public async Task<ActionResult<KeywordSuggestionsDto>> SuggestKeywords(
+        [FromBody] SuggestKeywordsRequest request, [FromServices] IKeywordSuggestionService suggestions, CancellationToken cancellationToken)
+        => Ok(await suggestions.SuggestAsync(request, cancellationToken));
+
     [HttpPut("timezone")]
     public async Task<ActionResult<TenantProfileDto>> UpdateTimezone([FromBody] UpdateTenantTimezoneRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateTimezoneForCurrentTenantAsync(request, cancellationToken));

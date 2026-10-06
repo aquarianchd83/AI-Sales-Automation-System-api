@@ -209,6 +209,10 @@ public static class DependencyInjection
         services.AddHttpClient<ITenantWhatsAppTokenRefreshService, TenantWhatsAppTokenRefreshService>()
             .RemoveAllLoggers();
 
+        // "Verify connection" - the token goes in a header, but the loggers come off for the same reason as above.
+        services.AddHttpClient<ITenantWhatsAppConnectionVerifier, TenantWhatsAppConnectionVerifier>()
+            .RemoveAllLoggers();
+
         services.AddHttpClient<MetaWhatsAppCloudApiClient>();
         services.AddHttpClient<IMediaUrlFetcher, WhatsAppSalesAutomation.Infrastructure.Storage.HttpMediaUrlFetcher>()
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
@@ -244,6 +248,9 @@ public static class DependencyInjection
 
         services.AddScoped<ITenantAiConfigProvider, TenantAiConfigProvider>();
         services.AddScoped<IActiveAiProviderAccessor, ActiveAiProviderAccessor>();
+
+        // One-shot text for helper features (keyword suggestions). Loggers removed: it carries the tenant's API key.
+        services.AddHttpClient<IAiTextGenerator, AiTextGenerator>().RemoveAllLoggers();
 
         services.AddHttpClient<AnthropicAiClient>();
         services.AddHttpClient<OpenAiAiClient>();

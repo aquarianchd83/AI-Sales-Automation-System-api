@@ -210,7 +210,6 @@ try
         // The plan catalog signup/billing depend on - real data every environment needs, not a
         // Seed:* gated dev convenience, so this always runs (see PlanSeeder's own doc comment).
         await PlanSeeder.SeedAsync(scope.ServiceProvider);
-        await SetupRequirementSeeder.SeedAsync(scope.ServiceProvider);
         await QuotaCatalogSeeder.SeedAsync(scope.ServiceProvider);
 
         // The Content Management System's starter FAQ catalog - real customer-facing content every
