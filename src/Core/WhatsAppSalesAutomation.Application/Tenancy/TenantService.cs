@@ -58,6 +58,10 @@ public class TenantService : ITenantService
         var tenant = await GetCurrentTenantAsync(cancellationToken);
         tenant.Name = request.CompanyName.Trim();
         TenantBusinessDetails.ApplyTo(tenant, request);
+        tenant.WorkingHours = TenantBusinessDetails.Clean(request.WorkingHours);
+        tenant.TargetAudience = TenantBusinessDetails.Clean(request.TargetAudience);
+        tenant.TargetLocation = TenantBusinessDetails.Clean(request.TargetLocation);
+        tenant.TargetCustomerType = TenantBusinessDetails.Clean(request.TargetCustomerType);
         await _context.SaveChangesAsync(cancellationToken);
 
         return TenantProfileDto.From(tenant);

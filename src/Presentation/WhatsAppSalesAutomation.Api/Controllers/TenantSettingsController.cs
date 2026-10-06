@@ -1,19 +1,17 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
-/// A tenant's own read-only view of its WhatsApp Business Account connection, AI provider setup, and
-/// message usage. This used to also be where a tenant's own Admin pasted in credentials and chose an
-/// AI provider (Phase B) - that write access has moved to the Platform Admin Console exclusively (see
-/// PlatformTenantConfigController's own doc comment for why): both hold real, security-sensitive
-/// credentials that a PlatformSuperAdmin now owns end to end, the same reasoning SettingsController
-/// already applies to the platform-global catalog. A tenant's own Admin can still see whether they're
-/// connected and what's configured (masked, same as before) - just not change it.
+/// A tenant's own settings: its WhatsApp Business Account connection (which the tenant's Admin and the Platform
+/// Admin both own - either can save it and verify it against Meta), a read-only view of the AI provider setup
+/// (platform-owned), and message usage and charges. Secrets are never returned, only whether each is set.
 /// </summary>
 [ApiController]
 [Route("api/v1/tenant-settings")]
@@ -63,6 +61,43 @@ public class TenantSettingsController : ControllerBase
     [HttpGet("charges")]
     public async Task<ActionResult<TenantChargesDto>> GetCharges(CancellationToken cancellationToken)
         => Ok(await _charges.GetCurrentMonthAsync(cancellationToken));
+
+    /// <summary>The tenant's Admin saves its own WhatsApp credentials (shared with the Platform Admin Console, which
+    /// writes the same row). Saving clears any earlier verification: verify again afterwards. Same "null keeps the
+    /// stored secret, empty string clears it" convention as the platform endpoint.</summary>
+    [HttpPut("whatsapp")]
+    public async Task<ActionResult<TenantWhatsAppConfigDto>> SaveWhatsAppConfig(
+        [FromBody] UpdateTenantWhatsAppConfigRequest request,
+        [FromServices] ICurrentUserService currentUser,
+        [FromServices] IPlatformJobService jobs,
+        [FromServices] ILogger<TenantSettingsController> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = RequireTenantId();
+        var result = await _whatsAppConfigProvider.SaveConfigForTenantAsync(tenantId, request, currentUser.UserId, cancellationToken);
+
+        // A token pasted from Meta's explorer lives about an hour; exchange it now rather than at the nightly run,
+        // exactly as the platform endpoint does. Never fails the save.
+        if ((!string.IsNullOrEmpty(request.AccessToken) || !string.IsNullOrEmpty(request.AppSecret)) && currentUser.UserId is { } actor)
+        {
+            try
+            {
+                await jobs.TriggerAsync(tenantId, TenantJobTypes.WhatsAppTokenRefresh, actor, currentUser.Email ?? string.Empty, cancellationToken);
+            }
+            catch (Exception ex) when (ex is ConflictException or NotFoundException)
+            {
+                logger.LogWarning("WhatsApp token refresh not started after a tenant saved credentials for {TenantId}: {Reason}", tenantId, ex.Message);
+            }
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>Asks Meta whether the saved credentials reach the phone number, and records the answer.</summary>
+    [HttpPost("whatsapp/verify")]
+    public async Task<ActionResult<TenantWhatsAppConfigDto>> VerifyWhatsAppConfig(
+        [FromServices] ITenantWhatsAppConnectionVerifier verifier, CancellationToken cancellationToken)
+        => Ok(await verifier.VerifyAsync(RequireTenantId(), cancellationToken));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated tenant-settings request has no tenant in scope.");

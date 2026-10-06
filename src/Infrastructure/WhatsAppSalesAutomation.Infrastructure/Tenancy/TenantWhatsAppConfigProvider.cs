@@ -143,6 +143,12 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
             row.AppId = request.AppId.Trim();
 
         row.IsConnected = !string.IsNullOrWhiteSpace(row.PhoneNumberId) && row.AccessToken is not null && row.AppSecret is not null;
+
+        // Whatever was verified before described the credentials as they were; they have to be verified again.
+        row.VerifiedAtUtc = null;
+        row.VerificationError = null;
+        row.VerifiedDisplayPhoneNumber = null;
+        row.VerifiedName = null;
         row.UpdatedAtUtc = _dateTime.UtcNow;
         row.UpdatedByUserId = updatedByUserId;
 
@@ -190,7 +196,7 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
             row.AppId);
     }
 
-    private static TenantWhatsAppConfigDto ToDto(TenantWhatsAppConfig row) => new(
+    internal static TenantWhatsAppConfigDto ToDto(TenantWhatsAppConfig row) => new(
         row.PhoneNumberId,
         row.WhatsAppBusinessAccountId,
         row.AccessToken is not null,
@@ -199,7 +205,11 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         row.ApiBaseUrl,
         row.IsConnected,
         row.WebhookVerifyToken is not null,
-        row.AppId);
+        row.AppId,
+        row.VerifiedAtUtc,
+        row.VerificationError,
+        row.VerifiedDisplayPhoneNumber,
+        row.VerifiedName);
 
     private static string TryUnprotect(IDataProtector protector, string? ciphertext)
     {

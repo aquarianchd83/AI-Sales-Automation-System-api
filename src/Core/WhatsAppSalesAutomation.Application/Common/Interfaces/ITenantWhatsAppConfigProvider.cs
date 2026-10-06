@@ -97,7 +97,26 @@ public record TenantWhatsAppConfigDto(
     string ApiBaseUrl,
     bool IsConnected,
     bool HasWebhookVerifyToken,
-    string? AppId);
+    string? AppId,
+    DateTime? VerifiedAtUtc = null,
+    string? VerificationError = null,
+    string? VerifiedDisplayPhoneNumber = null,
+    string? VerifiedName = null)
+{
+    /// <summary>Configured and confirmed live by Meta since the last save - what onboarding's WhatsApp step needs.</summary>
+    public bool IsVerified => IsConnected && VerifiedAtUtc is not null;
+}
+
+/// <summary>
+/// "Verify connection": asks Meta, with the tenant's stored token, for the configured phone number. Records the
+/// outcome on the tenant's config (verified time and number, or Meta's error) and returns the updated config.
+/// Used by both the tenant's own Admin and the Platform Admin Console.
+/// </summary>
+public interface ITenantWhatsAppConnectionVerifier
+{
+    /// <exception cref="Exceptions.ConflictException">Nothing to verify yet: no phone number or token saved.</exception>
+    Task<TenantWhatsAppConfigDto> VerifyAsync(Guid tenantId, CancellationToken cancellationToken = default);
+}
 
 /// <summary>Body of PUT the tenant WhatsApp settings endpoint. <see cref="AccessToken"/>/<see cref="AppSecret"/>/
 /// <see cref="WebhookVerifyToken"/> null leaves the currently-stored value unchanged - see

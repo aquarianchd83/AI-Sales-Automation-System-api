@@ -14,7 +14,8 @@ public record PackageDto(
     int ExpectedSales,
     decimal ProjectedRevenue,
     bool IsActive,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    Guid? PlatformPlanId = null);
 
 public record SavePackageRequest(
     string Name,

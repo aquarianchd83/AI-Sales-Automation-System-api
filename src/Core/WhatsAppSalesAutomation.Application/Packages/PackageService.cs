@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Packages;
 
@@ -59,10 +60,17 @@ public class PackageService : IPackageService
     {
         await _validator.ValidateAndThrowAsync(request, cancellationToken);
 
+        // A customer package is built on the platform plan the tenant chose, so there has to be one first.
+        var planId = await _context.Subscriptions
+            .Where(s => s.PlanId != null && s.Status != SubscriptionStatus.Canceled)
+            .Select(s => s.PlanId)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ConflictException("Select a platform plan before creating a package for your customers.");
+
         var name = request.Name.Trim();
         await EnsureNameIsFreeAsync(name, excludingId: null, cancellationToken);
 
-        var package = new SalesPackage();
+        var package = new SalesPackage { PlatformPlanId = planId };
         Apply(package, request, name);
 
         _context.SalesPackages.Add(package);
@@ -242,7 +250,8 @@ public class PackageService : IPackageService
         p.ExpectedSales,
         p.Price * p.ExpectedSales,
         p.IsActive,
-        p.CreatedAt);
+        p.CreatedAt,
+        p.PlatformPlanId);
 
     private async Task EnsureNameIsFreeAsync(string name, Guid? excludingId, CancellationToken cancellationToken)
     {

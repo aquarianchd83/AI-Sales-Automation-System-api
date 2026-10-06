@@ -8,13 +8,10 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
-/// Where a tenant's WhatsApp Business Account credentials and AI provider config now get created,
-/// edited and deleted - PlatformSuperAdmin-only. Both used to be the tenant's own self-service
-/// settings (Phase B, TenantSettingsController's PUT endpoints); that write access moved here because
-/// both hold real, security-sensitive credentials (a Meta System User token; OpenAI/Anthropic/Google
-/// API keys) whose correctness affects billing and platform-wide abuse exposure, not just the one
-/// tenant - too important to leave to self-service. A tenant's own Admin keeps read-only visibility
-/// via TenantSettingsController's GET endpoints, unchanged.
+/// The Platform Admin Console's side of a tenant's WhatsApp Business Account credentials and AI provider
+/// config - PlatformSuperAdmin-only. WhatsApp is shared ownership: the tenant's own Admin can also save and
+/// verify it (TenantSettingsController, the onboarding wizard's WhatsApp step); both write the same row.
+/// AI provider config stays platform-owned (the tenant only reads it).
 /// </summary>
 [ApiController]
 [Route("api/v1/platform/tenants/{tenantId:guid}")]
@@ -87,6 +84,12 @@ public class PlatformTenantConfigController : ControllerBase
             _logger.LogWarning("WhatsApp token refresh not started after saving credentials for tenant {TenantId}: {Reason}", tenantId, ex.Message);
         }
     }
+
+    /// <summary>Asks Meta whether the saved credentials reach the phone number, and records the answer.</summary>
+    [HttpPost("whatsapp-config/verify")]
+    public async Task<ActionResult<TenantWhatsAppConfigDto>> VerifyWhatsAppConfig(
+        Guid tenantId, [FromServices] ITenantWhatsAppConnectionVerifier verifier, CancellationToken cancellationToken)
+        => Ok(await verifier.VerifyAsync(tenantId, cancellationToken));
 
     /// <summary>Removes the tenant's WhatsApp config entirely - back to "not connected."</summary>
     [HttpDelete("whatsapp-config")]

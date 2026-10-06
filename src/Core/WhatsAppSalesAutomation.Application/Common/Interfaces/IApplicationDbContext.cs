@@ -6,7 +6,6 @@ using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
-using WhatsAppSalesAutomation.Domain.Entities.Setup;
 using WhatsAppSalesAutomation.Domain.Entities.SocialAds;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 using WhatsAppSalesAutomation.Domain.Entities.Audit;
@@ -38,19 +37,9 @@ public interface IApplicationDbContext
 
     DbSet<SalesPackage> SalesPackages { get; }
 
-    DbSet<PlanSetupVersion> PlanSetupVersions { get; }
-
-    DbSet<PlanRequirement> PlanRequirements { get; }
-
-    DbSet<PlanApplication> PlanApplications { get; }
-
-    DbSet<ApplicationSetupValue> ApplicationSetupValues { get; }
-
-    DbSet<ApplicationSetupAuditEntry> ApplicationSetupAuditEntries { get; }
-
-    DbSet<ApplicationExecution> ApplicationExecutions { get; }
-
     DbSet<PackageSale> PackageSales { get; }
+
+    DbSet<TenantOnboardingStep> TenantOnboardingSteps { get; }
 
     DbSet<SocialAdConnection> SocialAdConnections { get; }
 

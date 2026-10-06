@@ -40,6 +40,10 @@ public static class TenantProfileLimits
     public const int WebsiteUrl = 300;
     public const int SupportEmail = 256;
     public const int SupportPhone = 32;
+    public const int WorkingHours = 500;
+    public const int TargetAudience = 1000;
+    public const int TargetLocation = 500;
+    public const int TargetCustomerType = 50;
     public const int Keyword = 50;
     public const int MaxKeywords = 30;
 }
@@ -50,5 +54,9 @@ public class UpdateTenantBusinessProfileRequestValidator : AbstractValidator<Upd
     {
         RuleFor(x => x.CompanyName).NotEmpty().MaximumLength(TenantProfileLimits.CompanyName);
         Include(new TenantBusinessDetailsValidator());
+        RuleFor(x => x.WorkingHours).MaximumLength(TenantProfileLimits.WorkingHours);
+        RuleFor(x => x.TargetAudience).MaximumLength(TenantProfileLimits.TargetAudience);
+        RuleFor(x => x.TargetLocation).MaximumLength(TenantProfileLimits.TargetLocation);
+        RuleFor(x => x.TargetCustomerType).MaximumLength(TenantProfileLimits.TargetCustomerType);
     }
 }

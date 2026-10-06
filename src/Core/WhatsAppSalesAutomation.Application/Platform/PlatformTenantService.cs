@@ -195,6 +195,8 @@ public class PlatformTenantService : IPlatformTenantService
             Timezone = string.IsNullOrWhiteSpace(request.Timezone) ? TimeZoneCatalog.DefaultId : request.Timezone
         };
         TenantBusinessDetails.ApplyTo(tenant, request);
+        // Same as self-serve signup: with no support email given, start from the admin's address.
+        tenant.SupportEmail ??= TenantBusinessDetails.Clean(request.AdminEmail);
         _context.Tenants.Add(tenant);
         await _context.SaveChangesAsync(cancellationToken);
 

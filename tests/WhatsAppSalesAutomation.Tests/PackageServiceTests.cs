@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Packages;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using Xunit;
@@ -19,6 +20,7 @@ public sealed class PackageServiceTests : IDisposable
     private readonly PackageService _service;
     private readonly Guid _tenant = Guid.NewGuid();
     private readonly TestClock _clock = new();
+    private readonly Plan _plan = new() { Code = "silver", Name = "Silver", IsActive = true };
 
     public PackageServiceTests()
     {
@@ -26,6 +28,12 @@ public sealed class PackageServiceTests : IDisposable
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new Ambient(_tenant), new AnonymousUser()) { StampTenantId = _tenant };
         _db.Database.EnsureCreated();
+
+        // A customer package is built on the tenant's platform plan, so the tenant has subscribed to one.
+        _db.Plans.Add(_plan);
+        _db.Subscriptions.Add(new Subscription { TenantId = _tenant, PlanId = _plan.Id, Status = SubscriptionStatus.Active });
+        _db.SaveChanges();
+
         _service = new PackageService(_db, new SavePackageRequestValidator(), new RecordPackageSaleRequestValidator(), _clock);
     }
 
@@ -46,6 +54,25 @@ public sealed class PackageServiceTests : IDisposable
         Assert.Equal("Gold", dto.Name);
         Assert.Equal(new[] { "SEO", "Ads" }, dto.Features);
         Assert.Equal(20000m, dto.ProjectedRevenue);
+    }
+
+    [Fact]
+    public async Task A_package_is_mapped_to_the_platform_plan_the_tenant_is_on()
+    {
+        var dto = await _service.CreateAsync(Request("Gold"));
+
+        Assert.Equal(_plan.Id, dto.PlatformPlanId);
+    }
+
+    [Fact]
+    public async Task A_package_cannot_be_created_before_a_platform_plan_is_chosen()
+    {
+        var subscription = await _db.Subscriptions.SingleAsync();
+        subscription.Status = SubscriptionStatus.Canceled;
+        await _db.SaveChangesAsync();
+
+        var refused = await Assert.ThrowsAsync<ConflictException>(() => _service.CreateAsync(Request("Gold")));
+        Assert.Contains("platform plan", refused.Message);
     }
 
     [Fact]
