@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -6,7 +7,9 @@ using WhatsAppSalesAutomation.Domain.Enums;
 namespace WhatsAppSalesAutomation.Application.Onboarding;
 
 /// <summary>Done (its data is there); Current - the first step not done, the one to do next; Pending - not done and
-/// waiting behind Current, so not open yet.</summary>
+/// waiting behind Current, so not open yet. Travels as its name ("Completed"): the screen compares against the words,
+/// and the API's default is the number, which left every step showing as waiting.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum OnboardingStepState
 {
     Completed,
