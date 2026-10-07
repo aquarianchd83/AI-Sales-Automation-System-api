@@ -234,19 +234,18 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// Same per-tenant-router reasoning as <see cref="AddWhatsAppClient"/>: every concrete chat/
-    /// embedding client is registered as a plain concrete type, and AiServiceFactory/
+    /// Every concrete chat/embedding client is registered as a plain concrete type, and AiServiceFactory/
     /// TenantEmbeddingService/TenantEmbeddingProviderCatalog are the DI-registered IAiService/
-    /// IEmbeddingService/IEmbeddingProviderCatalog, each picking per tenant per call. Two independent
-    /// provider selections read from the same TenantAiProviderConfig - see AiProviderSettings' own
-    /// (pre-multi-tenant) doc comment for why Provider (chat) and EmbeddingProvider are separate knobs;
-    /// identical reasoning applies per-tenant now.
+    /// IEmbeddingService/IEmbeddingProviderCatalog. All of them take their provider, model and key from the one
+    /// platform-wide AiProviders configuration (IPlatformAiConfigProvider) - there is no per-tenant AI config, so the
+    /// operator can change provider or model for every tenant at once. Chat and embedding providers stay two
+    /// independent knobs (Anthropic has no embeddings endpoint).
     /// </summary>
     private static void AddAiClients(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AiProviderSettings>(configuration.GetSection("AiProviders"));
 
-        services.AddScoped<ITenantAiConfigProvider, TenantAiConfigProvider>();
+        services.AddScoped<IPlatformAiConfigProvider, PlatformAiConfigProvider>();
         services.AddScoped<IActiveAiProviderAccessor, ActiveAiProviderAccessor>();
 
         // One-shot text for helper features (keyword suggestions). Loggers removed: it carries the tenant's API key.

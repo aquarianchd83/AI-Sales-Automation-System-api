@@ -131,6 +131,7 @@ public static class DependencyInjection
         services.Configure<TrialQuotaOptions>(configuration.GetSection("Billing:Trial"));
         services.AddScoped<IQuotaLedgerService, QuotaLedgerService>();
         services.AddScoped<IQuotaGate, QuotaGate>();
+        services.AddScoped<IAiUsageService, AiUsageService>();
         services.Configure<RefundPolicyOptions>(configuration.GetSection("Billing:Refunds"));
         services.Configure<BillingAlertOptions>(configuration.GetSection("Billing:Alerts"));
         services.AddScoped<IRefundGateway, SimulatedRefundGateway>();

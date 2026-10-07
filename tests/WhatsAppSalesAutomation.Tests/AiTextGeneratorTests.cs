@@ -11,21 +11,11 @@ namespace WhatsAppSalesAutomation.Tests;
 /// out of the URL, and anything short of a real answer is a quiet null so the caller can fall back.</summary>
 public sealed class AiTextGeneratorTests
 {
-    private sealed class FakeConfig : ITenantAiConfigProvider
+    private sealed class FakeConfig : IPlatformAiConfigProvider
     {
-        public TenantAiCredentials? Credentials { get; set; }
+        public AiCredentials? Credentials { get; set; }
 
-        public Task<TenantAiCredentials?> GetForCurrentTenantAsync(CancellationToken cancellationToken = default) => Task.FromResult(Credentials);
-
-        public Task<TenantAiProviderConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public Task<TenantAiProviderConfigDto> SaveConfigForCurrentTenantAsync(UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public Task<TenantAiProviderConfigDto?> GetConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public Task<TenantAiProviderConfigDto> SaveConfigForTenantAsync(Guid tenantId, UpdateTenantAiProviderConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public AiCredentials Get() => Credentials!;
     }
 
     private sealed class StubHandler : HttpMessageHandler
@@ -50,7 +40,7 @@ public sealed class AiTextGeneratorTests
 
     private AiTextGenerator Generator() => new(new HttpClient(_http), _config, NullLogger<AiTextGenerator>.Instance);
 
-    private static TenantAiCredentials Credentials(string provider) => new(
+    private static AiCredentials Credentials(string provider) => new(
         provider, "Simulated",
         "anthropic-key", "claude-test", "2023-06-01", "https://anthropic.test/v1",
         "openai-key", "gpt-test", "embed", "https://openai.test/v1",

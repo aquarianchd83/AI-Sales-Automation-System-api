@@ -29,7 +29,7 @@ public class GoogleAiClient
         _logger = logger;
     }
 
-    public async Task<AiReplyResult> GetResponseAsync(TenantAiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
+    public async Task<AiReplyResult> GetResponseAsync(AiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var modelUsed = $"Google:{credentials.GoogleChatModel}";

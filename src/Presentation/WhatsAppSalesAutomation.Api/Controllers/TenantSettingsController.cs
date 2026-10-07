@@ -11,8 +11,8 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
 /// A tenant's own settings: its WhatsApp Business Account connection (which the tenant's Admin and the Platform
-/// Admin both own - either can save it and verify it against Meta), a read-only view of the AI provider setup
-/// (platform-owned), and message usage and charges. Secrets are never returned, only whether each is set.
+/// Admin both own - either can save it and verify it against Meta), and message usage and charges. There is no AI
+/// provider setting here: the provider, model and key are platform-wide. Secrets are never returned, only whether each is set.
 /// </summary>
 [ApiController]
 [Route("api/v1/tenant-settings")]
@@ -20,20 +20,17 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class TenantSettingsController : ControllerBase
 {
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;
-    private readonly ITenantAiConfigProvider _aiConfigProvider;
     private readonly IPlanLimitsService _planLimits;
     private readonly ITenantChargesService _charges;
     private readonly ITenantContext _tenantContext;
 
     public TenantSettingsController(
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
-        ITenantAiConfigProvider aiConfigProvider,
         IPlanLimitsService planLimits,
         ITenantChargesService charges,
         ITenantContext tenantContext)
     {
         _whatsAppConfigProvider = whatsAppConfigProvider;
-        _aiConfigProvider = aiConfigProvider;
         _planLimits = planLimits;
         _charges = charges;
         _tenantContext = tenantContext;
@@ -44,12 +41,6 @@ public class TenantSettingsController : ControllerBase
     [HttpGet("whatsapp")]
     public async Task<ActionResult<TenantWhatsAppConfigDto?>> GetWhatsAppConfig(CancellationToken cancellationToken)
         => Ok(await _whatsAppConfigProvider.GetConfigForCurrentTenantAsync(cancellationToken));
-
-    /// <summary>Null when the tenant has never configured one - defaults to Simulated for both
-    /// Provider and EmbeddingProvider, same as a brand-new trial tenant's WhatsApp config.</summary>
-    [HttpGet("ai")]
-    public async Task<ActionResult<TenantAiProviderConfigDto?>> GetAiConfig(CancellationToken cancellationToken)
-        => Ok(await _aiConfigProvider.GetConfigForCurrentTenantAsync(cancellationToken));
 
     /// <summary>How much of this month's WhatsApp message quota the tenant has used - see
     /// IPlanLimitsService.GetMessageUsageAsync's own doc comment.</summary>

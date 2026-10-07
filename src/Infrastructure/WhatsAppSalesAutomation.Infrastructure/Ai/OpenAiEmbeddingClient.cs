@@ -11,7 +11,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// Real OpenAI embeddings client. No longer implements <see cref="IEmbeddingService"/> directly -
 /// <see cref="TenantEmbeddingService"/>/<see cref="TenantEmbeddingProviderCatalog"/> are the
 /// DI-registered IEmbeddingService/IEmbeddingProviderCatalog and the only callers of this class, each
-/// passing the calling tenant's already-resolved <see cref="TenantAiCredentials"/> in. Never exercised
+/// passing the calling tenant's already-resolved <see cref="AiCredentials"/> in. Never exercised
 /// against a live API key in this codebase - same caveat as the chat clients.
 /// </summary>
 public class OpenAiEmbeddingClient
@@ -27,7 +27,7 @@ public class OpenAiEmbeddingClient
         _logger = logger;
     }
 
-    public async Task<float[]> GetEmbeddingAsync(TenantAiCredentials credentials, string text, CancellationToken cancellationToken)
+    public async Task<float[]> GetEmbeddingAsync(AiCredentials credentials, string text, CancellationToken cancellationToken)
     {
         var payload = new { model = credentials.OpenAiEmbeddingModel, input = text };
 

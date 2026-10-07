@@ -14,8 +14,8 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
 /// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
 /// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
-/// everything else here: WhatsApp/AiProviders already have their own bespoke per-tenant mechanism
-/// (TenantWhatsAppConfig/TenantAiProviderConfig), and MediaStorage is platform infra shared by every
+/// everything else here: WhatsApp has its own bespoke per-tenant mechanism
+/// (TenantWhatsAppConfig), AiProviders is one platform-wide config with no per-tenant form, and MediaStorage is platform infra shared by every
 /// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
 public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null, bool IsTenantOverridable = false);
 
@@ -57,9 +57,9 @@ public static class AppSettingCatalog
         new("MetaAds:ApiBaseUrl", "MetaAds", IsSecret: false),
         new("MetaAds:DialogBaseUrl", "MetaAds", IsSecret: false, Description: "Where the Facebook login dialog is served from (https://www.facebook.com/)."),
 
-        // AiProviders - Provider/EmbeddingProvider stay restart-required, same reasoning as above.
-        new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - restart required to take effect."),
-        new("AiProviders:EmbeddingProvider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"OpenAI\" or \"Google\" - restart required to take effect."),
+        // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
+        new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),
+        new("AiProviders:EmbeddingProvider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"OpenAI\" or \"Google\" - provider that embeds knowledge-base text for every tenant. Live once saved."),
         new("AiProviders:SimulatedFailureRatePercent", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false),

@@ -20,10 +20,10 @@ public class AiTextGenerator : IAiTextGenerator
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
-    private readonly ITenantAiConfigProvider _configProvider;
+    private readonly IPlatformAiConfigProvider _configProvider;
     private readonly ILogger<AiTextGenerator> _logger;
 
-    public AiTextGenerator(HttpClient httpClient, ITenantAiConfigProvider configProvider, ILogger<AiTextGenerator> logger)
+    public AiTextGenerator(HttpClient httpClient, IPlatformAiConfigProvider configProvider, ILogger<AiTextGenerator> logger)
     {
         _httpClient = httpClient;
         _configProvider = configProvider;
@@ -33,7 +33,7 @@ public class AiTextGenerator : IAiTextGenerator
 
     public async Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default)
     {
-        var credentials = await _configProvider.GetForCurrentTenantAsync(cancellationToken);
+        var credentials = _configProvider.Get();
         if (credentials is null)
             return null;
 
@@ -57,7 +57,7 @@ public class AiTextGenerator : IAiTextGenerator
         }
     }
 
-    private async Task<string?> AnthropicAsync(TenantAiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
+    private async Task<string?> AnthropicAsync(AiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
     {
         var payload = new
         {
@@ -80,7 +80,7 @@ public class AiTextGenerator : IAiTextGenerator
             : JsonSerializer.Deserialize<AnthropicReply>(body, JsonOptions)?.Content?.FirstOrDefault(b => b.Type == "text")?.Text;
     }
 
-    private async Task<string?> OpenAiAsync(TenantAiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
+    private async Task<string?> OpenAiAsync(AiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
     {
         var payload = new
         {
@@ -102,7 +102,7 @@ public class AiTextGenerator : IAiTextGenerator
             : JsonSerializer.Deserialize<OpenAiReply>(body, JsonOptions)?.Choices?.FirstOrDefault()?.Message?.Content;
     }
 
-    private async Task<string?> GoogleAsync(TenantAiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
+    private async Task<string?> GoogleAsync(AiCredentials c, string system, string user, int maxTokens, CancellationToken ct)
     {
         var payload = new
         {

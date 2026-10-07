@@ -14,7 +14,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// IEmbeddingService predates multi-tenancy and every existing caller reads them as plain properties,
 /// so changing that interface would ripple into KnowledgeBaseService for no benefit here. Resolving the
 /// tenant's AI config is an async DB read, so these properties block on
-/// ITenantAiConfigProvider.GetForCurrentTenantAsync's own per-scope-memoized task - the first property
+/// IPlatformAiConfigProvider.Get - cheap, since the platform settings are already in memory - the first property
 /// or GetEmbeddingAsync call in a scope pays one real DB round trip, every access after that (sync or
 /// async) is instant. Blocking is safe here (ASP.NET Core/Hangfire have no SynchronizationContext to
 /// deadlock against) but is still a known wart, not the ideal shape - a fully async IEmbeddingService
@@ -22,13 +22,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// </summary>
 public class TenantEmbeddingService : IEmbeddingService
 {
-    private readonly ITenantAiConfigProvider _configProvider;
+    private readonly IPlatformAiConfigProvider _configProvider;
     private readonly OpenAiEmbeddingClient _openAiClient;
     private readonly GoogleEmbeddingClient _googleClient;
     private readonly SimulatedEmbeddingClient _simulatedClient;
 
     public TenantEmbeddingService(
-        ITenantAiConfigProvider configProvider,
+        IPlatformAiConfigProvider configProvider,
         OpenAiEmbeddingClient openAiClient,
         GoogleEmbeddingClient googleClient,
         SimulatedEmbeddingClient simulatedClient)
@@ -39,7 +39,7 @@ public class TenantEmbeddingService : IEmbeddingService
         _simulatedClient = simulatedClient;
     }
 
-    private TenantAiCredentials? Credentials => _configProvider.GetForCurrentTenantAsync().GetAwaiter().GetResult();
+    private AiCredentials Credentials => _configProvider.Get();
 
     public string ProviderName => Credentials?.EmbeddingProvider ?? "Simulated";
 
@@ -62,7 +62,7 @@ public class TenantEmbeddingService : IEmbeddingService
 
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)
     {
-        var credentials = await _configProvider.GetForCurrentTenantAsync(cancellationToken);
+        var credentials = _configProvider.Get();
         if (credentials is null)
             return await _simulatedClient.GetEmbeddingAsync(text, cancellationToken);
 

@@ -8,10 +8,10 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
-/// The Platform Admin Console's side of a tenant's WhatsApp Business Account credentials and AI provider
-/// config - PlatformSuperAdmin-only. WhatsApp is shared ownership: the tenant's own Admin can also save and
+/// The Platform Admin Console's side of a tenant's WhatsApp Business Account credentials
+/// - PlatformSuperAdmin-only. WhatsApp is shared ownership: the tenant's own Admin can also save and
 /// verify it (TenantSettingsController, the onboarding wizard's WhatsApp step); both write the same row.
-/// AI provider config stays platform-owned (the tenant only reads it).
+/// The AI provider is platform-wide (Configuration screen), not per tenant.
 /// </summary>
 [ApiController]
 [Route("api/v1/platform/tenants/{tenantId:guid}")]
@@ -19,7 +19,6 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class PlatformTenantConfigController : ControllerBase
 {
     private readonly ITenantWhatsAppConfigProvider _whatsAppConfigProvider;
-    private readonly ITenantAiConfigProvider _aiConfigProvider;
     private readonly ITenantConfigOverrideProvider _configOverrideProvider;
     private readonly IPlatformAuditService _auditService;
     private readonly IPlatformJobService _jobService;
@@ -28,7 +27,6 @@ public class PlatformTenantConfigController : ControllerBase
 
     public PlatformTenantConfigController(
         ITenantWhatsAppConfigProvider whatsAppConfigProvider,
-        ITenantAiConfigProvider aiConfigProvider,
         ITenantConfigOverrideProvider configOverrideProvider,
         IPlatformAuditService auditService,
         IPlatformJobService jobService,
@@ -36,7 +34,6 @@ public class PlatformTenantConfigController : ControllerBase
         ILogger<PlatformTenantConfigController> logger)
     {
         _whatsAppConfigProvider = whatsAppConfigProvider;
-        _aiConfigProvider = aiConfigProvider;
         _configOverrideProvider = configOverrideProvider;
         _auditService = auditService;
         _jobService = jobService;
@@ -100,34 +97,6 @@ public class PlatformTenantConfigController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Null when the tenant has never configured one - defaults to Simulated for both
-    /// Provider and EmbeddingProvider.</summary>
-    [HttpGet("ai-config")]
-    public async Task<ActionResult<TenantAiProviderConfigDto?>> GetAiConfig(Guid tenantId, CancellationToken cancellationToken)
-        => Ok(await _aiConfigProvider.GetConfigForTenantAsync(tenantId, cancellationToken));
-
-    [HttpPut("ai-config")]
-    public async Task<ActionResult<TenantAiProviderConfigDto>> SaveAiConfig(
-        Guid tenantId, [FromBody] UpdateTenantAiProviderConfigRequest request, CancellationToken cancellationToken)
-    {
-        var result = await _aiConfigProvider.SaveConfigForTenantAsync(tenantId, request, ActorUserId, cancellationToken);
-
-        await _auditService.LogAsync(
-            ActorUserId, ActorEmail, PlatformAuditActions.TenantAiConfigSaved, tenantId,
-            details: $"Provider: {result.Provider}, embedding: {result.EmbeddingProvider}", cancellationToken: cancellationToken);
-
-        return Ok(result);
-    }
-
-    /// <summary>Removes the tenant's AI provider config entirely - back to the built-in Simulated
-    /// defaults.</summary>
-    [HttpDelete("ai-config")]
-    public async Task<IActionResult> DeleteAiConfig(Guid tenantId, CancellationToken cancellationToken)
-    {
-        await _aiConfigProvider.DeleteConfigForTenantAsync(tenantId, cancellationToken);
-        await _auditService.LogAsync(ActorUserId, ActorEmail, PlatformAuditActions.TenantAiConfigDeleted, tenantId, cancellationToken: cancellationToken);
-        return NoContent();
-    }
 
     /// <summary>Every tenant-overridable Campaigns/Media/Messaging/Ai key, showing the platform
     /// default, this tenant's override (if any) and the effective value - see

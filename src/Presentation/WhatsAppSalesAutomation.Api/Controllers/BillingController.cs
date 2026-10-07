@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -23,6 +24,7 @@ public class BillingController : ControllerBase
     private readonly IBillingService _billingService;
     private readonly ITenantContext _tenantContext;
     private readonly IQuotaLedgerService _quota;
+    private readonly IAiUsageService _aiUsage;
     private readonly IRefundService _refunds;
     private readonly ITenantBillingNoticeService _notices;
     private readonly ICurrentUserService _currentUser;
@@ -32,6 +34,7 @@ public class BillingController : ControllerBase
         IBillingService billingService,
         ITenantContext tenantContext,
         IQuotaLedgerService quota,
+        IAiUsageService aiUsage,
         IRefundService refunds,
         ITenantBillingNoticeService notices,
         ICurrentUserService currentUser,
@@ -39,6 +42,7 @@ public class BillingController : ControllerBase
     {
         _countries = countries;
         _quota = quota;
+        _aiUsage = aiUsage;
         _refunds = refunds;
         _notices = notices;
         _currentUser = currentUser;
@@ -105,6 +109,14 @@ public class BillingController : ControllerBase
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetQuotaLedger([FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
         => Ok(await _quota.GetLedgerAsync(RequireTenantId(), query, cancellationToken));
+
+    /// <summary>The tenant's AI usage history, newest first - each request with the credits before, spent and after, whether
+    /// it ran, failed (and was refunded) or was refused, and why. Provider and model are shown for the record only: the
+    /// tenant has no say in them.</summary>
+    [HttpGet("ai-usage")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<AiTransactionDto>>> GetAiUsage([FromQuery] AiTransactionQuery query, CancellationToken cancellationToken)
+        => Ok(await _aiUsage.GetHistoryAsync(RequireTenantId(), query, cancellationToken));
 
     [HttpGet("credit-packs")]
     [Authorize(Roles = AppRoles.Admin)]

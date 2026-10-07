@@ -83,7 +83,7 @@ public sealed class PlatformEmbeddingService : IPlatformEmbeddingService
 
     /// <summary>The existing embedding clients take the per-tenant credentials shape, so the platform's
     /// settings are presented in it. Only the embedding fields are ever read.</summary>
-    private TenantAiCredentials Credentials() => new(
+    private AiCredentials Credentials() => new(
         Provider: Settings.Provider,
         EmbeddingProvider: Settings.EmbeddingProvider,
         AnthropicApiKey: Settings.Anthropic.ApiKey,

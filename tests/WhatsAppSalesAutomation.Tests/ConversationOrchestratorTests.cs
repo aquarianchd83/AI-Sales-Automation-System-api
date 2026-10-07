@@ -9,7 +9,6 @@ using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Leads.FollowUps;
-using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -88,8 +87,12 @@ public sealed class ConversationOrchestratorTests : IDisposable
             return Task.FromResult(WhatsAppSendResult.Succeeded("wamid.1"));
         });
         var notifications = Fake.Of<INotificationService>((_, _) => Task.CompletedTask);
-        var quota = Fake.Of<IQuotaGate>((m, _) =>
-            m.Name == nameof(IQuotaGate.TryConsumeAiConversationAsync) ? Task.FromResult(true) : throw new NotImplementedException(m.Name));
+        var aiUsage = Fake.Of<IAiUsageService>((m, _) => m.Name switch
+        {
+            nameof(IAiUsageService.AuthorizeAsync) => Task.FromResult(new AiAuthorization(true, Guid.NewGuid(), AiDenialReason.None, null)),
+            nameof(IAiUsageService.CompleteAsync) or nameof(IAiUsageService.FailAsync) => Task.CompletedTask,
+            _ => throw new NotImplementedException(m.Name)
+        });
         var scoring = Fake.Of<ILeadScoringService>((m, _) =>
             m.Name == nameof(ILeadScoringService.RecomputeAsync)
                 ? Task.FromResult(new LeadScoreResult(_hot ? 80 : 10, _hot ? 80 : 10, _hot ? "Hot" : "Cold", _hot, _hot ? "asked to book" : null, Array.Empty<LeadScoreContributionDto>()))
@@ -107,7 +110,7 @@ public sealed class ConversationOrchestratorTests : IDisposable
             _db, _clock, _ai, knowledge, leads,
             new HandoffService(_db, _clock, null!),
             new HandoffSummaryBuilder(_db, _clock, config),
-            whatsApp, notifications, config, quota,
+            whatsApp, notifications, config, aiUsage,
             new QualificationPlanner(_db, config, NullLogger<QualificationPlanner>.Instance),
             scoring, new AiReplyValidator(), new CrmContextBuilder(_db), followUps,
             NullLogger<ConversationOrchestrator>.Instance);

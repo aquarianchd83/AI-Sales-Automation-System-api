@@ -24,7 +24,7 @@ public class GoogleEmbeddingClient
         _logger = logger;
     }
 
-    public async Task<float[]> GetEmbeddingAsync(TenantAiCredentials credentials, string text, CancellationToken cancellationToken)
+    public async Task<float[]> GetEmbeddingAsync(AiCredentials credentials, string text, CancellationToken cancellationToken)
     {
         var payload = new { content = new { parts = new[] { new { text } } } };
 

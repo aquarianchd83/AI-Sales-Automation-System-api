@@ -7,7 +7,6 @@ using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Leads.FollowUps;
-using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
@@ -42,7 +41,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly IWhatsAppService _whatsApp;
     private readonly INotificationService _notifications;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
-    private readonly IQuotaGate _quota;
+    private readonly IAiUsageService _aiUsage;
     private readonly IQualificationPlanner _qualification;
     private readonly ILeadScoringService _scoring;
     private readonly IAiReplyValidator _validator;
@@ -61,7 +60,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IWhatsAppService whatsApp,
         INotificationService notifications,
         ITenantConfigOverrideProvider tenantConfig,
-        IQuotaGate quota,
+        IAiUsageService aiUsage,
         IQualificationPlanner qualification,
         ILeadScoringService scoring,
         IAiReplyValidator validator,
@@ -69,7 +68,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ILeadFollowUpService followUps,
         ILogger<ConversationOrchestrator> logger)
     {
-        _quota = quota;
+        _aiUsage = aiUsage;
         _context = context;
         _dateTime = dateTime;
         _ai = ai;
@@ -165,23 +164,41 @@ public class ConversationOrchestrator : IConversationOrchestrator
             customer.PreferredLanguage,
             crm);
 
-        // Prepaid: one AI conversation is spent before the model is called (the provider bills whether or not the
-        // AI ends up replying or escalating). With none left the customer is handed to a human instead of being
-        // left unanswered. Keyed per inbound message, so a retry of this same run never spends twice.
-        if (!await _quota.TryConsumeAiConversationAsync(conversation.TenantId, $"ai-conv:{inboundMessageId}", inboundMessageId.ToString(), cancellationToken))
+        // Metered: subscription state and credit are checked, and one AI conversation is spent, before the model is
+        // called (the provider bills whether or not the AI ends up replying or escalating). Refused - no credit, trial
+        // used up, subscription expired or cancelled - the customer is handed to a human instead of being left
+        // unanswered, and the team is told why. A retry of this same inbound message never spends twice.
+        var authorization = await _aiUsage.AuthorizeAsync(conversation.TenantId, "ConversationReply", inboundMessageId.ToString(), cancellationToken);
+        if (!authorization.Allowed)
         {
             conversation.Status = ConversationStatus.Escalated;
-            var noQuotaHandoff = await _handoffs.GetOrCreateOpenHandoffAsync(
+            var blockedHandoff = await _handoffs.GetOrCreateOpenHandoffAsync(
                 conversationId,
                 nameof(HandoffTriggerReason.RuleTriggered),
-                "AI conversation quota used up - the tenant needs to buy credits or wait for renewal.",
+                authorization.Message ?? AiUsageService.InsufficientCreditsMessage,
                 cancellationToken: cancellationToken);
-            await _notifications.NotifyNewHandoffAsync(noQuotaHandoff.Id, conversationId, noQuotaHandoff.TriggerReason, cancellationToken);
+            await _notifications.NotifyNewHandoffAsync(blockedHandoff.Id, conversationId, blockedHandoff.TriggerReason, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);
             return;
         }
 
-        var result = await _ai.GetResponseAsync(context, cancellationToken);
+        var transactionId = authorization.TransactionId!.Value;
+
+        // A call that throws is a platform failure like any other: the credit goes back before the error moves on.
+        async Task<AiReplyResult> CallAiAsync(AiConversationContext aiContext)
+        {
+            try
+            {
+                return await _ai.GetResponseAsync(aiContext, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await _aiUsage.FailAsync(transactionId, ex.Message, null, null, CancellationToken.None);
+                throw;
+            }
+        }
+
+        var result = await CallAiAsync(context);
 
         // Nothing the model returned is trusted yet. Everything below works from the validated view.
         var validated = _validator.Validate(result, context);
@@ -196,9 +213,17 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 conversationId, result.AskedFieldKey);
 
             context = context with { KnownFields = answered.Known, FieldsToAsk = answered.ToAsk };
-            result = await _ai.GetResponseAsync(context, cancellationToken);
+            result = await CallAiAsync(context);
             validated = _validator.Validate(result, context);
         }
+
+        // Settle the transaction on what the provider actually did. A failed provider call is the platform's fault, not
+        // the tenant's: the credit is released. If the provider answered, the work is done and the credit stays spent
+        // even if something later in this method fails - the provider has already billed the platform for it.
+        if (result.ProviderFailed)
+            await _aiUsage.FailAsync(transactionId, "The AI provider did not return a usable answer.", ProviderOf(result.ModelUsed), ModelOf(result.ModelUsed), cancellationToken);
+        else
+            await _aiUsage.CompleteAsync(transactionId, ProviderOf(result.ModelUsed), ModelOf(result.ModelUsed), result.PromptTokens, result.CompletionTokens, cancellationToken);
 
         if (validated.HasFailures)
         {
@@ -387,6 +412,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
     /// <summary>The known/to-ask lists to retry with, or null when the reply asked for nothing that was
     /// already answered. "Answered" means on file already, or stated in this very message with enough
     /// confidence to count (the same floor <see cref="QualificationPlanner"/> uses for "known").</summary>
+    private static string ProviderOf(string modelUsed) => modelUsed.Contains(':') ? modelUsed[..modelUsed.IndexOf(':')] : modelUsed;
+
+    private static string ModelOf(string modelUsed) => modelUsed.Contains(':') ? modelUsed[(modelUsed.IndexOf(':') + 1)..] : modelUsed;
+
     private static (IReadOnlyList<AiCapturedField> Known, IReadOnlyList<AiQualificationField> ToAsk)? AskedWhatWasAlreadyAnswered(
         AiReplyResult result, ValidatedReply validated, QualificationPlan plan, AiOptions options, bool qualificationPaused)
     {

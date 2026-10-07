@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Notifications;
@@ -18,15 +19,17 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class PlatformTenantQuotaController : ControllerBase
 {
     private readonly IQuotaLedgerService _quota;
+    private readonly IAiUsageService _aiUsage;
     private readonly IPlatformAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
 
     private readonly ITenantNotifier _notifier;
 
-    public PlatformTenantQuotaController(IQuotaLedgerService quota, IPlatformAuditService auditService, ICurrentUserService currentUser, ITenantNotifier notifier)
+    public PlatformTenantQuotaController(IQuotaLedgerService quota, IAiUsageService aiUsage, IPlatformAuditService auditService, ICurrentUserService currentUser, ITenantNotifier notifier)
     {
         _notifier = notifier;
         _quota = quota;
+        _aiUsage = aiUsage;
         _auditService = auditService;
         _currentUser = currentUser;
     }
@@ -38,6 +41,10 @@ public class PlatformTenantQuotaController : ControllerBase
     [HttpGet("ledger")]
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetLedger(Guid tenantId, [FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
         => Ok(await _quota.GetLedgerAsync(tenantId, query, cancellationToken));
+
+    [HttpGet("ai-usage")]
+    public async Task<ActionResult<PagedResult<AiTransactionDto>>> GetAiUsage(Guid tenantId, [FromQuery] AiTransactionQuery query, CancellationToken cancellationToken)
+        => Ok(await _aiUsage.GetHistoryAsync(tenantId, query, cancellationToken));
 
     /// <summary>Positive adds a grant (valid <c>validForDays</c>, default a year); negative removes from what
     /// the tenant has left. <c>reason</c> is mandatory.</summary>
