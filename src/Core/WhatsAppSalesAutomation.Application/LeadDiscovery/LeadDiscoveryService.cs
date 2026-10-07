@@ -1,9 +1,11 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
@@ -21,19 +23,25 @@ public class LeadDiscoveryService : ILeadDiscoveryService
     private readonly IPlanLimitsService _planLimits;
     private readonly IDateTimeProvider _dateTime;
     private readonly IValidator<SaveLeadDiscoveryProfileRequest> _saveValidator;
+    private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly ILogger<LeadDiscoveryService> _logger;
 
     public LeadDiscoveryService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
         IPlanLimitsService planLimits,
         IDateTimeProvider dateTime,
-        IValidator<SaveLeadDiscoveryProfileRequest> saveValidator)
+        IValidator<SaveLeadDiscoveryProfileRequest> saveValidator,
+        ITenantJobProvisioner jobProvisioner,
+        ILogger<LeadDiscoveryService> logger)
     {
         _context = context;
         _tenantContext = tenantContext;
         _planLimits = planLimits;
         _dateTime = dateTime;
         _saveValidator = saveValidator;
+        _jobProvisioner = jobProvisioner;
+        _logger = logger;
     }
 
     public async Task<LeadDiscoveryProfileDto> GetProfileAsync(CancellationToken cancellationToken = default)
@@ -87,6 +95,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
 
         profile.IsEnabled = request.IsEnabled;
         profile.TargetBusinessType = request.TargetBusinessType.Trim();
+        profile.Description = TenantBusinessDetails.Clean(request.Description);
         profile.Keywords = TenantBusinessDetails.NormalizeKeywords(request.Keywords);
         profile.Locations = TenantBusinessDetails.NormalizeKeywords(request.Locations);
         profile.BatchSize = request.BatchSize;
@@ -108,6 +117,17 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // The lead discovery job is created with the profile - until it exists there is nothing for the job to search for.
+        // Never fails the save: the profile is stored, and the daily reconcile puts the job right if Hangfire was unavailable.
+        try
+        {
+            await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not create the lead discovery job of tenant {TenantId} after its profile was saved; the next reconcile will", tenantId);
+        }
 
         return ToDto(profile, planLimit, sourceCampaignName, sourceCampaignStatus);
     }
@@ -274,7 +294,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
         p.AutoConsentDiscoveredCustomers, p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
-        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt));
+        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description);
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,

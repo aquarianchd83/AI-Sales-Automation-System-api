@@ -59,11 +59,20 @@ public class Tenant : BaseEntity
 
     public string? BusinessDescription { get; set; }
 
+    /// <summary>The business's speciality within its <see cref="Industry"/> - "Eye clinic" for Healthcare - because the
+    /// industry alone is too general to describe or find the business by. Free text, optional.</summary>
+    public string? IndustrySubcategory { get; set; }
+
     public string? WebsiteUrl { get; set; }
 
     public string? SupportEmail { get; set; }
 
     public string? SupportPhone { get; set; }
+
+    /// <summary>The WhatsApp number the tenant's customers will message, as the tenant gives it during onboarding. Just
+    /// the number: connecting it to WhatsApp (phone number ID, access token, app secret) is done later, by the platform
+    /// administrator or the tenant's Admin on the Settings page. Not the same as the connection's phone number ID.</summary>
+    public string? WhatsAppNumber { get; set; }
 
     /// <summary>When the tenant finished every onboarding step (see TenantOnboardingStep). Null while onboarding
     /// is still in progress; until then the tenant's users are held in the onboarding wizard.</summary>

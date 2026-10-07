@@ -28,10 +28,12 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(t => t.WebsiteUrl).HasMaxLength(300);
         builder.Property(t => t.SupportEmail).HasMaxLength(256);
         builder.Property(t => t.SupportPhone).HasMaxLength(32);
+        builder.Property(t => t.WhatsAppNumber).HasMaxLength(32);
         builder.Property(t => t.BillingAlertEmail).HasMaxLength(256);
         builder.Property(t => t.BillingAlertPhoneE164).HasMaxLength(32);
         builder.Property(t => t.BusinessLocation).HasMaxLength(300);
         builder.Property(t => t.WorkingHours).HasMaxLength(500);
+        builder.Property(t => t.IndustrySubcategory).HasMaxLength(100);
         builder.Property(t => t.TargetAudience).HasMaxLength(1000);
         builder.Property(t => t.TargetLocation).HasMaxLength(500);
         builder.Property(t => t.TargetCustomerType).HasMaxLength(50);

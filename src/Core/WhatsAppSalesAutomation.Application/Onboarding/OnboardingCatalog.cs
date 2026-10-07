@@ -23,24 +23,28 @@ public static class OnboardingCatalog
     public const string Campaign = "campaign";
     public const string KnowledgeBase = "knowledge-base";
 
+    /// <summary>TEMPORARY: steps that stay to do but no longer hold up the step after them, so the flow can be walked
+    /// past one still being worked on. Empty this set to restore strict sequencing.</summary>
+    public static readonly IReadOnlySet<string> OnHold = new HashSet<string> { Campaign };
+
     public static readonly IReadOnlyList<OnboardingStepDefinition> Steps = new OnboardingStepDefinition[]
     {
         new(Profile, "Profile Information",
             "Tell us about your business: name, industry, description, contact details and country.", 10, "/profile"),
         new(Plan, "Select Package Plan",
-            "Choose the platform plan your business runs on.", 10, "/billing"),
+            "Choose the plan your business runs on - or carry on with your free trial and choose later.", 10, "/billing"),
         new(CustomerPackage, "Create Customer Package",
             "Create the package you will sell to your own customers, built on your plan.", 15, "/packages"),
-        new(LeadDiscovery, "Lead Discovery Profile",
-            "Describe the businesses you want to find: type, keywords and locations.", 10, "/lead-discovery/profile"),
         new(WhatsApp, "WhatsApp Configuration",
-            "Connect your WhatsApp Business number and verify the connection.", 15, "/tenant-settings"),
+            "Tell us the WhatsApp number your customers will message. Connecting it to WhatsApp comes later.", 15, "/tenant-settings"),
         new(MessageTemplate, "Configure Message Template",
             "Create a WhatsApp message template and submit it for approval.", 10, "/message-templates"),
         new(Customer, "Create Customer",
             "Add your first customer.", 10, "/customers"),
         new(Campaign, "Create Campaign",
             "Create a campaign with at least one message step and one customer.", 10, "/campaigns"),
+        new(LeadDiscovery, "Lead Discovery Profile",
+            "Describe the businesses you want to find: type, keywords and locations.", 10, "/lead-discovery/profile"),
         new(KnowledgeBase, "Knowledge Base / Voucher",
             "Upload your voucher or brochure so the assistant can use it with customers.", 10, "/knowledge-base"),
     };

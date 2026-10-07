@@ -11,6 +11,7 @@ public static class LeadDiscoveryLimits
     public const int MaxAdditionalCriteria = 20;
 
     public const int TargetBusinessType = 200;
+    public const int Description = 1000;
     public const int Keyword = 100;
     public const int Location = 200;
     public const int Criterion = 500;
@@ -69,7 +70,8 @@ public record LeadDiscoveryProfileDto(
     bool AutoConsentDiscoveredCustomers,
     string AutoCampaignStartMode,
     TimeSpan? AutoCampaignStartTime,
-    DateTime? UpdatedAt);
+    DateTime? UpdatedAt,
+    string? Description = null);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
 /// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
@@ -93,7 +95,8 @@ public record SaveLeadDiscoveryProfileRequest(
     Guid? SourceCampaignId = null,
     bool AutoConsentDiscoveredCustomers = false,
     string AutoCampaignStartMode = "Immediate",
-    TimeSpan? AutoCampaignStartTime = null);
+    TimeSpan? AutoCampaignStartTime = null,
+    string? Description = null);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's

@@ -33,7 +33,7 @@ public sealed class OnboardingServiceTests : IDisposable
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new Ambient(_tenant), new AnonymousUser()) { StampTenantId = _tenant };
         _db.Database.EnsureCreated();
-        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Confianza IT", Slug = "confianza" });
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Confianza IT", Slug = "confianza", Status = TenantStatus.Active });
         _db.SaveChanges();
 
         _service = new OnboardingService(_db, new Ambient(_tenant), new AnonymousUser(), _whatsApp, _clock);
@@ -135,9 +135,9 @@ public sealed class OnboardingServiceTests : IDisposable
     public void AC02_AC04_There_are_nine_steps_in_the_defined_order_and_their_weights_add_up_to_100()
     {
         Assert.Equal(
-            new[] { "profile", "plan", "customer-package", "lead-discovery", "whatsapp", "message-template", "customer", "campaign", "knowledge-base" },
+            new[] { "profile", "plan", "customer-package", "whatsapp", "message-template", "customer", "campaign", "lead-discovery", "knowledge-base" },
             OnboardingCatalog.Steps.Select(s => s.Key));
-        Assert.Equal(new[] { 10, 10, 15, 10, 15, 10, 10, 10, 10 }, OnboardingCatalog.Steps.Select(s => s.Weight));
+        Assert.Equal(new[] { 10, 10, 15, 15, 10, 10, 10, 10, 10 }, OnboardingCatalog.Steps.Select(s => s.Weight));
         Assert.Equal(100, OnboardingCatalog.Steps.Sum(s => s.Weight));
     }
 
@@ -165,7 +165,7 @@ public sealed class OnboardingServiceTests : IDisposable
         var status = await StatusAsync();
 
         Assert.Equal(35, status.ProgressPercent); // 10 + 10 + 15, as in the requirement's own example
-        Assert.Equal("lead-discovery", status.CurrentStepKey);
+        Assert.Equal("whatsapp", status.CurrentStepKey);
     }
 
     [Fact]
@@ -195,8 +195,8 @@ public sealed class OnboardingServiceTests : IDisposable
         var status = await StatusAsync();
 
         Assert.Equal(OnboardingStepState.Current, StateOf(status, "customer-package"));
-        Assert.Equal(OnboardingStepState.Pending, StateOf(status, "lead-discovery"));
         Assert.Equal(OnboardingStepState.Pending, StateOf(status, "whatsapp"));
+        Assert.Equal(OnboardingStepState.Pending, StateOf(status, "lead-discovery"));
         Assert.Equal(OnboardingStepState.Completed, StateOf(status, "customer")); // it has its data, so it is done
         Assert.Equal(30, status.ProgressPercent); // 10 + 10 + 10
         Assert.NotNull(status.Steps.Single(s => s.Key == "whatsapp").Missing); // and it says what it needs
@@ -270,26 +270,124 @@ public sealed class OnboardingServiceTests : IDisposable
         Assert.Contains("industry", status.Steps[0].Missing);
     }
 
-    // ---- individual step rules -------------------------------------------------------------------------------------
+    [Fact]
+    public async Task Lead_discovery_comes_after_the_campaign_and_before_the_voucher()
+    {
+        await CompleteEverythingAsync();
+        _db.LeadDiscoveryProfiles.RemoveRange(await _db.LeadDiscoveryProfiles.ToListAsync());
+        await _db.SaveChangesAsync();
+
+        var status = await StatusAsync();
+
+        Assert.Equal("lead-discovery", status.CurrentStepKey);
+        Assert.Equal(90, status.ProgressPercent);
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "campaign")); // the step before it
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "knowledge-base")); // the one after it keeps its data
+        Assert.Equal(8, status.Steps.ToList().FindIndex(s => s.Key == "knowledge-base"));
+        Assert.Equal(7, status.Steps.ToList().FindIndex(s => s.Key == "lead-discovery"));
+    }
+
+    // ---- the plan step: a free trial counts ------------------------------------------------------------------------
 
     [Fact]
-    public async Task AC09_WhatsApp_is_complete_only_once_the_connection_is_verified()
+    public async Task A_tenant_on_its_free_trial_has_the_plan_step_without_choosing_or_upgrading()
+    {
+        var tenant = await _db.Tenants.SingleAsync(t => t.Id == _tenant);
+        tenant.Status = TenantStatus.Trial;
+        tenant.TrialEndsAtUtc = _clock.UtcNow.AddDays(10);
+        await _db.SaveChangesAsync();
+        await CompleteProfileAsync();
+
+        var status = await StatusAsync();
+
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "plan")); // no subscription at all
+        Assert.Equal("customer-package", status.CurrentStepKey);
+        Assert.Equal(20, status.ProgressPercent);
+    }
+
+    [Fact]
+    public async Task Once_the_trial_has_ended_with_no_plan_chosen_the_step_is_open_again()
+    {
+        var tenant = await _db.Tenants.SingleAsync(t => t.Id == _tenant);
+        tenant.Status = TenantStatus.Trial;
+        tenant.TrialEndsAtUtc = _clock.UtcNow.AddDays(-1);
+        await _db.SaveChangesAsync();
+        await CompleteProfileAsync();
+
+        var status = await StatusAsync();
+
+        Assert.Equal("plan", status.CurrentStepKey);
+        Assert.Contains("trial has ended", status.Steps.Single(s => s.Key == "plan").Missing);
+    }
+
+    [Fact]
+    public async Task An_active_tenant_still_needs_a_plan()
+    {
+        await CompleteProfileAsync(); // the fixture tenant is Active, not on a trial
+
+        Assert.Equal("plan", (await StatusAsync()).CurrentStepKey);
+    }
+
+    // ---- individual step rules -------------------------------------------------------------------------------------
+
+    // ---- step 4: only the number -------------------------------------------------------------------------------------
+
+    private async Task ReachWhatsAppStepAsync()
     {
         await CompleteProfileAsync();
         await SubscribeAsync();
         await AddPackageAsync();
-        await AddLeadDiscoveryProfileAsync();
+    }
 
+    [Fact]
+    public async Task WhatsApp_asks_only_for_the_number_no_credentials_and_no_verification()
+    {
+        await ReachWhatsAppStepAsync();
+
+        var asked = await StatusAsync();
+        Assert.Equal("whatsapp", asked.CurrentStepKey);
+        Assert.Equal("Enter the WhatsApp number your customers will message.", asked.Steps.Single(s => s.Key == "whatsapp").Missing);
+
+        var tenant = await _db.Tenants.SingleAsync(t => t.Id == _tenant);
+        tenant.WhatsAppNumber = "+91 98765 43210";
+        await _db.SaveChangesAsync();
+
+        var done = await StatusAsync(); // no connection row at all: the platform administrator connects it later
+        Assert.Equal(OnboardingStepState.Completed, StateOf(done, "whatsapp"));
+        Assert.Equal("message-template", done.CurrentStepKey);
+    }
+
+    [Fact]
+    public async Task Saved_credentials_that_were_never_verified_do_not_stand_in_for_the_number()
+    {
+        await ReachWhatsAppStepAsync();
         ConnectWhatsApp(verified: false);
-        var saved = await StatusAsync();
-        Assert.Equal("whatsapp", saved.CurrentStepKey);
-        Assert.Equal("Verify the connection.", saved.Steps.Single(s => s.Key == "whatsapp").Missing);
 
-        _whatsApp.Config = _whatsApp.Config! with { VerificationError = "Invalid OAuth access token (code 190)" };
-        Assert.Contains("code 190", (await StatusAsync()).Steps.Single(s => s.Key == "whatsapp").Missing);
+        Assert.Equal("whatsapp", (await StatusAsync()).CurrentStepKey);
+    }
 
+    [Fact]
+    public async Task A_tenant_whose_connection_is_already_verified_is_not_asked_for_the_number_again()
+    {
+        await ReachWhatsAppStepAsync();
         ConnectWhatsApp(verified: true);
+
         Assert.Equal(OnboardingStepState.Completed, StateOf(await StatusAsync(), "whatsapp"));
+    }
+
+    [Fact]
+    public async Task Clearing_the_number_reopens_the_step()
+    {
+        await ReachWhatsAppStepAsync();
+        var tenant = await _db.Tenants.SingleAsync(t => t.Id == _tenant);
+        tenant.WhatsAppNumber = "+91 98765 43210";
+        await _db.SaveChangesAsync();
+        Assert.Equal(OnboardingStepState.Completed, StateOf(await StatusAsync(), "whatsapp"));
+
+        tenant.WhatsAppNumber = null;
+        await _db.SaveChangesAsync();
+
+        Assert.Equal("whatsapp", (await StatusAsync()).CurrentStepKey);
     }
 
     [Fact]

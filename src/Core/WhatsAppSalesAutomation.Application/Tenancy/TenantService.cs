@@ -14,6 +14,7 @@ public class TenantService : ITenantService
     private readonly IValidator<UpdateTenantTimezoneRequest> _updateTimezoneValidator;
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
     private readonly IValidator<UpdateTenantBusinessProfileRequest> _updateBusinessProfileValidator;
+    private readonly IValidator<UpdateTenantWhatsAppNumberRequest> _updateWhatsAppNumberValidator;
 
     private readonly ICountryAvailability _countries;
 
@@ -23,8 +24,10 @@ public class TenantService : ITenantService
         IValidator<UpdateTenantTimezoneRequest> updateTimezoneValidator,
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
         IValidator<UpdateTenantBusinessProfileRequest> updateBusinessProfileValidator,
-        ICountryAvailability countries)
+        ICountryAvailability countries,
+        IValidator<UpdateTenantWhatsAppNumberRequest> updateWhatsAppNumberValidator)
     {
+        _updateWhatsAppNumberValidator = updateWhatsAppNumberValidator;
         _countries = countries;
         _context = context;
         _tenantContext = tenantContext;
@@ -62,9 +65,27 @@ public class TenantService : ITenantService
         tenant.TargetAudience = TenantBusinessDetails.Clean(request.TargetAudience);
         tenant.TargetLocation = TenantBusinessDetails.Clean(request.TargetLocation);
         tenant.TargetCustomerType = TenantBusinessDetails.Clean(request.TargetCustomerType);
+        tenant.IndustrySubcategory = TenantBusinessDetails.Clean(request.IndustrySubcategory);
         await _context.SaveChangesAsync(cancellationToken);
 
         return TenantProfileDto.From(tenant);
+    }
+
+    public async Task<TenantWhatsAppNumberDto> GetWhatsAppNumberForCurrentTenantAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await GetCurrentTenantAsync(cancellationToken);
+        return new TenantWhatsAppNumberDto(tenant.WhatsAppNumber);
+    }
+
+    public async Task<TenantWhatsAppNumberDto> UpdateWhatsAppNumberForCurrentTenantAsync(UpdateTenantWhatsAppNumberRequest request, CancellationToken cancellationToken = default)
+    {
+        await _updateWhatsAppNumberValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var tenant = await GetCurrentTenantAsync(cancellationToken);
+        tenant.WhatsAppNumber = TenantBusinessDetails.Clean(request.WhatsAppNumber);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return new TenantWhatsAppNumberDto(tenant.WhatsAppNumber);
     }
 
     public async Task<TenantProfileDto> UpdateTimezoneForCurrentTenantAsync(UpdateTenantTimezoneRequest request, CancellationToken cancellationToken = default)

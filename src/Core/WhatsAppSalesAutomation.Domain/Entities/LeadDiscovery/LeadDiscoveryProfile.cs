@@ -21,6 +21,10 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// <summary>Free text, e.g. "Eye clinic" or "Computer hardware distributor".</summary>
     public string TargetBusinessType { get; set; } = string.Empty;
 
+    /// <summary>What the tenant says about this search - what they sell and who they are after. Not used by the run
+    /// itself: it is what "AI suggest" draws <see cref="Keywords"/> from (with the packages the tenant sells).</summary>
+    public string? Description { get; set; }
+
     /// <summary>Search terms, combined with each of <see cref="Locations"/>. JSON array column.</summary>
     public List<string> Keywords { get; set; } = new();
 

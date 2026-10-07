@@ -168,7 +168,8 @@ public class PlatformTenantService : IPlatformTenantService
             pricing.CurrencySymbol,
             Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero),
             tenant.RefundRequestsEnabled,
-            tenant.StateCode);
+            tenant.StateCode,
+            tenant.WhatsAppNumber);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)

@@ -33,7 +33,7 @@ public sealed class CampaignStepDeliveryTests : IDisposable
         _db.SaveChanges();
 
         // Only the read path is exercised, which touches the context and nothing else.
-        _service = new CampaignService(_db, null!, null!, null!, null!, null!, null!, null!, null!, null!);
+        _service = new CampaignService(_db, null!, null!, null!, null!, null!, null!, null!, null!, null!, null!, null!);
 
         _campaign = new Campaign { Name = "c", Status = CampaignStatus.Running, CreatedBy = Guid.NewGuid() };
         _campaign.Steps.Add(new CampaignStep { StepNumber = 0, StepType = "Initial", MessageText = "Hi" });

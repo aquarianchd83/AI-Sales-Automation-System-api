@@ -445,7 +445,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
             ? new AiBusinessProfile("the business", null, null, null, null, null, null, ConversationGoal.Enquiry, false)
             : new AiBusinessProfile(
                 tenant.Name,
-                tenant.Industry,
+                string.IsNullOrWhiteSpace(tenant.IndustrySubcategory) ? tenant.Industry : $"{tenant.Industry} ({tenant.IndustrySubcategory})",
                 tenant.BusinessLocation,
                 tenant.WebsiteUrl,
                 tenant.WorkingHours,

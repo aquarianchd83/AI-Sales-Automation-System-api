@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -85,6 +86,7 @@ public class OnboardingService : IOnboardingService
         var now = _clock.UtcNow;
         var steps = new List<OnboardingStepDto>();
         var foundCurrent = false;
+        var anyUnmet = false;
 
         foreach (var step in OnboardingCatalog.Steps)
         {
@@ -111,12 +113,20 @@ public class OnboardingService : IOnboardingService
             if (row is not null)
                 _context.TenantOnboardingSteps.Remove(row);
 
+            anyUnmet = true;
+            if (OnboardingCatalog.OnHold.Contains(step.Key))
+            {
+                // Held for testing: still to do (and open once it is the next one), but it does not hold up the step after it.
+                steps.Add(ToDto(step, foundCurrent ? OnboardingStepState.Pending : OnboardingStepState.Current, null, missing));
+                continue;
+            }
+
             steps.Add(ToDto(step, foundCurrent ? OnboardingStepState.Pending : OnboardingStepState.Current, null, missing));
             foundCurrent = true;
         }
 
         // Completed while every step is met; back to in progress the moment one is not.
-        tenant.OnboardingCompletedAt = foundCurrent ? null : tenant.OnboardingCompletedAt ?? now;
+        tenant.OnboardingCompletedAt = anyUnmet ? null : tenant.OnboardingCompletedAt ?? now;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -150,9 +160,13 @@ public class OnboardingService : IOnboardingService
             }
 
             case OnboardingCatalog.Plan:
+                // A plan, or the free trial the tenant signed up on: nobody is made to upgrade to get through setup. Once
+                // the trial has ended with no plan chosen, the step is open again.
+                if (TenantTrial.IsActive(tenant, _clock.UtcNow))
+                    return null;
                 return await _context.Subscriptions.AnyAsync(s => s.PlanId != null && s.Status != SubscriptionStatus.Canceled, cancellationToken)
                     ? null
-                    : "Choose a plan.";
+                    : "Your free trial has ended - choose a plan.";
 
             case OnboardingCatalog.CustomerPackage:
                 return await _context.SalesPackages.AnyAsync(p => p.IsActive, cancellationToken)
@@ -171,14 +185,13 @@ public class OnboardingService : IOnboardingService
 
             case OnboardingCatalog.WhatsApp:
             {
-                var config = await _whatsApp.GetConfigForTenantAsync(tenantId, cancellationToken);
-                if (config is null || !config.IsConnected)
-                    return "Save your WhatsApp phone number ID, access token and app secret.";
-                if (config.IsVerified)
+                // Early in setup all that is asked is the number customers will message. Connecting it to WhatsApp
+                // (credentials, verification) comes later. A tenant whose connection is already verified has
+                // plainly given its number, so it is not asked again.
+                if (!string.IsNullOrWhiteSpace(tenant.WhatsAppNumber))
                     return null;
-                return config.VerificationError is { } error
-                    ? $"Verification failed: {error}"
-                    : "Verify the connection.";
+                var config = await _whatsApp.GetConfigForTenantAsync(tenantId, cancellationToken);
+                return config is { IsVerified: true } ? null : "Enter the WhatsApp number your customers will message.";
             }
 
             case OnboardingCatalog.MessageTemplate:
