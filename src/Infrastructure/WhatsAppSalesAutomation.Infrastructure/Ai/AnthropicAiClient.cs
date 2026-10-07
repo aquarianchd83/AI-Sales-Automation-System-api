@@ -10,7 +10,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// <summary>
 /// Real Anthropic Claude client (Messages API). No longer implements <see cref="IAiService"/> directly -
 /// <see cref="AiServiceFactory"/> is the DI-registered IAiService and the only caller of this class,
-/// passing the calling tenant's already-resolved <see cref="TenantAiCredentials"/> into every call
+/// passing the calling tenant's already-resolved <see cref="AiCredentials"/> into every call
 /// instead of this class reading one fixed global setting. Forces tool-use (<c>tool_choice</c> pinned
 /// to AiPromptSupport.ToolName) so the reply text and the structured intent/confidence/entities always
 /// arrive together in one call - never exercised against a live API key in this codebase, same caveat
@@ -30,7 +30,7 @@ public class AnthropicAiClient
         _logger = logger;
     }
 
-    public async Task<AiReplyResult> GetResponseAsync(TenantAiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
+    public async Task<AiReplyResult> GetResponseAsync(AiCredentials credentials, AiConversationContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var modelUsed = $"Anthropic:{credentials.AnthropicModel}";

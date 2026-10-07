@@ -4,21 +4,21 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
 /// Tenant-aware implementation of <see cref="IActiveAiProviderAccessor"/> - see
-/// ITenantAiConfigProvider's own doc comment for why this reads the current tenant's config instead
+/// IPlatformAiConfigProvider's own doc comment for why this reads the current tenant's config instead
 /// of one global AiProviderSettings now. Same blocking-on-a-memoized-task shape as
 /// TenantEmbeddingService's sync properties, for the same reason (IActiveAiProviderAccessor.ActiveProvider
 /// is a plain synchronous property every existing caller - KnowledgeBaseService - already reads that way).
 /// </summary>
 public class ActiveAiProviderAccessor : IActiveAiProviderAccessor
 {
-    private readonly ITenantAiConfigProvider _configProvider;
+    private readonly IPlatformAiConfigProvider _configProvider;
 
-    public ActiveAiProviderAccessor(ITenantAiConfigProvider configProvider)
+    public ActiveAiProviderAccessor(IPlatformAiConfigProvider configProvider)
     {
         _configProvider = configProvider;
     }
 
-    private TenantAiCredentials? Credentials => _configProvider.GetForCurrentTenantAsync().GetAwaiter().GetResult();
+    private AiCredentials Credentials => _configProvider.Get();
 
     public string ActiveProvider => Credentials?.Provider ?? "Simulated";
 

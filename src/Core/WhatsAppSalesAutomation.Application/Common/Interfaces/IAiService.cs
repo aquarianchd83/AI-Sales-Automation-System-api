@@ -152,7 +152,10 @@ public record AiReplyResult(
     /// <summary>What they said stopped them, in a few words.</summary>
     string? CannotProceedReason = null,
     /// <summary>The wait that matches what they said (1, 2 or 3 months), or null when they named none.</summary>
-    int? FollowUpInMonths = null);
+    int? FollowUpInMonths = null,
+    /// <summary>True when the provider call itself failed (outage, rejected key, malformed answer) rather than the
+    /// model giving a low-confidence answer. A failed call is not billed to the tenant: the credit is given back.</summary>
+    bool ProviderFailed = false);
 
 /// <summary>One qualification value the model claims the customer supplied. Claims, not facts - the
 /// validator checks the key is in this tenant's schema and the value fits the field's type before any

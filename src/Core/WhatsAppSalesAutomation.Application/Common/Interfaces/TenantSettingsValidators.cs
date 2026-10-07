@@ -12,24 +12,6 @@ public class UpdateTenantWhatsAppConfigRequestValidator : AbstractValidator<Upda
     }
 }
 
-public class UpdateTenantAiProviderConfigRequestValidator : AbstractValidator<UpdateTenantAiProviderConfigRequest>
-{
-    private static readonly string[] ChatProviders = { "simulated", "anthropic", "openai", "google" };
-    private static readonly string[] EmbeddingProviders = { "simulated", "openai", "google" };
-
-    public UpdateTenantAiProviderConfigRequestValidator()
-    {
-        RuleFor(x => x.Provider)
-            .Must(p => ChatProviders.Contains(p!.ToLowerInvariant()))
-            .When(x => x.Provider is not null)
-            .WithMessage("Provider must be one of: Simulated, Anthropic, OpenAI, Google.");
-
-        RuleFor(x => x.EmbeddingProvider)
-            .Must(p => EmbeddingProviders.Contains(p!.ToLowerInvariant()))
-            .When(x => x.EmbeddingProvider is not null)
-            .WithMessage("EmbeddingProvider must be one of: Simulated, OpenAI, Google.");
-    }
-}
 
 /// <summary>Format-only validation for the tenant config-overrides request - whether a key is even
 /// tenant-overridable at all is TenantConfigOverrideProvider's job (NotFoundException), same split

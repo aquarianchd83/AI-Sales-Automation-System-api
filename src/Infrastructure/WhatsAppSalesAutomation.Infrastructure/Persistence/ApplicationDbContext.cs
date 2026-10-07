@@ -82,6 +82,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<AiInteraction> AiInteractions => Set<AiInteraction>();
 
+    public DbSet<AiTransaction> AiTransactions => Set<AiTransaction>();
+
     public DbSet<AiInteractionSource> AiInteractionSources => Set<AiInteractionSource>();
     public DbSet<AiInteractionValidationFailure> AiInteractionValidationFailures => Set<AiInteractionValidationFailure>();
 
@@ -192,16 +194,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // ISettingsService, same reasoning as WhatsAppAccessTokenStates above.
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
-    // Deliberately not on IApplicationDbContext - reached only through ITenantWhatsAppConfigProvider/
-    // ITenantAiConfigProvider, same reasoning as AppSettings/WhatsAppAccessTokenStates above. Both are
-    // still ITenantOwned (see each entity's own doc comment), so the reflective filter pass below
-    // picks them up like any other tenant-owned entity despite not appearing on the interface.
+    // Deliberately not on IApplicationDbContext - reached only through ITenantWhatsAppConfigProvider, same reasoning as AppSettings/WhatsAppAccessTokenStates above. It is
+    // still ITenantOwned (see its own doc comment), so the reflective filter pass below picks it up like any
+    // other tenant-owned entity despite not appearing on the interface.
     public DbSet<TenantWhatsAppConfig> TenantWhatsAppConfigs => Set<TenantWhatsAppConfig>();
 
-    public DbSet<TenantAiProviderConfig> TenantAiProviderConfigs => Set<TenantAiProviderConfig>();
-
     // Deliberately not on IApplicationDbContext - reached only through ITenantConfigOverrideProvider,
-    // same reasoning as TenantWhatsAppConfigs/TenantAiProviderConfigs above.
+    // same reasoning as TenantWhatsAppConfigs above.
     public DbSet<TenantAppSettingOverride> TenantAppSettingOverrides => Set<TenantAppSettingOverride>();
 
     protected override void OnModelCreating(ModelBuilder builder)

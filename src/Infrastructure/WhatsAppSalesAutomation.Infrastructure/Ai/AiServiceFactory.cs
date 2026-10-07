@@ -8,19 +8,19 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// choice once each tenant configures independently; this factory replaces
 /// DependencyInjection.AddAiClients's old startup-time switch for chat). Falls back to
 /// <see cref="SimulatedAiClient"/> - never throws - whenever the current tenant has no AI config row,
-/// or has one but left <see cref="TenantAiCredentials.Provider"/> as "Simulated" (the default), or
+/// or has one but left <see cref="AiCredentials.Provider"/> as "Simulated" (the default), or
 /// picked a real provider without supplying that provider's API key.
 /// </summary>
 public class AiServiceFactory : IAiService
 {
-    private readonly ITenantAiConfigProvider _configProvider;
+    private readonly IPlatformAiConfigProvider _configProvider;
     private readonly AnthropicAiClient _anthropicClient;
     private readonly OpenAiAiClient _openAiClient;
     private readonly GoogleAiClient _googleClient;
     private readonly SimulatedAiClient _simulatedClient;
 
     public AiServiceFactory(
-        ITenantAiConfigProvider configProvider,
+        IPlatformAiConfigProvider configProvider,
         AnthropicAiClient anthropicClient,
         OpenAiAiClient openAiClient,
         GoogleAiClient googleClient,
@@ -35,7 +35,7 @@ public class AiServiceFactory : IAiService
 
     public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
     {
-        var credentials = await _configProvider.GetForCurrentTenantAsync(cancellationToken);
+        var credentials = _configProvider.Get();
 
         if (credentials is null)
             return await _simulatedClient.GetResponseAsync(context, cancellationToken);

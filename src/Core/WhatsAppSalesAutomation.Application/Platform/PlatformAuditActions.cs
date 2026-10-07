@@ -16,8 +16,6 @@ public static class PlatformAuditActions
     public const string TenantCountryUpdated = "TenantCountryUpdated";
     public const string TenantWhatsAppConfigSaved = "TenantWhatsAppConfigSaved";
     public const string TenantWhatsAppConfigDeleted = "TenantWhatsAppConfigDeleted";
-    public const string TenantAiConfigSaved = "TenantAiConfigSaved";
-    public const string TenantAiConfigDeleted = "TenantAiConfigDeleted";
     public const string TenantConfigOverridesSaved = "TenantConfigOverridesSaved";
     public const string TenantConfigOverridesDeleted = "TenantConfigOverridesDeleted";
     public const string PlanCreated = "PlanCreated";

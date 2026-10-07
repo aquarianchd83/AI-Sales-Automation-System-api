@@ -26,5 +26,6 @@ internal static class AiClientFailure
         PromptTokens: null,
         CompletionTokens: null,
         LatencyMs: (int)elapsed.TotalMilliseconds,
-        CitedChunkIds: Array.Empty<Guid>());
+        CitedChunkIds: Array.Empty<Guid>(),
+        ProviderFailed: true);
 }

@@ -69,6 +69,8 @@ public interface IApplicationDbContext
 
     DbSet<AiInteraction> AiInteractions { get; }
 
+    DbSet<AiTransaction> AiTransactions { get; }
+
     DbSet<AiInteractionSource> AiInteractionSources { get; }
 
     DbSet<AiInteractionValidationFailure> AiInteractionValidationFailures { get; }

@@ -13,13 +13,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// </summary>
 public class TenantEmbeddingProviderCatalog : IEmbeddingProviderCatalog
 {
-    private readonly ITenantAiConfigProvider _configProvider;
+    private readonly IPlatformAiConfigProvider _configProvider;
     private readonly OpenAiEmbeddingClient _openAiClient;
     private readonly GoogleEmbeddingClient _googleClient;
     private readonly SimulatedEmbeddingClient _simulatedClient;
 
     public TenantEmbeddingProviderCatalog(
-        ITenantAiConfigProvider configProvider,
+        IPlatformAiConfigProvider configProvider,
         OpenAiEmbeddingClient openAiClient,
         GoogleEmbeddingClient googleClient,
         SimulatedEmbeddingClient simulatedClient)
@@ -30,13 +30,13 @@ public class TenantEmbeddingProviderCatalog : IEmbeddingProviderCatalog
         _simulatedClient = simulatedClient;
     }
 
-    // Blocking, memoized via ITenantAiConfigProvider's own per-scope cache - see
+    // Blocking, memoized via IPlatformAiConfigProvider's own per-scope cache - see
     // TenantEmbeddingService's identical property/doc comment for why this is safe and cheap.
     public IReadOnlyList<IEmbeddingService> AllProviders
     {
         get
         {
-            var credentials = _configProvider.GetForCurrentTenantAsync().GetAwaiter().GetResult();
+            var credentials = _configProvider.Get();
             return new IEmbeddingService[]
             {
                 _simulatedClient,
@@ -52,9 +52,9 @@ public class TenantEmbeddingProviderCatalog : IEmbeddingProviderCatalog
     private class OpenAiAdapter : IEmbeddingService
     {
         private readonly OpenAiEmbeddingClient _client;
-        private readonly TenantAiCredentials? _credentials;
+        private readonly AiCredentials _credentials;
 
-        public OpenAiAdapter(OpenAiEmbeddingClient client, TenantAiCredentials? credentials)
+        public OpenAiAdapter(OpenAiEmbeddingClient client, AiCredentials credentials)
         {
             _client = client;
             _credentials = credentials;
@@ -73,9 +73,9 @@ public class TenantEmbeddingProviderCatalog : IEmbeddingProviderCatalog
     private class GoogleAdapter : IEmbeddingService
     {
         private readonly GoogleEmbeddingClient _client;
-        private readonly TenantAiCredentials? _credentials;
+        private readonly AiCredentials _credentials;
 
-        public GoogleAdapter(GoogleEmbeddingClient client, TenantAiCredentials? credentials)
+        public GoogleAdapter(GoogleEmbeddingClient client, AiCredentials credentials)
         {
             _client = client;
             _credentials = credentials;
