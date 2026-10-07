@@ -8,6 +8,7 @@ public class SaveLeadDiscoveryProfileRequestValidator : AbstractValidator<SaveLe
     public SaveLeadDiscoveryProfileRequestValidator()
     {
         RuleFor(x => x.TargetBusinessType).NotEmpty().MaximumLength(LeadDiscoveryLimits.TargetBusinessType);
+        RuleFor(x => x.Description).MaximumLength(LeadDiscoveryLimits.Description);
 
         RuleFor(x => x.Keywords)
             .Must(HaveAValue).WithMessage("Add at least one search keyword.")

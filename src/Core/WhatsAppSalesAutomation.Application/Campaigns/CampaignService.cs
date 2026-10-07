@@ -1,10 +1,12 @@
 using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -13,6 +15,8 @@ namespace WhatsAppSalesAutomation.Application.Campaigns;
 public class CampaignService : ICampaignService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ITenantJobProvisioner _jobProvisioner;
+    private readonly ILogger<CampaignService> _logger;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantContext _tenantContext;
     private readonly IPlanLimitsService _planLimits;
@@ -33,8 +37,12 @@ public class CampaignService : ICampaignService
         IValidator<CreateCampaignRequest> createValidator,
         IValidator<UpdateCampaignRequest> updateValidator,
         IValidator<UpsertCampaignStepRequest> stepValidator,
-        IValidator<SetCampaignAudienceRequest> audienceValidator)
+        IValidator<SetCampaignAudienceRequest> audienceValidator,
+        ITenantJobProvisioner jobProvisioner,
+        ILogger<CampaignService> logger)
     {
+        _jobProvisioner = jobProvisioner;
+        _logger = logger;
         _context = context;
         _dateTime = dateTime;
         _tenantContext = tenantContext;
@@ -94,7 +102,28 @@ public class CampaignService : ICampaignService
         _context.Campaigns.Add(campaign);
         await _context.SaveChangesAsync(cancellationToken);
 
+        // The campaign jobs (initial sends, follow-ups, retries, completion) do not exist until the tenant has a
+        // campaign - this is the moment they are created.
+        await SyncCampaignJobsAsync(cancellationToken);
+
         return await BuildDtoAsync(campaign, cancellationToken);
+    }
+
+    /// <summary>Brings the tenant's recurring jobs in line with whether it has a campaign. Never fails the caller: the
+    /// campaign itself is already saved, and the daily reconcile puts the jobs right if Hangfire was unavailable.</summary>
+    private async Task SyncCampaignJobsAsync(CancellationToken cancellationToken)
+    {
+        if (_tenantContext.TenantId is not { } tenantId)
+            return;
+
+        try
+        {
+            await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not update the campaign jobs of tenant {TenantId} after a campaign change; the next reconcile will", tenantId);
+        }
     }
 
     public async Task<CampaignDto> UpdateAsync(Guid id, UpdateCampaignRequest request, CancellationToken cancellationToken = default)
@@ -147,6 +176,9 @@ public class CampaignService : ICampaignService
 
         _context.Campaigns.Remove(campaign);
         await _context.SaveChangesAsync(cancellationToken);
+
+        // With its last campaign gone the tenant has nothing for those jobs to do again.
+        await SyncCampaignJobsAsync(cancellationToken);
     }
 
     public async Task<CampaignDto> UpsertStepAsync(Guid campaignId, UpsertCampaignStepRequest request, CancellationToken cancellationToken = default)

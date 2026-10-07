@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -14,13 +15,16 @@ public class PackageService : IPackageService
     private readonly IValidator<SavePackageRequest> _validator;
     private readonly IValidator<RecordPackageSaleRequest> _saleValidator;
     private readonly IDateTimeProvider _clock;
+    private readonly ITenantContext _tenantContext;
 
     public PackageService(
         IApplicationDbContext context,
         IValidator<SavePackageRequest> validator,
         IValidator<RecordPackageSaleRequest> saleValidator,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ITenantContext tenantContext)
     {
+        _tenantContext = tenantContext;
         _context = context;
         _validator = validator;
         _saleValidator = saleValidator;
@@ -60,12 +64,14 @@ public class PackageService : IPackageService
     {
         await _validator.ValidateAndThrowAsync(request, cancellationToken);
 
-        // A customer package is built on the platform plan the tenant chose, so there has to be one first.
+        // A customer package is built on the platform plan the tenant chose. A tenant still on its free trial has not
+        // chosen one yet and need not: its packages are mapped to no plan until it does.
         var planId = await _context.Subscriptions
             .Where(s => s.PlanId != null && s.Status != SubscriptionStatus.Canceled)
             .Select(s => s.PlanId)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new ConflictException("Select a platform plan before creating a package for your customers.");
+            .FirstOrDefaultAsync(cancellationToken);
+        if (planId is null && !await OnTrialAsync(cancellationToken))
+            throw new ConflictException("Select a platform plan before creating a package for your customers.");
 
         var name = request.Name.Trim();
         await EnsureNameIsFreeAsync(name, excludingId: null, cancellationToken);
@@ -252,6 +258,15 @@ public class PackageService : IPackageService
         p.IsActive,
         p.CreatedAt,
         p.PlatformPlanId);
+
+    private async Task<bool> OnTrialAsync(CancellationToken cancellationToken)
+    {
+        if (_tenantContext.TenantId is not { } tenantId)
+            return false;
+
+        var tenant = await _context.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken);
+        return tenant is not null && TenantTrial.IsActive(tenant, _clock.UtcNow);
+    }
 
     private async Task EnsureNameIsFreeAsync(string name, Guid? excludingId, CancellationToken cancellationToken)
     {

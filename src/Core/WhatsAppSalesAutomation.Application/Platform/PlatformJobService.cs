@@ -204,7 +204,12 @@ public class PlatformJobService : IPlatformJobService
 
         return await _context.TenantJobSchedules.FirstOrDefaultAsync(
                    s => s.TenantId == tenantId && s.JobType == jobType, cancellationToken)
-               ?? throw new NotFoundException($"Job {jobType} was not found for tenant {tenantId}.");
+               ?? throw new NotFoundException(
+                   TenantJobCatalog.NeedsCampaign(jobType)
+                       ? $"Job {jobType} does not exist for this tenant yet - it is created with the tenant's first campaign."
+                       : TenantJobCatalog.NeedsLeadProfile(jobType)
+                           ? $"Job {jobType} does not exist for this tenant yet - it is created when the tenant saves its lead discovery profile."
+                           : $"Job {jobType} was not found for tenant {tenantId}.");
     }
 
     /// <summary>Hangfire's registry is read once per request for exactly the rows being returned, not per

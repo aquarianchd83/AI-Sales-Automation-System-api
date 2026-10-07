@@ -56,6 +56,8 @@ public static class DependencyInjection
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Onboarding.IOnboardingService, WhatsAppSalesAutomation.Application.Onboarding.OnboardingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Tenancy.IKeywordSuggestionService, WhatsAppSalesAutomation.Application.Tenancy.KeywordSuggestionService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.LeadDiscovery.ILeadDiscoveryKeywordSuggestionService, WhatsAppSalesAutomation.Application.LeadDiscovery.LeadDiscoveryKeywordSuggestionService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Tenancy.IDescriptionRefinementService, WhatsAppSalesAutomation.Application.Tenancy.DescriptionRefinementService>();
         services.AddScoped<IAiSpendEstimator, AiSpendEstimator>();
 
         // Phase 6 ingestion. The chunker and counter are stateless; the batcher and services are

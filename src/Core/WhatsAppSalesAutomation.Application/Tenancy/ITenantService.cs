@@ -20,6 +20,11 @@ public interface ITenantService
     /// doc comment. A PlatformSuperAdmin can also override this from the Platform Admin Console (see
     /// IPlatformTenantService.UpdateTimezoneAsync) - both paths write the same
     /// <c>Tenant.Timezone</c> column, neither is the sole owner of it.</summary>
+    /// <summary>The WhatsApp number the calling tenant gave for its customers to message; null when none yet.</summary>
+    Task<TenantWhatsAppNumberDto> GetWhatsAppNumberForCurrentTenantAsync(CancellationToken cancellationToken = default);
+
+    Task<TenantWhatsAppNumberDto> UpdateWhatsAppNumberForCurrentTenantAsync(UpdateTenantWhatsAppNumberRequest request, CancellationToken cancellationToken = default);
+
     Task<TenantProfileDto> UpdateTimezoneForCurrentTenantAsync(UpdateTenantTimezoneRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Self-service country change - see <see cref="UpdateTenantCountryRequest"/>'s own doc

@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Packages;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using Xunit;
@@ -34,7 +35,7 @@ public sealed class PackageServiceTests : IDisposable
         _db.Subscriptions.Add(new Subscription { TenantId = _tenant, PlanId = _plan.Id, Status = SubscriptionStatus.Active });
         _db.SaveChanges();
 
-        _service = new PackageService(_db, new SavePackageRequestValidator(), new RecordPackageSaleRequestValidator(), _clock);
+        _service = new PackageService(_db, new SavePackageRequestValidator(), new RecordPackageSaleRequestValidator(), _clock, new Ambient(_tenant));
     }
 
     public void Dispose()
@@ -73,6 +74,28 @@ public sealed class PackageServiceTests : IDisposable
 
         var refused = await Assert.ThrowsAsync<ConflictException>(() => _service.CreateAsync(Request("Gold")));
         Assert.Contains("platform plan", refused.Message);
+    }
+
+    [Fact]
+    public async Task A_tenant_still_on_its_free_trial_can_create_a_package_before_choosing_a_plan()
+    {
+        _db.Subscriptions.RemoveRange(await _db.Subscriptions.ToListAsync());
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Trial Co", Slug = "trial-co", Status = TenantStatus.Trial, TrialEndsAtUtc = _clock.UtcNow.AddDays(10) });
+        await _db.SaveChangesAsync();
+
+        var dto = await _service.CreateAsync(Request("Gold"));
+
+        Assert.Null(dto.PlatformPlanId); // mapped to no plan until one is chosen
+    }
+
+    [Fact]
+    public async Task A_trial_that_has_ended_is_not_a_plan()
+    {
+        _db.Subscriptions.RemoveRange(await _db.Subscriptions.ToListAsync());
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Old Trial Co", Slug = "old-trial", Status = TenantStatus.Trial, TrialEndsAtUtc = _clock.UtcNow.AddDays(-1) });
+        await _db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ConflictException>(() => _service.CreateAsync(Request("Gold")));
     }
 
     [Fact]

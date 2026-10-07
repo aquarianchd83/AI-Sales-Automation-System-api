@@ -33,6 +33,15 @@ public class LeadDiscoveryController : ControllerBase
     public async Task<ActionResult<LeadDiscoveryProfileDto>> SaveProfile([FromBody] SaveLeadDiscoveryProfileRequest request, CancellationToken cancellationToken)
         => Ok(await _leadDiscoveryService.SaveProfileAsync(request, cancellationToken));
 
+    /// <summary>"AI suggest" for the profile's search keywords: drawn from the description the tenant wrote and the packages
+    /// they sell - from their own AI provider when one is really configured, otherwise from what is already known. Says
+    /// which in <c>source</c>. Nothing is saved.</summary>
+    [HttpPost("keyword-suggestions")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<Application.Tenancy.KeywordSuggestionsDto>> SuggestKeywords(
+        [FromBody] SuggestLeadKeywordsRequest request, [FromServices] ILeadDiscoveryKeywordSuggestionService suggestions, CancellationToken cancellationToken)
+        => Ok(await suggestions.SuggestAsync(request, cancellationToken));
+
     [HttpGet("leads")]
     public async Task<ActionResult<PagedResult<DiscoveredLeadDto>>> GetLeads(
         [FromQuery] PagedRequest request, [FromQuery] int? minScore, CancellationToken cancellationToken)

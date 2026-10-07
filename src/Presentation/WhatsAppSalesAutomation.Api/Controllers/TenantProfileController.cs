@@ -40,6 +40,14 @@ public class TenantProfileController : ControllerBase
         [FromBody] SuggestKeywordsRequest request, [FromServices] IKeywordSuggestionService suggestions, CancellationToken cancellationToken)
         => Ok(await suggestions.SuggestAsync(request, cancellationToken));
 
+    /// <summary>Refines the business description the tenant wrote: from the tenant's own AI provider when one is really
+    /// configured, otherwise only tidied. Says which in <c>source</c>. Nothing is saved - the screen shows the result and
+    /// the tenant decides whether to use it.</summary>
+    [HttpPost("description-refinement")]
+    public async Task<ActionResult<RefinedDescriptionDto>> RefineDescription(
+        [FromBody] RefineDescriptionRequest request, [FromServices] IDescriptionRefinementService refinement, CancellationToken cancellationToken)
+        => Ok(await refinement.RefineAsync(request, cancellationToken));
+
     [HttpPut("timezone")]
     public async Task<ActionResult<TenantProfileDto>> UpdateTimezone([FromBody] UpdateTenantTimezoneRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateTimezoneForCurrentTenantAsync(request, cancellationToken));

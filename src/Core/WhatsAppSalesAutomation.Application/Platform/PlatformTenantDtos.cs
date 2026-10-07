@@ -47,7 +47,9 @@ public record PlatformTenantDetailDto(
     decimal EstimatedAiSpendThisMonthLocal,
     bool RefundRequestsEnabled,
     // The tenant's state where its country's tax splits by state (India); decides CGST + SGST versus IGST.
-    string? StateCode = null);
+    string? StateCode = null,
+    // The WhatsApp number the tenant gave during onboarding - what the operator connects to WhatsApp for it.
+    string? WhatsAppNumber = null);
 
 public record ImpersonationSessionDto(
     string AccessToken,

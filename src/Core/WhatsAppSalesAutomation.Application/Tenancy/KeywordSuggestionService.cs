@@ -7,7 +7,7 @@ namespace WhatsAppSalesAutomation.Application.Tenancy;
 
 /// <summary>Body of the keyword suggestion request: the industry to suggest for, optionally the business description
 /// for context, and the keywords already added (never suggested again).</summary>
-public record SuggestKeywordsRequest(string Industry, string? BusinessDescription, IReadOnlyList<string>? Existing);
+public record SuggestKeywordsRequest(string Industry, string? BusinessDescription, IReadOnlyList<string>? Existing, string? IndustrySubcategory = null);
 
 /// <summary>What came back. <see cref="Source"/> is "AI" when the tenant's AI provider wrote them, "Common terms" when
 /// they came from the built-in list for well-known industries - the screen says which, so a lookup is never passed off
@@ -25,6 +25,7 @@ public class SuggestKeywordsRequestValidator : AbstractValidator<SuggestKeywords
     {
         RuleFor(x => x.Industry).NotEmpty().WithMessage("Choose an industry first.").MaximumLength(TenantProfileLimits.Industry);
         RuleFor(x => x.BusinessDescription).MaximumLength(TenantProfileLimits.BusinessDescription);
+        RuleFor(x => x.IndustrySubcategory).MaximumLength(TenantProfileLimits.IndustrySubcategory);
         RuleFor(x => x.Existing).Must(e => e is null || e.Count <= TenantProfileLimits.MaxKeywords * 2);
     }
 }
@@ -59,7 +60,7 @@ public class KeywordSuggestionService : IKeywordSuggestionService
         var existing = new HashSet<string>(
             TenantBusinessDetails.NormalizeKeywords(request.Existing), StringComparer.OrdinalIgnoreCase);
 
-        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(industry, request.BusinessDescription, existing), 400, cancellationToken);
+        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(industry, request.IndustrySubcategory, request.BusinessDescription, existing), 400, cancellationToken);
         var fromAi = Clean(ParseList(reply), existing);
         if (fromAi.Count > 0)
             return new KeywordSuggestionsDto(fromAi, "AI");
@@ -67,9 +68,11 @@ public class KeywordSuggestionService : IKeywordSuggestionService
         return new KeywordSuggestionsDto(Clean(IndustryKeywordCatalog.For(industry), existing), "Common terms");
     }
 
-    private static string BuildPrompt(string industry, string? description, IReadOnlyCollection<string> existing)
+    private static string BuildPrompt(string industry, string? subcategory, string? description, IReadOnlyCollection<string> existing)
     {
         var lines = new List<string> { $"Industry: {industry}" };
+        if (!string.IsNullOrWhiteSpace(subcategory))
+            lines.Add($"Speciality within it: {subcategory.Trim()} (suggest for this speciality, not the whole industry)");
         if (!string.IsNullOrWhiteSpace(description))
             lines.Add($"About the business: {description.Trim()}");
         if (existing.Count > 0)

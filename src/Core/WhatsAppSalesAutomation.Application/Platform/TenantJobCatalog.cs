@@ -103,6 +103,33 @@ public static class TenantJobCatalog
         TenantJobTypes.LeadFollowUps,
     };
 
+    /// <summary>The jobs that only mean something once the tenant has a campaign. They are not scheduled at
+    /// registration - there is nothing for them to do - and are created with the tenant's first campaign (see
+    /// <see cref="ITenantJobProvisioner"/>), then removed again if its last campaign is deleted.</summary>
+    public static readonly IReadOnlySet<string> NeedsCampaignKeys = new HashSet<string>
+    {
+        TenantJobTypes.CampaignInitialSends,
+        TenantJobTypes.CampaignFollowUps,
+        TenantJobTypes.CampaignSendRetries,
+        TenantJobTypes.CampaignCompletion,
+    };
+
+    public static bool NeedsCampaign(string jobType) => NeedsCampaignKeys.Contains(jobType);
+
+    /// <summary>The job that only means something once the tenant has saved a lead discovery profile: without one there is
+    /// nothing for it to search for. Not scheduled at registration; created when the profile is first saved (see
+    /// <see cref="ITenantJobProvisioner"/>).</summary>
+    public static readonly IReadOnlySet<string> NeedsLeadProfileKeys = new HashSet<string>
+    {
+        TenantJobTypes.LeadDiscovery,
+    };
+
+    public static bool NeedsLeadProfile(string jobType) => NeedsLeadProfileKeys.Contains(jobType);
+
+    /// <summary>Whether a job should exist for a tenant, given what the tenant has set up so far.</summary>
+    public static bool IsApplicable(string jobType, bool hasCampaign, bool hasLeadProfile) =>
+        (!NeedsCampaign(jobType) || hasCampaign) && (!NeedsLeadProfile(jobType) || hasLeadProfile);
+
     public static TenantJobDefinition? Find(string jobType) =>
         All.FirstOrDefault(j => j.Key == jobType);
 

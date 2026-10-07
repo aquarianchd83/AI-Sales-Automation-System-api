@@ -27,6 +27,12 @@ public record TenantJobReconcileSummary(
 ///
 /// Both are idempotent, so calling one after the other (or twice) changes nothing the second time.
 /// </summary>
+/// <summary>
+/// Keeps each tenant's recurring jobs in line with what the tenant actually has. Every tenant gets the jobs that make
+/// sense from the start; the campaign jobs (<see cref="TenantJobCatalog.NeedsCampaignKeys"/>) exist only while the tenant
+/// has at least one campaign - a job that runs every day against nothing is just noise (and, for the self-service jobs,
+/// a "started"/"completed" notice each time).
+/// </summary>
 public interface ITenantJobProvisioner
 {
     /// <summary>Ensures this tenant has a schedule row per <see cref="TenantJobCatalog"/> entry, then

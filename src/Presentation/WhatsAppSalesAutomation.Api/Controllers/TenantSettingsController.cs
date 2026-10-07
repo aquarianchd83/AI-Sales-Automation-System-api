@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
@@ -55,6 +56,17 @@ public class TenantSettingsController : ControllerBase
     [HttpGet("usage")]
     public async Task<ActionResult<TenantMessageUsageDto>> GetUsage(CancellationToken cancellationToken)
         => Ok(await _planLimits.GetMessageUsageAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>The WhatsApp number the tenant gave for its customers to message - just the number. Connecting it to
+    /// WhatsApp (credentials, verification) is the separate "WhatsApp connection" below.</summary>
+    [HttpGet("whatsapp-number")]
+    public async Task<ActionResult<TenantWhatsAppNumberDto>> GetWhatsAppNumber([FromServices] ITenantService tenants, CancellationToken cancellationToken)
+        => Ok(await tenants.GetWhatsAppNumberForCurrentTenantAsync(cancellationToken));
+
+    [HttpPut("whatsapp-number")]
+    public async Task<ActionResult<TenantWhatsAppNumberDto>> SaveWhatsAppNumber(
+        [FromBody] UpdateTenantWhatsAppNumberRequest request, [FromServices] ITenantService tenants, CancellationToken cancellationToken)
+        => Ok(await tenants.UpdateWhatsAppNumberForCurrentTenantAsync(request, cancellationToken));
 
     /// <summary>This month's usage charges - WhatsApp sending plus lead discovery. Estimates from
     /// hand-maintained rate tables, not an invoice; see ITenantChargesService's own doc comment.</summary>

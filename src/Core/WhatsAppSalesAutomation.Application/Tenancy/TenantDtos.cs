@@ -30,7 +30,8 @@ public record TenantProfileDto(
     string? WorkingHours = null,
     string? TargetAudience = null,
     string? TargetLocation = null,
-    string? TargetCustomerType = null)
+    string? TargetCustomerType = null,
+    string? IndustrySubcategory = null)
 {
     /// <summary>Shared by the tenant's self-service endpoints and the Platform Admin Console's
     /// timezone/country overrides, so every path returns the same effective values.</summary>
@@ -49,7 +50,8 @@ public record TenantProfileDto(
         tenant.WorkingHours,
         tenant.TargetAudience,
         tenant.TargetLocation,
-        tenant.TargetCustomerType);
+        tenant.TargetCustomerType,
+        tenant.IndustrySubcategory);
 }
 
 /// <summary>Body of PUT the tenant's own business profile - replaces every business field at once, so
@@ -69,7 +71,8 @@ public record UpdateTenantBusinessProfileRequest(
     string? WorkingHours = null,
     string? TargetAudience = null,
     string? TargetLocation = null,
-    string? TargetCustomerType = null) : ITenantBusinessDetails;
+    string? TargetCustomerType = null,
+    string? IndustrySubcategory = null) : ITenantBusinessDetails;
 
 /// <summary>Body of PUT the tenant's own timezone - see TenantProfileDto's own doc comment for why
 /// this is never blank on the way out; on the way in it must be one of TimeZoneCatalog.All (see
@@ -77,6 +80,13 @@ public record UpdateTenantBusinessProfileRequest(
 /// signup's optional CountryCode/Timezone fields get - a tenant deliberately changing this expects it
 /// to actually take effect, not silently degrade.</summary>
 public record UpdateTenantTimezoneRequest(string Timezone);
+
+/// <summary>The WhatsApp number the tenant's customers will message (null: none given yet).</summary>
+public record TenantWhatsAppNumberDto(string? WhatsAppNumber);
+
+/// <summary>Body of PUT the tenant's own WhatsApp number. Blank clears it. Only the number - connecting it to WhatsApp
+/// is a separate, later step.</summary>
+public record UpdateTenantWhatsAppNumberRequest(string? WhatsAppNumber);
 
 /// <summary>Body of PUT the tenant's own country - same "must actually take effect, not silently
 /// degrade" reasoning as UpdateTenantTimezoneRequest: on the way in it must be one of
