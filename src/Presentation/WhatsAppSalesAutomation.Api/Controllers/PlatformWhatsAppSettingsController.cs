@@ -46,6 +46,11 @@ public class PlatformWhatsAppSettingsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Asks Meta about the SAVED number and token (and the Business Account id) without sending any message. Always 200: the result says whether it worked.</summary>
+    [HttpPost("verify")]
+    public async Task<ActionResult<DeliveryTestResultDto>> Verify([FromServices] IPlatformWhatsAppVerifier verifier, CancellationToken cancellationToken)
+        => Ok(await verifier.VerifyAsync(cancellationToken));
+
     /// <summary>Sends Meta's sample template from the saved number to prove the credentials work. Always 200: the result says whether it worked.</summary>
     [HttpPost("test")]
     public async Task<ActionResult<DeliveryTestResultDto>> Test([FromBody] SendPlatformWhatsAppTestRequest request, CancellationToken cancellationToken)

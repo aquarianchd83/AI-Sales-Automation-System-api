@@ -352,6 +352,8 @@ public static class DependencyInjection
         services.Configure<WhatsAppSalesAutomation.Infrastructure.WhatsApp.PlatformWhatsAppOptions>(configuration.GetSection("PlatformWhatsApp"));
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppSender>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
+        // The Verify button on the Platform WhatsApp page: asks Meta about the saved number without sending anything. Loggers removed - it carries the token.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IPlatformWhatsAppVerifier, WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppVerifier>().RemoveAllLoggers();
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppTemplateAdmin>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
         services.AddScoped<PlatformTemplateSyncJob>();
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayGateway, WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway>(client =>
