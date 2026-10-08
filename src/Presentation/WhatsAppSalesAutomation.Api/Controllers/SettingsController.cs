@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -37,6 +38,12 @@ public class SettingsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<SettingCategoryDto>>> GetAll(CancellationToken cancellationToken)
         => Ok(await _settingsService.GetAllAsync(cancellationToken));
+
+    /// <summary>Tries each saved AI provider key (Anthropic, OpenAI, Google), or only the one named by ?provider=, by listing the provider's models - no tokens
+    /// spent. Uses what is SAVED, so save first. Always 200: each result says whether its key worked.</summary>
+    [HttpPost("ai-providers/verify")]
+    public async Task<ActionResult<IReadOnlyList<AiProviderCheckDto>>> VerifyAiProviders([FromServices] IAiProviderVerifier verifier, [FromQuery] string? provider, CancellationToken cancellationToken)
+        => Ok(await verifier.VerifyAsync(provider, cancellationToken));
 
     [HttpGet("{category}")]
     public async Task<ActionResult<SettingCategoryDto>> GetCategory(string category, CancellationToken cancellationToken)

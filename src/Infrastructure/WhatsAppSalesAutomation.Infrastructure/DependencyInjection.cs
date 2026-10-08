@@ -13,6 +13,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
+using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.Billing;
@@ -250,6 +251,9 @@ public static class DependencyInjection
 
         // One-shot text for helper features (keyword suggestions). Loggers removed: it carries the tenant's API key.
         services.AddHttpClient<IAiTextGenerator, AiTextGenerator>().RemoveAllLoggers();
+
+        // The Verify button on the AI Providers screen: lists each provider's models with the saved key. Loggers removed - it carries keys.
+        services.AddHttpClient<IAiProviderVerifier, AiProviderVerifier>().RemoveAllLoggers();
 
         services.AddHttpClient<AnthropicAiClient>();
         services.AddHttpClient<OpenAiAiClient>();
