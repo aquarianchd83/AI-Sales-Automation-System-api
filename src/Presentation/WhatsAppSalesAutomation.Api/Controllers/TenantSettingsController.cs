@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.MetaOnboarding;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -101,6 +102,38 @@ public class TenantSettingsController : ControllerBase
     public async Task<ActionResult<TenantWhatsAppConfigDto>> VerifyWhatsAppConfig(
         [FromServices] ITenantWhatsAppConnectionVerifier verifier, CancellationToken cancellationToken)
         => Ok(await verifier.VerifyAsync(RequireTenantId(), cancellationToken));
+
+    // ---- "Connect with Meta" (WhatsApp Embedded Signup) ----------------------------------------------------------------
+    // A Meta-side problem is never an HTTP error here: it comes back 200 with an issue (plain-language title, message and
+    // next action) and the steps so far, so the screen can explain it and keep what is already done.
+
+    /// <summary>What the browser needs to open Meta's sign-up popup - or why "Connect with Meta" is not available yet.</summary>
+    [HttpGet("whatsapp/meta-signup/config")]
+    public async Task<ActionResult<MetaSignupClientConfigDto>> GetMetaSignupConfig(
+        [FromServices] IMetaEmbeddedSignupService signup, CancellationToken cancellationToken)
+        => Ok(await signup.GetClientConfigAsync(cancellationToken));
+
+    /// <summary>Where each onboarding step stands now, read from Meta with the saved credentials.</summary>
+    [HttpGet("whatsapp/meta-signup/status")]
+    public async Task<ActionResult<MetaSignupResultDto>> GetMetaSignupStatus(
+        [FromServices] IMetaEmbeddedSignupService signup, CancellationToken cancellationToken)
+        => Ok(await signup.GetStatusAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>Finishes the sign-in the browser just completed with Meta: exchanges the code, finds the WhatsApp account and
+    /// number, saves the credentials encrypted for this tenant, registers the number, turns on webhooks and reads templates.</summary>
+    [HttpPost("whatsapp/meta-signup/complete")]
+    public async Task<ActionResult<MetaSignupResultDto>> CompleteMetaSignup(
+        [FromBody] CompleteMetaSignupRequest request,
+        [FromServices] IMetaEmbeddedSignupService signup,
+        [FromServices] ICurrentUserService currentUser,
+        CancellationToken cancellationToken)
+        => Ok(await signup.CompleteAsync(RequireTenantId(), currentUser.UserId, request, cancellationToken));
+
+    /// <summary>Carries on from the first step that is not done, with the credentials already saved - no new Meta sign-in.</summary>
+    [HttpPost("whatsapp/meta-signup/resume")]
+    public async Task<ActionResult<MetaSignupResultDto>> ResumeMetaSignup(
+        [FromServices] IMetaEmbeddedSignupService signup, CancellationToken cancellationToken)
+        => Ok(await signup.ResumeAsync(RequireTenantId(), cancellationToken));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated tenant-settings request has no tenant in scope.");

@@ -214,6 +214,10 @@ public static class DependencyInjection
         services.AddHttpClient<ITenantWhatsAppConnectionVerifier, TenantWhatsAppConnectionVerifier>()
             .RemoveAllLoggers();
 
+        // "Connect with Meta" (Embedded Signup): exchanges the one-time code, which takes the App Secret in the query - loggers off.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.MetaOnboarding.IMetaEmbeddedSignupService, MetaEmbeddedSignupService>()
+            .RemoveAllLoggers();
+
         services.AddHttpClient<MetaWhatsAppCloudApiClient>();
         services.AddHttpClient<IMediaUrlFetcher, WhatsAppSalesAutomation.Infrastructure.Storage.HttpMediaUrlFetcher>()
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
