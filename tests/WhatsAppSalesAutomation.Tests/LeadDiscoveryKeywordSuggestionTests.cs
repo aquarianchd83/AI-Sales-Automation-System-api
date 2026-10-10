@@ -21,10 +21,12 @@ public sealed class LeadDiscoveryKeywordSuggestionTests : IDisposable
     {
         public string? Reply { get; set; }
         public string? LastPrompt { get; private set; }
+        public string? LastProvider { get; private set; }
 
-        public Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default)
+        public Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default, string? provider = null)
         {
             LastPrompt = userPrompt;
+            LastProvider = provider;
             return Task.FromResult(Reply);
         }
     }
@@ -75,6 +77,16 @@ public sealed class LeadDiscoveryKeywordSuggestionTests : IDisposable
 
         Assert.Equal("AI", result.Source);
         Assert.Equal(new[] { "eye hospital", "eye doctor", "ophthalmologist", "optometrist", "netra chikitsalaya" }, result.Keywords);
+    }
+
+    [Fact]
+    public async Task Always_asks_ChatGPT_whichever_provider_the_platform_uses_for_conversations()
+    {
+        _ai.Reply = "[]";
+
+        await Service().SuggestAsync(new SuggestLeadKeywordsRequest("Selling clinic software", "Eye clinic", null));
+
+        Assert.Equal("OpenAI", _ai.LastProvider);
     }
 
     [Fact]

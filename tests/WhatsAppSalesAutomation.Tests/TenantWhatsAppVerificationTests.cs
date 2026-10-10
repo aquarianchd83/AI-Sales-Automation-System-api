@@ -46,6 +46,21 @@ public sealed class TenantWhatsAppVerificationTests : IDisposable
         _provider.SaveConfigForTenantAsync(_tenant, new UpdateTenantWhatsAppConfigRequest("1098765", "2233445", token, "app-secret", "v19.0", "https://graph.facebook.com/"), null);
 
     [Fact]
+    public async Task A_phone_number_id_already_used_by_another_workspace_is_refused_with_a_clear_message_not_a_500()
+    {
+        var other = Guid.NewGuid();
+        await _provider.SaveConfigForTenantAsync(
+            other, new UpdateTenantWhatsAppConfigRequest("1098765", "2233445", "EAAG-other", "app-secret", "v19.0", "https://graph.facebook.com/"), null);
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => SaveAsync());
+
+        Assert.Contains("already connected to another workspace", ex.Message);
+        // The same workspace saving its own number again is not a clash.
+        await _provider.SaveConfigForTenantAsync(
+            other, new UpdateTenantWhatsAppConfigRequest("1098765", "2233445", null, null, "v19.0", "https://graph.facebook.com/"), null);
+    }
+
+    [Fact]
     public async Task A_successful_check_records_when_and_which_number_Meta_confirmed()
     {
         await SaveAsync();

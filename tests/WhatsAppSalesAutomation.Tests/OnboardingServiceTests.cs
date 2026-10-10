@@ -82,29 +82,6 @@ public sealed class OnboardingServiceTests : IDisposable
         _whatsApp.Config = new TenantWhatsAppConfigDto("123", "456", true, true, "v19.0", "https://graph.facebook.com/", true, false, null,
             VerifiedAtUtc: verified ? _clock.UtcNow : null);
 
-    private async Task AddTemplateAsync(WhatsAppTemplateStatus status = WhatsAppTemplateStatus.Pending)
-    {
-        _db.MessageTemplates.Add(new MessageTemplate { Name = $"welcome_{status}", WhatsAppTemplateName = $"welcome_{status}".ToLowerInvariant(), BodyText = "Hi", WhatsAppTemplateStatus = status });
-        await _db.SaveChangesAsync();
-    }
-
-    private async Task<Customer> AddCustomerAsync()
-    {
-        var customer = new Customer { PhoneNumberE164 = "+919876543210", FirstName = "Asha" };
-        _db.Customers.Add(customer);
-        await _db.SaveChangesAsync();
-        return customer;
-    }
-
-    private async Task AddCampaignAsync(Customer customer)
-    {
-        var campaign = new Campaign { Name = "Launch" };
-        campaign.Steps.Add(new CampaignStep { StepNumber = 1, MessageText = "Hi" });
-        campaign.CampaignCustomers.Add(new CampaignCustomer { CustomerId = customer.Id });
-        _db.Campaigns.Add(campaign);
-        await _db.SaveChangesAsync();
-    }
-
     private async Task AddProcessedVoucherAsync()
     {
         var article = new KnowledgeBaseArticle { TenantId = _tenant, ArticleKey = "voucher", Title = "Voucher", Content = "10% off", ContentHash = "h" };
@@ -120,8 +97,6 @@ public sealed class OnboardingServiceTests : IDisposable
         await AddPackageAsync();
         await AddLeadDiscoveryProfileAsync();
         ConnectWhatsApp(verified: true);
-        await AddTemplateAsync();
-        await AddCampaignAsync(await AddCustomerAsync());
         await AddProcessedVoucherAsync();
     }
 
@@ -132,12 +107,12 @@ public sealed class OnboardingServiceTests : IDisposable
     // ---- the catalog -------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void AC02_AC04_There_are_nine_steps_in_the_defined_order_and_their_weights_add_up_to_100()
+    public void AC02_AC04_There_are_six_steps_in_the_defined_order_and_their_weights_add_up_to_100()
     {
         Assert.Equal(
-            new[] { "profile", "plan", "customer-package", "whatsapp", "message-template", "customer", "campaign", "lead-discovery", "knowledge-base" },
+            new[] { "profile", "plan", "customer-package", "whatsapp", "lead-discovery", "knowledge-base" },
             OnboardingCatalog.Steps.Select(s => s.Key));
-        Assert.Equal(new[] { 10, 10, 15, 15, 10, 10, 10, 10, 10 }, OnboardingCatalog.Steps.Select(s => s.Weight));
+        Assert.Equal(new[] { 15, 15, 20, 20, 15, 15 }, OnboardingCatalog.Steps.Select(s => s.Weight));
         Assert.Equal(100, OnboardingCatalog.Steps.Sum(s => s.Weight));
     }
 
@@ -164,7 +139,7 @@ public sealed class OnboardingServiceTests : IDisposable
 
         var status = await StatusAsync();
 
-        Assert.Equal(35, status.ProgressPercent); // 10 + 10 + 15, as in the requirement's own example
+        Assert.Equal(50, status.ProgressPercent); // 15 + 15 + 20
         Assert.Equal("whatsapp", status.CurrentStepKey);
     }
 
@@ -177,9 +152,9 @@ public sealed class OnboardingServiceTests : IDisposable
 
         var status = await StatusAsync();
 
-        Assert.Equal(85, status.ProgressPercent); // everything but the 15% package step
+        Assert.Equal(80, status.ProgressPercent); // everything but the 20% package step
         Assert.Equal("customer-package", status.CurrentStepKey);
-        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "campaign"));
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "lead-discovery"));
         Assert.Equal(OnboardingStepState.Completed, StateOf(status, "knowledge-base"));
         Assert.Equal(1, status.Steps.Count(s => s.State == OnboardingStepState.Current));
         Assert.DoesNotContain(status.Steps, s => s.State == OnboardingStepState.Pending);
@@ -190,15 +165,15 @@ public sealed class OnboardingServiceTests : IDisposable
     {
         await CompleteProfileAsync();
         await SubscribeAsync();
-        await AddCustomerAsync(); // data for a later step, with the package step still to do
+        await AddLeadDiscoveryProfileAsync(); // data for a later step, with the package step still to do
 
         var status = await StatusAsync();
 
         Assert.Equal(OnboardingStepState.Current, StateOf(status, "customer-package"));
         Assert.Equal(OnboardingStepState.Pending, StateOf(status, "whatsapp"));
-        Assert.Equal(OnboardingStepState.Pending, StateOf(status, "lead-discovery"));
-        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "customer")); // it has its data, so it is done
-        Assert.Equal(30, status.ProgressPercent); // 10 + 10 + 10
+        Assert.Equal(OnboardingStepState.Pending, StateOf(status, "knowledge-base"));
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "lead-discovery")); // it has its data, so it is done
+        Assert.Equal(45, status.ProgressPercent); // 15 + 15 + 15
         Assert.NotNull(status.Steps.Single(s => s.Key == "whatsapp").Missing); // and it says what it needs
     }
 
@@ -213,7 +188,7 @@ public sealed class OnboardingServiceTests : IDisposable
 
         var resumed = await StatusAsync(); // signed back in
 
-        Assert.Equal(20, resumed.ProgressPercent);
+        Assert.Equal(30, resumed.ProgressPercent);
         Assert.Equal("customer-package", resumed.CurrentStepKey);
         Assert.Equal(2, await _db.TenantOnboardingSteps.CountAsync());
     }
@@ -233,10 +208,10 @@ public sealed class OnboardingServiceTests : IDisposable
         Assert.False(reopened.IsCompleted);
         Assert.Null(reopened.CompletedAt);
         Assert.Equal("customer-package", reopened.CurrentStepKey);
-        Assert.Equal(85, reopened.ProgressPercent); // 100 less the 15% package step; the rest still have their data
-        Assert.Equal(OnboardingStepState.Completed, StateOf(reopened, "campaign"));
+        Assert.Equal(80, reopened.ProgressPercent); // 100 less the 20% package step; the rest still have their data
+        Assert.Equal(OnboardingStepState.Completed, StateOf(reopened, "lead-discovery"));
         Assert.Null((await _db.Tenants.SingleAsync(t => t.Id == _tenant)).OnboardingCompletedAt);
-        Assert.Equal(8, await _db.TenantOnboardingSteps.CountAsync());
+        Assert.Equal(5, await _db.TenantOnboardingSteps.CountAsync());
     }
 
     [Fact]
@@ -266,12 +241,12 @@ public sealed class OnboardingServiceTests : IDisposable
         var status = await StatusAsync();
 
         Assert.Equal("profile", status.CurrentStepKey);
-        Assert.Equal(90, status.ProgressPercent);
+        Assert.Equal(85, status.ProgressPercent);
         Assert.Contains("industry", status.Steps[0].Missing);
     }
 
     [Fact]
-    public async Task Lead_discovery_comes_after_the_campaign_and_before_the_voucher()
+    public async Task Lead_discovery_comes_before_the_voucher()
     {
         await CompleteEverythingAsync();
         _db.LeadDiscoveryProfiles.RemoveRange(await _db.LeadDiscoveryProfiles.ToListAsync());
@@ -280,11 +255,11 @@ public sealed class OnboardingServiceTests : IDisposable
         var status = await StatusAsync();
 
         Assert.Equal("lead-discovery", status.CurrentStepKey);
-        Assert.Equal(90, status.ProgressPercent);
-        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "campaign")); // the step before it
+        Assert.Equal(85, status.ProgressPercent);
+        Assert.Equal(OnboardingStepState.Completed, StateOf(status, "whatsapp")); // the step before it
         Assert.Equal(OnboardingStepState.Completed, StateOf(status, "knowledge-base")); // the one after it keeps its data
-        Assert.Equal(8, status.Steps.ToList().FindIndex(s => s.Key == "knowledge-base"));
-        Assert.Equal(7, status.Steps.ToList().FindIndex(s => s.Key == "lead-discovery"));
+        Assert.Equal(5, status.Steps.ToList().FindIndex(s => s.Key == "knowledge-base"));
+        Assert.Equal(4, status.Steps.ToList().FindIndex(s => s.Key == "lead-discovery"));
     }
 
     // ---- the plan step: a free trial counts ------------------------------------------------------------------------
@@ -302,7 +277,7 @@ public sealed class OnboardingServiceTests : IDisposable
 
         Assert.Equal(OnboardingStepState.Completed, StateOf(status, "plan")); // no subscription at all
         Assert.Equal("customer-package", status.CurrentStepKey);
-        Assert.Equal(20, status.ProgressPercent);
+        Assert.Equal(30, status.ProgressPercent);
     }
 
     [Fact]
@@ -354,7 +329,7 @@ public sealed class OnboardingServiceTests : IDisposable
 
         var done = await StatusAsync(); // no connection row at all: the platform administrator connects it later
         Assert.Equal(OnboardingStepState.Completed, StateOf(done, "whatsapp"));
-        Assert.Equal("message-template", done.CurrentStepKey);
+        Assert.Equal("lead-discovery", done.CurrentStepKey);
     }
 
     [Fact]
@@ -388,41 +363,6 @@ public sealed class OnboardingServiceTests : IDisposable
         await _db.SaveChangesAsync();
 
         Assert.Equal("whatsapp", (await StatusAsync()).CurrentStepKey);
-    }
-
-    [Fact]
-    public async Task A_rejected_template_does_not_complete_the_template_step_but_a_submitted_one_does()
-    {
-        await CompleteProfileAsync();
-        await SubscribeAsync();
-        await AddPackageAsync();
-        await AddLeadDiscoveryProfileAsync();
-        ConnectWhatsApp(verified: true);
-
-        await AddTemplateAsync(WhatsAppTemplateStatus.Rejected);
-        Assert.Equal("message-template", (await StatusAsync()).CurrentStepKey);
-
-        await AddTemplateAsync(WhatsAppTemplateStatus.Pending);
-        Assert.Equal(OnboardingStepState.Completed, StateOf(await StatusAsync(), "message-template"));
-    }
-
-    [Fact]
-    public async Task A_campaign_counts_only_with_a_message_step_and_a_customer()
-    {
-        await CompleteProfileAsync();
-        await SubscribeAsync();
-        await AddPackageAsync();
-        await AddLeadDiscoveryProfileAsync();
-        ConnectWhatsApp(verified: true);
-        await AddTemplateAsync();
-        var customer = await AddCustomerAsync();
-
-        _db.Campaigns.Add(new Campaign { Name = "Empty" });
-        await _db.SaveChangesAsync();
-        Assert.Equal("campaign", (await StatusAsync()).CurrentStepKey);
-
-        await AddCampaignAsync(customer);
-        Assert.Equal(OnboardingStepState.Completed, StateOf(await StatusAsync(), "campaign"));
     }
 
     [Fact]

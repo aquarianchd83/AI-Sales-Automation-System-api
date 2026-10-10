@@ -39,6 +39,10 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 {
     public const int MaxSuggestions = 15;
 
+    /// <summary>Lead discovery keywords are always written by ChatGPT (the OpenAI key saved under Configuration > AI Providers), whichever provider
+    /// the platform uses for customer conversations. With no OpenAI key the suggestions fall back to the built-in ones.</summary>
+    private const string AiProviderName = "OpenAI";
+
     private const string SystemPrompt =
         "You are a local-search expert. Reply with ONLY a JSON array of strings - no prose, no code fences.";
 
@@ -57,7 +61,7 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 
         var existing = new HashSet<string>(TenantBusinessDetails.NormalizeKeywords(request.Existing), StringComparer.OrdinalIgnoreCase);
 
-        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken);
+        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken, provider: AiProviderName);
         var fromAi = Clean(KeywordSuggestionService.ParseList(reply), existing);
         if (fromAi.Count > 0)
             return new KeywordSuggestionsDto(fromAi, "AI");

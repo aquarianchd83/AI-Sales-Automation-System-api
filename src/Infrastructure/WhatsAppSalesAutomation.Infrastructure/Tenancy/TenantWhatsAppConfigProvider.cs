@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using WhatsAppSalesAutomation.Infrastructure.Settings;
@@ -104,6 +105,12 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         Guid tenantId, UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
     {
         await _saveValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        // Meta's phone number id belongs to one workspace: webhooks are routed to a tenant by it, so a second tenant using the same id would
+        // receive the first one's messages. The database refuses it too (unique index), but as a bare 500 - say it plainly instead.
+        var phoneNumberId = request.PhoneNumberId.Trim();
+        if (await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().AnyAsync(c => c.PhoneNumberId == phoneNumberId && c.TenantId != tenantId, cancellationToken))
+            throw new ConflictException("This phone number ID is already connected to another workspace. Each WhatsApp number can be used by one workspace only - use a different number, or ask your platform administrator to remove it from the other workspace first.");
 
         var protector = AppSettingsSecretProtection.CreateProtector(_dataProtectionProvider);
 

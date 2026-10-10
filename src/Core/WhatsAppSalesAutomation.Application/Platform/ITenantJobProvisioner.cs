@@ -42,4 +42,9 @@ public interface ITenantJobProvisioner
     Task SyncTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     Task<TenantJobReconcileSummary> ReconcileAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The tenant has just finished the application setup (onboarding): switches its lead discovery job on. That job is created paused
+    /// - see <see cref="TenantJobCatalog"/> - so nothing is discovered or sent for a tenant that has not finished setting up. Runs once, on the
+    /// transition to complete, so a pause an operator sets afterwards is left alone.</summary>
+    Task EnableLeadDiscoveryAfterSetupAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -62,11 +63,13 @@ public class OnboardingService : IOnboardingService
     private readonly ICurrentUserService _currentUser;
     private readonly ITenantWhatsAppConfigProvider _whatsApp;
     private readonly IDateTimeProvider _clock;
+    private readonly ITenantJobProvisioner? _jobs;
 
     public OnboardingService(
         IApplicationDbContext context, ITenantContext tenantContext, ICurrentUserService currentUser,
-        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock)
+        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock, ITenantJobProvisioner? jobs = null)
     {
+        _jobs = jobs;
         _context = context;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -126,9 +129,14 @@ public class OnboardingService : IOnboardingService
         }
 
         // Completed while every step is met; back to in progress the moment one is not.
+        var wasComplete = tenant.OnboardingCompletedAt is not null;
         tenant.OnboardingCompletedAt = anyUnmet ? null : tenant.OnboardingCompletedAt ?? now;
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // The moment the setup is finished the lead discovery job (created paused) is switched on.
+        if (!wasComplete && tenant.OnboardingCompletedAt is not null && _jobs is not null)
+            await _jobs.EnableLeadDiscoveryAfterSetupAsync(tenantId, cancellationToken);
 
         var progress = steps.Where(s => s.State == OnboardingStepState.Completed).Sum(s => s.Weight);
         return new OnboardingStatusDto(
@@ -193,20 +201,6 @@ public class OnboardingService : IOnboardingService
                 var config = await _whatsApp.GetConfigForTenantAsync(tenantId, cancellationToken);
                 return config is { IsVerified: true } ? null : "Enter the WhatsApp number your customers will message.";
             }
-
-            case OnboardingCatalog.MessageTemplate:
-                // Submitted counts: Meta's approval can take hours and must not hold the tenant up. A rejected one does not.
-                return await _context.MessageTemplates.AnyAsync(t => t.IsActive && t.WhatsAppTemplateStatus != WhatsAppTemplateStatus.Rejected, cancellationToken)
-                    ? null
-                    : "Create a message template (a rejected one does not count).";
-
-            case OnboardingCatalog.Customer:
-                return await _context.Customers.AnyAsync(cancellationToken) ? null : "Add a customer.";
-
-            case OnboardingCatalog.Campaign:
-                return await _context.Campaigns.AnyAsync(c => c.Steps.Any() && c.CampaignCustomers.Any(), cancellationToken)
-                    ? null
-                    : "Create a campaign with at least one message step and one customer.";
 
             case OnboardingCatalog.KnowledgeBase:
             {

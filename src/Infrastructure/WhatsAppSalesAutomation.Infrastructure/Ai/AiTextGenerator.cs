@@ -31,7 +31,7 @@ public class AiTextGenerator : IAiTextGenerator
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
-    public async Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default)
+    public async Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default, string? provider = null)
     {
         var credentials = _configProvider.Get();
         if (credentials is null)
@@ -39,7 +39,7 @@ public class AiTextGenerator : IAiTextGenerator
 
         try
         {
-            return credentials.Provider.ToLowerInvariant() switch
+            return (string.IsNullOrWhiteSpace(provider) ? credentials.Provider : provider).ToLowerInvariant() switch
             {
                 "anthropic" when !string.IsNullOrWhiteSpace(credentials.AnthropicApiKey)
                     => await AnthropicAsync(credentials, systemPrompt, userPrompt, maxTokens, cancellationToken),

@@ -15,7 +15,7 @@ public sealed class DescriptionRefinementTests
         public string? Reply { get; set; }
         public string? LastPrompt { get; private set; }
 
-        public Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default)
+        public Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default, string? provider = null)
         {
             LastPrompt = userPrompt;
             return Task.FromResult(Reply);

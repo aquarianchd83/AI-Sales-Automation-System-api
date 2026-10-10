@@ -71,9 +71,9 @@ public sealed class OnDemandTenantJobTests : IDisposable
         _connection.Dispose();
     }
 
-    private async Task<Guid> NewTenantAsync(string name, TenantStatus status = TenantStatus.Active)
+    private async Task<Guid> NewTenantAsync(string name, TenantStatus status = TenantStatus.Active, bool setupDone = false)
     {
-        var tenant = new Tenant { Name = name, Slug = name.ToLowerInvariant(), Status = status };
+        var tenant = new Tenant { Name = name, Slug = name.ToLowerInvariant(), Status = status, OnboardingCompletedAt = setupDone ? DateTime.UtcNow : null };
         _db.Tenants.Add(tenant);
         await _db.SaveChangesAsync();
         return tenant.Id;
@@ -164,7 +164,7 @@ public sealed class OnDemandTenantJobTests : IDisposable
     // ---- lead discovery --------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task The_lead_discovery_job_is_created_when_the_profile_is_first_saved()
+    public async Task The_lead_discovery_job_is_created_paused_when_the_profile_is_first_saved_and_starts_when_the_setup_is_done()
     {
         var tenant = await NewTenantAsync("Hunter");
         await _provisioner.SyncTenantAsync(tenant);
@@ -174,15 +174,32 @@ public sealed class OnDemandTenantJobTests : IDisposable
         await AddLeadProfileAsync(tenant);
         await _provisioner.SyncTenantAsync(tenant);
 
-        Assert.Contains(TenantJobTypes.LeadDiscovery, RegisteredFor(tenant));
+        // The row is there, but paused: nothing is registered with Hangfire until the setup is finished.
         Assert.Contains(TenantJobTypes.LeadDiscovery, await RowsFor(tenant));
+        Assert.DoesNotContain(TenantJobTypes.LeadDiscovery, RegisteredFor(tenant));
+        Assert.False((await _db.TenantJobSchedules.IgnoreQueryFilters().SingleAsync(s => s.TenantId == tenant && s.JobType == TenantJobTypes.LeadDiscovery)).IsEnabled);
+
+        await _provisioner.EnableLeadDiscoveryAfterSetupAsync(tenant);
+
+        Assert.Contains(TenantJobTypes.LeadDiscovery, RegisteredFor(tenant));
         Assert.DoesNotContain(RegisteredFor(tenant), CampaignJobs.Contains); // a profile is not a campaign
+    }
+
+    [Fact]
+    public async Task A_tenant_that_has_already_finished_the_setup_gets_the_lead_discovery_job_running_straight_away()
+    {
+        var tenant = await NewTenantAsync("Ready", setupDone: true);
+        await AddLeadProfileAsync(tenant);
+
+        await _provisioner.SyncTenantAsync(tenant);
+
+        Assert.Contains(TenantJobTypes.LeadDiscovery, RegisteredFor(tenant));
     }
 
     [Fact]
     public async Task One_tenants_profile_does_not_give_another_tenant_the_lead_discovery_job()
     {
-        var withProfile = await NewTenantAsync("Hunter");
+        var withProfile = await NewTenantAsync("Hunter", setupDone: true);
         var without = await NewTenantAsync("Quiet");
         await AddLeadProfileAsync(withProfile);
 
@@ -196,7 +213,7 @@ public sealed class OnDemandTenantJobTests : IDisposable
     [Fact]
     public async Task A_tenant_with_a_campaign_and_a_profile_has_every_job()
     {
-        var tenant = await NewTenantAsync("Everything");
+        var tenant = await NewTenantAsync("Everything", setupDone: true); // lead discovery stays paused until the setup is done
         await AddCampaignAsync(tenant);
         await AddLeadProfileAsync(tenant);
 

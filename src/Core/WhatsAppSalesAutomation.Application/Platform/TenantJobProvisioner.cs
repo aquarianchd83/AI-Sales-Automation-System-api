@@ -27,10 +27,11 @@ public class TenantJobProvisioner : ITenantJobProvisioner
     {
         // Tenants carries no query filter (see its own doc comment), so this reads correctly with no
         // ambient tenant - which is the only situation this ever runs in.
-        var status = await _context.Tenants
+        var tenant = await _context.Tenants
             .Where(t => t.Id == tenantId)
-            .Select(t => (TenantStatus?)t.Status)
+            .Select(t => new { t.Status, SetupDone = t.OnboardingCompletedAt != null })
             .FirstOrDefaultAsync(cancellationToken);
+        var status = tenant is null ? (TenantStatus?)null : tenant.Status;
 
         if (status is null)
         {
@@ -46,7 +47,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
         var hasCampaign = await _context.Campaigns.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenantId, cancellationToken);
         var hasLeadProfile = await _context.LeadDiscoveryProfiles.IgnoreQueryFilters().AnyAsync(p => p.TenantId == tenantId, cancellationToken);
 
-        var schedules = await GetOrCreateSchedulesAsync(tenantId, hasCampaign, hasLeadProfile, cancellationToken);
+        var schedules = await GetOrCreateSchedulesAsync(tenantId, hasCampaign, hasLeadProfile, tenant!.SetupDone, cancellationToken);
         ApplyRegistrations(status.Value, schedules);
         RemoveRegistrationsNotNeeded(tenantId, hasCampaign, hasLeadProfile);
     }
@@ -54,7 +55,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
     public async Task<TenantJobReconcileSummary> ReconcileAllAsync(CancellationToken cancellationToken = default)
     {
         var tenants = await _context.Tenants
-            .Select(t => new { t.Id, t.Status })
+            .Select(t => new { t.Id, t.Status, SetupDone = t.OnboardingCompletedAt != null })
             .ToListAsync(cancellationToken);
 
         var existing = await _context.TenantJobSchedules.ToListAsync(cancellationToken);
@@ -90,7 +91,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
                 if (schedules.Any(s => s.JobType == definition.Key))
                     continue;
 
-                var schedule = NewSchedule(tenant.Id, definition);
+                var schedule = NewSchedule(tenant.Id, definition, tenant.SetupDone);
                 _context.TenantJobSchedules.Add(schedule);
                 schedules.Add(schedule);
                 created++;
@@ -133,7 +134,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
         return summary;
     }
 
-    private async Task<List<TenantJobSchedule>> GetOrCreateSchedulesAsync(Guid tenantId, bool hasCampaign, bool hasLeadProfile, CancellationToken cancellationToken)
+    private async Task<List<TenantJobSchedule>> GetOrCreateSchedulesAsync(Guid tenantId, bool hasCampaign, bool hasLeadProfile, bool setupDone, CancellationToken cancellationToken)
     {
         var schedules = await _context.TenantJobSchedules
             .Where(s => s.TenantId == tenantId)
@@ -151,7 +152,7 @@ public class TenantJobProvisioner : ITenantJobProvisioner
         var missing = TenantJobCatalog.All
             .Where(definition => TenantJobCatalog.IsApplicable(definition.Key, hasCampaign, hasLeadProfile))
             .Where(definition => schedules.All(s => s.JobType != definition.Key))
-            .Select(definition => NewSchedule(tenantId, definition))
+            .Select(definition => NewSchedule(tenantId, definition, setupDone))
             .ToList();
 
         if (missing.Count == 0)
@@ -182,13 +183,30 @@ public class TenantJobProvisioner : ITenantJobProvisioner
         }
     }
 
-    private static TenantJobSchedule NewSchedule(Guid tenantId, TenantJobDefinition definition) => new()
+    /// <summary>Lead discovery is created paused until the tenant has finished setting up (it would otherwise start researching and messaging
+    /// businesses for a tenant that has not yet connected WhatsApp or written its templates); every other job starts on.</summary>
+    private static TenantJobSchedule NewSchedule(Guid tenantId, TenantJobDefinition definition, bool setupDone) => new()
     {
         TenantId = tenantId,
         JobType = definition.Key,
         CronExpression = definition.DefaultCron,
-        IsEnabled = true
+        IsEnabled = definition.Key != TenantJobTypes.LeadDiscovery || setupDone
     };
+
+    public async Task EnableLeadDiscoveryAfterSetupAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var schedule = await _context.TenantJobSchedules
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.JobType == TenantJobTypes.LeadDiscovery, cancellationToken);
+
+        // No row yet means no profile yet: it will be created already switched on, since the setup is done.
+        if (schedule is { IsEnabled: false })
+        {
+            schedule.IsEnabled = true;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        await SyncTenantAsync(tenantId, cancellationToken);
+    }
 
     /// <summary>Registers every enabled job for an eligible tenant and removes the rest. A schedule row
     /// for a job type no longer in the catalog is skipped rather than registered - the row is kept (it
