@@ -47,6 +47,7 @@ public static class AppSettingCatalog
         new("WhatsApp:AppSecret", "WhatsApp", IsSecret: true),
         new("WhatsApp:AppId", "WhatsApp", IsSecret: false),
         new("WhatsApp:WebhookVerifyToken", "WhatsApp", IsSecret: true),
+        new("WhatsApp:EmbeddedSignupConfigId", "WhatsApp", IsSecret: false, Description: "Meta Embedded Signup configuration id - turns on \"Connect with Meta\" for tenants. Needs WhatsApp:AppId and WhatsApp:AppSecret too."),
 
         // MetaAds - the Facebook/Instagram ad-spend connection on the tenants' Settings and Revenue report. AppId/AppSecret may
         // be left empty to reuse the Meta App set up for WhatsApp (WhatsApp:AppId / WhatsApp:AppSecret). All are live: the

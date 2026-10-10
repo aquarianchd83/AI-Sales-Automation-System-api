@@ -40,4 +40,9 @@ public class WhatsAppSettings
     /// <summary>The value configured in Meta's webhook setup - echoed back on the GET verification
     /// handshake to prove this endpoint belongs to the same person who registered the webhook URL.</summary>
     public string WebhookVerifyToken { get; set; } = string.Empty;
+
+    /// <summary>The Embedded Signup configuration id created in the Meta App dashboard (Facebook Login for Business ->
+    /// Configurations). Not a secret - the browser needs it to open Meta's sign-up popup. Empty means "Connect with Meta"
+    /// is not available yet.</summary>
+    public string EmbeddedSignupConfigId { get; set; } = string.Empty;
 }
