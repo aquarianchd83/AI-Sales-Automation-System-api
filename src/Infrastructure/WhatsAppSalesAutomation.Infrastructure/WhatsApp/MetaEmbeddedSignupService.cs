@@ -37,6 +37,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.WhatsApp;
 public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
 {
     private const int MaxLoggedMessage = 300;
+    private const int MaxTenantNumberLength = 32; // Tenant.WhatsAppNumber's column size
 
     private readonly HttpClient _httpClient;
     private readonly ApplicationDbContext _context;
@@ -68,7 +69,8 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
     private WhatsAppSettings Platform => _settings.Value;
 
     private bool PlatformReady =>
-        !string.IsNullOrWhiteSpace(Platform.AppId) && !string.IsNullOrWhiteSpace(Platform.AppSecret)
+        Platform.EmbeddedSignupEnabled
+        && !string.IsNullOrWhiteSpace(Platform.AppId) && !string.IsNullOrWhiteSpace(Platform.AppSecret)
         && !string.IsNullOrWhiteSpace(Platform.EmbeddedSignupConfigId);
 
     public Task<MetaSignupClientConfigDto> GetClientConfigAsync(CancellationToken cancellationToken = default)
@@ -291,6 +293,16 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
         row.VerificationError = phone is null ? Cap(MetaIssueCatalog.FromMetaError(MetaSignupSteps.Verification, error!).Message) : null;
         row.VerifiedDisplayPhoneNumber = phone?.DisplayPhoneNumber;
         row.VerifiedName = phone?.VerifiedName;
+
+        // The tenant never types their number: the one Meta confirms is the tenant's WhatsApp number from now on.
+        var confirmedNumber = phone?.DisplayPhoneNumber?.Trim();
+        if (!string.IsNullOrEmpty(confirmedNumber))
+        {
+            var tenant = await _context.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == row.TenantId, cancellationToken);
+            if (tenant is not null)
+                tenant.WhatsAppNumber = confirmedNumber.Length > MaxTenantNumberLength ? confirmedNumber[..MaxTenantNumberLength] : confirmedNumber;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
     }
 

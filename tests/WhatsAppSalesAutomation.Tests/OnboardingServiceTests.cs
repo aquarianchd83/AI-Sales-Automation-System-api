@@ -315,13 +315,13 @@ public sealed class OnboardingServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task WhatsApp_asks_only_for_the_number_no_credentials_and_no_verification()
+    public async Task WhatsApp_asks_the_tenant_to_connect_with_Meta_not_to_type_a_number()
     {
         await ReachWhatsAppStepAsync();
 
         var asked = await StatusAsync();
         Assert.Equal("whatsapp", asked.CurrentStepKey);
-        Assert.Equal("Enter the WhatsApp number your customers will message.", asked.Steps.Single(s => s.Key == "whatsapp").Missing);
+        Assert.Equal("Connect your WhatsApp number with Meta.", asked.Steps.Single(s => s.Key == "whatsapp").Missing);
 
         var tenant = await _db.Tenants.SingleAsync(t => t.Id == _tenant);
         tenant.WhatsAppNumber = "+91 98765 43210";

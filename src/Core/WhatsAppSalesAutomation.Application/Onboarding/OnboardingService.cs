@@ -193,13 +193,13 @@ public class OnboardingService : IOnboardingService
 
             case OnboardingCatalog.WhatsApp:
             {
-                // Early in setup all that is asked is the number customers will message. Connecting it to WhatsApp
-                // (credentials, verification) comes later. A tenant whose connection is already verified has
-                // plainly given its number, so it is not asked again.
+                // The tenant types no number: "Connect with Meta" asks for it in Meta's own window, and the number Meta
+                // confirms is saved on the tenant. A number already on file (given before that flow existed) or a connection
+                // Meta has verified both mean the step is done.
                 if (!string.IsNullOrWhiteSpace(tenant.WhatsAppNumber))
                     return null;
                 var config = await _whatsApp.GetConfigForTenantAsync(tenantId, cancellationToken);
-                return config is { IsVerified: true } ? null : "Enter the WhatsApp number your customers will message.";
+                return config is { IsVerified: true } ? null : "Connect your WhatsApp number with Meta.";
             }
 
             case OnboardingCatalog.KnowledgeBase:
