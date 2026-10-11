@@ -33,7 +33,7 @@ public static class OnboardingCatalog
         new(CustomerPackage, "Create Customer Package",
             "Create the package you will sell to your own customers, built on your plan.", 20, "/packages"),
         new(WhatsApp, "WhatsApp Configuration",
-            "Tell us the WhatsApp number your customers will message. Connecting it to WhatsApp comes later.", 20, "/tenant-settings"),
+            "Connect your WhatsApp number with Meta. You choose or add the number in Meta's own window.", 20, "/tenant-settings"),
         new(LeadDiscovery, "Lead Discovery Profile",
             "Describe the businesses you want to find: type, keywords and locations.", 15, "/lead-discovery/profile"),
         new(KnowledgeBase, "Knowledge Base / Voucher",

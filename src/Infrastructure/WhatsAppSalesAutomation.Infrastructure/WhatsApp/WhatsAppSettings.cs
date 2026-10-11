@@ -45,4 +45,8 @@ public class WhatsAppSettings
     /// Configurations). Not a secret - the browser needs it to open Meta's sign-up popup. Empty means "Connect with Meta"
     /// is not available yet.</summary>
     public string EmbeddedSignupConfigId { get; set; } = string.Empty;
+
+    /// <summary>The platform operator's switch for "Connect with Meta". On by default, so only an explicit "off" hides it from
+    /// tenants; it never replaces the three values above, it only adds a way to pause the feature without clearing them.</summary>
+    public bool EmbeddedSignupEnabled { get; set; } = true;
 }
