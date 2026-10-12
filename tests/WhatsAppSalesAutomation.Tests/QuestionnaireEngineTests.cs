@@ -274,6 +274,76 @@ public sealed class QuestionnaireEngineTests
         Assert.Contains(issues, i => i.Message.Contains(expected, StringComparison.OrdinalIgnoreCase));
     }
 
+    // ----- limits that keep a generated fact inside its column -------------------------------------------------------------------------
+
+    [Fact]
+    public void The_longest_possible_fact_still_fits_the_fact_column()
+    {
+        // The worst case each kind of answer can produce, built from the definition limits.
+        var longText = new QuestionDef { Key = "t", Type = QuestionType.LongText, Prompt = "t", Fact = new FactRule { Category = "c", Template = new string('x', QuestionnaireEngine.MaxFactTemplate - 7) + "{value}" } };
+        var fields = Enumerable.Range(0, QuestionnaireEngine.MaxFields).Select(i => new FieldDef { Key = $"f{i}", Label = new string('l', QuestionnaireEngine.MaxFieldLabel) }).ToList();
+        var structured = new QuestionDef { Key = "s", Type = QuestionType.Structured, Prompt = "s", Fields = fields, Fact = new FactRule { Category = "c", Template = new string('x', QuestionnaireEngine.MaxFactTemplate - 7) + "{value}" } };
+        var options = Enumerable.Range(0, QuestionnaireEngine.MaxOptions).Select(i => new OptionDef { Value = $"o{i}", Label = new string('o', QuestionnaireEngine.MaxOptionLabel) }).ToList();
+        var multi = new QuestionDef { Key = "m", Type = QuestionType.MultiChoice, Prompt = "m", Options = options, Fact = new FactRule { Category = "c", Template = new string('x', QuestionnaireEngine.MaxFactTemplate - 7) + "{value}" } };
+        var definition = new QuestionnaireDefinition { Questions = { longText, structured, multi } };
+        Assert.Empty(QuestionnaireEngine.Check(definition));
+
+        var answers = Answers(
+            ("t", JsonSerializer.Serialize(new string('a', QuestionnaireEngine.DefaultLongTextLength))),
+            ("s", JsonSerializer.Serialize(fields.ToDictionary(f => f.Key, _ => new string('v', QuestionnaireEngine.DefaultShortTextLength)))),
+            ("m", JsonSerializer.Serialize(options.Select(o => o.Value))));
+
+        var facts = QuestionnaireEngine.FactsFrom(definition, answers);
+
+        Assert.Equal(3, facts.Count);
+        Assert.All(facts, f => Assert.True(f.Statement.Length <= QuestionnaireEngine.MaxFactStatementLength, $"{f.SourceRef}: {f.Statement.Length}"));
+    }
+
+    [Fact]
+    public void A_long_text_answer_makes_a_fact_longer_than_a_person_may_type()
+    {
+        // This is the case that used to fail on a real database: a 4,000-character answer is allowed, so its fact must be too.
+        var def = QuestionnaireEngine.Parse("""{ "questions": [ { "key": "about", "type": "LongText", "prompt": "About?", "fact": { "category": "About", "template": "What we do: {value}" } } ] }""");
+
+        var fact = QuestionnaireEngine.FactsFrom(def, Answers(("about", JsonSerializer.Serialize(new string('a', 4000))))).Single();
+
+        Assert.True(fact.Statement.Length > 1000);
+        Assert.True(fact.Statement.Length <= QuestionnaireEngine.MaxFactStatementLength);
+    }
+
+    [Theory]
+    [InlineData("""{ "questions": [ { "key": "a", "type": "LongText", "prompt": "x", "maxLength": 4001 } ] }""", "MaxLength must be between")]
+    [InlineData("""{ "questions": [ { "key": "a", "type": "ShortText", "prompt": "x", "maxLength": 0 } ] }""", "MaxLength must be between")]
+    [InlineData("""{ "questions": [ { "key": "a", "type": "ShortText", "prompt": "x", "fact": { "category": "c", "template": "{value} PADDING" } } ] }""", null)]
+    public void Text_length_limits_are_checked(string json, string? expected)
+    {
+        var (definition, issues) = QuestionnaireEngine.TryParse(json);
+
+        if (expected is null)
+            Assert.NotNull(definition);
+        else
+            Assert.Contains(issues, i => i.Message.Contains(expected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Oversized_pieces_of_a_definition_are_refused()
+    {
+        string Q(string body) => $$"""{ "questions": [ { "key": "a", "prompt": "x", {{body}} } ] }""";
+        var longTemplate = new string('t', QuestionnaireEngine.MaxFactTemplate + 1);
+        var longCategory = new string('c', QuestionnaireEngine.MaxFactCategory + 1);
+        var manyOptions = string.Join(",", Enumerable.Range(0, QuestionnaireEngine.MaxOptions + 1).Select(i => $$"""{ "value": "v{{i}}", "label": "L" }"""));
+        var manyFields = string.Join(",", Enumerable.Range(0, QuestionnaireEngine.MaxFields + 1).Select(i => $$"""{ "key": "f{{i}}", "label": "L" }"""));
+        var longLabel = new string('l', QuestionnaireEngine.MaxOptionLabel + 1);
+        var longFieldLabel = new string('l', QuestionnaireEngine.MaxFieldLabel + 1);
+
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "ShortText", "fact": { "category": "c", "template": "{value}{{longTemplate}}" }""".Insert(0, "\""))).Issues, i => i.Message.Contains("template can be at most"));
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "ShortText", "fact": { "category": "{{longCategory}}", "template": "{value}" }""".Insert(0, "\""))).Issues, i => i.Message.Contains("category can be at most"));
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "MultiChoice", "options": [ {{manyOptions}} ]""".Insert(0, "\""))).Issues, i => i.Message.Contains("at most 40 options"));
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "SingleChoice", "options": [ { "value": "v", "label": "{{longLabel}}" } ]""".Insert(0, "\""))).Issues, i => i.Message.Contains("option label can be at most"));
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "Structured", "fields": [ {{manyFields}} ]""".Insert(0, "\""))).Issues, i => i.Message.Contains("at most 12 fields"));
+        Assert.Contains(QuestionnaireEngine.TryParse(Q($$"""type": "Structured", "fields": [ { "key": "f", "label": "{{longFieldLabel}}" } ]""".Insert(0, "\""))).Issues, i => i.Message.Contains("field label can be at most"));
+    }
+
     [Fact]
     public void Every_problem_is_reported_not_just_the_first()
     {

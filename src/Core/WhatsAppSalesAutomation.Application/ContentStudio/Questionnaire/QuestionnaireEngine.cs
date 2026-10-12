@@ -16,6 +16,19 @@ public static class QuestionnaireEngine
     public const int DefaultShortTextLength = 200;
     public const int DefaultLongTextLength = 4000;
 
+    // Limits that together guarantee a generated fact always fits its column (see MaxFactStatementLength): the longest answer is a
+    // 4000-character text, or a structured/multiple-choice answer built from these bounded pieces, plus a template of at most 300.
+    public const int MaxTextLength = DefaultLongTextLength;
+    public const int MaxOptions = 40;
+    public const int MaxOptionLabel = 100;
+    public const int MaxFields = 12;
+    public const int MaxFieldLabel = 60;
+    public const int MaxFactTemplate = 300;
+    public const int MaxFactCategory = 60;
+
+    /// <summary>The longest statement a fact can have. The database column must be at least this wide.</summary>
+    public const int MaxFactStatementLength = 4500;
+
     /// <summary>The business-profile fields a text question may start from.</summary>
     public static readonly IReadOnlyList<string> PrefillSources = new[]
     {
@@ -123,12 +136,19 @@ public static class QuestionnaireEngine
                     issues.Add(new(key, "Only a text question can start from the business profile."));
             }
 
+            if (q.MaxLength is { } maxLength && (maxLength < 1 || maxLength > MaxTextLength))
+                issues.Add(new(key, $"MaxLength must be between 1 and {MaxTextLength}."));
+
             if (q.Fact is not null)
             {
                 if (string.IsNullOrWhiteSpace(q.Fact.Category))
                     issues.Add(new(key, "A fact rule needs a category."));
+                else if (q.Fact.Category.Trim().Length > MaxFactCategory)
+                    issues.Add(new(key, $"A fact rule's category can be at most {MaxFactCategory} characters."));
                 if (string.IsNullOrWhiteSpace(q.Fact.Template) || !q.Fact.Template.Contains("{value}", StringComparison.Ordinal))
                     issues.Add(new(key, "A fact rule's template must contain {value}, where the answer goes."));
+                if (q.Fact.Template?.Length > MaxFactTemplate)
+                    issues.Add(new(key, $"A fact rule's template can be at most {MaxFactTemplate} characters."));
             }
 
             if (KeyPattern.IsMatch(q.Key ?? string.Empty))
@@ -150,6 +170,10 @@ public static class QuestionnaireEngine
                     issues.Add(new(key, "Every option needs a value and a label."));
                 if (q.Options.Select(o => o.Value).Distinct(StringComparer.OrdinalIgnoreCase).Count() != q.Options.Count)
                     issues.Add(new(key, "Two options share the same value."));
+                if (q.Options.Count > MaxOptions)
+                    issues.Add(new(key, $"A choice question can have at most {MaxOptions} options."));
+                if (q.Options.Any(o => o.Label?.Length > MaxOptionLabel))
+                    issues.Add(new(key, $"An option label can be at most {MaxOptionLabel} characters."));
                 break;
 
             case QuestionType.Structured:
@@ -159,6 +183,10 @@ public static class QuestionnaireEngine
                     issues.Add(new(key, "Every field needs a key of lower-case letters, digits and underscores."));
                 if (q.Fields.Select(f => f.Key).Distinct(StringComparer.Ordinal).Count() != q.Fields.Count)
                     issues.Add(new(key, "Two fields share the same key."));
+                if (q.Fields.Count > MaxFields)
+                    issues.Add(new(key, $"A structured question can have at most {MaxFields} fields."));
+                if (q.Fields.Any(f => f.Label?.Length > MaxFieldLabel))
+                    issues.Add(new(key, $"A field label can be at most {MaxFieldLabel} characters."));
                 if (q.Fields.Any(f => string.IsNullOrWhiteSpace(f.Label)))
                     issues.Add(new(key, "Every field needs a label."));
                 if (q.Fields.Any(f => f.Type is QuestionType.SingleChoice or QuestionType.MultiChoice or QuestionType.Structured))
@@ -455,7 +483,11 @@ public static class QuestionnaireEngine
             if (string.IsNullOrWhiteSpace(words))
                 continue;
 
-            facts.Add(new GeneratedFact(q.Key, q.Fact!.Category.Trim(), q.Fact.Template.Replace("{value}", words, StringComparison.Ordinal).Trim()));
+            var statement = q.Fact!.Template.Replace("{value}", words, StringComparison.Ordinal).Trim();
+            // The definition limits make this unreachable; it is the last line of defence so a fact can never overflow its column.
+            if (statement.Length > MaxFactStatementLength)
+                statement = statement[..MaxFactStatementLength];
+            facts.Add(new GeneratedFact(q.Key, q.Fact.Category.Trim(), statement));
         }
 
         return facts;

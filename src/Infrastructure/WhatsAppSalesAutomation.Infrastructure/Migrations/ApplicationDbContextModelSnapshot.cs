@@ -1318,8 +1318,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<string>("Statement")
                         .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
+                        .HasMaxLength(4500)
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Status")
                         .IsRequired()

@@ -483,6 +483,34 @@ public sealed class QuestionnaireServiceTests : IDisposable
         Assert.Equal(new[] { "Contact", "Services" }, summary.Categories);
     }
 
+    [Fact]
+    public async Task A_long_text_answer_completes_and_its_fact_fits_the_fact_column()
+    {
+        await PublishAsync("longform", """{ "questions": [ { "key": "about", "type": "LongText", "prompt": "About?", "required": true, "fact": { "category": "About", "template": "What we do: {value}" } } ] }""");
+        await _questionnaire.SaveAnswersAsync(_tenant, Save(("about", JsonSerializer.Serialize(new string('a', 4000)))));
+
+        var done = await _questionnaire.CompleteAsync(_tenant, _admin);
+
+        Assert.Equal(1, done.FactsCreated);
+        var fact = await _db.BusinessFacts.IgnoreQueryFilters().SingleAsync();
+        Assert.True(fact.Statement.Length > BusinessFactService.MaxStatement);
+        // SQLite does not enforce column lengths, SQL Server does: so check the real model against what can be written.
+        var column = _db.Model.FindEntityType(typeof(BusinessFact))!.FindProperty(nameof(BusinessFact.Statement))!.GetMaxLength();
+        Assert.True(column >= QuestionnaireEngine.MaxFactStatementLength, $"Statement column is {column}");
+        Assert.True(fact.Statement.Length <= column);
+    }
+
+    [Fact]
+    public void Every_fact_column_is_wide_enough_for_what_a_questionnaire_can_put_in_it()
+    {
+        var fact = _db.Model.FindEntityType(typeof(BusinessFact))!;
+
+        Assert.True(fact.FindProperty(nameof(BusinessFact.Statement))!.GetMaxLength() >= QuestionnaireEngine.MaxFactStatementLength);
+        Assert.True(fact.FindProperty(nameof(BusinessFact.Category))!.GetMaxLength() >= QuestionnaireEngine.MaxFactCategory);
+        Assert.True(fact.FindProperty(nameof(BusinessFact.Category))!.GetMaxLength() >= BusinessFactService.MaxCategory);
+        Assert.True(fact.FindProperty(nameof(BusinessFact.SourceRef))!.GetMaxLength() >= 60); // a question key can be 60 characters
+    }
+
     // ----- isolation and the switch --------------------------------------------------------------------------------------------------
 
     [Fact]

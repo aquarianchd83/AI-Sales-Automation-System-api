@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
@@ -60,7 +61,8 @@ public class BusinessFactConfiguration : IEntityTypeConfiguration<BusinessFact>
         builder.HasKey(f => f.Id);
 
         builder.Property(f => f.Category).IsRequired().HasMaxLength(60);
-        builder.Property(f => f.Statement).IsRequired().HasMaxLength(1000);
+        // Wide enough for a fact built from the longest allowed answer (QuestionnaireEngine.MaxFactStatementLength); a fact a person types is held to 1,000.
+        builder.Property(f => f.Statement).IsRequired().HasMaxLength(QuestionnaireEngine.MaxFactStatementLength);
         builder.Property(f => f.SourceType).HasConversion<string>().HasMaxLength(15);
         builder.Property(f => f.SourceRef).HasMaxLength(60);
         builder.Property(f => f.Status).HasConversion<string>().HasMaxLength(15);
