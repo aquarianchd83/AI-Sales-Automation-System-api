@@ -5017,6 +5017,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<string>("AppSecret")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ConnectionMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
                     b.Property<bool>("IsConnected")
                         .HasColumnType("bit");
 

@@ -47,6 +47,19 @@ public class MetaIssueCatalogTests
     }
 
     [Theory]
+    [InlineData(190)]
+    [InlineData(102)]
+    public void A_token_meta_cannot_parse_is_invalid_not_expired(int code)
+    {
+        var issue = Map(401, code, "Invalid OAuth access token - Cannot parse access token");
+
+        Assert.Equal("token_invalid", issue.Code);
+        Assert.Equal(MetaIssueAction.Reconnect, issue.PrimaryAction);
+        Assert.DoesNotContain("expired", issue.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Cannot parse", issue.Message);
+    }
+
+    [Theory]
     [InlineData(10)]
     [InlineData(200)]
     [InlineData(299)]

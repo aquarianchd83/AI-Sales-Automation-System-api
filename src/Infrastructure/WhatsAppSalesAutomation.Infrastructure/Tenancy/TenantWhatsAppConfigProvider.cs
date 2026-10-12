@@ -14,6 +14,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Tenancy;
 /// deliberately not exposed there - see that entity's own doc comment.</summary>
 public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
 {
+    private static readonly SetWhatsAppConnectionModeRequestValidator _modeValidator = new();
+
     private readonly ApplicationDbContext _context;
     private readonly ITenantContext _tenantContext;
     private readonly IDataProtectionProvider _dataProtectionProvider;
@@ -151,6 +153,10 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
 
         row.IsConnected = !string.IsNullOrWhiteSpace(row.PhoneNumberId) && row.AccessToken is not null && row.AppSecret is not null;
 
+        // Null leaves the tenant's earlier choice alone (the platform console and older callers never send one).
+        if (request.ConnectionMode is not null)
+            row.ConnectionMode = request.ConnectionMode;
+
         // Whatever was verified before described the credentials as they were; they have to be verified again.
         row.VerifiedAtUtc = null;
         row.VerificationError = null;
@@ -163,6 +169,28 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
 
         if (_tenantContext.TenantId == tenantId)
             _cachedCredentials = null;
+
+        return ToDto(row);
+    }
+
+    public async Task<TenantWhatsAppConfigDto> SetConnectionModeForTenantAsync(
+        Guid tenantId, string mode, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        // Rejected before any row is read, so an unsupported value can never reach the table.
+        await _modeValidator.ValidateAndThrowAsync(new SetWhatsAppConnectionModeRequest(mode), cancellationToken);
+
+        // Looked up by the caller's own tenant id only - no other tenant's row can be matched, let alone changed.
+        var row = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken)
+                  ?? throw new ConflictException("Nothing is connected yet, so there is nothing to record the mode on. It is saved together with the connection once you connect.");
+
+        // Only the mode: credentials, the connected flag and the verification result describe the connection, not how it was made.
+        if (row.ConnectionMode != mode)
+        {
+            row.ConnectionMode = mode;
+            row.UpdatedAtUtc = _dateTime.UtcNow;
+            row.UpdatedByUserId = updatedByUserId;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
         return ToDto(row);
     }
@@ -216,7 +244,8 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         row.VerifiedAtUtc,
         row.VerificationError,
         row.VerifiedDisplayPhoneNumber,
-        row.VerifiedName);
+        row.VerifiedName,
+        row.ConnectionMode);
 
     private static string TryUnprotect(IDataProtector protector, string? ciphertext)
     {

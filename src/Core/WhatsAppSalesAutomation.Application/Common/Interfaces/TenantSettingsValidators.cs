@@ -9,6 +9,20 @@ public class UpdateTenantWhatsAppConfigRequestValidator : AbstractValidator<Upda
     {
         RuleFor(x => x.PhoneNumberId).NotEmpty().MaximumLength(64);
         RuleFor(x => x.WhatsAppBusinessAccountId).NotEmpty().MaximumLength(64);
+        RuleFor(x => x.ConnectionMode)
+            .Must(WhatsAppConnectionModes.IsSupported)
+            .When(x => x.ConnectionMode is not null)
+            .WithMessage("The connection mode must be \"Automatic\" or \"Manual\".");
+    }
+}
+
+public class SetWhatsAppConnectionModeRequestValidator : AbstractValidator<SetWhatsAppConnectionModeRequest>
+{
+    public SetWhatsAppConnectionModeRequestValidator()
+    {
+        RuleFor(x => x.Mode)
+            .Must(WhatsAppConnectionModes.IsSupported)
+            .WithMessage("The connection mode must be \"Automatic\" or \"Manual\".");
     }
 }
 
