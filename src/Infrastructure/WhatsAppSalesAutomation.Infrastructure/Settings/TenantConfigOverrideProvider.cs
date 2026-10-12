@@ -257,7 +257,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
                 {
                     var globalValue = globalByKey[d.Key];
                     var overrideValue = overridesByKey.TryGetValue(d.Key, out var v) ? v : null;
-                    return new TenantSettingItemDto(d.Key, d.Category, d.IsList, d.Description, globalValue, overrideValue, overrideValue ?? globalValue);
+                    return new TenantSettingItemDto(d.Key, d.Category, d.IsList, d.Description, globalValue, overrideValue, overrideValue ?? globalValue, d.Options);
                 }).ToList()))
             .ToList();
     }

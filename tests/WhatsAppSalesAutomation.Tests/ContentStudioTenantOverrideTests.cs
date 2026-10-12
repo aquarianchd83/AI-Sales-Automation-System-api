@@ -120,6 +120,10 @@ public sealed class ContentStudioTenantOverrideTests : IDisposable
         Assert.Equal("true", enabled.OverrideValue);
         Assert.Equal("true", enabled.EffectiveValue);
         Assert.Null(category.Items.Single(i => i.Key == "ContentStudio:StorageMode").OverrideValue);
+        // The per-tenant list is told which settings are dropdowns, so a tenant's Advanced settings can offer the same choices.
+        Assert.Equal(new[] { "true", "false" }, enabled.Options);
+        Assert.Equal(new[] { "PublicBucket", "SignedUrls" }, category.Items.Single(i => i.Key == "ContentStudio:StorageMode").Options);
+        Assert.Null(category.Items.Single(i => i.Key == "ContentStudio:StorageKeyPrefix").Options);
     }
 
     [Fact]

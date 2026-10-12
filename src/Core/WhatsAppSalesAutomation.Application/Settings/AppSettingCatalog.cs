@@ -11,13 +11,25 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// <param name="IsList">Bound to a comma-separated string in the DB/UI (e.g. "1,5,15,60,240") but
 /// expanded into IConfiguration's own indexed "Key:0", "Key:1", ... shape so the existing
 /// List&lt;T&gt;/array-typed Options properties keep binding the same way they do from JSON today.</param>
+/// <param name="DefaultValue">What the seeder stores when appsettings.json has nothing for the key, so a setting managed only in the Platform Admin
+/// Console still shows a value on first run.</param>
+/// <param name="Options">When set, the value must be one of these: the console shows a dropdown instead of a text box and a save of anything else
+/// is refused.</param>
 /// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
 /// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
 /// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
 /// everything else here: WhatsApp has its own bespoke per-tenant mechanism
 /// (TenantWhatsAppConfig), AiProviders is one platform-wide config with no per-tenant form, and MediaStorage is platform infra shared by every
 /// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
-public record AppSettingDefinition(string Key, string Category, bool IsSecret, bool IsList = false, string? Description = null, bool IsTenantOverridable = false);
+public record AppSettingDefinition(
+    string Key,
+    string Category,
+    bool IsSecret,
+    bool IsList = false,
+    string? Description = null,
+    bool IsTenantOverridable = false,
+    string? DefaultValue = null,
+    IReadOnlyList<string>? Options = null);
 
 /// <summary>
 /// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
@@ -61,10 +73,10 @@ public static class AppSettingCatalog
 
         // ContentStudio - the AI Content Studio module. Live (read through IOptionsSnapshot). Each key is a platform default that a tenant can override from its
         // own Advanced settings, so a tenant such as the pilot can have the studio switched on while everyone else stays off.
-        new("ContentStudio:Enabled", "ContentStudio", IsSecret: false, Description: "\"true\" turns the AI Content Studio on for tenants. Off by default.", IsTenantOverridable: true),
-        new("ContentStudio:StorageMode", "ContentStudio", IsSecret: false, Description: "\"PublicBucket\" (the platform's existing public bucket, files reached by unguessable keys) or \"SignedUrls\" (short-lived addresses). Switching needs no migration.", IsTenantOverridable: true),
-        new("ContentStudio:StorageKeyPrefix", "ContentStudio", IsSecret: false, Description: "Folder studio files are stored under. Default \"studio\".", IsTenantOverridable: true),
-        new("ContentStudio:SignedUrlMinutes", "ContentStudio", IsSecret: false, Description: "How long a signed address stays valid, in minutes. Only used in SignedUrls mode.", IsTenantOverridable: true),
+        new("ContentStudio:Enabled", "ContentStudio", IsSecret: false, Description: "\"true\" turns the AI Content Studio on for tenants. Off by default.", IsTenantOverridable: true, DefaultValue: "false", Options: new[] { "true", "false" }),
+        new("ContentStudio:StorageMode", "ContentStudio", IsSecret: false, Description: "\"PublicBucket\" (the platform's existing public bucket, files reached by unguessable keys) or \"SignedUrls\" (short-lived addresses). Switching needs no migration.", IsTenantOverridable: true, DefaultValue: "PublicBucket", Options: new[] { "PublicBucket", "SignedUrls" }),
+        new("ContentStudio:StorageKeyPrefix", "ContentStudio", IsSecret: false, Description: "Folder studio files are stored under. Default \"studio\".", IsTenantOverridable: true, DefaultValue: "studio"),
+        new("ContentStudio:SignedUrlMinutes", "ContentStudio", IsSecret: false, Description: "How long a signed address stays valid, in minutes. Only used in SignedUrls mode.", IsTenantOverridable: true, DefaultValue: "60", Options: new[] { "15", "30", "60", "120", "240" }),
 
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),

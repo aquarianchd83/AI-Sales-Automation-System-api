@@ -65,7 +65,8 @@ public record TenantSettingItemDto(
     string? Description,
     string GlobalValue,
     string? OverrideValue,
-    string EffectiveValue);
+    string EffectiveValue,
+    IReadOnlyList<string>? Options = null);
 
 public record TenantSettingCategoryDto(string Category, IReadOnlyList<TenantSettingItemDto> Items);
 

@@ -13,7 +13,8 @@ public record SettingItemDto(
     string? Description,
     string? Value,
     bool HasValue,
-    string? ValueHint);
+    string? ValueHint,
+    IReadOnlyList<string>? Options = null);
 
 public record SettingCategoryDto(string Category, IReadOnlyList<SettingItemDto> Items);
 
