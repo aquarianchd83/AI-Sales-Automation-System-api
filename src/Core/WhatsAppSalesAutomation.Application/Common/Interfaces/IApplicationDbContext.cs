@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
@@ -169,6 +170,10 @@ public interface IApplicationDbContext
     DbSet<PlatformNotification> PlatformNotifications { get; }
 
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
+
+    DbSet<StudioActivity> StudioActivities { get; }
+
+    DbSet<TenantStudioSettings> TenantStudioSettings { get; }
 
     DbSet<Flowchart> Flowcharts { get; }
 

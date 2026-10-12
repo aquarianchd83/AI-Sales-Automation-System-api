@@ -34,6 +34,13 @@ public class UpdateTenantSettingsRequestValidator : AbstractValidator<UpdateTena
         ["Ai:KnowledgeBaseTopN"] = (IsInt, "must be a whole number"),
         ["Ai:MinRelevanceScore"] = (IsUnitInterval, "must be a number between 0 and 1"),
         ["Ai:ConversationHistoryTurns"] = (IsInt, "must be a whole number"),
+        ["Ai:MinFieldExtractionConfidence"] = (IsUnitInterval, "must be a number between 0 and 1"),
+        ["Ai:MaxFieldsToAsk"] = (IsInt, "must be a whole number"),
+        ["Ai:HandoffOnHotLead"] = (v => IsOneOf(v, "true", "false"), "must be true or false"),
+        ["ContentStudio:Enabled"] = (v => IsOneOf(v, "true", "false"), "must be true or false"),
+        ["ContentStudio:StorageMode"] = (v => IsOneOf(v, "PublicBucket", "SignedUrls"), "must be PublicBucket or SignedUrls"),
+        ["ContentStudio:StorageKeyPrefix"] = (IsFolderName, "must be a folder name of letters, digits, - or _"),
+        ["ContentStudio:SignedUrlMinutes"] = (IsMinutes, "must be a whole number of minutes between 1 and 1440"),
     };
 
     public UpdateTenantSettingsRequestValidator()
@@ -48,6 +55,14 @@ public class UpdateTenantSettingsRequestValidator : AbstractValidator<UpdateTena
                 context.AddFailure(entry.Key, $"'{entry.Key}' {rule.Message}.");
         });
     }
+
+    private static bool IsOneOf(string value, params string[] allowed) => allowed.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsFolderName(string value) =>
+        value.Trim().Length is > 0 and <= 40 && value.Trim().All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
+
+    private static bool IsMinutes(string value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) && minutes is >= 1 and <= 1440;
 
     private static bool IsInt(string value) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
 

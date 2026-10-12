@@ -30,7 +30,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds", "ContentStudio"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -58,6 +58,13 @@ public static class AppSettingCatalog
         new("MetaAds:ApiVersion", "MetaAds", IsSecret: false, Description: "Graph API version, e.g. v21.0."),
         new("MetaAds:ApiBaseUrl", "MetaAds", IsSecret: false),
         new("MetaAds:DialogBaseUrl", "MetaAds", IsSecret: false, Description: "Where the Facebook login dialog is served from (https://www.facebook.com/)."),
+
+        // ContentStudio - the AI Content Studio module. Live (read through IOptionsSnapshot). Each key is a platform default that a tenant can override from its
+        // own Advanced settings, so a tenant such as the pilot can have the studio switched on while everyone else stays off.
+        new("ContentStudio:Enabled", "ContentStudio", IsSecret: false, Description: "\"true\" turns the AI Content Studio on for tenants. Off by default.", IsTenantOverridable: true),
+        new("ContentStudio:StorageMode", "ContentStudio", IsSecret: false, Description: "\"PublicBucket\" (the platform's existing public bucket, files reached by unguessable keys) or \"SignedUrls\" (short-lived addresses). Switching needs no migration.", IsTenantOverridable: true),
+        new("ContentStudio:StorageKeyPrefix", "ContentStudio", IsSecret: false, Description: "Folder studio files are stored under. Default \"studio\".", IsTenantOverridable: true),
+        new("ContentStudio:SignedUrlMinutes", "ContentStudio", IsSecret: false, Description: "How long a signed address stays valid, in minutes. Only used in SignedUrls mode.", IsTenantOverridable: true),
 
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),

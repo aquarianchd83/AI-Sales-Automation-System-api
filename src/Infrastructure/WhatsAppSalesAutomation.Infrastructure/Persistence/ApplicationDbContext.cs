@@ -8,6 +8,7 @@ using WhatsAppSalesAutomation.Domain.Common;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
@@ -181,6 +182,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PlatformNotification> PlatformNotifications => Set<PlatformNotification>();
 
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();
+
+    public DbSet<StudioActivity> StudioActivities => Set<StudioActivity>();
+
+    public DbSet<TenantStudioSettings> TenantStudioSettings => Set<TenantStudioSettings>();
 
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 

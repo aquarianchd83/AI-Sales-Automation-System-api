@@ -7,6 +7,7 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Common;
 using WhatsAppSalesAutomation.Domain.Entities.Audit;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
@@ -70,7 +71,10 @@ public static class AuditedEntityCatalog
             new[] { "BodyText" }),
         [typeof(QualificationField)] = new("QualificationField", new[] { "FieldKey", "DisplayName", "IsActive", "IsRequired", "Priority", "ScoreWeight" }),
 
-        [typeof(LeadScoringRule)] = new("ScoringRule", new[] { "RuleKey", "DisplayName", "Points", "IsActive", "MarksLeadHot", "MatchValue" })
+        [typeof(LeadScoringRule)] = new("ScoringRule", new[] { "RuleKey", "DisplayName", "Points", "IsActive", "MarksLeadHot", "MatchValue" }),
+
+        // Who may approve studio content is a permission decision, so changing it is on the record.
+        [typeof(TenantStudioSettings)] = new("StudioSettings", new[] { "ApprovalPolicy" })
     };
 
     public static bool TryGet(Type clrType, out AuditedEntity entity) => Entities.TryGetValue(clrType, out entity!);

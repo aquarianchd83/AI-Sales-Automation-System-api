@@ -11,6 +11,7 @@ using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.ContentStudio;
 using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Application.Handoffs;
@@ -46,6 +47,9 @@ public static class DependencyInjection
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
         services.Configure<AppLinkOptions>(configuration.GetSection("App"));
         services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
+        services.Configure<StudioOptions>(configuration.GetSection("ContentStudio"));
+        services.AddScoped<IStudioMeteringService, StudioMeteringService>();
+        services.AddScoped<IStudioSettingsService, StudioSettingsService>();
         services.Configure<LeadDiscoveryOptions>(configuration.GetSection("LeadDiscovery"));
         services.Configure<LeadDiscoveryPricingOptions>(configuration.GetSection("LeadDiscovery:Pricing"));
         services.Configure<WhatsAppPricingOptions>(configuration.GetSection("WhatsApp:Pricing"));
