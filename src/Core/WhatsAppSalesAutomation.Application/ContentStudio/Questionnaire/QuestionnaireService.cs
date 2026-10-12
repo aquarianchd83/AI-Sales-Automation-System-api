@@ -24,6 +24,9 @@ public class QuestionnaireService : IQuestionnaireService
         _dateTime = dateTime;
     }
 
+    public async Task<bool> IsEnabledAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+        (await _config.GetStudioOptionsForTenantAsync(tenantId, cancellationToken)).Enabled;
+
     public async Task<QuestionnaireStateDto> GetStateAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         await StudioGate.EnsureEnabledAsync(_config, tenantId, cancellationToken);

@@ -503,6 +503,15 @@ public sealed class QuestionnaireServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_status_check_says_on_or_off_per_tenant_without_ever_refusing()
+    {
+        _studio.Off.Add(_tenant);
+
+        Assert.False(await _questionnaire.IsEnabledAsync(_tenant));
+        Assert.True(await _questionnaire.IsEnabledAsync(_other));
+    }
+
+    [Fact]
     public async Task Every_tenant_action_is_refused_while_the_studio_is_off_for_that_tenant()
     {
         await PublishAsync("generic", Generic);

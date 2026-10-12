@@ -32,6 +32,11 @@ public class ContentStudioQuestionnaireController : ControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>Whether the studio is on for this tenant. Open to everyone who can use the studio, unlike the Admin-only overview.</summary>
+    [HttpGet("status")]
+    public async Task<ActionResult<StudioStatusDto>> GetStatus(CancellationToken cancellationToken)
+        => Ok(new StudioStatusDto(await _questionnaire.IsEnabledAsync(RequireTenantId(), cancellationToken)));
+
     [HttpGet("questionnaire")]
     public async Task<ActionResult<QuestionnaireStateDto>> GetQuestionnaire(CancellationToken cancellationToken)
         => Ok(await _questionnaire.GetStateAsync(RequireTenantId(), cancellationToken));
@@ -83,3 +88,5 @@ public static class StudioRoles
 {
     public const string Contributors = AppRoles.Admin + "," + AppRoles.SalesManager;
 }
+
+public record StudioStatusDto(bool Enabled);

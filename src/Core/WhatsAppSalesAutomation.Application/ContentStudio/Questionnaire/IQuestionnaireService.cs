@@ -7,6 +7,10 @@ namespace WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 /// </summary>
 public interface IQuestionnaireService
 {
+    /// <summary>Whether the studio is switched on for this tenant - what the sidenav asks, so a link only shows for a screen that will open.
+    /// Never throws for a tenant that has it off.</summary>
+    Task<bool> IsEnabledAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
     /// <summary>The questionnaire for this tenant, started (and pre-filled from the business profile) the first time it is asked for.</summary>
     Task<QuestionnaireStateDto> GetStateAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
