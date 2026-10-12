@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.ContentStudio;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -25,6 +26,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
     private readonly IOptionsSnapshot<MediaOptions> _mediaOptions;
     private readonly IOptionsSnapshot<MessagingOptions> _messagingOptions;
     private readonly IOptionsSnapshot<AiOptions> _aiOptions;
+    private readonly IOptionsSnapshot<StudioOptions> _studioOptions;
 
     public TenantConfigOverrideProvider(
         ApplicationDbContext context,
@@ -34,7 +36,8 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
         IOptionsSnapshot<CampaignOptions> campaignOptions,
         IOptionsSnapshot<MediaOptions> mediaOptions,
         IOptionsSnapshot<MessagingOptions> messagingOptions,
-        IOptionsSnapshot<AiOptions> aiOptions)
+        IOptionsSnapshot<AiOptions> aiOptions,
+        IOptionsSnapshot<StudioOptions> studioOptions)
     {
         _context = context;
         _tenantContext = tenantContext;
@@ -44,6 +47,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
         _mediaOptions = mediaOptions;
         _messagingOptions = messagingOptions;
         _aiOptions = aiOptions;
+        _studioOptions = studioOptions;
     }
 
     public async Task<CampaignOptions> GetCampaignOptionsAsync(CancellationToken cancellationToken = default)
@@ -104,6 +108,29 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             KnowledgeBaseTopN = ParseInt(overrides, "Ai:KnowledgeBaseTopN", global.KnowledgeBaseTopN),
             MinRelevanceScore = ParseDouble(overrides, "Ai:MinRelevanceScore", global.MinRelevanceScore),
             ConversationHistoryTurns = ParseInt(overrides, "Ai:ConversationHistoryTurns", global.ConversationHistoryTurns),
+            MinFieldExtractionConfidence = ParseDouble(overrides, "Ai:MinFieldExtractionConfidence", global.MinFieldExtractionConfidence),
+            MaxFieldsToAsk = ParseInt(overrides, "Ai:MaxFieldsToAsk", global.MaxFieldsToAsk),
+            HandoffOnHotLead = overrides.TryGetValue("Ai:HandoffOnHotLead", out var handoff) ? string.Equals(handoff, "true", StringComparison.OrdinalIgnoreCase) : global.HandoffOnHotLead,
+        };
+    }
+
+    public async Task<StudioOptions> GetStudioOptionsForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var global = _studioOptions.Value;
+        // Cross-tenant read by explicit id, like GetOverridesForTenantAsync - so IgnoreQueryFilters.
+        var rows = await _context.TenantAppSettingOverrides.IgnoreQueryFilters().AsNoTracking()
+            .Where(o => o.TenantId == tenantId && o.Key.StartsWith("ContentStudio:"))
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+            return global;
+
+        var overrides = rows.ToDictionary(r => r.Key, r => r.Value, StringComparer.OrdinalIgnoreCase);
+        return new StudioOptions
+        {
+            Enabled = overrides.TryGetValue("ContentStudio:Enabled", out var enabled) ? string.Equals(enabled, "true", StringComparison.OrdinalIgnoreCase) : global.Enabled,
+            StorageMode = overrides.GetValueOrDefault("ContentStudio:StorageMode") ?? global.StorageMode,
+            StorageKeyPrefix = overrides.GetValueOrDefault("ContentStudio:StorageKeyPrefix") ?? global.StorageKeyPrefix,
+            SignedUrlMinutes = ParseInt(overrides, "ContentStudio:SignedUrlMinutes", global.SignedUrlMinutes),
         };
     }
 
@@ -212,6 +239,13 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             ["Ai:KnowledgeBaseTopN"] = _aiOptions.Value.KnowledgeBaseTopN.ToString(CultureInfo.InvariantCulture),
             ["Ai:MinRelevanceScore"] = _aiOptions.Value.MinRelevanceScore.ToString(CultureInfo.InvariantCulture),
             ["Ai:ConversationHistoryTurns"] = _aiOptions.Value.ConversationHistoryTurns.ToString(CultureInfo.InvariantCulture),
+            ["Ai:MinFieldExtractionConfidence"] = _aiOptions.Value.MinFieldExtractionConfidence.ToString(CultureInfo.InvariantCulture),
+            ["Ai:MaxFieldsToAsk"] = _aiOptions.Value.MaxFieldsToAsk.ToString(CultureInfo.InvariantCulture),
+            ["Ai:HandoffOnHotLead"] = _aiOptions.Value.HandoffOnHotLead ? "true" : "false",
+            ["ContentStudio:Enabled"] = _studioOptions.Value.Enabled ? "true" : "false",
+            ["ContentStudio:StorageMode"] = _studioOptions.Value.StorageMode,
+            ["ContentStudio:StorageKeyPrefix"] = _studioOptions.Value.StorageKeyPrefix,
+            ["ContentStudio:SignedUrlMinutes"] = _studioOptions.Value.SignedUrlMinutes.ToString(CultureInfo.InvariantCulture),
         };
 
         return AppSettingCatalog.All
@@ -223,7 +257,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
                 {
                     var globalValue = globalByKey[d.Key];
                     var overrideValue = overridesByKey.TryGetValue(d.Key, out var v) ? v : null;
-                    return new TenantSettingItemDto(d.Key, d.Category, d.IsList, d.Description, globalValue, overrideValue, overrideValue ?? globalValue);
+                    return new TenantSettingItemDto(d.Key, d.Category, d.IsList, d.Description, globalValue, overrideValue, overrideValue ?? globalValue, d.Options);
                 }).ToList()))
             .ToList();
     }

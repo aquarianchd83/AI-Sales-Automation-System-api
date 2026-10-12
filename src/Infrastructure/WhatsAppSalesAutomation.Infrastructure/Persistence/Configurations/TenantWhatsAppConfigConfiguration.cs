@@ -16,6 +16,7 @@ public class TenantWhatsAppConfigConfiguration : IEntityTypeConfiguration<Tenant
         builder.Property(c => c.AppId).HasMaxLength(64);
         builder.Property(c => c.ApiVersion).HasMaxLength(20);
         builder.Property(c => c.ApiBaseUrl).HasMaxLength(500);
+        builder.Property(c => c.ConnectionMode).HasMaxLength(16);
         builder.Property(c => c.VerificationError).HasMaxLength(300);
         builder.Property(c => c.VerifiedDisplayPhoneNumber).HasMaxLength(40);
         builder.Property(c => c.VerifiedName).HasMaxLength(200);

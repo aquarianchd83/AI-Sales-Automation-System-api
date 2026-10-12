@@ -40,7 +40,7 @@ public static class AppSettingsSeeder
         {
             var defaultValue = definition.IsList
                 ? string.Join(",", configuration.GetSection(definition.Key).Get<string[]>() ?? [])
-                : configuration[definition.Key];
+                : configuration[definition.Key] ?? definition.DefaultValue;
 
             context.AppSettings.Add(new AppSetting
             {

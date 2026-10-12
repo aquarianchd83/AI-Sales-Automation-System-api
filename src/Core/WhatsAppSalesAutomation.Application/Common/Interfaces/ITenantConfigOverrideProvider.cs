@@ -30,6 +30,11 @@ public interface ITenantConfigOverrideProvider
 
     Task<Common.Options.AiOptions> GetAiOptionsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>The AI Content Studio settings this tenant is running with: its own overrides over the platform default. Takes the
+    /// tenant explicitly (not the ambient one) because its callers include background jobs and the studio charge history, which
+    /// already carry a tenant id.</summary>
+    Task<ContentStudio.StudioOptions> GetStudioOptionsForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
     /// <summary>Every tenant-overridable key across all four categories, each showing the platform
     /// default, this tenant's override (if any) and the effective value - what the Platform Admin
     /// Console's tenant detail screen renders.</summary>
@@ -60,7 +65,8 @@ public record TenantSettingItemDto(
     string? Description,
     string GlobalValue,
     string? OverrideValue,
-    string EffectiveValue);
+    string EffectiveValue,
+    IReadOnlyList<string>? Options = null);
 
 public record TenantSettingCategoryDto(string Category, IReadOnlyList<TenantSettingItemDto> Items);
 

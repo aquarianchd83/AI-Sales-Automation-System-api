@@ -182,7 +182,8 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
         await _configProvider.SaveConfigForTenantAsync(
             tenantId,
             new UpdateTenantWhatsAppConfigRequest(
-                phone.Id, wabaId, token, Platform.AppSecret, Platform.ApiVersion, Platform.ApiBaseUrl, null, Platform.AppId),
+                phone.Id, wabaId, token, Platform.AppSecret, Platform.ApiVersion, Platform.ApiBaseUrl, null, Platform.AppId,
+                WhatsAppConnectionModes.Automatic),
             userId,
             cancellationToken);
         steps = Set(steps, MetaSignupSteps.Credentials, MetaSignupStepStatus.Completed, "Saved securely.");
@@ -218,6 +219,16 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
         {
             if (repair)
                 await RecordVerificationAsync(row, null, phoneCall.Error, cancellationToken);
+            // Meta refused the token itself: the access is not "granted" or "saved" in any useful sense, so the earlier
+            // steps must not read as done (they were only assumed from the stored row, never checked with Meta).
+            if (MetaIssueCatalog.IsTokenRejection(phoneCall.Error))
+            {
+                var unreadable = MetaIssueCatalog.IsUnreadableToken((phoneCall.Error.Message ?? string.Empty).ToLowerInvariant());
+                steps = Set(steps, MetaSignupSteps.Authorization, MetaSignupStepStatus.ActionRequired,
+                    unreadable ? "Meta cannot read the saved access." : "Meta no longer accepts the saved access.");
+                steps = Set(steps, MetaSignupSteps.Assets, MetaSignupStepStatus.NotStarted, "Not confirmed by Meta yet.");
+                steps = Set(steps, MetaSignupSteps.Credentials, MetaSignupStepStatus.ActionRequired, "The saved access needs to be replaced.");
+            }
             return Fail(tenantId, MetaSignupSteps.Verification, steps, phoneCall.Error, TenantWhatsAppConfigProvider.ToDto(row));
         }
         var phone = phoneCall.Phone!;

@@ -40,6 +40,14 @@ public class SettingsService : ISettingsService
         if (unknownKeys.Count > 0)
             throw new NotFoundException($"'{string.Join("', '", unknownKeys)}' is not a setting under the '{category}' category.");
 
+        // A setting with fixed choices only ever stores one of them, whatever the caller sent.
+        foreach (var (key, value) in request.Values)
+        {
+            var options = AppSettingCatalog.All.First(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase)).Options;
+            if (options is not null && !string.IsNullOrEmpty(value) && !options.Contains(value, StringComparer.OrdinalIgnoreCase))
+                throw new FluentValidation.ValidationException(new[] { new FluentValidation.Results.ValidationFailure(key, $"{key} must be one of: {string.Join(", ", options)}.") });
+        }
+
         await _store.UpsertAsync(request.Values, updatedByUserId, cancellationToken);
     }
 
@@ -58,7 +66,7 @@ public class SettingsService : ISettingsService
         var hasValue = !string.IsNullOrEmpty(storedValue);
 
         if (!definition.IsSecret)
-            return new SettingItemDto(definition.Key, definition.Category, definition.IsSecret, definition.IsList, definition.Description, storedValue, hasValue, null);
+            return new SettingItemDto(definition.Key, definition.Category, definition.IsSecret, definition.IsList, definition.Description, storedValue, hasValue, null, definition.Options);
 
         // Never round-trip a real secret value - only enough of a hint to confirm to an admin that
         // the value they expect is the one currently stored, same convention as a password manager.

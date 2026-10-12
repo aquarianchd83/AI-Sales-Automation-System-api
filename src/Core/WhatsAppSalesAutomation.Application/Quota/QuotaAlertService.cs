@@ -164,6 +164,8 @@ public class QuotaAlertService : IQuotaAlertService
     {
         QuotaType.WhatsAppMessages => "WhatsApp messages",
         QuotaType.AiConversations => "AI conversations",
+        QuotaType.ContentGenerations => "content generations",
+        QuotaType.VideoRenders => "video renders",
         _ => "lead candidates"
     };
 

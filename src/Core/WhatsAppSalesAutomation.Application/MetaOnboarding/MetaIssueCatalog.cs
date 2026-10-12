@@ -28,6 +28,11 @@ public static class MetaIssueCatalog
             case 1 or 2 or 4 or 17 or 32 or 341 or 613 or 80007 or 130429 or 131056:
                 return Temporary(step, reference);
 
+            case 190 or 102 when IsUnreadableToken(text): // the saved value is not a Meta token at all (typed, pasted or placeholder)
+                return Issue("token_invalid", step, "The saved WhatsApp access is not valid",
+                    "Meta cannot read the saved access token, so it was most likely typed or pasted incorrectly. Connect with Meta to replace it, or enter a valid token in the manual details.",
+                    MetaIssueAction.Reconnect, null, false, reference);
+
             case 190: // access token expired / revoked / invalidated
             case 102: // session expired
                 return Issue("token_expired", step, "Your Meta connection has expired",
@@ -85,6 +90,13 @@ public static class MetaIssueCatalog
             "Meta did not accept this step and gave no reason we can act on. Your progress is saved - retry, and if it keeps happening contact support with the reference below.",
             MetaIssueAction.Retry, MetaIssueAction.ContactSupport, true, reference);
     }
+
+    /// <summary>Meta's wording for a token that is not in its format at all, as opposed to one that expired or was revoked.</summary>
+    public static bool IsUnreadableToken(string? lowerCasedMessage) =>
+        lowerCasedMessage is not null && lowerCasedMessage.Contains("cannot parse access token");
+
+    /// <summary>True when Meta rejected the token itself (not a permission or an outage) - the saved access is what has to change.</summary>
+    public static bool IsTokenRejection(MetaErrorInfo error) => error.Code is 190 or 102;
 
     /// <summary>The tenant closed Meta's popup, or Meta reported the sign-in failed, before a code was issued.</summary>
     public static MetaIssueDto FromClientEvent(string? clientEvent, string? clientStep, string? reference)

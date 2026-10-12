@@ -74,15 +74,27 @@ public class TenantSettingsController : ControllerBase
         [FromBody] UpdateTenantWhatsAppConfigRequest request,
         [FromServices] ICurrentUserService currentUser,
         [FromServices] IPlatformJobService jobs,
+        [FromServices] ITenantWhatsAppConnectionVerifier verifier,
         [FromServices] ILogger<TenantSettingsController> logger,
         CancellationToken cancellationToken)
     {
         var tenantId = RequireTenantId();
         var result = await _whatsAppConfigProvider.SaveConfigForTenantAsync(tenantId, request, currentUser.UserId, cancellationToken);
 
+        // Ask Meta right away whether what was just typed works, so a wrong token or number ID is reported now - on the
+        // save - instead of sitting saved and looking connected. The answer is recorded on the row and comes back in the
+        // response (VerifiedAtUtc, or VerificationError). Nothing is thrown away: the values stay, ready to be corrected.
+        var verified = false;
+        if (result.HasAccessToken && !string.IsNullOrWhiteSpace(result.PhoneNumberId))
+        {
+            result = await verifier.VerifyAsync(tenantId, cancellationToken);
+            verified = result.VerifiedAtUtc is not null;
+        }
+
         // A token pasted from Meta's explorer lives about an hour; exchange it now rather than at the nightly run,
-        // exactly as the platform endpoint does. Never fails the save.
-        if ((!string.IsNullOrEmpty(request.AccessToken) || !string.IsNullOrEmpty(request.AppSecret)) && currentUser.UserId is { } actor)
+        // exactly as the platform endpoint does. Skipped when Meta just rejected the credentials - there is nothing to
+        // exchange. Never fails the save.
+        if (verified && (!string.IsNullOrEmpty(request.AccessToken) || !string.IsNullOrEmpty(request.AppSecret)) && currentUser.UserId is { } actor)
         {
             try
             {
@@ -96,6 +108,16 @@ public class TenantSettingsController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>Records whether this tenant connects WhatsApp automatically (Connect with Meta) or manually (details typed in). Changes
+    /// nothing but the mode: credentials and the verification result stay as they are. Always the caller's own tenant. 400 for an
+    /// unsupported value; 409 when nothing is connected yet (the mode is then saved with the first connection).</summary>
+    [HttpPut("whatsapp/connection-mode")]
+    public async Task<ActionResult<TenantWhatsAppConfigDto>> SetWhatsAppConnectionMode(
+        [FromBody] SetWhatsAppConnectionModeRequest request,
+        [FromServices] ICurrentUserService currentUser,
+        CancellationToken cancellationToken)
+        => Ok(await _whatsAppConfigProvider.SetConnectionModeForTenantAsync(RequireTenantId(), request.Mode, currentUser.UserId, cancellationToken));
 
     /// <summary>Asks Meta whether the saved credentials reach the phone number, and records the answer.</summary>
     [HttpPost("whatsapp/verify")]

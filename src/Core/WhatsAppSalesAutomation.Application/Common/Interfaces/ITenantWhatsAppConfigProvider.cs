@@ -38,6 +38,13 @@ public interface ITenantWhatsAppConfigProvider
     /// SettingItemDto.HasValue/ValueHint). Null if not yet configured.</summary>
     Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Records which connection mode the tenant picked, on its own row, and touches nothing else (credentials, verification
+    /// and connected state are left exactly as they are).</summary>
+    /// <exception cref="FluentValidation.ValidationException">The mode is not one of <see cref="WhatsAppConnectionModes"/>.</exception>
+    /// <exception cref="Exceptions.ConflictException">The tenant has no WhatsApp connection saved yet, so there is no row to hold the
+    /// choice. It is saved together with the connection when one is made.</exception>
+    Task<TenantWhatsAppConfigDto> SetConnectionModeForTenantAsync(Guid tenantId, string mode, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
     /// <summary>Deprecated call path kept only for <see cref="GetConfigForCurrentTenantAsync"/>'s own
     /// read-only use - throws <see cref="InvalidOperationException"/> if actually invoked without a
     /// tenant in scope, same as before. No controller writes through this anymore; see
@@ -101,7 +108,8 @@ public record TenantWhatsAppConfigDto(
     DateTime? VerifiedAtUtc = null,
     string? VerificationError = null,
     string? VerifiedDisplayPhoneNumber = null,
-    string? VerifiedName = null)
+    string? VerifiedName = null,
+    string? ConnectionMode = null)
 {
     /// <summary>Configured and confirmed live by Meta since the last save - what onboarding's WhatsApp step needs.</summary>
     public bool IsVerified => IsConnected && VerifiedAtUtc is not null;
@@ -132,7 +140,23 @@ public record UpdateTenantWhatsAppConfigRequest(
     string? ApiVersion,
     string? ApiBaseUrl,
     string? WebhookVerifyToken = null,
-    string? AppId = null);
+    string? AppId = null,
+    string? ConnectionMode = null);
+
+/// <summary>How a tenant connects WhatsApp: "Automatic" (Connect with Meta) or "Manual" (details typed in). The value is stored on the
+/// tenant's own <c>TenantWhatsAppConfig.ConnectionMode</c>; null there means the tenant has not chosen yet. Both modes write the same
+/// credentials, so switching mode never touches them.</summary>
+public static class WhatsAppConnectionModes
+{
+    public const string Automatic = "Automatic";
+    public const string Manual = "Manual";
+
+    /// <summary>Exact, case-sensitive match - the API only ever stores one of the two constants.</summary>
+    public static bool IsSupported(string? mode) => mode is Automatic or Manual;
+}
+
+/// <summary>Body of PUT tenant-settings/whatsapp/connection-mode.</summary>
+public record SetWhatsAppConnectionModeRequest(string Mode);
 
 /// <summary>
 /// One tenant's row on the Platform Admin Console's WhatsApp Connections screen. Has no token-expiry

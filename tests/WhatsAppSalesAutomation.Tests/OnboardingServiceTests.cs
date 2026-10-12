@@ -431,6 +431,8 @@ public sealed class OnboardingServiceTests : IDisposable
 
         public Task<TenantWhatsAppConfigDto> SaveConfigForTenantAsync(Guid tenantId, UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+        public Task<TenantWhatsAppConfigDto> SetConnectionModeForTenantAsync(Guid tenantId, string mode, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task DeleteConfigForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<IReadOnlyList<TenantWhatsAppConnectionSummary>> GetAllConnectionSummariesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

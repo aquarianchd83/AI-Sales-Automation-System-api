@@ -72,6 +72,12 @@ public class TenantWhatsAppConfig : ITenantOwned
     /// tenant's WABA usable" flag for the frontend, not a live Meta connectivity check.</summary>
     public bool IsConnected { get; set; }
 
+    /// <summary>How this tenant chose to connect: "Automatic" (Connect with Meta) or "Manual" (details typed in) - see
+    /// <see cref="Application.Common.Interfaces.WhatsAppConnectionModes"/>. Null: not chosen yet (every row from before this existed), which
+    /// the screen reads as Automatic. Only says which screen the tenant works from; both modes write the same credentials above, so it is
+    /// never consulted when sending or receiving.</summary>
+    public string? ConnectionMode { get; set; }
+
     // ---- Live verification: "Verify connection" asks Meta for the phone number with the stored token. Every
     // save clears these, so a verified tick always describes the credentials as they are now. ----
 
