@@ -175,6 +175,14 @@ public interface IApplicationDbContext
 
     DbSet<TenantStudioSettings> TenantStudioSettings { get; }
 
+    DbSet<QuestionnaireTemplate> QuestionnaireTemplates { get; }
+
+    DbSet<QuestionnaireTemplateVersion> QuestionnaireTemplateVersions { get; }
+
+    DbSet<QuestionnaireResponse> QuestionnaireResponses { get; }
+
+    DbSet<BusinessFact> BusinessFacts { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

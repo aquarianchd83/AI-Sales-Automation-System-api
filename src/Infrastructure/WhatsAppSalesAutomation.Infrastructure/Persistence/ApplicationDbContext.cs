@@ -187,6 +187,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<TenantStudioSettings> TenantStudioSettings => Set<TenantStudioSettings>();
 
+    public DbSet<QuestionnaireTemplate> QuestionnaireTemplates => Set<QuestionnaireTemplate>();
+
+    public DbSet<QuestionnaireTemplateVersion> QuestionnaireTemplateVersions => Set<QuestionnaireTemplateVersion>();
+
+    public DbSet<QuestionnaireResponse> QuestionnaireResponses => Set<QuestionnaireResponse>();
+
+    public DbSet<BusinessFact> BusinessFacts => Set<BusinessFact>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();

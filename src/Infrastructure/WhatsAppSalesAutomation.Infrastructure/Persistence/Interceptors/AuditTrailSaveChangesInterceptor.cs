@@ -74,7 +74,10 @@ public static class AuditedEntityCatalog
         [typeof(LeadScoringRule)] = new("ScoringRule", new[] { "RuleKey", "DisplayName", "Points", "IsActive", "MarksLeadHot", "MatchValue" }),
 
         // Who may approve studio content is a permission decision, so changing it is on the record.
-        [typeof(TenantStudioSettings)] = new("StudioSettings", new[] { "ApprovalPolicy" })
+        [typeof(TenantStudioSettings)] = new("StudioSettings", new[] { "ApprovalPolicy" }),
+
+        // Who confirmed which business fact is the point of verification, so it is on the record. The wording itself is the tenant's content, not logged.
+        [typeof(BusinessFact)] = new("BusinessFact", new[] { "Category", "Status", "SourceType", "VerifiedBy" })
     };
 
     public static bool TryGet(Type clrType, out AuditedEntity entity) => Entities.TryGetValue(clrType, out entity!);
