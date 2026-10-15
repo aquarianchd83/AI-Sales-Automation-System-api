@@ -50,6 +50,10 @@ public class LeadDiscoveryExecutionCustomerConfiguration : IEntityTypeConfigurat
         builder.Property(c => c.ErrorMessage).HasMaxLength(2000);
         builder.Property(c => c.ErrorDetails).HasMaxLength(8000);
         builder.Property(c => c.CandidateJson).HasColumnType("nvarchar(max)");
+        builder.Property(c => c.VerificationStatus).HasConversion<string>().HasMaxLength(20);
+        builder.Property(c => c.VerificationReasonCode).HasMaxLength(50);
+        builder.Property(c => c.VerificationReason).HasMaxLength(500);
+        builder.Property(c => c.VerificationRequestId).HasMaxLength(100);
 
         builder.HasOne<LeadDiscoveryExecution>()
             .WithMany()

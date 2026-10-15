@@ -8,6 +8,10 @@ public static class PlatformAuditActions
 {
     public const string TenantCreated = "TenantCreated";
     public const string TenantSuspended = "TenantSuspended";
+    public const string TenantQualityWarning = "TenantQualityWarning";
+    public const string TenantQualityRecovered = "TenantQualityRecovered";
+    public const string TenantSendingPaused = "TenantSendingPaused";
+    public const string TenantSendingResumed = "TenantSendingResumed";
     public const string TenantReactivated = "TenantReactivated";
     public const string TenantDeleted = "TenantDeleted";
     public const string TenantImpersonated = "TenantImpersonated";

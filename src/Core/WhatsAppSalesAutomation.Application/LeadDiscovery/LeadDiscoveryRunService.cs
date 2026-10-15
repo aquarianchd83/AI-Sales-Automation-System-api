@@ -69,6 +69,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly ICampaignService _campaignService;
     private readonly ILeadDiscoveryLockStore _lockStore;
     private readonly IApplicationInstance _instance;
+    private readonly IPhoneVerificationProvider _verification;
     private readonly ILogger<LeadDiscoveryRunService> _logger;
     private readonly LeadDiscoveryOptions _options;
     private readonly LeadDiscoveryPricingOptions _pricing;
@@ -86,8 +87,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         IApplicationInstance instance,
         ILogger<LeadDiscoveryRunService> logger,
         IOptions<LeadDiscoveryOptions> options,
-        IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing)
+        IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing,
+        IPhoneVerificationProvider verification)
     {
+        _verification = verification;
         _context = context;
         _agent = agent;
         _planLimits = planLimits;
@@ -437,7 +440,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         try
         {
-            while (stats.Saved < run.BatchSize && stats.Rounds < _options.MaxRounds)
+            // A verification provider that is not answering ends the research too: more candidates would only be paid for and
+            // left unchecked.
+            while (stats.Saved < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
                 await run.Lease.EnsureCanProcessAsync(cancellationToken);
@@ -542,12 +547,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 _context.LeadDiscoveryExecutionCustomers.AddRange(rows);
                 await _context.SaveChangesAsync(cancellationToken);
 
-                run.Step = LeadDiscoverySteps.Customers;
-                foreach (var (lead, row) in pending)
+                foreach (var (lead, outcome) in await VerifyAndProcessAsync(run, pending, cancellationToken))
                 {
-                    await run.Lease.EnsureCanProcessAsync(cancellationToken);
-                    var outcome = await ProcessCustomerAsync(run, row, lead, cancellationToken);
-
                     if (outcome is CustomerOutcome.Created or CustomerOutcome.LeadOnly)
                     {
                         stats.Saved++;
@@ -592,6 +593,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 skipped.CustomerId = earlier.CustomerId;
                 skipped.DiscoveredLeadId = earlier.DiscoveredLeadId;
                 skipped.ProcessedAtUtc = now;
+                // What the earlier execution learned about the number carries over.
+                skipped.VerificationStatus = earlier.VerificationStatus;
+                skipped.VerificationReasonCode = earlier.VerificationReasonCode;
+                skipped.VerificationReason = earlier.VerificationReason;
+                skipped.VerifiedAtUtc = earlier.VerifiedAtUtc;
+                skipped.VerificationRequestId = earlier.VerificationRequestId;
                 rows.Add(skipped);
                 continue;
             }
@@ -610,11 +617,114 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _context.LeadDiscoveryExecutionCustomers.AddRange(rows);
         await _context.SaveChangesAsync(cancellationToken);
 
-        foreach (var (lead, row) in toProcess)
+        await VerifyAndProcessAsync(run, toProcess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks the numbers first, then creates customers only for the ones that passed. A number the provider rejected (DND and the
+    /// like) never becomes a customer - its business is kept as a discovered lead and its row records the rejection, so the tenant
+    /// still sees what the discovery cost and found. A number that could not be checked is left Pending, with its candidate, for a
+    /// retry to ask again. A business with no usable number is not checked and is handled as before.
+    /// </summary>
+    private async Task<List<(VerifiedLead Lead, CustomerOutcome Outcome)>> VerifyAndProcessAsync(
+        ExecutionRun run, IReadOnlyList<(VerifiedLead Lead, LeadDiscoveryExecutionCustomer Row)> items, CancellationToken cancellationToken)
+    {
+        // The profile's DND-check switch (off by default): when off nothing is submitted, and every qualified lead is processed as
+        // it always was.
+        var dndCheck = run.Profile.DndCheckEnabled;
+        if (dndCheck)
+            await VerifyNumbersAsync(run, items, cancellationToken);
+
+        run.Step = LeadDiscoverySteps.Customers;
+        var outcomes = new List<(VerifiedLead, CustomerOutcome)>();
+        foreach (var (lead, row) in items)
         {
             await run.Lease.EnsureCanProcessAsync(cancellationToken);
-            await ProcessCustomerAsync(run, row, lead, cancellationToken);
+
+            if (dndCheck && lead.PhoneE164 is not null
+                && row.VerificationStatus is not (LeadDiscoveryVerificationStatus.Pass or LeadDiscoveryVerificationStatus.Fail))
+                continue;
+
+            outcomes.Add((lead, await ProcessCustomerAsync(run, row, lead, cancellationToken)));
         }
+
+        return outcomes;
+    }
+
+    /// <summary>
+    /// Submits the rows' numbers to the verification provider as one batch and records each answer on its row, matched by the row's
+    /// id - never by order or by number. A provider failure or a missing answer is recorded as Error, never as Pass, and does not
+    /// stop the run; the execution stays retryable.
+    /// </summary>
+    private async Task VerifyNumbersAsync(
+        ExecutionRun run, IReadOnlyList<(VerifiedLead Lead, LeadDiscoveryExecutionCustomer Row)> items, CancellationToken cancellationToken)
+    {
+        run.Step = LeadDiscoverySteps.Verification;
+        await run.Lease.EnsureCanProcessAsync(cancellationToken);
+
+        var targets = items
+            .Where(i => i.Lead.PhoneE164 is not null
+                        && i.Row.VerificationStatus is LeadDiscoveryVerificationStatus.NotChecked
+                            or LeadDiscoveryVerificationStatus.Pending or LeadDiscoveryVerificationStatus.Error)
+            .ToList();
+        if (targets.Count == 0)
+            return;
+
+        PhoneVerificationResponse? response = null;
+        string? providerFailure = null;
+        try
+        {
+            response = await _verification.VerifyAsync(
+                run.Profile.TenantId,
+                targets.Select(t => new PhoneVerificationItem(t.Row.Id, t.Lead.PhoneE164!)).ToList(),
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Phone verification failed for lead discovery execution {ExecutionId}", run.Execution.Id);
+            providerFailure = Truncate(ex.Message, 400);
+        }
+
+        var answers = new Dictionary<Guid, PhoneVerificationItemResult>();
+        foreach (var result in response?.Results ?? Array.Empty<PhoneVerificationItemResult>())
+            answers.TryAdd(result.ReferenceId, result);
+
+        var now = _dateTime.UtcNow;
+        foreach (var (_, row) in targets)
+        {
+            LeadDiscoveryVerificationStatus status;
+            string? code = null, reason = null;
+            if (answers.TryGetValue(row.Id, out var answer))
+            {
+                status = answer.Status == LeadDiscoveryVerificationStatus.NotChecked
+                    ? LeadDiscoveryVerificationStatus.Error : answer.Status;
+                code = answer.ReasonCode;
+                reason = answer.Reason;
+            }
+            else
+            {
+                status = LeadDiscoveryVerificationStatus.Error;
+                code = providerFailure is null ? "NO_RESULT" : "PROVIDER_ERROR";
+                reason = providerFailure ?? "The provider returned no result for this number.";
+            }
+
+            row.VerificationStatus = status;
+            row.VerificationReasonCode = Truncate(code, 50);
+            row.VerificationReason = Truncate(reason, 500);
+            row.VerificationRequestId = Truncate(response?.RequestId, 100);
+            row.VerifiedAtUtc = status == LeadDiscoveryVerificationStatus.Pending ? null : now;
+            if (status is LeadDiscoveryVerificationStatus.Error or LeadDiscoveryVerificationStatus.Pending)
+                run.VerificationUnfinished = true;
+        }
+
+        if (run.VerificationUnfinished)
+        {
+            var unfinished = targets.Count(t => t.Row.VerificationStatus is LeadDiscoveryVerificationStatus.Error or LeadDiscoveryVerificationStatus.Pending);
+            SetError(run.Execution, LeadDiscoverySteps.Verification,
+                $"{unfinished} number(s) could not be verified; no customer is created for them until a retry succeeds.", null);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
@@ -668,6 +778,21 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     return CustomerOutcome.LeadOnly;
                 }
 
+                if (row.VerificationStatus == LeadDiscoveryVerificationStatus.Fail)
+                {
+                    // Rejected by the verification provider (DND and the like): no customer is created, since nothing could be sent to
+                    // it. The business stays as a discovered lead - so it is not paid for again - and this row is the record.
+                    row.Status = LeadDiscoveryCustomerStatus.Skipped;
+                    row.IsInvalid = true;
+                    row.ErrorMessage = Truncate(
+                        $"Rejected by the DND check{(row.VerificationReasonCode is null ? "" : $" ({row.VerificationReasonCode})")}: " +
+                        $"{row.VerificationReason ?? "number not eligible for outreach"} - no customer created.",
+                        ErrorMessageLength);
+                    await _context.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return CustomerOutcome.LeadOnly;
+                }
+
                 var customer = new Customer
                 {
                     TenantId = tenantId,
@@ -677,24 +802,52 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     FirstName = Truncate(lead.ContactPerson ?? lead.BusinessName, CustomerNameLength),
                     Email = Truncate(lead.Email, LeadDiscoveryLimits.Email),
                     Source = CustomerSource,
-                    // OptInStatus left at its PendingOptIn default, with no consent evidence written -
-                    // being discovered on the web is not consent to be messaged. Campaigns only ever
-                    // send to OptedIn customers (see CampaignSendService), so nothing discovered here
-                    // can be messaged until a person actually opts in (e.g. messages the business first) -
-                    // unless the tenant has explicitly turned on AutoConsentDiscoveredCustomers, their own
-                    // choice to skip that check, not something the platform decides for them.
+                    // PendingOptIn, or WaitingForConsent when the tenant requires consent (Customers page setting); no
+                    // consent evidence is written either way -
+                    // being discovered on the web is not consent to be messaged. Campaigns only ever send to
+                    // OptedIn customers (see CampaignSendService), so nothing discovered here can be messaged
+                    // until the customer replies or taps the opt-in link and messages the business first.
+                    // There is deliberately no switch to skip this.
+                    OptInStatus = await Customers.ConsentPolicy.InitialStatusAsync(_context, tenantId, cancellationToken)
                 };
-                if (run.Profile.AutoConsentDiscoveredCustomers)
-                {
-                    customer.OptInStatus = OptInStatus.OptedIn;
-                    customer.OptInTimestamp = now;
-                    customer.OptInSource = CustomerSource;
-                }
                 // Every customer a run creates is tagged with the run's processing date, so a day's discoveries can be found
                 // (and campaigned to) together in the Customers screen.
                 customer.Tags.Add(await GetOrCreateDateTagAsync(tenantId, run.Execution.ProcessingDate, cancellationToken));
                 _context.Customers.Add(customer);
                 discovered.CustomerId = customer.Id;
+
+                // In the same transaction as the customer, so a customer exists exactly when its "discovered" event does.
+                _context.CustomerHistoryEvents.Add(new CustomerHistoryEvent
+                {
+                    TenantId = tenantId,
+                    CustomerId = customer.Id,
+                    EventType = CustomerHistoryEventTypes.Discovered,
+                    // When the row was recorded - before the number was checked - so discovery precedes verification on the timeline.
+                    OccurredAtUtc = row.CreatedAt == default ? now : row.CreatedAt,
+                    NewStatus = "Discovered",
+                    Reason = $"Found by lead discovery for \"{Truncate(run.Profile.TargetBusinessType, 200)}\".",
+                    ExecutionId = run.Execution.Id,
+                    CorrelationId = run.Execution.Id.ToString("N")
+                });
+
+                if (row.VerificationStatus == LeadDiscoveryVerificationStatus.Pass)
+                {
+                    var verifiedAt = row.VerifiedAtUtc ?? now;
+                    foreach (var (type, previousStatus, newStatus) in new[]
+                             {
+                                 (CustomerHistoryEventTypes.VerificationSubmitted, "NotChecked", "Pending"),
+                                 (CustomerHistoryEventTypes.VerificationPassed, "Pending", "Pass")
+                             })
+                    {
+                        _context.CustomerHistoryEvents.Add(new CustomerHistoryEvent
+                        {
+                            TenantId = tenantId, CustomerId = customer.Id, EventType = type, OccurredAtUtc = verifiedAt,
+                            PreviousStatus = previousStatus, NewStatus = newStatus,
+                            ExecutionId = run.Execution.Id, CorrelationId = run.Execution.Id.ToString("N"),
+                            ProviderReference = row.VerificationRequestId
+                        });
+                    }
+                }
 
                 row.CustomerId = customer.Id;
                 row.Status = LeadDiscoveryCustomerStatus.Created;
@@ -770,12 +923,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             return;
         }
 
-        var eligible = await EligibleCustomerIdsAsync(execution, cancellationToken);
+        var customers = await EligibleCustomerIdsAsync(execution, profile.DndCheckEnabled, cancellationToken);
+        var eligible = customers.Passed;
         execution.MappingsEligible = eligible.Count;
 
         if (eligible.Count == 0)
         {
-            SkipCampaign(execution, "No new customers discovered/created. Campaign creation skipped.");
+            SkipCampaign(execution, customers.Rejected > 0
+                ? $"None of the {customers.Rejected + customers.Created} discovered numbers passed the DND check. Campaign creation skipped."
+                : "No new customers discovered/created. Campaign creation skipped.");
             await _context.SaveChangesAsync(cancellationToken);
             return;
         }
@@ -809,7 +965,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
     /// <summary>Customers created anywhere in this execution's retry chain that still exist in this tenant - never
     /// a duplicate, never another tenant's, never one from an unrelated execution.</summary>
-    private async Task<List<Guid>> EligibleCustomerIdsAsync(LeadDiscoveryExecution execution, CancellationToken cancellationToken)
+    private async Task<EligibleCustomers> EligibleCustomerIdsAsync(
+        LeadDiscoveryExecution execution, bool requireVerificationPass, CancellationToken cancellationToken)
     {
         var tenantId = execution.TenantId;
         var rootId = execution.RootExecutionId;
@@ -830,8 +987,32 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 .ToListAsync(cancellationToken))
             .ToHashSet();
 
-        return created.Where(existing.Contains).Distinct().ToList();
+        var all = created.Where(existing.Contains).Distinct().ToList();
+
+        // With the DND check off nothing was verified and every created customer is eligible, as before the check existed.
+        if (!requireVerificationPass)
+            return new EligibleCustomers(all, all.Count, 0);
+
+        // With it on, a customer is only ever created for a number that passed, so this keeps out anything that did not (a
+        // customer from before verification existed has no Pass on record and is left out too).
+        var passed = (await _context.LeadDiscoveryExecutionCustomers.AsNoTracking()
+                .Where(r => chain.Contains(r.ExecutionId) && r.TenantId == tenantId && r.CustomerId != null
+                            && r.VerificationStatus == LeadDiscoveryVerificationStatus.Pass)
+                .Select(r => r.CustomerId!.Value)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var rejected = await _context.LeadDiscoveryExecutionCustomers.AsNoTracking()
+            .CountAsync(r => chain.Contains(r.ExecutionId) && r.TenantId == tenantId
+                             && r.VerificationStatus == LeadDiscoveryVerificationStatus.Fail, cancellationToken);
+
+        return new EligibleCustomers(all.Where(passed.Contains).ToList(), all.Count, rejected);
     }
+
+    /// <param name="Passed">Created customers whose number passed verification, in discovery order.</param>
+    /// <param name="Created">All customers created in the chain.</param>
+    /// <param name="Rejected">Numbers the provider rejected in the chain - no customer exists for them.</param>
+    private sealed record EligibleCustomers(List<Guid> Passed, int Created, int Rejected);
 
     /// <summary>The campaign for (tenant, profile, auto campaign, processing date): reused when it already exists,
     /// created in its own transaction when it does not. Returns null when the step failed.</summary>
@@ -849,9 +1030,22 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (source.Status == CampaignStatus.Stopped)
             return await FailCampaignAsync(execution, $"The referred campaign '{source.Name}' is Stopped.", null, cancellationToken);
 
+        if (source.IsRetired)
+            return await FailCampaignAsync(execution, $"The referred campaign '{source.Name}' was retired.", null, cancellationToken);
+
         var existing = await FindGeneratedCampaignAsync(execution, source.Id, cancellationToken);
+        // A generated campaign the tenant has since deleted or retired is not reused: its mapping is replaced by a new
+        // campaign below, so the run recovers by itself instead of failing on every retry.
+        LeadDiscoveryGeneratedCampaign? stale = null;
         if (existing is not null)
-            return await ReuseCampaignAsync(execution, existing, cancellationToken);
+        {
+            var stillExists = await _context.Campaigns.AsNoTracking()
+                .AnyAsync(c => c.Id == existing.CampaignId && c.TenantId == execution.TenantId && c.RetiredAt == null, cancellationToken);
+            if (stillExists)
+                return await ReuseCampaignAsync(execution, existing, cancellationToken);
+
+            stale = existing;
+        }
 
         var campaign = new Campaign
         {
@@ -882,6 +1076,16 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             {
                 await _planLimits.EnsureCanCreateCampaignAsync(execution.TenantId, cancellationToken);
 
+                if (stale is not null)
+                {
+                    // Saved on its own first: EF does not order a delete ahead of an insert for the same unique key.
+                    // Loaded tracked: the context may already be tracking this row from an earlier step.
+                    var tracked = await _context.LeadDiscoveryGeneratedCampaigns.FirstOrDefaultAsync(g => g.Id == stale.Id, cancellationToken);
+                    if (tracked is not null)
+                        _context.LeadDiscoveryGeneratedCampaigns.Remove(tracked);
+                    await _context.SaveChangesAsync(cancellationToken);
+                }
+
                 _context.Campaigns.Add(campaign);
                 _context.LeadDiscoveryGeneratedCampaigns.Add(new LeadDiscoveryGeneratedCampaign
                 {
@@ -908,7 +1112,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             execution.GeneratedCampaignId = campaign.Id;
             execution.GeneratedCampaignName = campaign.Name;
             execution.CampaignStatus = LeadDiscoveryCampaignStatus.Created;
-            execution.CampaignNote = "Campaign created.";
+            execution.CampaignNote = stale is null
+                ? "Campaign created."
+                : $"Campaign created - the one generated earlier for {execution.ProcessingDate:yyyy-MM-dd} ({stale.CampaignId}) had been deleted or retired.";
             await _context.SaveChangesAsync(cancellationToken);
             return campaign.Id;
         }
@@ -1258,7 +1464,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             || execution.MappingStatus is LeadDiscoveryAssociationStatus.RetryPending or LeadDiscoveryAssociationStatus.Failed
                 or LeadDiscoveryAssociationStatus.Processing;
 
-        var retryable = execution.CustomersFailed > 0 || pending > 0 || run.Interrupted || run.Fatal || stepUnfinished || run.ActivationFailed;
+        var retryable = execution.CustomersFailed > 0 || pending > 0 || run.Interrupted || run.Fatal || stepUnfinished || run.ActivationFailed
+                        || run.VerificationUnfinished;
         // For a retry, customers an earlier attempt of the chain created (Skipped here) count as work done.
         var anySuccess = execution.CustomersCreated > 0 || execution.CustomersSkipped > 0
                          || execution.CampaignStatus == LeadDiscoveryCampaignStatus.Created;
@@ -1598,6 +1805,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         public bool Fatal { get; set; }
         public bool DiscoveryFailed { get; set; }
         public bool ActivationFailed { get; set; }
+
+        /// <summary>A number could not be checked (Error) or has no answer yet (Pending): the execution stays retryable so a
+        /// retry asks again, and its customer is kept out of the campaign until then.</summary>
+        public bool VerificationUnfinished { get; set; }
         public string? NotConfiguredReason { get; set; }
     }
 
@@ -1653,6 +1864,7 @@ public static class LeadDiscoverySteps
     public const string LockAcquisition = "LockAcquisition";
     public const string Discovery = "Discovery";
     public const string Customers = "Customers";
+    public const string Verification = "Verification";
     public const string Campaign = "Campaign";
     public const string Templates = "Templates";
     public const string CustomerMapping = "CustomerMapping";

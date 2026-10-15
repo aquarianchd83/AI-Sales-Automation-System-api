@@ -39,6 +39,16 @@ public class Campaign : BaseEntity, ITenantOwned
     /// closed itself (every audience member finished, or <see cref="ExpectedEndAt"/> passed).</summary>
     public DateTime? StoppedAt { get; set; }
 
+    /// <summary>Set when the tenant retired the campaign: kept, with its messages and audience, as a record, but
+    /// closed to every change and never reused. Lead discovery treats a retired campaign like a deleted one and
+    /// creates a new one.</summary>
+    public DateTime? RetiredAt { get; set; }
+
+    /// <summary>Why the tenant retired it - required when retiring.</summary>
+    public string? RetiredReason { get; set; }
+
+    public bool IsRetired => RetiredAt is not null;
+
     /// <summary>StartedAt plus the delays of every active step - when the last follow-up falls due. Null
     /// until started or with no active step. Needs <see cref="Steps"/> loaded. The Angular
     /// campaignEndDate helper computes the same value; keep them in step.</summary>

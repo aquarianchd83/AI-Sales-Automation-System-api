@@ -31,7 +31,7 @@ public sealed class LeadFollowUpTests : IDisposable
     private readonly LeadFollowUpService _service;
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme" };
     private readonly Guid _agent = Guid.NewGuid();
-    private readonly Customer _customer = new() { PhoneNumberE164 = "+919000000000", FirstName = "Asha", OptInStatus = OptInStatus.OptedIn };
+    private readonly Customer _customer = new() { PhoneNumberE164 = "+919000000000", FirstName = "Asha", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
     private readonly Lead _lead = new() { Stage = LeadStage.Qualified };
     private readonly MessageTemplate _template = new()
     {
@@ -387,7 +387,7 @@ public sealed class LeadFollowUpTests : IDisposable
     [Fact]
     public async Task The_list_shows_scheduled_follow_ups_soonest_first_and_can_be_narrowed_to_those_due_soon()
     {
-        var other = new Customer { PhoneNumberE164 = "+919111111111", FirstName = "Ravi", OptInStatus = OptInStatus.OptedIn };
+        var other = new Customer { PhoneNumberE164 = "+919111111111", FirstName = "Ravi", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
         var otherLead = new Lead { Stage = LeadStage.Qualifying, CustomerId = other.Id };
         _db.Customers.Add(other);
         _db.Leads.Add(otherLead);

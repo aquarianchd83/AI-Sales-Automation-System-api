@@ -246,7 +246,9 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
                 PhoneNumberE164 = phoneNumber,
                 FirstName = inbound.ContactName,
                 Source = "Inbound",
-                OptInStatus = OptInStatus.PendingOptIn
+                // PendingOptIn, or WaitingForConsent when the tenant requires consent.
+                OptInStatus = await WhatsAppSalesAutomation.Application.Customers.ConsentPolicy.InitialStatusAsync(
+                    _context, tenantId, cancellationToken)
             };
             _context.Customers.Add(customer);
             await _context.SaveChangesAsync(cancellationToken);

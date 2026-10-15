@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Customers;
+using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -25,6 +26,20 @@ public class CustomersController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<CustomerDto>> GetById(Guid id, CancellationToken cancellationToken)
         => Ok(await _customerService.GetByIdAsync(id, cancellationToken));
+
+    [HttpGet("consent-setting")]
+    public async Task<ActionResult<CustomerConsentSettingDto>> GetConsentSetting(CancellationToken cancellationToken)
+        => Ok(await _customerService.GetConsentSettingAsync(cancellationToken));
+
+    [HttpPut("consent-setting")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<CustomerConsentSettingDto>> SetConsentSetting(
+        [FromBody] SetCustomerConsentSettingRequest request, CancellationToken cancellationToken)
+        => Ok(await _customerService.SetConsentSettingAsync(request, cancellationToken));
+
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<IReadOnlyList<CustomerHistoryEventDto>>> GetHistory(Guid id, CancellationToken cancellationToken)
+        => Ok(await _customerService.GetHistoryAsync(id, cancellationToken));
 
     [HttpPost]
     public async Task<ActionResult<CustomerDto>> Create([FromBody] CreateCustomerRequest request, CancellationToken cancellationToken)

@@ -38,6 +38,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     private readonly ServiceProvider _services;
     private readonly SqlLeadDiscoveryLockStore _sqlLockStore;
     private readonly FakeAgent _agent = new();
+    private readonly FakeVerifier _verifier = new();
     private readonly List<Guid> _startedCampaigns = new();
     private readonly LeadDiscoveryOptions _discoveryOptions = new() { LockHeartbeatSeconds = 0, MaxRetryAttempts = 3 };
 
@@ -102,6 +103,28 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Each_new_customer_gets_one_discovered_history_event_for_its_execution()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _agent.Rounds.Add(Candidates("A"));   // a duplicate found later must not add a second event
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var events = await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.Discovered).ToListAsync();
+        Assert.Equal(2, events.Count);
+        Assert.Equal(
+            (await _db.Customers.Select(c => c.Id).ToListAsync()).OrderBy(i => i),
+            events.Select(e => e.CustomerId).OrderBy(i => i));
+        Assert.All(events, e =>
+        {
+            Assert.Equal(CustomerHistoryEventTypes.Discovered, e.EventType);
+            Assert.Equal(execution.Id, e.ExecutionId);
+            Assert.Equal(_tenant, e.TenantId);
+        });
+    }
+
+    [Fact]
     public async Task New_customers_are_tagged_with_the_processing_date_and_share_one_tag()
     {
         _agent.Rounds.Add(Candidates("A", "B"));
@@ -148,9 +171,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
-    public async Task Auto_consent_opts_in_new_customers_with_no_manual_step()
+    public async Task Discovered_customers_are_never_opted_in_by_discovery()
     {
-        EnableAutoConsent();
         _agent.Rounds.Add(Candidates("A", "B"));
 
         await Service().RunForTenantAsync(_tenant);
@@ -159,9 +181,9 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(2, customers.Count);
         Assert.All(customers, c =>
         {
-            Assert.Equal(OptInStatus.OptedIn, c.OptInStatus);
-            Assert.NotNull(c.OptInTimestamp);
-            Assert.Equal("Lead discovery", c.OptInSource);
+            Assert.Equal(OptInStatus.PendingOptIn, c.OptInStatus);
+            Assert.Null(c.OptInTimestamp);
+            Assert.Null(c.OptInSource);
         });
     }
 
@@ -224,6 +246,24 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(LeadDiscoveryCampaignStatus.Skipped, execution.CampaignStatus);
         Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
         Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task The_execution_detail_shows_the_name_of_each_customer_created()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.Equal("A Contact", detail.Customers.Single(c => c.CustomerName.Contains("A")).CrmCustomerName);
+        Assert.Null(detail.Customers.Single(c => c.CustomerName.Contains("B")).CrmCustomerName);   // rejected: no customer
     }
 
     [Fact]
@@ -420,6 +460,52 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_deleted_generated_campaign_is_replaced_by_a_new_one_on_the_next_run()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var deleted = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        _db.CampaignCustomers.RemoveRange(_db.CampaignCustomers.Where(cc => cc.CampaignId == deleted.Id));
+        _db.CampaignSteps.RemoveRange(_db.CampaignSteps.Where(s => s.CampaignId == deleted.Id));
+        _db.Campaigns.Remove(deleted);
+        await _db.SaveChangesAsync();
+
+        _agent.Rounds.Add(Candidates("B"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var replacement = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        Assert.NotEqual(deleted.Id, replacement.Id);
+        var mapping = await _db.LeadDiscoveryGeneratedCampaigns.SingleAsync();
+        Assert.Equal(replacement.Id, mapping.CampaignId);
+        var latest = (await _db.LeadDiscoveryExecutions.ToListAsync()).Last();
+        Assert.Equal(LeadDiscoveryCampaignStatus.Created, latest.CampaignStatus);
+    }
+
+    [Fact]
+    public async Task A_retired_generated_campaign_is_not_reused_and_a_new_one_is_created()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var retired = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        retired.RetiredAt = DateTime.UtcNow;
+        retired.RetiredReason = "Wrong audience";
+        await _db.SaveChangesAsync();
+
+        _agent.Rounds.Add(Candidates("B"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var replacement = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId && c.RetiredAt == null);
+        Assert.NotEqual(retired.Id, replacement.Id);
+        Assert.Equal(1, await _db.CampaignCustomers.CountAsync(cc => cc.CampaignId == replacement.Id));
+        Assert.Equal(1, await _db.CampaignCustomers.CountAsync(cc => cc.CampaignId == retired.Id));
+        Assert.Equal(replacement.Id, (await _db.LeadDiscoveryGeneratedCampaigns.SingleAsync()).CampaignId);
+    }
+
+    [Fact]
     public async Task The_database_rejects_a_second_campaign_for_the_same_logical_key()
     {
         var key = new LeadDiscoveryGeneratedCampaign
@@ -585,10 +671,10 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     [Fact]
     public async Task Losing_the_lock_stops_new_work_but_keeps_committed_customers()
     {
-        // Renew at every checkpoint, and have the provider report the lock lost on the third renewal:
-        // round checkpoint (1), customer A (2), customer B (3 -> lost).
+        // Renew at every checkpoint, and have the provider report the lock lost on the fourth renewal:
+        // round checkpoint (1), verification (2), customer A (3), customer B (4 -> lost).
         _discoveryOptions.LockRenewWhenRemainingSeconds = _discoveryOptions.LockLeaseSeconds;
-        var store = new ScriptedLockStore(_sqlLockStore) { LoseOnRenewal = 3 };
+        var store = new ScriptedLockStore(_sqlLockStore) { LoseOnRenewal = 4 };
         _agent.Rounds.Add(Candidates("A", "B", "C"));
 
         await Service(store).RunForTenantAsync(_tenant);
@@ -811,7 +897,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         {
             TenantId = _tenant, IsEnabled = true, TargetBusinessType = "Eye clinic",
             Keywords = new List<string> { "eye clinic" }, Locations = new List<string> { "Chandigarh" },
-            BatchSize = 25, PhoneRequired = true, MinimumLeadScore = 60,
+            BatchSize = 25, PhoneRequired = true, MinimumLeadScore = 60, DndCheckEnabled = true,
             AutoCampaignEnabled = autoCampaign, SourceCampaignId = autoCampaign ? campaign.Id : null
         };
         _db.LeadDiscoveryProfiles.Add(profile);
@@ -824,13 +910,6 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var profile = _db.LeadDiscoveryProfiles.Single();
         profile.AutoCampaignEnabled = true;
         profile.SourceCampaignId = _referredCampaignId;
-        _db.SaveChanges();
-    }
-
-    private void EnableAutoConsent()
-    {
-        var profile = _db.LeadDiscoveryProfiles.Single();
-        profile.AutoConsentDiscoveredCustomers = true;
         _db.SaveChanges();
     }
 
@@ -867,7 +946,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()));
+            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier);
     }
 
     private SaveFailure FailCustomerSave(string firstName)
@@ -912,6 +991,202 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         return new LeadDiscoveryAgentResult(true, null, candidates, new LeadDiscoveryEvidence(seen, pages),
             LeadDiscoveryUsage.None, "Simulated");
+    }
+
+    /// <summary>Passes everyone unless told otherwise. Matches results by customer id only, like a real provider.</summary>
+    private sealed class FakeVerifier : IPhoneVerificationProvider
+    {
+        public Func<Guid, string, PhoneVerificationItemResult?> Decide { get; set; } =
+            (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        public bool Throw { get; set; }
+        public int Calls { get; private set; }
+        public List<IReadOnlyList<PhoneVerificationItem>> Batches { get; } = new();
+
+        public Task<PhoneVerificationResponse> VerifyAsync(
+            Guid tenantId, IReadOnlyList<PhoneVerificationItem> items, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            Batches.Add(items);
+            if (Throw)
+                throw new InvalidOperationException("provider down");
+
+            // Reversed on purpose: an implementation that relies on response order would mismatch.
+            var results = items.Reverse().Select(i => Decide(i.ReferenceId, i.PhoneE164)).OfType<PhoneVerificationItemResult>().ToList();
+            return Task.FromResult(new PhoneVerificationResponse("req-1", results));
+        }
+    }
+
+    [Fact]
+    public async Task Customers_are_verified_in_one_batch_and_each_answer_lands_on_the_right_row()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", "On the DND register")
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, _verifier.Calls);
+        Assert.Equal(2, _verifier.Batches.Single().Count);
+        var rows = await _db.LeadDiscoveryExecutionCustomers.ToListAsync();
+        var a = rows.Single(r => r.CustomerName.Contains("A"));
+        var b = rows.Single(r => r.CustomerName.Contains("B"));
+        Assert.Equal(LeadDiscoveryVerificationStatus.Pass, a.VerificationStatus);
+        Assert.Equal(LeadDiscoveryCustomerStatus.Created, a.Status);
+        Assert.Equal(LeadDiscoveryVerificationStatus.Fail, b.VerificationStatus);
+        Assert.Equal("DND", b.VerificationReasonCode);
+        Assert.NotNull(b.VerifiedAtUtc);
+        Assert.Equal("req-1", b.VerificationRequestId);
+
+        // The rejected number leaves a record on its row, but never becomes a customer.
+        Assert.Equal(LeadDiscoveryCustomerStatus.Skipped, b.Status);
+        Assert.Null(b.CustomerId);
+        Assert.Contains("Rejected by the DND check", b.ErrorMessage);
+        Assert.Equal(1, await _db.Customers.CountAsync());
+
+        var events = await _db.CustomerHistoryEvents.Where(e => e.CustomerId == a.CustomerId).Select(e => e.EventType).ToListAsync();
+        Assert.Contains(CustomerHistoryEventTypes.VerificationSubmitted, events);
+        Assert.Contains(CustomerHistoryEventTypes.VerificationPassed, events);
+    }
+
+    [Fact]
+    public async Task With_the_dnd_check_off_nothing_is_verified_and_every_lead_becomes_a_customer_in_the_campaign()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.DndCheckEnabled = false;
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(0, _verifier.Calls);
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.All(await _db.LeadDiscoveryExecutionCustomers.ToListAsync(),
+            r => Assert.Equal(LeadDiscoveryVerificationStatus.NotChecked, r.VerificationStatus));
+        var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        Assert.Equal(2, await _db.CampaignCustomers.CountAsync(cc => cc.CampaignId == generated.Id));
+    }
+
+    [Fact]
+    public async Task The_dnd_check_is_off_for_a_new_profile()
+    {
+        Assert.False(new LeadDiscoveryProfile().DndCheckEnabled);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_rejected_number_is_kept_as_a_discovered_lead_so_it_is_not_found_again()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        _verifier.Decide = (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var lead = await _db.DiscoveredLeads.SingleAsync();
+        Assert.Null(lead.CustomerId);
+        Assert.Equal(0, await _db.Customers.CountAsync());
+    }
+
+    [Fact]
+    public async Task Only_customers_who_passed_verification_join_the_campaign()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", "On the DND register")
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        var members = await _db.CampaignCustomers.Where(cc => cc.CampaignId == generated.Id).Select(cc => cc.CustomerId).ToListAsync();
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        Assert.Equal(new[] { passed.Id }, members);
+        Assert.Equal(1, await _db.Customers.CountAsync());   // no customer is created for the rejected number
+        Assert.Equal(1, (await SingleExecutionAsync()).MappingsEligible);
+    }
+
+    [Fact]
+    public async Task No_campaign_is_created_when_no_number_passes()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", "On the DND register");
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Campaigns.CountAsync());   // only the referred one
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryCampaignStatus.Skipped, execution.CampaignStatus);
+        Assert.Contains("None of the 2 discovered numbers passed the DND check", execution.CampaignNote);
+        Assert.Equal(0, await _db.Customers.CountAsync());
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+    }
+
+    [Fact]
+    public async Task A_number_that_could_not_be_verified_stays_out_until_a_retry_passes_it()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A"));
+        _verifier.Throw = true;
+        await Service().RunForTenantAsync(_tenant);
+
+        var first = await SingleExecutionAsync();
+        Assert.Equal(1, await _db.Campaigns.CountAsync());
+        Assert.Equal(LeadDiscoveryExecutionStatus.RetryPending, first.Status);
+
+        _verifier.Throw = false;
+        await Service().RetryExecutionAsync(_tenant, first.Id);
+
+        var generated = await _db.Campaigns.SingleAsync(c => c.Id != _referredCampaignId);
+        Assert.Equal(1, await _db.CampaignCustomers.CountAsync(cc => cc.CampaignId == generated.Id));
+        Assert.Equal(1, await _db.Customers.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_provider_failure_is_an_error_not_a_pass_and_does_not_fail_the_run()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        _verifier.Throw = true;
+
+        await Service().RunForTenantAsync(_tenant);
+
+        // Not verified, so no customer yet: the row waits, with its candidate, for a retry.
+        var row = await _db.LeadDiscoveryExecutionCustomers.SingleAsync(r => r.VerificationStatus != LeadDiscoveryVerificationStatus.NotChecked);
+        Assert.Equal(LeadDiscoveryVerificationStatus.Error, row.VerificationStatus);
+        Assert.Equal("PROVIDER_ERROR", row.VerificationReasonCode);
+        Assert.Equal(LeadDiscoveryCustomerStatus.Pending, row.Status);
+        Assert.NotNull(row.CandidateJson);
+        Assert.Equal(0, await _db.Customers.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_number_with_no_answer_is_an_error()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        _verifier.Decide = (_, _) => null;
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var row = await _db.LeadDiscoveryExecutionCustomers.SingleAsync(r => r.VerificationStatus != LeadDiscoveryVerificationStatus.NotChecked);
+        Assert.Equal(LeadDiscoveryVerificationStatus.Error, row.VerificationStatus);
+        Assert.Equal("NO_RESULT", row.VerificationReasonCode);
+        Assert.Equal(0, await _db.Customers.CountAsync());
+    }
+
+    [Fact]
+    public async Task Rows_that_are_not_customers_are_never_submitted()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var submitted = _verifier.Batches.Single().Select(i => i.ReferenceId).ToHashSet();
+        var skipped = await _db.LeadDiscoveryExecutionCustomers.Where(r => r.Status != LeadDiscoveryCustomerStatus.Created).ToListAsync();
+        Assert.All(skipped, r => Assert.Equal(LeadDiscoveryVerificationStatus.NotChecked, r.VerificationStatus));
+        Assert.Single(submitted);
     }
 
     private sealed class FakeAgent : ILeadDiscoveryAgent

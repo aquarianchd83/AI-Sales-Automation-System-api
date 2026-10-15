@@ -48,6 +48,16 @@ public class PlatformTenantsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Reopens sending for a tenant paused automatically when WhatsApp rated its number Red. A person does this
+    /// once they have reviewed the account; a recovered rating does not do it on its own.</summary>
+    [HttpPost("{id:guid}/resume-sending")]
+    public async Task<IActionResult> ResumeSending(
+        Guid id, [FromServices] WhatsAppSalesAutomation.Application.Compliance.ITenantQualityService quality, CancellationToken cancellationToken)
+    {
+        await quality.ResumeSendingAsync(id, ActorUserId, ActorEmail, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("{id:guid}/reactivate")]
     public async Task<IActionResult> Reactivate(Guid id, CancellationToken cancellationToken)
     {

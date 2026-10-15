@@ -22,8 +22,8 @@ public sealed class CampaignReplyTests : IDisposable
     private readonly InboundWebhookProcessor _processor;
     private readonly Tenant _tenant = new() { Name = "Acme", Slug = "acme" };
     private readonly Campaign _campaign = new() { Name = "c", Status = CampaignStatus.Running, CreatedBy = Guid.NewGuid() };
-    private readonly Customer _harish = new() { PhoneNumberE164 = "+919815733426", FirstName = "Harish", OptInStatus = OptInStatus.OptedIn };
-    private readonly Customer _other = new() { PhoneNumberE164 = "+919000000001", FirstName = "Other", OptInStatus = OptInStatus.OptedIn };
+    private readonly Customer _harish = new() { PhoneNumberE164 = "+919815733426", FirstName = "Harish", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
+    private readonly Customer _other = new() { PhoneNumberE164 = "+919000000001", FirstName = "Other", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
 
     public CampaignReplyTests()
     {

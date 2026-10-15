@@ -23,4 +23,6 @@ public record CustomerImportRow(
     IReadOnlyList<string> Tags,
     string? OptInStatus = null,
     string? OptInDate = null,
-    string? OptInSource = null);
+    string? OptInSource = null,
+    string? OptInProof = null,
+    string? OptInScope = null);

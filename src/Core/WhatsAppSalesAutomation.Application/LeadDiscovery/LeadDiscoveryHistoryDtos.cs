@@ -73,7 +73,14 @@ public record LeadDiscoveryExecutionCustomerDto(
     string? ErrorMessage,
     string? ErrorDetails,
     Guid? RetriedFromId,
-    DateTime? ProcessedAtUtc);
+    DateTime? ProcessedAtUtc,
+    /// <summary>NotChecked, Pending, Pass, Fail or Error - the DND / outreach-eligibility check. Fail is a rejected number, Error a check that could not be completed.</summary>
+    string VerificationStatus = "NotChecked",
+    string? VerificationReasonCode = null,
+    string? VerificationReason = null,
+    DateTime? VerifiedAtUtc = null,
+    /// <summary>The name on the CRM customer created for this row (the named contact, else the business) - null when no customer exists, or it was since deleted.</summary>
+    string? CrmCustomerName = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

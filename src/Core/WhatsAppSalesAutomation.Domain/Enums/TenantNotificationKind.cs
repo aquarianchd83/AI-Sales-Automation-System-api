@@ -34,5 +34,10 @@ public enum TenantNotificationKind
     WhatsAppTokenFailing = 16,
     // Someone's account was locked after repeated wrong passwords. Tells the tenant's admins while it is happening - it is
     // either a forgotten password or somebody guessing, and only a person can tell which.
-    AccountLocked = 17
+    AccountLocked = 17,
+    // Meta rated the tenant's WhatsApp number down (Yellow): the daily cap is halved until it recovers. Tells them
+    // while there is still time to change what they send.
+    QualityWarning = 18,
+    // Sending stopped: the number's quality fell to Red and the account is held for review.
+    SendingPaused = 19
 }

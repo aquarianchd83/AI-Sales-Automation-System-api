@@ -9,7 +9,9 @@ internal readonly record struct ImportConsent(
     OptInStatus Status,
     DateTime? OptInTimestamp,
     DateTime? OptOutTimestamp,
-    string? Source);
+    string? Source,
+    string? Proof = null,
+    ConsentScope? Scope = null);
 
 /// <summary>
 /// Turns the free-text consent columns of an import file into a status plus its evidence.
@@ -97,8 +99,48 @@ internal static class ImportConsentResolver
             return false;
         }
 
-        consent = new ImportConsent(OptInStatus.OptedIn, optInAt, null, source);
+        var proof = string.IsNullOrWhiteSpace(row.OptInProof) ? null : row.OptInProof.Trim();
+        if (proof is null)
+        {
+            error = "Opt-in requires OptInProof, e.g. a WhatsApp message id, call id or form entry reference.";
+            return false;
+        }
+
+        if (proof.Length > MaxProofLength)
+        {
+            error = $"OptInProof is longer than {MaxProofLength} characters.";
+            return false;
+        }
+
+        if (!TryParseScope(row.OptInScope, out var scope))
+        {
+            error = "Opt-in requires OptInScope: Marketing (promotions allowed) or Transactional (service messages only).";
+            return false;
+        }
+
+        consent = new ImportConsent(OptInStatus.OptedIn, optInAt, null, source, proof, scope);
         return true;
+    }
+
+    /// <summary>Longest proof the Customer column holds.</summary>
+    public const int MaxProofLength = 200;
+
+    /// <summary>Reads a consent scope. Blank or unrecognised is a failure, never a default: guessing "Marketing"
+    /// would widen consent nobody gave, and a booking-only list must not become a promotional one.</summary>
+    public static bool TryParseScope(string? value, out ConsentScope scope)
+    {
+        scope = default;
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case "marketing" or "promotional" or "promotions":
+                scope = ConsentScope.Marketing;
+                return true;
+            case "transactional" or "service" or "booking":
+                scope = ConsentScope.Transactional;
+                return true;
+            default:
+                return false;
+        }
     }
 
     /// <summary>Returns true with a null date when the field is simply absent; false only on a bad value.</summary>

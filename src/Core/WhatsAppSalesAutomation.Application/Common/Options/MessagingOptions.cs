@@ -28,4 +28,26 @@ public class MessagingOptions
     /// buried in ConversationService.
     /// </summary>
     public int CustomerServiceWindowHours { get; set; } = 24;
+
+    /// <summary>Most template messages a tenant may send in any rolling 24 hours. A starting value
+    /// (new tenants run on one shared WhatsApp number, so volume is kept low until quality is proven),
+    /// to be tuned from real data and raised per tenant as their quality rating earns it.</summary>
+    public int DailyTemplateCap { get; set; } = 200;
+
+    /// <summary>Most promotional (Marketing-category) templates one contact may receive within
+    /// <see cref="MarketingWindowDays"/>. A starting value: repeated promotions are what drive blocks
+    /// and reports, which lower the shared number's quality rating.</summary>
+    public int MaxMarketingPerContactPerWindow { get; set; } = 2;
+
+    /// <summary>The window, in days, that <see cref="MaxMarketingPerContactPerWindow"/> is counted over.</summary>
+    public int MarketingWindowDays { get; set; } = 7;
+
+    /// <summary>Days of unbroken Green quality needed to move up one step in <see cref="CapStepUps"/>. A starting value.</summary>
+    public int CapStepUpAfterGreenDays { get; set; } = 7;
+
+    /// <summary>The daily caps a tenant earns, in order, after each <see cref="CapStepUpAfterGreenDays"/> of Green
+    /// quality; the first step is <see cref="DailyTemplateCap"/> itself. Empty means no step-ups. Must default to
+    /// empty, not the real values: configuration binding appends to a non-empty array default instead of replacing
+    /// it (see <see cref="RetryBackoffMinutes"/>). appsettings.json supplies the real starting steps.</summary>
+    public int[] CapStepUps { get; set; } = Array.Empty<int>();
 }

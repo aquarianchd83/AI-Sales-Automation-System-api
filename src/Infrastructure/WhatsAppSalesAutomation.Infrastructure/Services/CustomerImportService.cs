@@ -57,7 +57,9 @@ public class CustomerImportService : ICustomerImportService
                 GetField(csv, "tags"),
                 FirstNonEmpty(GetField(csv, OptInStatusAliases[0]), GetField(csv, OptInStatusAliases[1]), GetField(csv, OptInStatusAliases[2])),
                 FirstNonEmpty(GetField(csv, OptInDateAliases[0]), GetField(csv, OptInDateAliases[1])),
-                FirstNonEmpty(GetField(csv, OptInSourceAliases[0]), GetField(csv, OptInSourceAliases[1]))));
+                FirstNonEmpty(GetField(csv, OptInSourceAliases[0]), GetField(csv, OptInSourceAliases[1])),
+                FirstNonEmpty(GetField(csv, OptInProofAliases[0]), GetField(csv, OptInProofAliases[1])),
+                FirstNonEmpty(GetField(csv, OptInScopeAliases[0]), GetField(csv, OptInScopeAliases[1]))));
         }
 
         return rows;
@@ -67,6 +69,8 @@ public class CustomerImportService : ICustomerImportService
     private static readonly string[] OptInStatusAliases = { "optinstatus", "consent", "optin" };
     private static readonly string[] OptInDateAliases = { "optindate", "consentdate" };
     private static readonly string[] OptInSourceAliases = { "optinsource", "consentsource" };
+    private static readonly string[] OptInProofAliases = { "optinproof", "consentproof" };
+    private static readonly string[] OptInScopeAliases = { "optinscope", "consentscope" };
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
@@ -107,7 +111,9 @@ public class CustomerImportService : ICustomerImportService
                 Get("tags"),
                 FirstNonEmpty(OptInStatusAliases.Select(Get).ToArray()),
                 FirstNonEmpty(OptInDateAliases.Select(Get).ToArray()),
-                FirstNonEmpty(OptInSourceAliases.Select(Get).ToArray())));
+                FirstNonEmpty(OptInSourceAliases.Select(Get).ToArray()),
+                FirstNonEmpty(OptInProofAliases.Select(Get).ToArray()),
+                FirstNonEmpty(OptInScopeAliases.Select(Get).ToArray())));
         }
 
         return rows;
@@ -122,7 +128,9 @@ public class CustomerImportService : ICustomerImportService
         string? tags,
         string? optInStatus = null,
         string? optInDate = null,
-        string? optInSource = null)
+        string? optInSource = null,
+        string? optInProof = null,
+        string? optInScope = null)
     {
         var tagList = string.IsNullOrWhiteSpace(tags)
             ? Array.Empty<string>()
@@ -137,6 +145,8 @@ public class CustomerImportService : ICustomerImportService
             tagList,
             optInStatus?.Trim(),
             optInDate?.Trim(),
-            optInSource?.Trim());
+            optInSource?.Trim(),
+            optInProof?.Trim(),
+            optInScope?.Trim());
     }
 }

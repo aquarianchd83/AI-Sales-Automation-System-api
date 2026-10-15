@@ -117,6 +117,8 @@ public interface IApplicationDbContext
 
     DbSet<DiscoveredLead> DiscoveredLeads { get; }
 
+    DbSet<CustomerHistoryEvent> CustomerHistoryEvents { get; }
+
     DbSet<LeadDiscoveryRun> LeadDiscoveryRuns { get; }
 
     DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments { get; }

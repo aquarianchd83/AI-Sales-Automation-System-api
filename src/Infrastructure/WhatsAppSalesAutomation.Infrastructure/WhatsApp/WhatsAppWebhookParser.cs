@@ -27,7 +27,9 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
     {
         var messages = new List<InboundWhatsAppMessage>();
         var statuses = new List<WhatsAppStatusUpdate>();
+        var quality = new List<WhatsAppQualityUpdate>();
         string? phoneNumberId = null;
+        string? wabaId = null;
 
         MetaWebhookPayload? payload;
         try
@@ -42,11 +44,23 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
         foreach (var entry in payload?.Entry ?? Enumerable.Empty<MetaEntry>())
         {
+            wabaId ??= entry.Id;
+
             foreach (var change in entry.Changes ?? Enumerable.Empty<MetaChange>())
             {
                 var value = change.Value;
                 if (value is null)
                     continue;
+
+                // Account-level events carry no metadata.phone_number_id; they name the number by its display
+                // number and are routed by the entry's WABA id instead.
+                if (string.Equals(change.Field, "phone_number_quality_update", StringComparison.OrdinalIgnoreCase)
+                    && value.Event is not null)
+                {
+                    quality.Add(new WhatsAppQualityUpdate(
+                        value.DisplayPhoneNumber ?? string.Empty, value.Event, value.CurrentLimit, value.QualityRating));
+                    continue;
+                }
 
                 // Meta sends the same metadata.phone_number_id on every change under an entry - the
                 // first one found is as good as any other; a payload that somehow mixed two different
@@ -83,7 +97,7 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
             }
         }
 
-        return new WhatsAppWebhookParseResult(messages, statuses, phoneNumberId);
+        return new WhatsAppWebhookParseResult(messages, statuses, phoneNumberId, quality, wabaId);
     }
 
     /// <summary>Meta sends Unix epoch seconds as a string. Falls back to now on anything else rather
@@ -115,18 +129,39 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
     private class MetaEntry
     {
+        /// <summary>The WhatsApp Business Account id the change belongs to.</summary>
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
         [JsonPropertyName("changes")]
         public List<MetaChange>? Changes { get; set; }
     }
 
     private class MetaChange
     {
+        [JsonPropertyName("field")]
+        public string? Field { get; set; }
+
         [JsonPropertyName("value")]
         public MetaValue? Value { get; set; }
     }
 
     private class MetaValue
     {
+        // phone_number_quality_update fields.
+        [JsonPropertyName("display_phone_number")]
+        public string? DisplayPhoneNumber { get; set; }
+
+        [JsonPropertyName("event")]
+        public string? Event { get; set; }
+
+        [JsonPropertyName("current_limit")]
+        public string? CurrentLimit { get; set; }
+
+        /// <summary>Read if Meta supplies it; the documented event names do not include a colour, so this is optional.</summary>
+        [JsonPropertyName("quality_rating")]
+        public string? QualityRating { get; set; }
+
         [JsonPropertyName("metadata")]
         public MetaMetadata? Metadata { get; set; }
 

@@ -120,6 +120,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<DiscoveredLead> DiscoveredLeads => Set<DiscoveredLead>();
 
+    public DbSet<CustomerHistoryEvent> CustomerHistoryEvents => Set<CustomerHistoryEvent>();
+
     public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
 
     public DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments => Set<AutoCampaignEnrollment>();

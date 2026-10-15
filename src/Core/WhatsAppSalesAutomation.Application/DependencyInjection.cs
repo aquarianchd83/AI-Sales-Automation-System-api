@@ -159,6 +159,7 @@ public static class DependencyInjection
 
         // Platform Admin Console (PlatformSuperAdmin-only cross-tenant screens).
         services.AddScoped<IPlatformAuditService, PlatformAuditService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Compliance.ITenantQualityService, WhatsAppSalesAutomation.Application.Compliance.TenantQualityService>();
         services.AddScoped<IPlatformTenantService, PlatformTenantService>();
         services.AddScoped<IPlatformBillingService, PlatformBillingService>();
         services.AddScoped<IPlatformConfigurationService, PlatformConfigurationService>();

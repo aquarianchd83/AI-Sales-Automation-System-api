@@ -51,6 +51,10 @@ public class CampaignsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id:guid}/retire")]
+    public async Task<ActionResult<CampaignDto>> Retire(Guid id, [FromBody] RetireCampaignRequest request, CancellationToken cancellationToken)
+        => Ok(await _campaignService.RetireAsync(id, request, cancellationToken));
+
     /// <summary>Adds the step at this StepType's position, or replaces it if one already exists there.</summary>
     [HttpPost("{id:guid}/steps")]
     public async Task<ActionResult<CampaignDto>> UpsertStep(Guid id, [FromBody] UpsertCampaignStepRequest request, CancellationToken cancellationToken)
@@ -68,6 +72,11 @@ public class CampaignsController : ControllerBase
     [HttpGet("{id:guid}/audience")]
     public async Task<ActionResult<PagedResult<CampaignAudienceMemberDto>>> GetAudience(Guid id, [FromQuery] PagedRequest request, CancellationToken cancellationToken)
         => Ok(await _campaignService.GetAudienceAsync(id, request, cancellationToken));
+
+    /// <summary>One attached customer's journey through this campaign: consent, campaign status and every message, first step first.</summary>
+    [HttpGet("{id:guid}/audience/{customerId:guid}/journey")]
+    public async Task<ActionResult<CampaignCustomerJourneyDto>> GetCustomerJourney(Guid id, Guid customerId, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetCustomerJourneyAsync(id, customerId, cancellationToken));
 
     [HttpPost("{id:guid}/start")]
     public async Task<ActionResult<CampaignDto>> Start(Guid id, CancellationToken cancellationToken)
