@@ -33,6 +33,14 @@ public interface ITenantWhatsAppConfigProvider
     /// </summary>
     Task<TenantWhatsAppLookupResult?> GetByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The other cross-tenant lookup, for account-level webhooks (quality updates) that name the WhatsApp Business
+    /// Account and the number's display form but carry no <c>phone_number_id</c>. One tenant on that WABA is returned
+    /// as is; if several share it, the one whose own WhatsApp number matches <paramref name="displayPhoneNumber"/>
+    /// (compared as digits). Null when nobody matches - never a guess between tenants.
+    /// </summary>
+    Task<TenantWhatsAppLookupResult?> GetByWabaIdAsync(string wabaId, string? displayPhoneNumber, CancellationToken cancellationToken = default);
+
     /// <summary>Masked view of the calling tenant's config for the settings screen - never exposes
     /// AccessToken/AppSecret/WebhookVerifyToken in full, only whether each is set (same convention as
     /// SettingItemDto.HasValue/ValueHint). Null if not yet configured.</summary>

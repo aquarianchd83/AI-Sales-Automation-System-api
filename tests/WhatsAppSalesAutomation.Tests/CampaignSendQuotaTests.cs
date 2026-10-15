@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -69,7 +70,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
 
     private void Seed(TemplateCategory category, int customers)
     {
-        var customer0 = new Customer { PhoneNumberE164 = "+919000000000", OptInStatus = OptInStatus.OptedIn };
+        var customer0 = new Customer { PhoneNumberE164 = "+919000000000", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
         _db.Customers.Add(customer0);
         _db.Conversations.Add(new Conversation { Id = _conversationId, CustomerId = customer0.Id });
 
@@ -86,12 +87,61 @@ public sealed class CampaignSendQuotaTests : IDisposable
 
         for (var i = 0; i < customers; i++)
         {
-            var customer = i == 0 ? customer0 : new Customer { PhoneNumberE164 = $"+91900000000{i}", OptInStatus = OptInStatus.OptedIn };
+            var customer = i == 0 ? customer0 : new Customer { PhoneNumberE164 = $"+91900000000{i}", OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
             if (i > 0) _db.Customers.Add(customer);
             _db.CampaignCustomers.Add(new CampaignCustomer { CampaignId = _campaign.Id, CustomerId = customer.Id });
         }
 
         _db.SaveChanges();
+    }
+
+    private void AddSentTemplate(Guid customerId, string templateName, DateTime createdAt, MessageStatus status = MessageStatus.Sent)
+    {
+        _db.Messages.Add(new Message
+        {
+            CustomerId = customerId, ConversationId = _conversationId, Direction = MessageDirection.Outbound,
+            MessageType = MessageType.Template, TemplateName = templateName, Status = status,
+            IdempotencyKey = Guid.NewGuid().ToString(), CreatedAt = createdAt
+        });
+        _db.SaveChanges();
+    }
+
+    [Fact]
+    public async Task The_daily_cap_blocks_once_reached_and_ignores_failed_and_older_messages()
+    {
+        Seed(TemplateCategory.Utility, customers: 1);
+        var customer = _db.Customers.Single();
+        var options = new MessagingOptions { DailyTemplateCap = 2 };
+
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddHours(-1));
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddHours(-30));
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddHours(-2), MessageStatus.Failed);
+        Assert.True((await SendLimits.CheckAsync(_db, _tenant.Id, customer.Id, TemplateCategory.Utility, options, _clock.UtcNow, default)).Allowed);
+
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddHours(-3));
+        var blocked = await SendLimits.CheckAsync(_db, _tenant.Id, customer.Id, TemplateCategory.Utility, options, _clock.UtcNow, default);
+
+        Assert.False(blocked.Allowed);
+        Assert.Contains("daily limit of 2", blocked.Reason);
+    }
+
+    [Fact]
+    public async Task A_third_promotion_to_one_contact_inside_the_window_is_blocked_but_service_messages_are_not()
+    {
+        Seed(TemplateCategory.Marketing, customers: 1);
+        var customer = _db.Customers.Single();
+        var options = new MessagingOptions { MaxMarketingPerContactPerWindow = 2, MarketingWindowDays = 7 };
+
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddDays(-1));
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddDays(-6));
+        AddSentTemplate(customer.Id, "t", _clock.UtcNow.AddDays(-10));
+
+        var promo = await SendLimits.CheckAsync(_db, _tenant.Id, customer.Id, TemplateCategory.Marketing, options, _clock.UtcNow, default);
+        var service = await SendLimits.CheckAsync(_db, _tenant.Id, customer.Id, TemplateCategory.Utility, options, _clock.UtcNow, default);
+
+        Assert.False(promo.Allowed);
+        Assert.Contains("promotional", promo.Reason);
+        Assert.True(service.Allowed);
     }
 
     private Task Fund(decimal units) =>

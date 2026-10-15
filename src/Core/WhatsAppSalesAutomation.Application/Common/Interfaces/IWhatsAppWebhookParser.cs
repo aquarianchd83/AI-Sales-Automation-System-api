@@ -22,7 +22,14 @@ public interface IWhatsAppWebhookParser
 public record WhatsAppWebhookParseResult(
     IReadOnlyList<InboundWhatsAppMessage> Messages,
     IReadOnlyList<WhatsAppStatusUpdate> Statuses,
-    string? PhoneNumberId = null);
+    string? PhoneNumberId = null,
+    IReadOnlyList<WhatsAppQualityUpdate>? QualityUpdates = null,
+    string? WabaId = null);
+
+/// <summary>One <c>phone_number_quality_update</c>. <paramref name="Event"/> is Meta's event name (FLAGGED, UNFLAGGED, DOWNGRADE,
+/// UPGRADE, ONBOARDING); <paramref name="QualityRating"/> is a GREEN/YELLOW/RED value if the payload carried one, else null.
+/// <paramref name="DisplayPhoneNumber"/> is how a tenant is told apart when several share a WABA.</summary>
+public record WhatsAppQualityUpdate(string DisplayPhoneNumber, string Event, string? CurrentLimit, string? QualityRating);
 
 /// <summary>
 /// <paramref name="FromPhone"/> is Meta's raw digit string (e.g. "919876543210"), not yet run through

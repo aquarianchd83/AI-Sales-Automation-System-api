@@ -427,6 +427,8 @@ public sealed class OnboardingServiceTests : IDisposable
 
         public Task<TenantWhatsAppLookupResult?> GetByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+        public Task<TenantWhatsAppLookupResult?> GetByWabaIdAsync(string wabaId, string? displayPhoneNumber, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<TenantWhatsAppConfigDto> SaveConfigForCurrentTenantAsync(UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<TenantWhatsAppConfigDto> SaveConfigForTenantAsync(Guid tenantId, UpdateTenantWhatsAppConfigRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

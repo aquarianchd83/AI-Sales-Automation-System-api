@@ -91,6 +91,11 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             MaxRetryAttempts = ParseInt(overrides, "Messaging:MaxRetryAttempts", global.MaxRetryAttempts),
             RetryBackoffMinutes = ParseIntList(overrides, "Messaging:RetryBackoffMinutes", global.RetryBackoffMinutes),
             CustomerServiceWindowHours = ParseInt(overrides, "Messaging:CustomerServiceWindowHours", global.CustomerServiceWindowHours),
+            DailyTemplateCap = ParseInt(overrides, "Messaging:DailyTemplateCap", global.DailyTemplateCap),
+            MaxMarketingPerContactPerWindow = ParseInt(overrides, "Messaging:MaxMarketingPerContactPerWindow", global.MaxMarketingPerContactPerWindow),
+            MarketingWindowDays = ParseInt(overrides, "Messaging:MarketingWindowDays", global.MarketingWindowDays),
+            CapStepUpAfterGreenDays = ParseInt(overrides, "Messaging:CapStepUpAfterGreenDays", global.CapStepUpAfterGreenDays),
+            CapStepUps = ParseIntList(overrides, "Messaging:CapStepUps", global.CapStepUps),
         };
     }
 
@@ -234,6 +239,11 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             ["Messaging:MaxRetryAttempts"] = _messagingOptions.Value.MaxRetryAttempts.ToString(CultureInfo.InvariantCulture),
             ["Messaging:RetryBackoffMinutes"] = string.Join(",", _messagingOptions.Value.RetryBackoffMinutes),
             ["Messaging:CustomerServiceWindowHours"] = _messagingOptions.Value.CustomerServiceWindowHours.ToString(CultureInfo.InvariantCulture),
+            ["Messaging:DailyTemplateCap"] = _messagingOptions.Value.DailyTemplateCap.ToString(CultureInfo.InvariantCulture),
+            ["Messaging:MaxMarketingPerContactPerWindow"] = _messagingOptions.Value.MaxMarketingPerContactPerWindow.ToString(CultureInfo.InvariantCulture),
+            ["Messaging:MarketingWindowDays"] = _messagingOptions.Value.MarketingWindowDays.ToString(CultureInfo.InvariantCulture),
+            ["Messaging:CapStepUpAfterGreenDays"] = _messagingOptions.Value.CapStepUpAfterGreenDays.ToString(CultureInfo.InvariantCulture),
+            ["Messaging:CapStepUps"] = string.Join(",", _messagingOptions.Value.CapStepUps),
             ["Ai:ConfidenceThreshold"] = _aiOptions.Value.ConfidenceThreshold.ToString(CultureInfo.InvariantCulture),
             ["Ai:EscalationIntents"] = string.Join(",", _aiOptions.Value.EscalationIntents),
             ["Ai:KnowledgeBaseTopN"] = _aiOptions.Value.KnowledgeBaseTopN.ToString(CultureInfo.InvariantCulture),

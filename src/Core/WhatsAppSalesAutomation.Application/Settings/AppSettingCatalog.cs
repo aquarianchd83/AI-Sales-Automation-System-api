@@ -108,6 +108,11 @@ public static class AppSettingCatalog
         new("Messaging:MaxRetryAttempts", "Messaging", IsSecret: false, IsTenantOverridable: true),
         new("Messaging:RetryBackoffMinutes", "Messaging", IsSecret: false, IsList: true, IsTenantOverridable: true),
         new("Messaging:CustomerServiceWindowHours", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:DailyTemplateCap", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:MaxMarketingPerContactPerWindow", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:MarketingWindowDays", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:CapStepUpAfterGreenDays", "Messaging", IsSecret: false, IsTenantOverridable: true),
+        new("Messaging:CapStepUps", "Messaging", IsSecret: false, IsList: true, IsTenantOverridable: true),
 
         // Ai - tenant-overridable.
         new("Ai:ConfidenceThreshold", "Ai", IsSecret: false, IsTenantOverridable: true),

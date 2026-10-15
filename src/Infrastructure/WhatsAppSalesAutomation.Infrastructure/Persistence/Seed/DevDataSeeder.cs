@@ -148,6 +148,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-45),
                 OptInSource = "WebForm",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "en",
                 AssignedAgentId = aisha,
                 Tags = { tags["vip"], tags["enterprise"], tags["high-intent"] }
@@ -162,6 +164,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-30),
                 OptInSource = "Import",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "en",
                 AssignedAgentId = aisha,
                 Tags = { tags["vip"], tags["newsletter"] }
@@ -176,6 +180,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-12),
                 OptInSource = "Referral",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "hi",
                 AssignedAgentId = diego,
                 Tags = { tags["high-intent"], tags["trial"] }
@@ -190,6 +196,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-8),
                 OptInSource = "Webinar",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "de",
                 AssignedAgentId = diego,
                 Tags = { tags["webinar-2026"], tags["enterprise"] }
@@ -205,6 +213,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-3),
                 OptInSource = "WebForm",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "pt",
                 AssignedAgentId = null,
                 Tags = { tags["newsletter"] }
@@ -282,6 +292,8 @@ public static class DevDataSeeder
                 OptInStatus = OptInStatus.OptedIn,
                 OptInTimestamp = now.AddDays(-90),
                 OptInSource = "Import",
+                OptInProof = Customer.LegacyProof,
+                OptInScope = ConsentScope.Marketing,
                 PreferredLanguage = "en",
                 IsDeleted = true,
                 DeletedAt = now.AddDays(-5)

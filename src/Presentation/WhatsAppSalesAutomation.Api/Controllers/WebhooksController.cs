@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Webhooks;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
@@ -33,6 +34,7 @@ public class WebhooksController : ControllerBase
 {
     private readonly IInboundWebhookProcessor _processor;
     private readonly IWhatsAppWebhookParser _parser;
+    private readonly ITenantQualityService _quality;
     private readonly IWebhookSignatureValidator _signatureValidator;
     private readonly ITenantWhatsAppConfigProvider _tenantConfigProvider;
     private readonly WhatsAppSettings _settings;
@@ -42,6 +44,7 @@ public class WebhooksController : ControllerBase
     public WebhooksController(
         IInboundWebhookProcessor processor,
         IWhatsAppWebhookParser parser,
+        ITenantQualityService quality,
         IWebhookSignatureValidator signatureValidator,
         ITenantWhatsAppConfigProvider tenantConfigProvider,
         IOptionsSnapshot<WhatsAppSettings> settings,
@@ -50,6 +53,7 @@ public class WebhooksController : ControllerBase
     {
         _processor = processor;
         _parser = parser;
+        _quality = quality;
         _signatureValidator = signatureValidator;
         _tenantConfigProvider = tenantConfigProvider;
         _settings = settings.Value;
@@ -90,6 +94,11 @@ public class WebhooksController : ControllerBase
         // Parse first (cheap, never throws - see WhatsAppWebhookParser's own doc comment) so the
         // tenant-routing key (metadata.phone_number_id) is available before anything else happens.
         var parsed = _parser.Parse(rawBody);
+
+        // Account-level quality events name the WABA, not a phone_number_id, so they are routed and applied on their own.
+        if (string.IsNullOrEmpty(parsed.PhoneNumberId) && parsed.QualityUpdates is { Count: > 0 } qualityUpdates)
+            return await ReceiveQualityAsync(rawBody, parsed.WabaId, qualityUpdates, cancellationToken);
+
         if (string.IsNullOrEmpty(parsed.PhoneNumberId))
         {
             _logger.LogWarning("Rejected WhatsApp webhook POST: no metadata.phone_number_id in payload");
@@ -124,6 +133,40 @@ public class WebhooksController : ControllerBase
         // Meta is waiting on. tenantId is threaded through explicitly - this job gets its own DI scope
         // with no ambient tenant to inherit.
         _backgroundJobClient.Enqueue<InboundWebhookProcessingJob>(job => job.RunAsync(lookup.TenantId, webhookEventId));
+
+        return Ok();
+    }
+
+    /// <summary>Applies <c>phone_number_quality_update</c> changes to the tenant that owns the number. Authenticated the same
+    /// way as a message delivery - the signature is checked against that tenant's own app secret - and answers 200 for
+    /// anything it cannot place, because Meta retries a non-2xx indefinitely and a number nobody owns will never resolve.</summary>
+    private async Task<IActionResult> ReceiveQualityAsync(
+        string rawBody, string? wabaId, IReadOnlyList<WhatsAppQualityUpdate> updates, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(wabaId))
+        {
+            _logger.LogWarning("Ignored WhatsApp quality webhook: no WABA id in the payload");
+            return Ok();
+        }
+
+        var signatureHeader = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
+        foreach (var update in updates)
+        {
+            var lookup = await _tenantConfigProvider.GetByWabaIdAsync(wabaId, update.DisplayPhoneNumber, cancellationToken);
+            if (lookup is null)
+            {
+                _logger.LogWarning("Ignored WhatsApp quality webhook for WABA {WabaId}: no single tenant owns number {Number}", wabaId, update.DisplayPhoneNumber);
+                continue;
+            }
+
+            if (!_signatureValidator.IsValid(Encoding.UTF8.GetBytes(rawBody), signatureHeader, lookup.Credentials.AppSecret))
+            {
+                _logger.LogWarning("Rejected WhatsApp quality webhook: signature verification failed for tenant {TenantId}", lookup.TenantId);
+                return Unauthorized();
+            }
+
+            await _quality.ApplyPhoneQualityEventAsync(lookup.TenantId, update.Event, update.QualityRating, cancellationToken);
+        }
 
         return Ok();
     }

@@ -48,6 +48,16 @@ public class OptInCustomerRequestValidator : AbstractValidator<OptInCustomerRequ
             .NotEmpty().WithMessage("Record how consent was captured, e.g. WebForm, WhatsApp, PaperForm.")
             .MaximumLength(100);
 
+        // The source says how; the proof says where to find it. Without both, "they opted in" is a claim.
+        RuleFor(x => x.Proof)
+            .NotEmpty().WithMessage("Record the proof of consent, e.g. a WhatsApp message id, call id or form entry reference.")
+            .MaximumLength(ImportConsentResolver.MaxProofLength);
+
+        // Required, never defaulted: booking-only consent must not silently become consent to promotions.
+        RuleFor(x => x.Scope)
+            .Must(s => ImportConsentResolver.TryParseScope(s, out _))
+            .WithMessage("Choose what the consent covers: Marketing (promotions allowed) or Transactional (service messages only).");
+
         RuleFor(x => x.CapturedAt)
             .LessThanOrEqualTo(_ => DateTime.UtcNow)
             .When(x => x.CapturedAt.HasValue)

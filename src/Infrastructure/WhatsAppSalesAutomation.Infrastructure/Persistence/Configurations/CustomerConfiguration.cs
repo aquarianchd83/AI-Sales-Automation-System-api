@@ -24,6 +24,8 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(c => c.Source).HasMaxLength(100);
         builder.Property(c => c.PreferredLanguage).HasMaxLength(10);
         builder.Property(c => c.OptInSource).HasMaxLength(100);
+        builder.Property(c => c.OptInProof).HasMaxLength(200);
+        builder.Property(c => c.OptInScope).HasConversion<string>().HasMaxLength(20);
         builder.Property(c => c.OptInStatus).HasConversion<string>().HasMaxLength(20);
         builder.Property(c => c.OptOutSource).HasConversion<string>().HasMaxLength(20);
 

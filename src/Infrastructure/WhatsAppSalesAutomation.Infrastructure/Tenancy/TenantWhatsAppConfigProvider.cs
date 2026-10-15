@@ -69,6 +69,42 @@ public class TenantWhatsAppConfigProvider : ITenantWhatsAppConfigProvider
         return row is null ? null : new TenantWhatsAppLookupResult(row.TenantId, Decrypt(row));
     }
 
+    public async Task<TenantWhatsAppLookupResult?> GetByWabaIdAsync(string wabaId, string? displayPhoneNumber, CancellationToken cancellationToken = default)
+    {
+        var rows = await _context.TenantWhatsAppConfigs.IgnoreQueryFilters().AsNoTracking()
+            .Where(c => c.WhatsAppBusinessAccountId == wabaId)
+            .ToListAsync(cancellationToken);
+
+        if (rows.Count == 0)
+            return null;
+
+        TenantWhatsAppConfig? match = null;
+        if (rows.Count == 1)
+        {
+            match = rows[0];
+        }
+        else
+        {
+            var wanted = Digits(displayPhoneNumber);
+            if (wanted.Length > 0)
+            {
+                var tenantIds = rows.Select(r => r.TenantId).ToList();
+                var numbers = await _context.Tenants.AsNoTracking()
+                    .Where(t => tenantIds.Contains(t.Id))
+                    .Select(t => new { t.Id, t.WhatsAppNumber })
+                    .ToListAsync(cancellationToken);
+
+                var hits = numbers.Where(n => Digits(n.WhatsAppNumber) == wanted).Select(n => n.Id).ToList();
+                if (hits.Count == 1)
+                    match = rows.First(r => r.TenantId == hits[0]);
+            }
+        }
+
+        return match is null ? null : new TenantWhatsAppLookupResult(match.TenantId, Decrypt(match));
+    }
+
+    private static string Digits(string? value) => new((value ?? string.Empty).Where(char.IsDigit).ToArray());
+
     public Task<TenantWhatsAppConfigDto?> GetConfigForCurrentTenantAsync(CancellationToken cancellationToken = default) =>
         _tenantContext.TenantId is { } tenantId ? GetConfigForTenantAsync(tenantId, cancellationToken) : Task.FromResult<TenantWhatsAppConfigDto?>(null);
 

@@ -1,5 +1,6 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Compliance;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
@@ -392,6 +393,20 @@ public class LeadFollowUpService : ILeadFollowUpService
         if (template is null || !IsUsable(template))
         {
             _logger.LogWarning("Lead follow-up {FollowUpId} not sent: its template is missing or not Approved", followUp.Id);
+            return SendOutcome.Skipped;
+        }
+
+        var gate = TemplateSendGate.Evaluate(customer, template.Category);
+        if (!gate.Allowed)
+        {
+            _logger.LogInformation("Lead follow-up {FollowUpId} not sent: {Reason}", followUp.Id, gate.Reason);
+            return SendOutcome.Skipped;
+        }
+
+        var limits = await SendLimits.CheckAsync(_context, customer.TenantId, customer.Id, template.Category, options, now, cancellationToken);
+        if (!limits.Allowed)
+        {
+            _logger.LogInformation("Lead follow-up {FollowUpId} held: {Reason}", followUp.Id, limits.Reason);
             return SendOutcome.Skipped;
         }
 

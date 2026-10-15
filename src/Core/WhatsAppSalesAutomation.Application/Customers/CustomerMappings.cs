@@ -14,6 +14,8 @@ public static class CustomerMappings
         customer.OptInStatus.ToString(),
         customer.OptInTimestamp,
         customer.OptInSource,
+        customer.OptInProof,
+        customer.OptInScope?.ToString(),
         customer.OptOutTimestamp,
         customer.OptOutSource?.ToString(),
         customer.PreferredLanguage,

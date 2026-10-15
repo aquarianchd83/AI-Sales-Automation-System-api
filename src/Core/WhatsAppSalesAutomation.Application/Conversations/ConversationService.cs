@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
@@ -241,6 +242,17 @@ public class ConversationService : IConversationService
 
             if (template.WhatsAppTemplateStatus != WhatsAppTemplateStatus.Approved || !template.IsActive)
                 throw new ConflictException($"Template '{template.Name}' is not an active, Approved template.");
+
+            // The same gate every other template sender uses. An agent could previously send a template to a
+            // customer who had never opted in; now no consent record, no template.
+            var gate = TemplateSendGate.Evaluate(customer, template.Category);
+            if (!gate.Allowed)
+                throw new ConflictException($"This template cannot be sent: {gate.Reason}");
+
+            var limits = await SendLimits.CheckAsync(
+                _context, customer.TenantId, customer.Id, template.Category, await _tenantConfig.GetMessagingOptionsAsync(cancellationToken), _dateTime.UtcNow, cancellationToken);
+            if (!limits.Allowed)
+                throw new ConflictException($"This template cannot be sent: {limits.Reason}");
 
             var (text, values) = TemplatePlaceholderResolver.Resolve(template.BodyText, customer);
             resolvedText = text;

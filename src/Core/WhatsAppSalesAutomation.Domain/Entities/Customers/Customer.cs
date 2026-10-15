@@ -29,6 +29,17 @@ public class Customer : BaseEntity, ISoftDelete, ITenantOwned
     /// </summary>
     public string? OptInSource { get; set; }
 
+    /// <summary>The evidence behind the opt-in: a WhatsApp message id, call id, form entry reference or similar.
+    /// The timestamp and source say when and how; this says where to find the proof. Required for any opt-in
+    /// recorded from now on; a record that predates this field carries <see cref="LegacyProof"/>.</summary>
+    public string? OptInProof { get; set; }
+
+    /// <summary>What the opt-in covers. Null while the customer has not opted in.</summary>
+    public ConsentScope? OptInScope { get; set; }
+
+    /// <summary>Stamped on opt-ins recorded before proof was captured, so they are visibly unverified rather than blank.</summary>
+    public const string LegacyProof = "Legacy record (recorded before proof was captured)";
+
     public DateTime? OptOutTimestamp { get; set; }
 
     /// <summary>How the opt-out was detected. Null when the customer has never opted out. Compliance
