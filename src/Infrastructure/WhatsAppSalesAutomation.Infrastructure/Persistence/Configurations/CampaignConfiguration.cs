@@ -14,6 +14,8 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.Name).IsRequired().HasMaxLength(200);
         builder.Property(c => c.Description).HasMaxLength(2000);
         builder.Property(c => c.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(c => c.RetiredReason).HasMaxLength(500);
+        builder.Ignore(c => c.IsRetired);
         builder.Property(c => c.TargetAudienceFilterJson).HasColumnType("nvarchar(max)");
 
         builder.HasMany(c => c.Steps)

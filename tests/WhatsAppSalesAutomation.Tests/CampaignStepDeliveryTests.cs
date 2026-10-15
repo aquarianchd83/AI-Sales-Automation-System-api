@@ -59,7 +59,7 @@ public sealed class CampaignStepDeliveryTests : IDisposable
 
     private void Member(string key, CampaignCustomerStatus status, int currentStep, string? stoppedReason = null)
     {
-        var customer = new Customer { PhoneNumberE164 = $"+91{9000000000 + _customers.Count}", FirstName = key, OptInStatus = OptInStatus.OptedIn };
+        var customer = new Customer { PhoneNumberE164 = $"+91{9000000000 + _customers.Count}", FirstName = key, OptInStatus = OptInStatus.OptedIn, OptInTimestamp = DateTime.UtcNow, OptInSource = "WebForm", OptInProof = "test-proof", OptInScope = ConsentScope.Marketing };
         _customers[key] = customer;
         _db.Customers.Add(customer);
 
@@ -86,6 +86,22 @@ public sealed class CampaignStepDeliveryTests : IDisposable
             Status = status,
             FailureReason = failureReason,
         });
+
+    [Fact]
+    public async Task The_audience_roster_shows_each_customers_own_opt_in_status_apart_from_the_campaign_status()
+    {
+        _customers["waiting"].OptInStatus = OptInStatus.WaitingForConsent;
+        _customers["optedOut"].OptInStatus = OptInStatus.OptedOut;
+        _db.SaveChanges();
+
+        var page = await _service.GetAudienceAsync(_campaign.Id, new WhatsAppSalesAutomation.Application.Common.Models.PagedRequest { Page = 1, PageSize = 50 });
+
+        var byName = page.Items.ToDictionary(m => m.FirstName!);
+        Assert.Equal("OptedIn", byName["delivered"].OptInStatus);
+        Assert.Equal("WaitingForConsent", byName["waiting"].OptInStatus);
+        Assert.Equal("OptedOut", byName["optedOut"].OptInStatus);
+        Assert.Equal("Pending", byName["waiting"].Status);   // the campaign's own status is untouched
+    }
 
     [Fact]
     public async Task Step_summary_splits_the_audience_into_received_failed_upcoming_and_never()

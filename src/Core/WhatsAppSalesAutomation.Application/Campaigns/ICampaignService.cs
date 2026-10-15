@@ -26,6 +26,12 @@ public interface ICampaignService
     /// </summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Draft, Stopped or Completed only. Keeps the campaign, its audience and its messages as a record but closes it to
+    /// every change, with the tenant's reason. Idempotent for an already-retired campaign (the first reason stays).
+    /// </summary>
+    Task<CampaignDto> RetireAsync(Guid id, RetireCampaignRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>Adds or replaces the step at this StepType's position. Draft or Paused campaigns only.</summary>
     Task<CampaignDto> UpsertStepAsync(Guid campaignId, UpsertCampaignStepRequest request, CancellationToken cancellationToken = default);
 
@@ -65,6 +71,10 @@ public interface ICampaignService
     /// <summary>The roster SetAudienceAsync's counts don't expose - who is actually attached, and
     /// their current status/step. Ordered by LastMessageSentAt desc (most recently active first),
     /// nulls (never sent) last.</summary>
+    /// <summary>One attached customer's journey through this campaign - consent, campaign status and every message, first step first.
+    /// 404 when the customer is not in this campaign (or belongs to another tenant).</summary>
+    Task<CampaignCustomerJourneyDto> GetCustomerJourneyAsync(Guid campaignId, Guid customerId, CancellationToken cancellationToken = default);
+
     Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Every message this campaign has sent - the per-send detail behind

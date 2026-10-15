@@ -67,7 +67,9 @@ public class CampaignService : ICampaignService
 
         var totalCount = await query.CountAsync(cancellationToken);
         var ids = await query
-            .OrderByDescending(c => c.CreatedAt)
+            // Retired campaigns sink to the bottom of the grid, newest first within each group.
+            .OrderBy(c => c.RetiredAt != null)
+            .ThenByDescending(c => c.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .Select(c => c.Id)
@@ -151,7 +153,7 @@ public class CampaignService : ICampaignService
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var campaign = await LoadCampaignAsync(id, cancellationToken);
-        RequireStatus(campaign, "delete", CampaignStatus.Draft, CampaignStatus.Stopped, CampaignStatus.Completed);
+        RequireStatus(campaign, "delete", allowRetired: true, CampaignStatus.Draft, CampaignStatus.Stopped, CampaignStatus.Completed);
 
         // Campaign -> CampaignCustomers cascades, but Message -> CampaignCustomer is deliberately
         // Restrict, not Cascade - a guard against any path silently destroying send history. A Draft
@@ -179,6 +181,27 @@ public class CampaignService : ICampaignService
 
         // With its last campaign gone the tenant has nothing for those jobs to do again.
         await SyncCampaignJobsAsync(cancellationToken);
+    }
+
+    public async Task<CampaignDto> RetireAsync(Guid id, RetireCampaignRequest request, CancellationToken cancellationToken = default)
+    {
+        var reason = request.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason))
+            throw Invalid(nameof(request.Reason), "Say why the campaign is being retired.");
+        if (reason.Length > RetireCampaignRequest.Max)
+            throw Invalid(nameof(request.Reason), $"The reason can be at most {RetireCampaignRequest.Max} characters.");
+
+        var campaign = await LoadCampaignAsync(id, cancellationToken);
+        if (campaign.IsRetired)
+            return await BuildDtoAsync(campaign, cancellationToken);
+
+        RequireStatus(campaign, "retire", CampaignStatus.Draft, CampaignStatus.Stopped, CampaignStatus.Completed);
+
+        campaign.RetiredAt = _dateTime.UtcNow;
+        campaign.RetiredReason = reason;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await BuildDtoAsync(campaign, cancellationToken);
     }
 
     public async Task<CampaignDto> UpsertStepAsync(Guid campaignId, UpsertCampaignStepRequest request, CancellationToken cancellationToken = default)
@@ -461,6 +484,27 @@ public class CampaignService : ICampaignService
         return new CampaignProgressDto(campaignId, counts.Sum(c => c.Count), byStatus);
     }
 
+    public async Task<CampaignCustomerJourneyDto> GetCustomerJourneyAsync(Guid campaignId, Guid customerId, CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
+
+        var member = await _context.CampaignCustomers.AsNoTracking()
+                         .FirstOrDefaultAsync(cc => cc.CampaignId == campaignId && cc.CustomerId == customerId, cancellationToken)
+                     ?? throw new NotFoundException(nameof(CampaignCustomer), customerId);
+        var customer = await _context.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == customerId, cancellationToken)
+                       ?? throw new NotFoundException("Customer", customerId);
+
+        var outbound = await _context.Messages.AsNoTracking()
+            .Where(m => m.CampaignCustomerId == member.Id)
+            .ToListAsync(cancellationToken);
+        var inbound = await _context.Messages.AsNoTracking()
+            .Where(m => m.CustomerId == customerId && m.Direction == MessageDirection.Inbound && m.CreatedAt >= member.CreatedAt)
+            .OrderBy(m => m.CreatedAt).Take(5)
+            .ToListAsync(cancellationToken);
+
+        return CampaignJourneyBuilder.Build(campaign, member, customer, outbound, inbound);
+    }
+
     public async Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default)
     {
         await LoadCampaignAsync(campaignId, cancellationToken); // throws NotFoundException if missing
@@ -496,7 +540,8 @@ public class CampaignService : ICampaignService
                 x.cc.CurrentStepNumber,
                 x.cc.LastMessageSentAt,
                 x.cc.NextFollowUpDueAt,
-                x.cc.StoppedReason))
+                x.cc.StoppedReason,
+                x.c.OptInStatus.ToString()))
             .ToListAsync(cancellationToken);
 
         return new PagedResult<CampaignAudienceMemberDto>(items, totalCount, request.Page, request.PageSize);
@@ -725,8 +770,14 @@ public class CampaignService : ICampaignService
         }
     }
 
-    private static void RequireStatus(Campaign campaign, string action, params CampaignStatus[] allowed)
+    private static void RequireStatus(Campaign campaign, string action, params CampaignStatus[] allowed) =>
+        RequireStatus(campaign, action, allowRetired: false, allowed);
+
+    private static void RequireStatus(Campaign campaign, string action, bool allowRetired, params CampaignStatus[] allowed)
     {
+        if (campaign.IsRetired && !allowRetired)
+            throw new ConflictException($"Cannot {action} campaign '{campaign.Name}': it was retired. Retired campaigns are kept as a record only.");
+
         if (!allowed.Contains(campaign.Status))
             throw new ConflictException($"Cannot {action} campaign '{campaign.Name}' while it is {campaign.Status}. Allowed: {string.Join(", ", allowed)}.");
     }

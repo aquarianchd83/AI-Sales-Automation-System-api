@@ -17,7 +17,15 @@ public record CampaignDto(
     DateTime? StoppedAt,
     int AudienceCount,
     IReadOnlyList<CampaignStepDto> Steps,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    DateTime? RetiredAt = null,
+    string? RetiredReason = null);
+
+/// <summary>Why the campaign is being retired - required, at most <see cref="Max"/> characters.</summary>
+public record RetireCampaignRequest(string Reason)
+{
+    public const int Max = 500;
+}
 
 public record CampaignStepDto(
     Guid Id,
@@ -84,7 +92,9 @@ public record CampaignAudienceMemberDto(
     int CurrentStepNumber,
     DateTime? LastMessageSentAt,
     DateTime? NextFollowUpDueAt,
-    string? StoppedReason);
+    string? StoppedReason,
+    /// <summary>The customer's own opt-in status (PendingOptIn, WaitingForConsent, OptedIn, OptedOut) - separate from <paramref name="Status"/>, the campaign processing status.</summary>
+    string OptInStatus);
 
 /// <summary>
 /// Query for GET campaigns/{id}/history. <see cref="PagedRequest.Search"/> matches the customer's
@@ -172,3 +182,28 @@ public static class CampaignStepOutcome
     public const string Upcoming = "Upcoming";
     public const string WillNotReceive = "WillNotReceive";
 }
+
+/// <summary>One labelled fact inside a journey step.</summary>
+public record CampaignJourneyDetailDto(string Label, string Value);
+
+/// <summary>
+/// One step of a customer's journey through a campaign. Dimension says which of the three separate things moved: "Consent" (the
+/// customer's opt-in), "Campaign" (their processing status in this campaign) or "Message" (a send). State is the status they moved to.
+/// </summary>
+public record CampaignJourneyStepDto(
+    string Key,
+    string Title,
+    string Dimension,
+    string State,
+    DateTime? OccurredAtUtc,
+    string Summary,
+    IReadOnlyList<CampaignJourneyDetailDto> Details);
+
+/// <summary>A customer's journey through one campaign - consent, campaign status and every message - first step first.</summary>
+public record CampaignCustomerJourneyDto(
+    Guid CustomerId,
+    string CustomerName,
+    string PhoneNumberE164,
+    string OptInStatus,
+    string CampaignStatus,
+    IReadOnlyList<CampaignJourneyStepDto> Steps);

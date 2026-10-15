@@ -29,5 +29,7 @@ public static class CampaignMappings
             .OrderBy(s => s.StepNumber)
             .Select(s => s.ToDto(s.MessageTemplateId.HasValue && templateNamesById.TryGetValue(s.MessageTemplateId.Value, out var name) ? name : null))
             .ToList(),
-        campaign.CreatedAt);
+        campaign.CreatedAt,
+        campaign.RetiredAt,
+        campaign.RetiredReason);
 }
