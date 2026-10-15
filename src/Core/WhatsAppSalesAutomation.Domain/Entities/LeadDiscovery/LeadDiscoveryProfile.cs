@@ -82,4 +82,8 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// is created. Off by default: when off nothing is submitted for verification, every qualified lead becomes a customer, and the
     /// auto-campaign takes all of them.</summary>
     public bool DndCheckEnabled { get; set; }
+
+    /// <summary>Whether each customer who joins the auto-campaign is sent an SMS inviting them to start a WhatsApp conversation, which
+    /// is how their consent is obtained. Off by default: nothing is sent unless the tenant turns it on.</summary>
+    public bool ConsentSmsEnabled { get; set; }
 }

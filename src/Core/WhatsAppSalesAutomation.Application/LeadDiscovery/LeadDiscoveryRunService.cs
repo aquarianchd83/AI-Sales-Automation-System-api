@@ -7,6 +7,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
@@ -70,6 +71,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly ILeadDiscoveryLockStore _lockStore;
     private readonly IApplicationInstance _instance;
     private readonly IPhoneVerificationProvider _verification;
+    private readonly IConsentInvitationService _consent;
     private readonly ILogger<LeadDiscoveryRunService> _logger;
     private readonly LeadDiscoveryOptions _options;
     private readonly LeadDiscoveryPricingOptions _pricing;
@@ -88,9 +90,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         ILogger<LeadDiscoveryRunService> logger,
         IOptions<LeadDiscoveryOptions> options,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing,
-        IPhoneVerificationProvider verification)
+        IPhoneVerificationProvider verification,
+        IConsentInvitationService consent)
     {
         _verification = verification;
+        _consent = consent;
         _context = context;
         _agent = agent;
         _planLimits = planLimits;
@@ -116,6 +120,22 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             return "Skipped: lead discovery is turned off in the profile.";
 
         var summaries = new List<string>();
+
+        // Invitations the SMS provider turned away earlier are tried again first, while their attempt budget lasts. A problem here
+        // never stops the discovery itself.
+        if (profile.ConsentSmsEnabled)
+        {
+            try
+            {
+                var retried = await _consent.RetryDueAsync(cancellationToken);
+                if (retried > 0)
+                    summaries.Add($"consent SMS retried: {retried}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Retrying consent invitations failed for tenant {TenantId}", tenantId);
+            }
+        }
 
         // Unfinished work first, oldest first - each resumed by its own new execution.
         foreach (var retryId in await FindAutomaticRetryTargetsAsync(profile, cancellationToken))
@@ -953,6 +973,33 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             return;
 
         await ActivateCampaignAsync(run, campaignId.Value, cancellationToken);
+
+        if (profile.ConsentSmsEnabled)
+            await SendConsentInvitationsAsync(run, campaignId.Value, eligible, cancellationToken);
+    }
+
+    /// <summary>
+    /// Texts each customer now in the campaign an invitation to start a WhatsApp conversation - the way their consent is obtained. The
+    /// customers are exactly those the campaign took, so a number that failed the DND check is never texted. Idempotent: one invitation
+    /// exists per (customer, campaign), so a retried execution only reaches customers who have none yet. A failure here is recorded on
+    /// each invitation and never fails the execution.
+    /// </summary>
+    private async Task SendConsentInvitationsAsync(ExecutionRun run, Guid campaignId, IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken)
+    {
+        run.Step = LeadDiscoverySteps.ConsentSms;
+        await run.Lease.EnsureCanProcessAsync(cancellationToken);
+
+        try
+        {
+            var result = await _consent.SendAsync(campaignId, run.Execution.Id, customerIds, cancellationToken);
+            _logger.LogInformation(
+                "Consent invitations for execution {ExecutionId}: {Sent} sent, {Failed} failed, {Skipped} skipped",
+                run.Execution.Id, result.Sent, result.Failed, result.Skipped);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not LeadDiscoveryLockUnavailableException)
+        {
+            _logger.LogWarning(ex, "Sending consent invitations failed for lead discovery execution {ExecutionId}", run.Execution.Id);
+        }
     }
 
     private static void SkipCampaign(LeadDiscoveryExecution execution, string note)
@@ -1865,6 +1912,7 @@ public static class LeadDiscoverySteps
     public const string Discovery = "Discovery";
     public const string Customers = "Customers";
     public const string Verification = "Verification";
+    public const string ConsentSms = "ConsentSms";
     public const string Campaign = "Campaign";
     public const string Templates = "Templates";
     public const string CustomerMapping = "CustomerMapping";

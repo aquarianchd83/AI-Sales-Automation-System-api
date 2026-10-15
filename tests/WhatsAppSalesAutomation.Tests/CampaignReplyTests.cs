@@ -33,7 +33,7 @@ public sealed class CampaignReplyTests : IDisposable
         _db.Database.EnsureCreated();
 
         // Only the campaign-reply step is exercised, and it touches nothing but the context.
-        _processor = new InboundWebhookProcessor(_db, null!, null!, null!, null!, null!, null!, NullLogger<InboundWebhookProcessor>.Instance);
+        _processor = new InboundWebhookProcessor(_db, null!, null!, null!, null!, null!, null!, NullLogger<InboundWebhookProcessor>.Instance, null!);
 
         _db.Tenants.Add(_tenant);
         _db.Campaigns.Add(_campaign);

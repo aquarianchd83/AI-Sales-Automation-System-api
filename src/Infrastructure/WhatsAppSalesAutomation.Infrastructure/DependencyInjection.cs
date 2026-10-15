@@ -288,6 +288,9 @@ public static class DependencyInjection
         // Simulated until a real mobile-number verification provider is chosen; it replaces this registration only.
         services.AddScoped<IPhoneVerificationProvider, WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
 
+        // Simulated until a real SMS provider is chosen; it replaces this registration only.
+        services.AddScoped<IConsentSmsSender, WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>();
+
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddHttpClient<GoogleEmbeddingClient>();
         services.AddScoped<SimulatedEmbeddingClient>();

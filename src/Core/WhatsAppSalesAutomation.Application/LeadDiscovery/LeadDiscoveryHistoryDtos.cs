@@ -82,7 +82,12 @@ public record LeadDiscoveryExecutionCustomerDto(
     /// <summary>The name on the CRM customer created for this row (the named contact, else the business) - null when no customer exists, or it was since deleted.</summary>
     string? CrmCustomerName = null,
     /// <summary>The campaign this execution generated, when the row's customer was added to it; null otherwise.</summary>
-    string? CampaignName = null);
+    string? CampaignName = null,
+    /// <summary>Pending, Submitted, Delivered or Failed - the SMS inviting the customer to chat on WhatsApp; null when none was sent. Submitted is not delivered.</summary>
+    string? ConsentSmsStatus = null,
+    string? ConsentSmsFailureReason = null,
+    /// <summary>When the customer's own WhatsApp message answered the invitation and consent was recorded; null until then.</summary>
+    DateTime? ConsentRecordedAtUtc = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

@@ -115,6 +115,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AutoCampaignStartMode = Enum.Parse<LeadDiscoveryCampaignStartMode>(request.AutoCampaignStartMode, ignoreCase: true);
         profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
         profile.DndCheckEnabled = request.DndCheckEnabled;
+        profile.ConsentSmsEnabled = request.ConsentSmsEnabled;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -364,7 +365,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
         p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
-        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled);
+        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled, p.ConsentSmsEnabled);
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,

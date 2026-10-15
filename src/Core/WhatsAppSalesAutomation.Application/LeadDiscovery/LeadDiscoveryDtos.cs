@@ -68,7 +68,8 @@ public record LeadDiscoveryProfileDto(
     TimeSpan? AutoCampaignStartTime,
     DateTime? UpdatedAt,
     string? Description = null,
-    bool DndCheckEnabled = false);
+    bool DndCheckEnabled = false,
+    bool ConsentSmsEnabled = false);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
 /// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
@@ -93,7 +94,8 @@ public record SaveLeadDiscoveryProfileRequest(
     string AutoCampaignStartMode = "Immediate",
     TimeSpan? AutoCampaignStartTime = null,
     string? Description = null,
-    bool DndCheckEnabled = false);
+    bool DndCheckEnabled = false,
+    bool ConsentSmsEnabled = false);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's

@@ -20,7 +20,9 @@ public static class CampaignJourneyBuilder
         CampaignCustomer member,
         Customer customer,
         IReadOnlyCollection<Message> outbound,
-        IReadOnlyCollection<Message> inbound)
+        IReadOnlyCollection<Message> inbound,
+        IReadOnlyCollection<ConsentInvitation>? invitations = null,
+        int customerServiceWindowHours = 24)
     {
         var steps = new List<(int Order, CampaignJourneyStepDto Step)>();
         void Add(CampaignJourneyStepDto step) => steps.Add((steps.Count, step));
@@ -56,6 +58,45 @@ public static class CampaignJourneyBuilder
                     ("Proof", customer.OptInProof ?? "Not recorded"),
                     ("Covers", customer.OptInScope?.ToString() ?? "Not recorded"),
                     ("Recorded at", Format(optedInAt)))));
+        }
+
+        // 2b. The SMS inviting the customer to chat on WhatsApp, and the customer's own message that answered it.
+        foreach (var invitation in (invitations ?? Array.Empty<ConsentInvitation>()).OrderBy(i => i.CreatedAt))
+        {
+            var smsAt = invitation.DeliveredAtUtc ?? invitation.SubmittedAtUtc ?? invitation.CreatedAt;
+            Add(new CampaignJourneyStepDto(
+                $"consent-sms-{invitation.Id}", $"Consent SMS {invitation.Status.ToString().ToLowerInvariant()}", "Consent", invitation.Status.ToString(), smsAt,
+                invitation.Status switch
+                {
+                    ConsentInvitationStatus.Pending => "The SMS inviting the customer to chat on WhatsApp is queued.",
+                    ConsentInvitationStatus.Submitted => "The SMS provider accepted the invitation. Accepted is not delivered - delivery is confirmed by the provider's receipt.",
+                    ConsentInvitationStatus.Delivered => "The SMS reached the customer's phone. Consent is only recorded when the customer messages the business first.",
+                    _ => $"The SMS could not be delivered{(invitation.FailureReason is null ? "." : ": " + invitation.FailureReason)}"
+                },
+                Details(
+                    ("Sent to", invitation.ToPhoneE164),
+                    ("Message", invitation.Body),
+                    ("WhatsApp link", invitation.WhatsAppLink),
+                    ("Status", invitation.Status.ToString()),
+                    ("Queued at", Format(invitation.CreatedAt)),
+                    ("Submitted at", Format(invitation.SubmittedAtUtc)),
+                    ("Delivered at", Format(invitation.DeliveredAtUtc)),
+                    ("Attempts", invitation.AttemptCount.ToString(CultureInfo.InvariantCulture)),
+                    ("Failure reason", invitation.FailureReason),
+                    ("Next attempt", Format(invitation.NextAttemptAt)),
+                    ("SMS provider id", invitation.ProviderMessageId))));
+
+            if (invitation.ConsentRecordedAtUtc is { } answeredAt)
+            {
+                Add(new CampaignJourneyStepDto(
+                    $"consent-started-{invitation.Id}", "Customer started a WhatsApp conversation", "Consent", "ConversationStarted", answeredAt,
+                    "The customer messaged the business first, which is what answers the invitation. Clicking the link or receiving the SMS alone would not.",
+                    Details(
+                        ("WhatsApp message id", invitation.ConsentMessageId),
+                        ("Received at", Format(answeredAt)),
+                        ("Customer service window open until", Format(answeredAt.AddHours(customerServiceWindowHours))),
+                        ("In reply to", $"SMS invitation {invitation.Id}"))));
+            }
         }
 
         // 3. Attached to this campaign - the campaign status starts at Pending.
@@ -107,6 +148,20 @@ public static class CampaignJourneyBuilder
                     ("Last step sent", member.CurrentStepNumber < 0 ? "None" : StepLabel(member.CurrentStepNumber)),
                     ("Last message sent", Format(member.LastMessageSentAt)),
                     ("Next follow-up due", member.NextFollowUpDueAt is null ? "No further step" : Format(member.NextFollowUpDueAt)))));
+        }
+
+        // 5b. Ready to receive the first message, but its content is not.
+        if (member.Status == CampaignCustomerStatus.WaitingForContent)
+        {
+            Add(new CampaignJourneyStepDto(
+                "campaign-waiting-content", "Waiting for content", "Campaign", CampaignCustomerStatus.WaitingForContent.ToString(),
+                member.UpdatedAt ?? member.CreatedAt,
+                "Consent is on record, but the first message has no approved content yet. It goes out once, as soon as the content is ready.",
+                Details(
+                    ("Customer status in campaign", CampaignCustomerStatus.WaitingForContent.ToString()),
+                    ("What is missing", member.StoppedReason),
+                    ("Opt-in status", customer.OptInStatus.ToString()),
+                    ("Campaign status", campaign.Status.ToString()))));
         }
 
         // 6. A reply.

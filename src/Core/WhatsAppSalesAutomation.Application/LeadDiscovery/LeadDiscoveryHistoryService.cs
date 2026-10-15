@@ -99,7 +99,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null))
             .ToListAsync(cancellationToken);
 
         var customerIds = customers.Where(c => c.CustomerId != null).Select(c => c.CustomerId!.Value).Distinct().ToList();
@@ -127,6 +127,23 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
 
             customers = customers
                 .Select(c => c.CustomerId is { } id && inCampaign.Contains(id) ? c with { CampaignName = execution.GeneratedCampaignName } : c)
+                .ToList();
+        }
+
+        // The consent SMS each customer was sent in this execution, and whether they have answered it.
+        if (customerIds.Count > 0)
+        {
+            var invitations = (await _context.ConsentInvitations.AsNoTracking()
+                    .Where(i => i.ExecutionId == executionId && customerIds.Contains(i.CustomerId))
+                    .Select(i => new { i.CustomerId, i.Status, i.FailureReason, i.ConsentRecordedAtUtc })
+                    .ToListAsync(cancellationToken))
+                .GroupBy(i => i.CustomerId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            customers = customers
+                .Select(c => c.CustomerId is { } id && invitations.TryGetValue(id, out var inv)
+                    ? c with { ConsentSmsStatus = inv.Status.ToString(), ConsentSmsFailureReason = inv.FailureReason, ConsentRecordedAtUtc = inv.ConsentRecordedAtUtc }
+                    : c)
                 .ToList();
         }
 

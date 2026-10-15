@@ -9,6 +9,7 @@ using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -40,6 +41,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     private readonly SqlLeadDiscoveryLockStore _sqlLockStore;
     private readonly FakeAgent _agent = new();
     private readonly FakeVerifier _verifier = new();
+    private readonly FakeConsent _consent = new();
     private readonly List<Guid> _startedCampaigns = new();
     private readonly LeadDiscoveryOptions _discoveryOptions = new() { LockHeartbeatSeconds = 0, MaxRetryAttempts = 3 };
 
@@ -356,6 +358,58 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal(execution.GeneratedCampaignName, detail.Customers.Single(c => c.CustomerName.Contains("A")).CampaignName);
         Assert.Null(detail.Customers.Single(c => c.CustomerName.Contains("B")).CampaignName);
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_on_only_the_customers_the_campaign_took_are_invited()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.ConsentSmsEnabled = true;
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var call = Assert.Single(_consent.Sent);
+        Assert.Equal(execution.GeneratedCampaignId, call.CampaignId);
+        Assert.Equal(execution.Id, call.ExecutionId);
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        Assert.Equal(new[] { passed.Id }, call.CustomerIds);   // the DND-rejected number has no customer and is never texted
+        Assert.Equal(1, _consent.RetryCalls);                  // failed invitations are retried whenever the job runs
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_off_nothing_is_sent_and_nothing_is_retried()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Empty(_consent.Sent);
+        Assert.Equal(0, _consent.RetryCalls);
+    }
+
+    [Fact]
+    public async Task A_problem_sending_the_invitations_does_not_fail_the_execution()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.ConsentSmsEnabled = true;
+        await _db.SaveChangesAsync();
+        _consent.ThrowOnSend = true;
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.Equal(LeadDiscoveryCampaignStatus.Created, execution.CampaignStatus);
     }
 
     [Fact]
@@ -1056,7 +1110,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier);
+            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent);
     }
 
     private SaveFailure FailCustomerSave(string firstName)
@@ -1101,6 +1155,36 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         return new LeadDiscoveryAgentResult(true, null, candidates, new LeadDiscoveryEvidence(seen, pages),
             LeadDiscoveryUsage.None, "Simulated");
+    }
+
+    /// <summary>Records what the discovery run asked it to do; sends nothing.</summary>
+    private sealed class FakeConsent : IConsentInvitationService
+    {
+        public List<(Guid CampaignId, Guid? ExecutionId, Guid[] CustomerIds)> Sent { get; } = new();
+        public int RetryCalls { get; private set; }
+        public bool ThrowOnSend { get; set; }
+
+        public Task<ConsentInvitationBatchResult> SendAsync(
+            Guid campaignId, Guid? executionId, IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnSend)
+                throw new InvalidOperationException("SMS provider is down");
+            Sent.Add((campaignId, executionId, customerIds.ToArray()));
+            return Task.FromResult(new ConsentInvitationBatchResult(customerIds.Count, 0, 0, Array.Empty<string>()));
+        }
+
+        public Task<int> RetryDueAsync(CancellationToken cancellationToken = default)
+        {
+            RetryCalls++;
+            return Task.FromResult(0);
+        }
+
+        public Task<bool> ApplyReceiptAsync(string providerMessageId, ConsentInvitationStatus status, DateTime atUtc, string? reason, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
+        public Task<ConsentReplyOutcome> HandleInboundMessageAsync(
+            Customer customer, InboundConsentMessage message, CancellationToken cancellationToken = default)
+            => Task.FromResult(ConsentReplyOutcome.None);
     }
 
     /// <summary>Passes everyone unless told otherwise. Matches results by customer id only, like a real provider.</summary>
