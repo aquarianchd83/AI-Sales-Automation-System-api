@@ -29,7 +29,7 @@ public sealed class CustomerBulkTagsTests : IDisposable
             _db, null!, new TestClock(),
             new CreateCustomerRequestValidator(), new UpdateCustomerRequestValidator(),
             new BulkDeleteCustomersRequestValidator(), new OptInCustomerRequestValidator(),
-            new BulkAddCustomerTagsRequestValidator());
+            new BulkAddCustomerTagsRequestValidator(), new Ambient(_tenant));
     }
 
     public void Dispose()

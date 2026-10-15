@@ -10,6 +10,10 @@ public record CustomerDto(
     string OptInStatus,
     DateTime? OptInTimestamp,
     string? OptInSource,
+    /// <summary>The evidence behind the opt-in (message id, call id, form entry). Null for a customer who has not opted in.</summary>
+    string? OptInProof,
+    /// <summary>"Transactional" or "Marketing" - what the opt-in covers. Null for a customer who has not opted in.</summary>
+    string? OptInScope,
     DateTime? OptOutTimestamp,
     /// <summary>Which of the four detection paths produced the opt-out - ExactKeyword, PhrasePattern,
     /// AiDetected or Manual. Null for an opt-out recorded before the field existed. Surfaced because
@@ -19,6 +23,19 @@ public record CustomerDto(
     Guid? AssignedAgentId,
     IReadOnlyList<string> Tags,
     DateTime CreatedAt);
+
+/// <summary>One entry of a customer's processing timeline. executionId is the Lead Discovery batch, campaignId the campaign, when either applies.</summary>
+public record CustomerHistoryEventDto(
+    Guid Id,
+    string EventType,
+    DateTime OccurredAtUtc,
+    string? PreviousStatus,
+    string? NewStatus,
+    string? Reason,
+    Guid? ExecutionId,
+    Guid? CampaignId,
+    string? CorrelationId,
+    string? ProviderReference);
 
 public record CreateCustomerRequest(
     string PhoneNumberE164,
@@ -45,7 +62,9 @@ public record AddCustomerTagsRequest(IReadOnlyList<string> TagNames);
 /// paper form); <paramref name="CapturedAt"/> backdates consent gathered before it reached this
 /// system, and defaults to now when omitted.
 /// </summary>
-public record OptInCustomerRequest(string Source, DateTime? CapturedAt = null);
+/// <summary>Proof and Scope are required: consent with no evidence, or with no stated scope, is not usable.
+/// Scope is "Transactional" or "Marketing"; booking-only consent is Transactional and never covers promotions.</summary>
+public record OptInCustomerRequest(string Source, DateTime? CapturedAt = null, string? Proof = null, string? Scope = null);
 
 public record BulkDeleteCustomersRequest(IReadOnlyList<Guid> Ids);
 
@@ -81,3 +100,9 @@ public record CustomerImportResultDto(
     IReadOnlyList<CustomerImportRowError> RowErrors);
 
 public record CustomerImportRowError(int RowNumber, string Reason);
+
+/// <summary>The tenant's answer to "is customer consent required?". Required: new customers start WaitingForConsent; not required:
+/// PendingOptIn. Either way only an OptedIn customer can be messaged.</summary>
+public record CustomerConsentSettingDto(bool ConsentRequired);
+
+public record SetCustomerConsentSettingRequest(bool ConsentRequired);

@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Conversations;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
@@ -374,7 +375,7 @@ public class CampaignSendService : ICampaignSendService
         // point this same step becomes sendable on a later tick. Previously unreachable, since
         // CampaignService.SetAudienceAsync only ever attached OptedIn customers; reachable when a customer
         // mapped to a campaign by lead discovery is later set back to PendingOptIn by hand.
-        if (customer.OptInStatus == OptInStatus.PendingOptIn)
+        if (customer.OptInStatus is OptInStatus.PendingOptIn or OptInStatus.WaitingForConsent)
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
 
         var idempotencyKey = BuildIdempotencyKey(cc.Id, step.StepNumber);
@@ -395,6 +396,29 @@ public class CampaignSendService : ICampaignSendService
                 "Skipping step {StepNumber} for campaign customer {CampaignCustomerId}: template is missing or not Approved",
                 step.StepNumber, cc.Id);
             // Leave cc exactly where it is - fixing the template lets this step send on the next tick.
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        // The central consent gate: complete consent record, and a scope that covers this template's category.
+        // Leaves cc where it is, as for PendingOptIn above - recording the missing proof or widening the scope
+        // lets this step send on a later tick.
+        var gate = TemplateSendGate.Evaluate(customer, template.Category);
+        if (!gate.Allowed)
+        {
+            _logger.LogInformation(
+                "Not sending step {StepNumber} to campaign customer {CampaignCustomerId}: {Reason}",
+                step.StepNumber, cc.Id, gate.Reason);
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        // Volume rules (daily cap, promotions per contact). Only on a fresh send: a retry already holds its
+        // reserved row, which these counts would include, so it was checked when it was reserved.
+        var limits = await SendLimits.CheckAsync(_context, customer.TenantId, customer.Id, template.Category, options, now, cancellationToken);
+        if (!limits.Allowed)
+        {
+            _logger.LogInformation(
+                "Holding step {StepNumber} for campaign customer {CampaignCustomerId}: {Reason}",
+                step.StepNumber, cc.Id, limits.Reason);
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
@@ -496,6 +520,17 @@ public class CampaignSendService : ICampaignSendService
             message.Status = MessageStatus.Failed;
             message.FailureReason = "Step no longer has a template assigned.";
             message.NextAttemptAt = null;
+            await _context.SaveChangesAsync(cancellationToken);
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
+        var retryGate = TemplateSendGate.Evaluate(customer, template.Category);
+        if (!retryGate.Allowed)
+        {
+            message.Status = MessageStatus.Failed;
+            message.FailureReason = $"Consent check failed before retry: {retryGate.Reason}";
+            message.NextAttemptAt = null;
+            message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
             await _context.SaveChangesAsync(cancellationToken);
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }

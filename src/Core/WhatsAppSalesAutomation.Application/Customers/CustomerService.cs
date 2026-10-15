@@ -19,6 +19,7 @@ public class CustomerService : ICustomerService
     private readonly IValidator<BulkDeleteCustomersRequest> _bulkDeleteValidator;
     private readonly IValidator<OptInCustomerRequest> _optInValidator;
     private readonly IValidator<BulkAddCustomerTagsRequest> _bulkTagsValidator;
+    private readonly ITenantContext _tenantContext;
 
     public CustomerService(
         IApplicationDbContext context,
@@ -28,8 +29,10 @@ public class CustomerService : ICustomerService
         IValidator<UpdateCustomerRequest> updateValidator,
         IValidator<BulkDeleteCustomersRequest> bulkDeleteValidator,
         IValidator<OptInCustomerRequest> optInValidator,
-        IValidator<BulkAddCustomerTagsRequest> bulkTagsValidator)
+        IValidator<BulkAddCustomerTagsRequest> bulkTagsValidator,
+        ITenantContext tenantContext)
     {
+        _tenantContext = tenantContext;
         _context = context;
         _importService = importService;
         _dateTime = dateTime;
@@ -73,6 +76,62 @@ public class CustomerService : ICustomerService
         return customer.ToDto();
     }
 
+    public async Task<IReadOnlyList<CustomerHistoryEventDto>> GetHistoryAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        // Both queries go through the tenant filter, so another tenant's customer is a 404, never an empty timeline.
+        if (!await _context.Customers.AnyAsync(c => c.Id == id, cancellationToken))
+            throw new NotFoundException(nameof(Customer), id);
+
+        var events = await _context.CustomerHistoryEvents.AsNoTracking()
+            .Where(e => e.CustomerId == id)
+            .ToListAsync(cancellationToken);
+
+        return OrderTimeline(events);
+    }
+
+    /// <summary>
+    /// The timeline, top to bottom: the initial step (Customer discovered) first, then the rest oldest first, ties broken by the order
+    /// the process runs in and then by when they were saved. A discovered event written after the check it preceded (history recorded
+    /// before the order was fixed) is shown at the time of the first event after it, so no entry is dated later than the one below it.
+    /// </summary>
+    private static List<CustomerHistoryEventDto> OrderTimeline(IReadOnlyCollection<CustomerHistoryEvent> events)
+    {
+        var discovered = events.Where(e => e.EventType == CustomerHistoryEventTypes.Discovered)
+            .OrderBy(e => e.OccurredAtUtc).ThenBy(e => e.CreatedAt).ToList();
+        var rest = events.Where(e => e.EventType != CustomerHistoryEventTypes.Discovered)
+            .OrderBy(e => e.OccurredAtUtc).ThenBy(e => CustomerHistoryEventTypes.Rank(e.EventType)).ThenBy(e => e.CreatedAt).ToList();
+
+        var firstAfter = rest.Count > 0 ? rest[0].OccurredAtUtc : (DateTime?)null;
+        return discovered.Concat(rest)
+            .Select(e => new CustomerHistoryEventDto(
+                e.Id, e.EventType, e.EventType == CustomerHistoryEventTypes.Discovered && firstAfter is { } next && next < e.OccurredAtUtc ? next : e.OccurredAtUtc,
+                e.PreviousStatus, e.NewStatus, e.Reason, e.ExecutionId, e.CampaignId, e.CorrelationId, e.ProviderReference))
+            .ToList();
+    }
+
+    public async Task<CustomerConsentSettingDto> GetConsentSettingAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = _tenantContext.TenantId ?? throw new ConflictException("There is no tenant to read this setting for.");
+        var required = await _context.Tenants.AsNoTracking()
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.ConsentRequired)
+            .FirstOrDefaultAsync(cancellationToken);
+        return new CustomerConsentSettingDto(required);
+    }
+
+    public async Task<CustomerConsentSettingDto> SetConsentSettingAsync(
+        SetCustomerConsentSettingRequest request, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _tenantContext.TenantId ?? throw new ConflictException("There is no tenant to change this setting for.");
+        var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+                     ?? throw new NotFoundException("Tenant", tenantId);
+
+        // Applies to customers created from now on; customers that already exist keep the status they have.
+        tenant.ConsentRequired = request.ConsentRequired;
+        await _context.SaveChangesAsync(cancellationToken);
+        return new CustomerConsentSettingDto(tenant.ConsentRequired);
+    }
+
     public async Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
@@ -92,7 +151,7 @@ public class CustomerService : ICustomerService
             Source = request.Source,
             PreferredLanguage = request.PreferredLanguage,
             AssignedAgentId = request.AssignedAgentId,
-            OptInStatus = OptInStatus.PendingOptIn
+            OptInStatus = await ConsentPolicy.InitialStatusAsync(_context, _tenantContext.TenantId, cancellationToken)
         };
 
         _context.Customers.Add(customer);
@@ -304,6 +363,10 @@ public class CustomerService : ICustomerService
             customer.OptInStatus = OptInStatus.OptedIn;
             customer.OptInTimestamp = request.CapturedAt ?? _dateTime.UtcNow;
             customer.OptInSource = request.Source.Trim();
+            customer.OptInProof = request.Proof!.Trim();
+            // Already validated by OptInCustomerRequestValidator.
+            ImportConsentResolver.TryParseScope(request.Scope, out var scope);
+            customer.OptInScope = scope;
 
             await _context.SaveChangesAsync(cancellationToken);
         }
@@ -341,6 +404,9 @@ public class CustomerService : ICustomerService
         // two differently-typed rows ("9820098200" and "+91 98200-98200") collapse to one number,
         // which would otherwise reach the unique index and fail the entire import.
         var seenInFile = new HashSet<string>(StringComparer.Ordinal);
+
+        // What a row with no consent of its own starts as, from the tenant's consent-required setting.
+        var initialStatus = await ConsentPolicy.InitialStatusAsync(_context, _tenantContext.TenantId, cancellationToken);
 
         // Note: this checks/inserts row-by-row for correctness and simplicity. For very large
         // imports (10k+ rows) this is a good candidate to batch-load existing phone numbers and
@@ -390,9 +456,11 @@ public class CustomerService : ICustomerService
                 LastName = row.LastName,
                 Email = row.Email,
                 Source = "Import",
-                OptInStatus = consent.Status,
+                OptInStatus = consent.Status == OptInStatus.PendingOptIn ? initialStatus : consent.Status,
                 OptInTimestamp = consent.OptInTimestamp,
                 OptInSource = consent.Source,
+                OptInProof = consent.Proof,
+                OptInScope = consent.Scope,
                 OptOutTimestamp = consent.OptOutTimestamp,
                 OptOutSource = consent.Status == OptInStatus.OptedOut ? OptOutSource.Manual : null
             };

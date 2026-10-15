@@ -41,6 +41,11 @@ public class Tenant : BaseEntity
     /// CGST + SGST versus IGST on what it pays. Null when unknown or not applicable.</summary>
     public string? StateCode { get; set; }
 
+    /// <summary>The tenant's own answer to "is customer consent required?", set from the Customers page. Decides the status a new
+    /// customer starts in wherever one is created without recorded consent: required is WaitingForConsent, otherwise PendingOptIn.
+    /// False by default, which is how customers behaved before the setting existed.</summary>
+    public bool ConsentRequired { get; set; }
+
     /// <summary>IANA timezone id (e.g. "America/New_York", "Asia/Kolkata") - one of
     /// TimeZoneCatalog.All, set at signup or changed later by the tenant's own Admin or a
     /// PlatformSuperAdmin. Null defaults to TimeZoneCatalog.DefaultId (India Standard Time) via
@@ -126,4 +131,25 @@ public class Tenant : BaseEntity
     /// case-insensitively on save. Persisted as a JSON array in one column (see TenantConfiguration);
     /// never null, empty when none were added.</summary>
     public List<string> DomainKeywords { get; set; } = new();
+
+    // ---- WhatsApp sending health. Set from Meta's quality webhooks (TenantQualityService); read by the send
+    // path (SendLimits). A tenant starts Green: Meta numbers do, and nothing has gone wrong yet. ----
+
+    /// <summary>Meta's current quality rating for this tenant's number.</summary>
+    public WhatsAppQualityRating QualityRating { get; set; } = WhatsAppQualityRating.Green;
+
+    /// <summary>When <see cref="QualityRating"/> last changed. Null means "since the tenant was created". How long
+    /// a Green rating has lasted is what raises the daily cap step by step.</summary>
+    public DateTime? QualityRatingSince { get; set; }
+
+    /// <summary>When the tenant was last warned for a quality drop. A second drop inside the repeat-violation
+    /// window, after the number had recovered, suspends the tenant.</summary>
+    public DateTime? QualityWarningAt { get; set; }
+
+    /// <summary>When sending was paused, null while it is not. Set automatically on a Red rating and only cleared
+    /// by a person (TenantQualityService.ResumeSendingAsync) - a rating that recovers does not reopen the tap.</summary>
+    public DateTime? SendingPausedAt { get; set; }
+
+    /// <summary>Why sending is paused, shown to the tenant and to the platform team.</summary>
+    public string? SendingPauseReason { get; set; }
 }

@@ -8,6 +8,13 @@ public interface ICustomerService
 
     Task<CustomerDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>The customer's processing timeline, oldest first. 404 for an unknown customer or one that belongs to another tenant.</summary>
+    Task<IReadOnlyList<CustomerHistoryEventDto>> GetHistoryAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<CustomerConsentSettingDto> GetConsentSettingAsync(CancellationToken cancellationToken = default);
+
+    Task<CustomerConsentSettingDto> SetConsentSettingAsync(SetCustomerConsentSettingRequest request, CancellationToken cancellationToken = default);
+
     Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken cancellationToken = default);
 
     Task<CustomerDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken cancellationToken = default);
