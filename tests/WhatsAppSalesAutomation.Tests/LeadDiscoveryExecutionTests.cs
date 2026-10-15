@@ -249,6 +249,29 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task The_execution_detail_counts_how_the_numbers_came_out_of_the_dnd_check()
+    {
+        _agent.Rounds.Add(Candidates("A", "B", "C"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        var counts = detail.VerificationCounts;
+        Assert.Equal(2, counts.Passed);
+        Assert.Equal(1, counts.Failed);
+        Assert.Equal(0, counts.Pending);
+        Assert.Equal(0, counts.Error);
+        // The two deliberately flawed simulated candidates (no verifiable phone, closed) were never submitted.
+        Assert.Equal(detail.Customers.Count, counts.Passed + counts.Failed + counts.Pending + counts.Error + counts.NotChecked);
+    }
+
+    [Fact]
     public async Task The_execution_detail_shows_the_name_of_each_customer_created()
     {
         _agent.Rounds.Add(Candidates("A", "B"));

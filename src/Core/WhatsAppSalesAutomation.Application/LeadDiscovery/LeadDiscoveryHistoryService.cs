@@ -135,6 +135,13 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
 
         var pricing = await ResolvePricingAsync(tenantId, cancellationToken);
 
+        var verificationCounts = new LeadDiscoveryVerificationCountsDto(
+            customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.Pass)),
+            customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.Fail)),
+            customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.Pending)),
+            customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.Error)),
+            customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.NotChecked)));
+
         return new LeadDiscoveryExecutionDetailDto(
             ToSummary(execution, run, pricing),
             execution.LockKey,
@@ -150,7 +157,8 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             transitions,
             run is null ? null : LeadDiscoveryService.ToDto(run, pricing),
             pricing.CurrencyCode,
-            pricing.CurrencySymbol);
+            pricing.CurrencySymbol,
+            verificationCounts);
     }
 
     public async Task<LeadDiscoveryRetryQueuedDto> RequestRetryAsync(Guid executionId, CancellationToken cancellationToken = default)
