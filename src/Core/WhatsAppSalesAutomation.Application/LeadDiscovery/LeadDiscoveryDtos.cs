@@ -159,7 +159,16 @@ public record DiscoveredLeadDto(
     string? ScoreRationale,
     /// <summary>The CRM customer created for this business, or null when it had no usable phone number.</summary>
     Guid? CustomerId,
-    DateTime DiscoveredAt);
+    DateTime DiscoveredAt,
+    /// <summary>The Lead Discovery History execution (batch) that found this business.</summary>
+    Guid? ExecutionId = null,
+    /// <summary>NotChecked, Pending, Pass, Fail or Error - the DND / outreach-eligibility check on its number. Fail is a rejected number (no customer was created), Error a check that could not be completed.</summary>
+    string VerificationStatus = "NotChecked",
+    string? VerificationReasonCode = null,
+    string? VerificationReason = null,
+    DateTime? VerifiedAtUtc = null,
+    /// <summary>The campaign this business's customer was most recently added to, if any.</summary>
+    string? CampaignName = null);
 
 /// <summary>One auto-campaign enrollment outcome for one discovered customer - the admin-facing audit
 /// trail behind LeadDiscoveryProfile.AutoCampaignEnabled. <paramref name="Status"/> is "Started",

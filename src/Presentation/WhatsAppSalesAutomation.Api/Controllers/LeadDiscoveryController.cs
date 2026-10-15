@@ -44,8 +44,8 @@ public class LeadDiscoveryController : ControllerBase
 
     [HttpGet("leads")]
     public async Task<ActionResult<PagedResult<DiscoveredLeadDto>>> GetLeads(
-        [FromQuery] PagedRequest request, [FromQuery] int? minScore, CancellationToken cancellationToken)
-        => Ok(await _leadDiscoveryService.GetDiscoveredLeadsAsync(request, minScore, cancellationToken));
+        [FromQuery] PagedRequest request, [FromQuery] int? minScore, [FromQuery] string? verificationStatus, CancellationToken cancellationToken)
+        => Ok(await _leadDiscoveryService.GetDiscoveredLeadsAsync(request, minScore, verificationStatus, cancellationToken));
 
     /// <summary>What each run cost and produced, newest first. Admin-only, like the profile - it is spend.</summary>
     [HttpGet("runs")]

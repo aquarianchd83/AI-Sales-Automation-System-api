@@ -80,7 +80,9 @@ public record LeadDiscoveryExecutionCustomerDto(
     string? VerificationReason = null,
     DateTime? VerifiedAtUtc = null,
     /// <summary>The name on the CRM customer created for this row (the named contact, else the business) - null when no customer exists, or it was since deleted.</summary>
-    string? CrmCustomerName = null);
+    string? CrmCustomerName = null,
+    /// <summary>The campaign this execution generated, when the row's customer was added to it; null otherwise.</summary>
+    string? CampaignName = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

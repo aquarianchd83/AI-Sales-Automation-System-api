@@ -99,7 +99,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null))
             .ToListAsync(cancellationToken);
 
         var customerIds = customers.Where(c => c.CustomerId != null).Select(c => c.CustomerId!.Value).Distinct().ToList();
@@ -113,6 +113,20 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
 
             customers = customers
                 .Select(c => c.CustomerId is { } id && names.TryGetValue(id, out var name) && name.Length > 0 ? c with { CrmCustomerName = name } : c)
+                .ToList();
+        }
+
+        // Which rows' customers ended up in the campaign this execution generated.
+        if (execution.GeneratedCampaignId is { } generatedId && customerIds.Count > 0)
+        {
+            var inCampaign = (await _context.CampaignCustomers.AsNoTracking()
+                    .Where(cc => cc.CampaignId == generatedId && customerIds.Contains(cc.CustomerId))
+                    .Select(cc => cc.CustomerId)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+
+            customers = customers
+                .Select(c => c.CustomerId is { } id && inCampaign.Contains(id) ? c with { CampaignName = execution.GeneratedCampaignName } : c)
                 .ToList();
         }
 
