@@ -285,6 +285,9 @@ public static class DependencyInjection
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
         }
 
+        // Simulated until a real mobile-number verification provider is chosen; it replaces this registration only.
+        services.AddScoped<IPhoneVerificationProvider, WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
+
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddHttpClient<GoogleEmbeddingClient>();
         services.AddScoped<SimulatedEmbeddingClient>();

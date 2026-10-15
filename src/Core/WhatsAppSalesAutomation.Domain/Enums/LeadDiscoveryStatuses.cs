@@ -95,3 +95,23 @@ public enum LeadDiscoveryLockStatus
     Expired = 8,
     Lost = 9
 }
+
+/// <summary>The outcome of checking a discovered customer's mobile number with the verification provider (DND and
+/// similar outreach restrictions). Pass is the only value that means the number is eligible; a technical failure is
+/// Error, never Pass, and is kept apart from Fail so a rejected number and an unverified one are never confused.</summary>
+public enum LeadDiscoveryVerificationStatus
+{
+    /// <summary>Not submitted: the row has no customer (invalid, duplicate) or has not been reached yet.</summary>
+    NotChecked = 0,
+
+    /// <summary>Submitted, no result yet.</summary>
+    Pending = 1,
+
+    Pass = 2,
+
+    /// <summary>The provider rejected the number, for example it is on a DND register.</summary>
+    Fail = 3,
+
+    /// <summary>Could not be checked: a technical or provider error, or no result came back. Retried on a retry.</summary>
+    Error = 4
+}

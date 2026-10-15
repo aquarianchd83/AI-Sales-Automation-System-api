@@ -41,6 +41,19 @@ public class LeadDiscoveryExecutionCustomer : BaseEntity, ITenantOwned
     public string? CandidateJson { get; set; }
 
     public DateTime? ProcessedAtUtc { get; set; }
+
+    /// <summary>Whether the customer's number passed the DND / outreach-eligibility check. NotChecked for a row with no customer.</summary>
+    public LeadDiscoveryVerificationStatus VerificationStatus { get; set; } = LeadDiscoveryVerificationStatus.NotChecked;
+
+    /// <summary>The provider's reason code for a Fail or Error, for example "DND".</summary>
+    public string? VerificationReasonCode { get; set; }
+
+    public string? VerificationReason { get; set; }
+
+    public DateTime? VerifiedAtUtc { get; set; }
+
+    /// <summary>The provider's reference for the batch this customer was submitted in.</summary>
+    public string? VerificationRequestId { get; set; }
 }
 
 /// <summary>One Auto-Campaign template (a step of the referred campaign) and whether it was associated with

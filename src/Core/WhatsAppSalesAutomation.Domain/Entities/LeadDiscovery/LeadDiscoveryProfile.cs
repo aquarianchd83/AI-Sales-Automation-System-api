@@ -78,10 +78,8 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// <see cref="LeadDiscoveryCampaignStartMode.NextDayWithTime"/>.</summary>
     public TimeSpan? AutoCampaignStartTime { get; set; }
 
-    /// <summary>When true, a customer this job creates is written OptedIn instead of the default
-    /// PendingOptIn, with no consent evidence beyond having been found on the web - see
-    /// LeadDiscoveryRunService.ProcessCustomerAsync. False by default: being discovered is not consent
-    /// to be messaged, and turning this on is a tenant's own choice to skip that check, not something
-    /// the platform decides for them.</summary>
-    public bool AutoConsentDiscoveredCustomers { get; set; }
+    /// <summary>Whether discovered mobile numbers are checked against DND and similar outreach restrictions before a customer
+    /// is created. Off by default: when off nothing is submitted for verification, every qualified lead becomes a customer, and the
+    /// auto-campaign takes all of them.</summary>
+    public bool DndCheckEnabled { get; set; }
 }
