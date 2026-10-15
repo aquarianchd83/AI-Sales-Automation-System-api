@@ -88,6 +88,9 @@ public record MetaSignupClientConfigDto(
 /// FB.login; <see cref="WabaId"/>/<see cref="PhoneNumberId"/> come from Meta's WA_EMBEDDED_SIGNUP message (the backend
 /// looks them up itself when they are missing). <see cref="ClientEvent"/> is "FINISH", "CANCEL" or "ERROR".
 /// None of this is trusted on its own - the code is exchanged server-side and the assets are re-read with the token it yields.
+/// <see cref="PageUrl"/> is the address of the page that opened the popup. Meta ties the code to the redirect address it was
+/// issued for, and for the JavaScript SDK popup that is the page itself, so it is only used to retry a code Meta refuses with
+/// "redirect_uri mismatch" and to log where the popup was opened from - never to decide where anything is sent.
 /// </summary>
 public record CompleteMetaSignupRequest(
     string? Code,
@@ -95,7 +98,8 @@ public record CompleteMetaSignupRequest(
     string? PhoneNumberId,
     string? ClientEvent,
     string? ClientStep,
-    string? ClientErrorMessage);
+    string? ClientErrorMessage,
+    string? PageUrl = null);
 
 public record MetaSignupResultDto(
     string Status,
