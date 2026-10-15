@@ -1123,6 +1123,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTime?>("RetiredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RetiredReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<DateTime?>("ScheduledStartAt")
                         .HasColumnType("datetime2");
 
@@ -1735,6 +1742,14 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("OptInProof")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("OptInScope")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("OptInSource")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -1780,6 +1795,65 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("Customers", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Customers.CustomerHistoryEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("ExecutionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("NewStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ProviderReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CustomerId", "OccurredAtUtc");
+
+                    b.ToTable("CustomerHistoryEvents", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Customers.CustomerTag", b =>
@@ -2856,6 +2930,26 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("VerificationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("VerificationReasonCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("VerificationRequestId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExecutionId", "Status");
@@ -3085,9 +3179,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<TimeSpan?>("AutoCampaignStartTime")
                         .HasColumnType("time");
 
-                    b.Property<bool>("AutoConsentDiscoveredCustomers")
-                        .HasColumnType("bit");
-
                     b.Property<int>("BatchSize")
                         .HasColumnType("int");
 
@@ -3097,6 +3188,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("DndCheckEnabled")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("EmailRequired")
                         .HasColumnType("bit");
@@ -4742,6 +4836,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<bool>("ConsentRequired")
+                        .HasColumnType("bit");
+
                     b.Property<string>("CountryCode")
                         .HasMaxLength(2)
                         .HasColumnType("nvarchar(2)");
@@ -4779,8 +4876,26 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("QualityRating")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<DateTime?>("QualityRatingSince")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("QualityWarningAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("RefundRequestsEnabled")
                         .HasColumnType("bit");
+
+                    b.Property<string>("SendingPauseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("SendingPausedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Slug")
                         .IsRequired()
