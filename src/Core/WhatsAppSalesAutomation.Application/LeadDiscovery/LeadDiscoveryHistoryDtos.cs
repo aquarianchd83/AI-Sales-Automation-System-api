@@ -107,6 +107,11 @@ public record LeadDiscoveryLockTransitionDto(
 /// retry, a skipped or blocked run, a run stopped before its first round, or one recorded before runs were linked
 /// to executions. <see cref="CurrencyCode"/>/<see cref="CurrencySymbol"/> are the tenant's currency, for
 /// Research.EstimatedCostLocal.</param>
+/// <summary>How the execution's numbers came out of the DND / outreach-eligibility check. Pending and Error are numbers still to be
+/// checked, so a retry would ask again; Failed are rejected numbers, which never became customers; NotChecked rows were never submitted
+/// (invalid, duplicate, or the check was off). The five add up to the rows the execution recorded.</summary>
+public record LeadDiscoveryVerificationCountsDto(int Passed, int Failed, int Pending, int Error, int NotChecked);
+
 public record LeadDiscoveryExecutionDetailDto(
     LeadDiscoveryExecutionSummaryDto Execution,
     string LockKey,
@@ -122,7 +127,8 @@ public record LeadDiscoveryExecutionDetailDto(
     IReadOnlyList<LeadDiscoveryLockTransitionDto> LockTransitions,
     LeadDiscoveryRunDto? Research,
     string CurrencyCode,
-    string CurrencySymbol);
+    string CurrencySymbol,
+    LeadDiscoveryVerificationCountsDto VerificationCounts);
 
 /// <summary>A manual retry was queued; it runs as a new execution with a new Execution ID.</summary>
 public record LeadDiscoveryRetryQueuedDto(Guid ExecutionId, string BackgroundJobId);
