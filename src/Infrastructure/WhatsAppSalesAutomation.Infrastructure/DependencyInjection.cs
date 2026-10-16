@@ -289,6 +289,8 @@ public static class DependencyInjection
         // page (absent settings mean the simulator). Read per request, so a save is live without a restart.
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.ConsentSmsIntegrationOptions>(configuration.GetSection("Integrations:ConsentSms"));
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.DndCheckIntegrationOptions>(configuration.GetSection("Integrations:DndCheck"));
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.AiFeatureOptions>(configuration.GetSection("Integrations:Ai"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.Platform.IAiFeatureRouting, WhatsAppSalesAutomation.Infrastructure.Integrations.AiFeatureRouting>();
         services.AddHttpClient();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>();

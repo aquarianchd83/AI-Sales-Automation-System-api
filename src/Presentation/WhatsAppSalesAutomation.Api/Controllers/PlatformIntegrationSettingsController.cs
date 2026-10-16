@@ -14,15 +14,18 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class PlatformIntegrationSettingsController : ControllerBase
 {
     private readonly IPlatformIntegrationSettingsService _settings;
+    private readonly IPlatformAiFeatureSettingsService _aiFeatures;
     private readonly IPlatformAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
 
     public PlatformIntegrationSettingsController(
         IPlatformIntegrationSettingsService settings,
+        IPlatformAiFeatureSettingsService aiFeatures,
         IPlatformAuditService auditService,
         ICurrentUserService currentUser)
     {
         _settings = settings;
+        _aiFeatures = aiFeatures;
         _auditService = auditService;
         _currentUser = currentUser;
     }
@@ -50,6 +53,34 @@ public class PlatformIntegrationSettingsController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>The engine behind each AI feature: simulator, or ChatGPT / Claude / Gemini with the key saved under AI Providers.</summary>
+    [HttpGet("ai-features")]
+    public async Task<ActionResult<PlatformAiFeatureSettingsDto>> GetAiFeatures(CancellationToken cancellationToken)
+        => Ok(await _aiFeatures.GetAsync(cancellationToken));
+
+    /// <summary>Takes effect on the next request, no restart. Switching to a provider with no saved key is refused.</summary>
+    [HttpPut("ai-features")]
+    public async Task<ActionResult<PlatformAiFeatureSettingsDto>> UpdateAiFeatures([FromBody] UpdatePlatformAiFeatureSettingsRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _aiFeatures.UpdateAsync(request, _currentUser.UserId, cancellationToken);
+
+        static string Describe(AiFeatureChannelDto c) => c.Mode == "Api" ? c.Provider : "Simulator";
+        await _auditService.LogAsync(
+            _currentUser.UserId ?? throw new InvalidOperationException("No authenticated user."), _currentUser.Email ?? string.Empty, PlatformAuditActions.AiFeatureSettingsUpdated,
+            details: $"Conversation: {(result.Conversation.Mode == "Api" ? result.Conversation.Provider : "Simulator")} " +
+                     $"(embeddings {(result.Conversation.EmbeddingMode == "Api" ? result.Conversation.EmbeddingProvider : "Simulator")}), " +
+                     $"discovery lead: {Describe(result.DiscoveryLead)}, knowledge base: {Describe(result.KnowledgeBase)}, " +
+                     $"content generation: {Describe(result.ContentGeneration)}, video renders: {Describe(result.VideoRenders)}",
+            cancellationToken: cancellationToken);
+
+        return Ok(result);
+    }
+
+    /// <summary>Asks the chosen third-party tool one trivial question with the saved key, saved choice or not. Always 200: the result says whether it worked.</summary>
+    [HttpPost("ai-features/{feature}/test")]
+    public async Task<ActionResult<DeliveryTestResultDto>> TestAiFeature(string feature, [FromBody] TestAiFeatureRequest request, CancellationToken cancellationToken)
+        => Ok(await _aiFeatures.TestAsync(feature, request, cancellationToken));
 
     /// <summary>Sends one real consent-style SMS through the third-party API in the request, saved or not. Always 200: the result says whether it worked.</summary>
     [HttpPost("test-consent-sms")]

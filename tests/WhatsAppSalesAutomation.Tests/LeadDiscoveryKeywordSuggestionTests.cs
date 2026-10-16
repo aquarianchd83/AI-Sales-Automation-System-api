@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Packages;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -66,7 +67,15 @@ public sealed class LeadDiscoveryKeywordSuggestionTests : IDisposable
         _connection.Dispose();
     }
 
-    private LeadDiscoveryKeywordSuggestionService Service() => new(_ai, new SuggestLeadKeywordsRequestValidator());
+    private sealed class FixedRouting : IAiFeatureRouting
+    {
+        public AiFeatureChoice Choice { get; set; } = new(true, "OpenAI");
+        public AiFeatureChoice Resolve(string feature) => Choice;
+    }
+
+    private readonly FixedRouting _routing = new();
+
+    private LeadDiscoveryKeywordSuggestionService Service() => new(_ai, new SuggestLeadKeywordsRequestValidator(), _routing);
 
     [Fact]
     public async Task Uses_the_tenants_AI_when_it_answers_and_says_so()
@@ -80,13 +89,28 @@ public sealed class LeadDiscoveryKeywordSuggestionTests : IDisposable
     }
 
     [Fact]
-    public async Task Always_asks_ChatGPT_whichever_provider_the_platform_uses_for_conversations()
+    public async Task Asks_the_tool_the_admin_chose_for_discovery_leads_not_the_conversation_provider()
     {
         _ai.Reply = "[]";
 
         await Service().SuggestAsync(new SuggestLeadKeywordsRequest("Selling clinic software", "Eye clinic", null));
-
         Assert.Equal("OpenAI", _ai.LastProvider);
+
+        _routing.Choice = new AiFeatureChoice(true, "Google");
+        await Service().SuggestAsync(new SuggestLeadKeywordsRequest("Selling clinic software", "Eye clinic", null));
+        Assert.Equal("Google", _ai.LastProvider);
+    }
+
+    [Fact]
+    public async Task The_simulator_makes_no_outside_call_and_answers_from_common_terms()
+    {
+        _routing.Choice = new AiFeatureChoice(false, "OpenAI");
+        _ai.Reply = """["should not be used"]""";
+
+        var result = await Service().SuggestAsync(new SuggestLeadKeywordsRequest("Selling clinic software", "Eye clinic", null));
+
+        Assert.Null(_ai.LastPrompt);
+        Assert.Equal("Common terms", result.Source);
     }
 
     [Fact]

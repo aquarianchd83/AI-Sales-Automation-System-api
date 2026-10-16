@@ -43,6 +43,7 @@ public static class PlatformAuditActions
     public const string AwsSettingsUpdated = "AwsSettingsUpdated";
     public const string DeliverySettingsUpdated = "DeliverySettingsUpdated";
     public const string IntegrationSettingsUpdated = "IntegrationSettingsUpdated";
+    public const string AiFeatureSettingsUpdated = "AiFeatureSettingsUpdated";
     public const string PlatformWhatsAppSettingsUpdated = "PlatformWhatsAppSettingsUpdated";
     public const string PlatformTemplateUpdated = "PlatformTemplateUpdated";
     public const string PlatformTemplateRestored = "PlatformTemplateRestored";
