@@ -102,6 +102,11 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
                 c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null))
             .ToListAsync(cancellationToken);
 
+        // Read back as Kind.Unspecified; without a "Z" the browser would show these digits as local time.
+        customers = customers
+            .Select(c => c with { ProcessedAtUtc = AsUtc(c.ProcessedAtUtc), VerifiedAtUtc = AsUtc(c.VerifiedAtUtc) })
+            .ToList();
+
         var customerIds = customers.Where(c => c.CustomerId != null).Select(c => c.CustomerId!.Value).Distinct().ToList();
         if (customerIds.Count > 0)
         {

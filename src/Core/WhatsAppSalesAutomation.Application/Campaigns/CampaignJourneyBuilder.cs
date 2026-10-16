@@ -157,7 +157,8 @@ public static class CampaignJourneyBuilder
         var ordering = steps
             .OrderBy(s => s.Step.OccurredAtUtc ?? DateTime.MaxValue)
             .ThenBy(s => s.Order)
-            .Select(s => s.Step)
+            // Read back as Kind.Unspecified; without a "Z" the browser would show these digits as local time.
+            .Select(s => s.Step with { OccurredAtUtc = s.Step.OccurredAtUtc is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null })
             .ToList();
 
         return new CampaignCustomerJourneyDto(
