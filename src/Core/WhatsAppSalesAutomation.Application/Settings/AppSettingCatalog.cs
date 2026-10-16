@@ -42,7 +42,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds", "ContentStudio"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds", "ContentStudio"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -157,6 +157,21 @@ public static class AppSettingCatalog
         new("Sms:Msg91:AuthKey", "Sms", IsSecret: true, Description: "MSG91 account auth key."),
         new("Sms:Msg91:OtpTemplateId", "Sms", IsSecret: false, Description: "MSG91 (DLT-registered) OTP template id."),
         new("Sms:Msg91:BaseUrl", "Sms", IsSecret: false, Description: "MSG91 API base address."),
+
+        // How the consent SMS and the DND check are handled: the built-in simulator or a third-party API. Kept on the Platform Admin
+        // Console's Integrations page (PlatformIntegrationSettingsService) and live only in this table; absent means the simulator.
+        new("Integrations:ConsentSms:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how the WhatsApp consent SMS is sent.", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:ConsentSms:ApiUrl", "Integrations", IsSecret: false, Description: "Consent SMS third-party API address (https)."),
+        new("Integrations:ConsentSms:ApiKey", "Integrations", IsSecret: true, Description: "Consent SMS third-party API key."),
+        new("Integrations:ConsentSms:ApiKeyHeader", "Integrations", IsSecret: false, Description: "Header the key is sent in (Authorization sends it as a Bearer token)."),
+        new("Integrations:ConsentSms:SenderId", "Integrations", IsSecret: false, Description: "Sender id the SMS is sent as."),
+        new("Integrations:ConsentSms:TimeoutSeconds", "Integrations", IsSecret: false),
+        new("Integrations:DndCheck:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how the DND check is done.", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:DndCheck:ApiUrl", "Integrations", IsSecret: false, Description: "DND check third-party API address (https)."),
+        new("Integrations:DndCheck:ApiKey", "Integrations", IsSecret: true, Description: "DND check third-party API key."),
+        new("Integrations:DndCheck:ApiKeyHeader", "Integrations", IsSecret: false, Description: "Header the key is sent in (Authorization sends it as a Bearer token)."),
+        new("Integrations:DndCheck:SenderId", "Integrations", IsSecret: false),
+        new("Integrations:DndCheck:TimeoutSeconds", "Integrations", IsSecret: false),
 
         // The WhatsApp number the PLATFORM sends tenant notices from (plan expiring, credits running out). Managed on the Platform Admin
         // Console's WhatsApp page (PlatformWhatsAppSettingsService) and live only in this table. All are live: the sender reads them through

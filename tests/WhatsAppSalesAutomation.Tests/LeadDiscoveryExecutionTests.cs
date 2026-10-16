@@ -7,7 +7,9 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -39,6 +41,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     private readonly SqlLeadDiscoveryLockStore _sqlLockStore;
     private readonly FakeAgent _agent = new();
     private readonly FakeVerifier _verifier = new();
+    private readonly FakeConsent _consent = new();
     private readonly List<Guid> _startedCampaigns = new();
     private readonly LeadDiscoveryOptions _discoveryOptions = new() { LockHeartbeatSeconds = 0, MaxRetryAttempts = 3 };
 
@@ -269,6 +272,224 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(0, counts.Error);
         // The two deliberately flawed simulated candidates (no verifiable phone, closed) were never submitted.
         Assert.Equal(detail.Customers.Count, counts.Passed + counts.Failed + counts.Pending + counts.Error + counts.NotChecked);
+    }
+
+    private LeadDiscoveryService LeadsService() =>
+        new(_db, null!, null!, null!, null!, null!, NullLogger<LeadDiscoveryService>.Instance);
+
+    private async Task RunWithOneRejectedAsync()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", "On the DND register")
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+        await Service().RunForTenantAsync(_tenant);
+    }
+
+    [Fact]
+    public async Task Discovered_leads_show_batch_check_result_reason_and_campaign_and_keep_the_rejected_one_listed()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+
+        var page = await LeadsService().GetDiscoveredLeadsAsync(new PagedRequest { Page = 1, PageSize = 50 });
+
+        var passed = page.Items.Single(l => l.BusinessName.Contains("A"));
+        var rejected = page.Items.Single(l => l.BusinessName.Contains("B"));
+        Assert.Equal(execution.Id, passed.ExecutionId);
+        Assert.Equal(execution.Id, rejected.ExecutionId);
+
+        Assert.Equal("Pass", passed.VerificationStatus);
+        Assert.NotNull(passed.VerifiedAtUtc);
+        Assert.NotNull(passed.CustomerId);
+        Assert.Equal(execution.GeneratedCampaignName, passed.CampaignName);
+
+        // Rejected: still visible for the audit, with its reason, and no customer or campaign.
+        Assert.Equal("Fail", rejected.VerificationStatus);
+        Assert.Equal("DND", rejected.VerificationReasonCode);
+        Assert.Equal("On the DND register", rejected.VerificationReason);
+        Assert.Null(rejected.CustomerId);
+        Assert.Null(rejected.CampaignName);
+    }
+
+    [Fact]
+    public async Task Discovered_leads_can_be_filtered_by_verification_status()
+    {
+        await RunWithOneRejectedAsync();
+        var request = new PagedRequest { Page = 1, PageSize = 50 };
+
+        var failed = await LeadsService().GetDiscoveredLeadsAsync(request, null, "Fail");
+        var passed = await LeadsService().GetDiscoveredLeadsAsync(request, null, "pass");
+        var notChecked = await LeadsService().GetDiscoveredLeadsAsync(request, null, "NotChecked");
+
+        Assert.Equal(new[] { true }, failed.Items.Select(l => l.BusinessName.Contains("B")));
+        Assert.Equal(new[] { true }, passed.Items.Select(l => l.BusinessName.Contains("A")));
+        Assert.Equal(0, notChecked.TotalCount);
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(
+            () => LeadsService().GetDiscoveredLeadsAsync(request, null, "Maybe"));
+    }
+
+    [Fact]
+    public async Task A_lead_found_with_the_check_off_is_not_checked_and_filters_as_such()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.DndCheckEnabled = false;
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var page = await LeadsService().GetDiscoveredLeadsAsync(new PagedRequest { Page = 1, PageSize = 50 }, null, "NotChecked");
+
+        Assert.Single(page.Items);
+        Assert.Equal("NotChecked", page.Items[0].VerificationStatus);
+    }
+
+    [Fact]
+    public async Task The_execution_detail_names_the_campaign_only_on_rows_whose_customer_joined_it()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.Equal(execution.GeneratedCampaignName, detail.Customers.Single(c => c.CustomerName.Contains("A")).CampaignName);
+        Assert.Null(detail.Customers.Single(c => c.CustomerName.Contains("B")).CampaignName);
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_on_only_the_customers_the_campaign_took_are_invited()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.ConsentSmsEnabled = true;
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var call = Assert.Single(_consent.Sent);
+        Assert.Equal(execution.GeneratedCampaignId, call.CampaignId);
+        Assert.Equal(execution.Id, call.ExecutionId);
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        Assert.Equal(new[] { passed.Id }, call.CustomerIds);   // the DND-rejected number has no customer and is never texted
+        Assert.Equal(1, _consent.RetryCalls);                  // failed invitations are retried whenever the job runs
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_off_nothing_is_sent_and_nothing_is_retried()
+    {
+        EnableAutoCampaign();
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Empty(_consent.Sent);
+        Assert.Equal(0, _consent.RetryCalls);
+    }
+
+    [Fact]
+    public async Task A_problem_sending_the_invitations_does_not_fail_the_execution()
+    {
+        EnableAutoCampaign();
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.ConsentSmsEnabled = true;
+        await _db.SaveChangesAsync();
+        _consent.ThrowOnSend = true;
+        _agent.Rounds.Add(Candidates("A"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.Equal(LeadDiscoveryCampaignStatus.Created, execution.CampaignStatus);
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_off_each_customer_the_campaign_took_gets_one_history_entry_saying_why_no_sms_was_sent()
+    {
+        await RunWithOneRejectedAsync();   // A passes and joins the campaign, B is rejected by the DND check; the consent SMS is off
+
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        var skipped = await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped).ToListAsync();
+
+        var entry = Assert.Single(skipped);                  // the rejected number has no customer, so nothing is recorded for it
+        Assert.Equal(passed.Id, entry.CustomerId);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, entry.Reason);
+        Assert.Equal((await SingleExecutionAsync()).Id, entry.ExecutionId);
+        Assert.Empty(_consent.Sent);
+    }
+
+    [Fact]
+    public async Task The_consent_sms_column_is_never_blank_it_says_why_nothing_was_sent()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.All(detail.Customers, c => Assert.False(string.IsNullOrWhiteSpace(c.ConsentSmsNote), c.CustomerName));
+        var rejected = detail.Customers.Single(c => c.CustomerName.Contains("B"));
+        Assert.Equal("Not sent: Not applicable", rejected.ConsentSmsNote);   // the SMS logic is skipped for a number that failed the DND check
+        var passed = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal("Not sent: the consent SMS was Off", passed.ConsentSmsNote);
+        Assert.True(passed.ConsentSmsNeedsSetting);      // the screen links this one to the discovery profile
+        Assert.False(rejected.ConsentSmsNeedsSetting);   // a rejected number is not fixed by a setting
+        Assert.All(detail.Customers.Where(c => c.CustomerId is null), c => Assert.StartsWith("Not sent:", c.ConsentSmsNote));
+
+    }
+
+    [Fact]
+    public void A_business_with_no_customer_that_was_not_rejected_is_not_applicable_and_a_customer_with_a_specific_skip_reason_keeps_it()
+    {
+        LeadDiscoveryExecutionCustomerDto Row(Guid? customerId, string verification) =>
+            new(Guid.NewGuid(), customerId, null, "Closed Business", null, "Skipped", true, null, null, null, null, verification);
+
+        var none = new Dictionary<Guid, string?>();
+        Assert.Equal(("Not sent: Not applicable", false), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(null, "NotChecked"), none));
+
+        var customerId = Guid.NewGuid();
+        var reasons = new Dictionary<Guid, string?> { [customerId] = "The business's WhatsApp number is not set up, so the invitation has nowhere to point." };
+        var (note, needsSetting) = LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons);
+        Assert.StartsWith("Not sent: The business's WhatsApp number is not set up", note);
+        Assert.False(needsSetting);
+
+        // The recorded "switch is Off" reason and a missing record both read the same, and link to the setting.
+        reasons[customerId] = LeadDiscoveryRunService.ConsentSmsOffReason;
+        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
+        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
+    }
+
+    [Fact]
+    public async Task A_row_that_was_sent_an_sms_has_its_status_and_no_note()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        _db.ConsentInvitations.Add(new ConsentInvitation
+        {
+            TenantId = _tenant, CustomerId = passed.Id, CampaignId = execution.GeneratedCampaignId, ExecutionId = execution.Id,
+            IdempotencyKey = "k-a", ToPhoneE164 = passed.PhoneNumberE164, Body = "b", WhatsAppLink = "https://wa.me/1",
+            Status = ConsentInvitationStatus.Delivered
+        });
+        await _db.SaveChangesAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        var row = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal("Delivered", row.ConsentSmsStatus);
+        Assert.Null(row.ConsentSmsNote);
     }
 
     [Fact]
@@ -969,7 +1190,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier);
+            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent);
     }
 
     private SaveFailure FailCustomerSave(string firstName)
@@ -1014,6 +1235,36 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         return new LeadDiscoveryAgentResult(true, null, candidates, new LeadDiscoveryEvidence(seen, pages),
             LeadDiscoveryUsage.None, "Simulated");
+    }
+
+    /// <summary>Records what the discovery run asked it to do; sends nothing.</summary>
+    private sealed class FakeConsent : IConsentInvitationService
+    {
+        public List<(Guid CampaignId, Guid? ExecutionId, Guid[] CustomerIds)> Sent { get; } = new();
+        public int RetryCalls { get; private set; }
+        public bool ThrowOnSend { get; set; }
+
+        public Task<ConsentInvitationBatchResult> SendAsync(
+            Guid campaignId, Guid? executionId, IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnSend)
+                throw new InvalidOperationException("SMS provider is down");
+            Sent.Add((campaignId, executionId, customerIds.ToArray()));
+            return Task.FromResult(new ConsentInvitationBatchResult(customerIds.Count, 0, 0, Array.Empty<string>()));
+        }
+
+        public Task<int> RetryDueAsync(CancellationToken cancellationToken = default)
+        {
+            RetryCalls++;
+            return Task.FromResult(0);
+        }
+
+        public Task<bool> ApplyReceiptAsync(string providerMessageId, ConsentInvitationStatus status, DateTime atUtc, string? reason, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
+        public Task<ConsentReplyOutcome> HandleInboundMessageAsync(
+            Customer customer, InboundConsentMessage message, CancellationToken cancellationToken = default)
+            => Task.FromResult(ConsentReplyOutcome.None);
     }
 
     /// <summary>Passes everyone unless told otherwise. Matches results by customer id only, like a real provider.</summary>

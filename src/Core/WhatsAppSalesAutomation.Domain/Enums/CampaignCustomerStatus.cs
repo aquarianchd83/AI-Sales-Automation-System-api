@@ -27,5 +27,9 @@ public enum CampaignCustomerStatus
     Completed = 5,
 
     /// <summary>Every send attempt for the current step exhausted its retries. Terminal.</summary>
-    Failed = 6
+    Failed = 6,
+
+    /// <summary>The customer is ready - consent recorded, campaign running - but the message content is not (the step has no approved,
+    /// active template). Not a final state: it resumes by itself once the content is available, and the first message goes out once.</summary>
+    WaitingForContent = 7
 }

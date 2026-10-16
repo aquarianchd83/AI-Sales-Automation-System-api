@@ -52,12 +52,38 @@ public static class CustomerHistoryEventTypes
     public const string VerificationError = "VerificationError";
     public const string VerificationPending = "VerificationPending";
 
-    /// <summary>Where an event falls among others recorded at the same instant: discovered, then submitted, then any outcome.</summary>
+    // Consent invitation (SMS) and the customer's WhatsApp reply.
+    public const string SmsQueued = "SmsQueued";
+    public const string SmsSubmitted = "SmsSubmitted";
+    public const string SmsDelivered = "SmsDelivered";
+    public const string SmsFailed = "SmsFailed";
+    public const string SmsSkipped = "SmsSkipped";
+    public const string ConversationStarted = "ConversationStarted";
+    public const string ConsentRecorded = "ConsentRecorded";
+
+    // The campaign's first message after consent.
+    public const string FirstMessageSent = "FirstMessageSent";
+    public const string FirstMessageFailed = "FirstMessageFailed";
+    public const string WaitingForContent = "WaitingForContent";
+    public const string ContentAvailable = "ContentAvailable";
+
+    /// <summary>Where an event falls among others recorded at the same instant - the order the process runs in: discovered, verified, invited
+    /// by SMS, the customer's reply and consent, then the campaign's first message.</summary>
     public static int Rank(string eventType) => eventType switch
     {
         Discovered => 0,
         VerificationSubmitted => 1,
-        _ => 2
+        VerificationPassed or VerificationFailed or VerificationError or VerificationPending => 2,
+        SmsQueued => 3,
+        SmsSkipped => 3,
+        SmsSubmitted => 4,
+        SmsDelivered or SmsFailed => 5,
+        ConversationStarted => 6,
+        ConsentRecorded => 7,
+        WaitingForContent => 8,
+        ContentAvailable => 9,
+        FirstMessageSent or FirstMessageFailed => 10,
+        _ => 50
     };
 
     /// <summary>The event that records a verification outcome.</summary>

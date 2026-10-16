@@ -15,7 +15,8 @@ public interface ILeadDiscoveryService
 
     /// <summary>Newest first. <paramref name="minScore"/> keeps leads scoring at least that much; Search
     /// matches business name, type or city.</summary>
-    Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(PagedRequest request, int? minScore = null, CancellationToken cancellationToken = default);
+    Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(
+        PagedRequest request, int? minScore = null, string? verificationStatus = null, CancellationToken cancellationToken = default);
 
     /// <summary>What each run cost and produced, newest first.</summary>
     Task<PagedResult<LeadDiscoveryRunDto>> GetRunsAsync(PagedRequest request, CancellationToken cancellationToken = default);

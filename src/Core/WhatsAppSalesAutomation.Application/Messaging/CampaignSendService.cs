@@ -116,7 +116,7 @@ public class CampaignSendService : ICampaignSendService
         var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
 
         var candidates = await _context.CampaignCustomers
-            .Where(cc => cc.Status == CampaignCustomerStatus.Pending)
+            .Where(cc => cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.WaitingForContent)
             .Join(runningCampaigns, cc => cc.CampaignId, c => c.Id, (cc, c) => cc)
             .OrderBy(cc => cc.CreatedAt)
             .Take(options.MaxSendsPerRun)
@@ -155,6 +155,31 @@ public class CampaignSendService : ICampaignSendService
         return result;
     }
 
+    public async Task<FirstMessageOutcome> SendFirstMessageAsync(Guid campaignCustomerId, CancellationToken cancellationToken = default)
+    {
+        var member = await _context.CampaignCustomers.AsNoTracking().FirstOrDefaultAsync(cc => cc.Id == campaignCustomerId, cancellationToken);
+        if (member is null)
+            return new FirstMessageOutcome(FirstMessageStatus.Held, "The customer is not in the campaign.");
+
+        // Past the first message already (or finished): nothing to send, and certainly not a second first message.
+        if (member.Status is not (CampaignCustomerStatus.Pending or CampaignCustomerStatus.WaitingForContent) || member.CurrentStepNumber >= 0)
+            return new FirstMessageOutcome(FirstMessageStatus.AlreadyProcessed, $"Already {member.Status}.");
+
+        var now = _dateTime.UtcNow;
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+        var result = await ProcessOneAsync(campaignCustomerId, fromStepNumber: 0, now, options, cancellationToken);
+
+        // ProcessOneAsync reports counts only, so read where the member ended up.
+        var after = await _context.CampaignCustomers.AsNoTracking().FirstAsync(cc => cc.Id == campaignCustomerId, cancellationToken);
+        if (after.Status == CampaignCustomerStatus.WaitingForContent)
+            return new FirstMessageOutcome(FirstMessageStatus.WaitingForContent, after.StoppedReason);
+        if (after.CurrentStepNumber >= 0)
+            return new FirstMessageOutcome(FirstMessageStatus.Sent);
+        if (result.Failed > 0)
+            return new FirstMessageOutcome(FirstMessageStatus.Failed, "The send was rejected; it is retried automatically.");
+        return new FirstMessageOutcome(FirstMessageStatus.Held, "A sending rule is holding it (campaign not running yet, daily limit, quota or consent); the scheduled send will pick it up.");
+    }
+
     public async Task<SendRunResult> ForceNextStepAsync(Guid campaignId, IReadOnlyCollection<Guid>? customerIds, CancellationToken cancellationToken = default)
     {
         var campaign = await _context.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, cancellationToken)
@@ -167,7 +192,8 @@ public class CampaignSendService : ICampaignSendService
 
         var eligible = _context.CampaignCustomers.Where(cc =>
             cc.CampaignId == campaignId &&
-            (cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.AwaitingResponse));
+            (cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.WaitingForContent
+                || cc.Status == CampaignCustomerStatus.AwaitingResponse));
         if (customerIds is { Count: > 0 })
             eligible = eligible.Where(cc => customerIds.Contains(cc.CustomerId));
 
@@ -210,7 +236,8 @@ public class CampaignSendService : ICampaignSendService
             var pastEnd = campaign.ExpectedEndAt() is { } end && now > end;
             var everyoneFinished = !pastEnd
                 && await members.AnyAsync(cancellationToken)
-                && !await members.AnyAsync(cc => cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.AwaitingResponse, cancellationToken);
+                && !await members.AnyAsync(cc => cc.Status == CampaignCustomerStatus.Pending || cc.Status == CampaignCustomerStatus.WaitingForContent
+                    || cc.Status == CampaignCustomerStatus.AwaitingResponse, cancellationToken);
 
             if (!pastEnd && !everyoneFinished)
             {
@@ -395,7 +422,19 @@ public class CampaignSendService : ICampaignSendService
             _logger.LogWarning(
                 "Skipping step {StepNumber} for campaign customer {CampaignCustomerId}: template is missing or not Approved",
                 step.StepNumber, cc.Id);
-            // Leave cc exactly where it is - fixing the template lets this step send on the next tick.
+
+            // The first message of a customer whose consent is on record has no content to send: the audience row shows WaitingForContent,
+            // and the scheduled send resumes it once a template is approved. Past the first step, the row is left where it is.
+            if (cc.Status == CampaignCustomerStatus.Pending && cc.CurrentStepNumber < 0)
+            {
+                cc.Status = CampaignCustomerStatus.WaitingForContent;
+                cc.StoppedReason = template is null
+                    ? $"Step {step.StepNumber} has no template yet."
+                    : !template.IsActive ? $"The template '{template.Name}' is inactive." : $"The template '{template.Name}' is not approved by WhatsApp yet.";
+                AddHistory(cc, customer, CustomerHistoryEventTypes.WaitingForContent, CampaignCustomerStatus.Pending.ToString(), cc.Status.ToString(), cc.StoppedReason, now);
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
@@ -452,7 +491,32 @@ public class CampaignSendService : ICampaignSendService
         // Reserve the idempotency key BEFORE calling the external API - see class remarks.
         await _context.SaveChangesAsync(cancellationToken);
 
+        var wasWaiting = cc.Status == CampaignCustomerStatus.WaitingForContent;
+        var isFirstMessage = cc.CurrentStepNumber < 0;
+        var statusBefore = cc.Status.ToString();
+
         var sent = await AttemptSendAsync(message, step, template, customer, cc, campaign, now, options, cancellationToken);
+
+        if (isFirstMessage)
+        {
+            if (sent)
+            {
+                cc.StoppedReason = null;   // no longer waiting for anything
+                if (wasWaiting)
+                    AddHistory(cc, customer, CustomerHistoryEventTypes.ContentAvailable, statusBefore, cc.Status.ToString(),
+                        "The content is ready; the first message goes out now, once.", now);
+                AddHistory(cc, customer, CustomerHistoryEventTypes.FirstMessageSent, statusBefore, cc.Status.ToString(),
+                    $"Step {step.StepNumber} sent using template '{template.Name}'.", now, message.WhatsAppMessageId);
+            }
+            else
+            {
+                AddHistory(cc, customer, CustomerHistoryEventTypes.FirstMessageFailed, statusBefore, cc.Status.ToString(),
+                    message.FailureReason ?? "WhatsApp rejected the send.", now, message.WhatsAppMessageId);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
         return new SendRunResult(1, sent ? 1 : 0, sent ? 0 : 1, 0);
     }
 
@@ -501,7 +565,7 @@ public class CampaignSendService : ICampaignSendService
             message.NextAttemptAt = null;
             message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
 
-            if (cc.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.AwaitingResponse)
+            if (cc.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.WaitingForContent or CampaignCustomerStatus.AwaitingResponse)
             {
                 cc.Status = CampaignCustomerStatus.OptedOut;
                 cc.StoppedReason = "Customer is not opted in";
@@ -638,6 +702,26 @@ public class CampaignSendService : ICampaignSendService
 
         await _context.SaveChangesAsync(cancellationToken);
         return result.Success;
+    }
+
+    /// <summary>One entry on the customer's history for something that happened to them in this campaign.</summary>
+    private void AddHistory(
+        CampaignCustomer cc, Customer customer, string eventType, string? previousStatus, string? newStatus, string? reason, DateTime at,
+        string? providerReference = null)
+    {
+        _context.CustomerHistoryEvents.Add(new CustomerHistoryEvent
+        {
+            TenantId = customer.TenantId,
+            CustomerId = customer.Id,
+            EventType = eventType,
+            OccurredAtUtc = at,
+            PreviousStatus = previousStatus,
+            NewStatus = newStatus,
+            Reason = reason,
+            CampaignId = cc.CampaignId,
+            CorrelationId = cc.Id.ToString("N"),
+            ProviderReference = providerReference
+        });
     }
 
     private static string BuildIdempotencyKey(Guid campaignCustomerId, int stepNumber) => $"{campaignCustomerId}:step{stepNumber}";

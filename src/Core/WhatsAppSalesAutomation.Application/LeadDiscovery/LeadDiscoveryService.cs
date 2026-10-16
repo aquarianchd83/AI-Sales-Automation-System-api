@@ -115,6 +115,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AutoCampaignStartMode = Enum.Parse<LeadDiscoveryCampaignStartMode>(request.AutoCampaignStartMode, ignoreCase: true);
         profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
         profile.DndCheckEnabled = request.DndCheckEnabled;
+        profile.ConsentSmsEnabled = request.ConsentSmsEnabled;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -132,7 +133,8 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         return ToDto(profile, planLimit, sourceCampaignName, sourceCampaignStatus);
     }
 
-    public async Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(PagedRequest request, int? minScore = null, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(
+        PagedRequest request, int? minScore = null, string? verificationStatus = null, CancellationToken cancellationToken = default)
     {
         var query = _context.DiscoveredLeads.AsNoTracking();
 
@@ -145,6 +147,18 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         if (minScore is { } score)
             query = query.Where(l => l.LeadScore >= score);
 
+        if (!string.IsNullOrWhiteSpace(verificationStatus))
+        {
+            if (!Enum.TryParse<LeadDiscoveryVerificationStatus>(verificationStatus, ignoreCase: true, out var status))
+                throw new FluentValidation.ValidationException($"Unknown verification status '{verificationStatus}'.");
+
+            query = status == LeadDiscoveryVerificationStatus.NotChecked
+                ? query.Where(l => !_context.LeadDiscoveryExecutionCustomers.Any(
+                    r => r.DiscoveredLeadId == l.Id && r.VerificationStatus != LeadDiscoveryVerificationStatus.NotChecked))
+                : query.Where(l => _context.LeadDiscoveryExecutionCustomers.Any(
+                    r => r.DiscoveredLeadId == l.Id && r.VerificationStatus == status));
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var leads = await query
@@ -153,7 +167,64 @@ public class LeadDiscoveryService : ILeadDiscoveryService
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<DiscoveredLeadDto>(leads.Select(ToDto).ToList(), totalCount, request.Page, request.PageSize);
+        return new PagedResult<DiscoveredLeadDto>(await WithResultsAsync(leads, cancellationToken), totalCount, request.Page, request.PageSize);
+    }
+
+    /// <summary>
+    /// Adds to each lead what the discovery did with it: the batch (execution) that found it, how its number came out of the DND
+    /// check and why, when it was checked, and the campaign its customer joined. A lead whose number was rejected has no customer and
+    /// stays listed, so the paid discovery can be reconciled against what it produced.
+    /// </summary>
+    private async Task<List<DiscoveredLeadDto>> WithResultsAsync(List<DiscoveredLead> leads, CancellationToken cancellationToken)
+    {
+        var leadIds = leads.Select(l => l.Id).ToList();
+        var rows = await _context.LeadDiscoveryExecutionCustomers.AsNoTracking()
+            .Where(r => r.DiscoveredLeadId != null && leadIds.Contains(r.DiscoveredLeadId.Value))
+            .OrderBy(r => r.CreatedAt)
+            .Select(r => new { LeadId = r.DiscoveredLeadId!.Value, r.ExecutionId, r.VerificationStatus, r.VerificationReasonCode, r.VerificationReason, r.VerifiedAtUtc })
+            .ToListAsync(cancellationToken);
+        var byLead = rows.GroupBy(r => r.LeadId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var customerIds = leads.Where(l => l.CustomerId != null).Select(l => l.CustomerId!.Value).ToList();
+        var memberships = customerIds.Count == 0
+            ? new List<(Guid CustomerId, Guid CampaignId)>()
+            : (await _context.CampaignCustomers.AsNoTracking()
+                    .Where(cc => customerIds.Contains(cc.CustomerId))
+                    .OrderByDescending(cc => cc.CreatedAt)
+                    .Select(cc => new { cc.CustomerId, cc.CampaignId })
+                    .ToListAsync(cancellationToken))
+                .Select(m => (m.CustomerId, m.CampaignId)).ToList();
+        var campaignIds = memberships.Select(m => m.CampaignId).Distinct().ToList();
+        var campaignNames = campaignIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _context.Campaigns.AsNoTracking().Where(c => campaignIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
+
+        return leads.Select(lead =>
+        {
+            var dto = ToDto(lead);
+            if (byLead.TryGetValue(lead.Id, out var leadRows))
+            {
+                // The batch is the execution that first recorded the lead; the check result is the latest one on record.
+                var latest = leadRows[^1];
+                dto = dto with
+                {
+                    ExecutionId = leadRows[0].ExecutionId,
+                    VerificationStatus = latest.VerificationStatus.ToString(),
+                    VerificationReasonCode = latest.VerificationReasonCode,
+                    VerificationReason = latest.VerificationReason,
+                    VerifiedAtUtc = latest.VerifiedAtUtc
+                };
+            }
+
+            if (lead.CustomerId is { } customerId)
+            {
+                var membership = memberships.FirstOrDefault(m => m.CustomerId == customerId);
+                if (membership != default && campaignNames.TryGetValue(membership.CampaignId, out var campaignName))
+                    dto = dto with { CampaignName = campaignName };
+            }
+
+            return dto;
+        }).ToList();
     }
 
     public async Task<PagedResult<LeadDiscoveryRunDto>> GetRunsAsync(PagedRequest request, CancellationToken cancellationToken = default)
@@ -294,7 +365,7 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
         p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
-        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled);
+        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled, p.ConsentSmsEnabled);
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,

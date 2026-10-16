@@ -80,7 +80,18 @@ public record LeadDiscoveryExecutionCustomerDto(
     string? VerificationReason = null,
     DateTime? VerifiedAtUtc = null,
     /// <summary>The name on the CRM customer created for this row (the named contact, else the business) - null when no customer exists, or it was since deleted.</summary>
-    string? CrmCustomerName = null);
+    string? CrmCustomerName = null,
+    /// <summary>The campaign this execution generated, when the row's customer was added to it; null otherwise.</summary>
+    string? CampaignName = null,
+    /// <summary>Pending, Submitted, Delivered or Failed - the SMS inviting the customer to chat on WhatsApp; null when none was sent. Submitted is not delivered.</summary>
+    string? ConsentSmsStatus = null,
+    string? ConsentSmsFailureReason = null,
+    /// <summary>When the customer's own WhatsApp message answered the invitation and consent was recorded; null until then.</summary>
+    DateTime? ConsentRecordedAtUtc = null,
+    /// <summary>Why no consent SMS went to this row, in words - "Not sent: ..." - so the column is never an unexplained blank. Null when an SMS was sent.</summary>
+    string? ConsentSmsNote = null,
+    /// <summary>True when the SMS was not sent because the consent SMS switch in the discovery profile is Off, so the screen can link to where it is turned on.</summary>
+    bool ConsentSmsNeedsSetting = false);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

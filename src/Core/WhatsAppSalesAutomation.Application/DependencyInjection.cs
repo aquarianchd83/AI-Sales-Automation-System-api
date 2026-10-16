@@ -61,6 +61,7 @@ public static class DependencyInjection
         services.Configure<CostAssumptionsOptions>(configuration.GetSection("Costing"));
         services.Configure<FxOptions>(configuration.GetSection("Fx"));
         services.AddScoped<IPricingService, PricingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentInvitationService, WhatsAppSalesAutomation.Application.Consent.ConsentInvitationService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Onboarding.IOnboardingService, WhatsAppSalesAutomation.Application.Onboarding.OnboardingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Tenancy.IKeywordSuggestionService, WhatsAppSalesAutomation.Application.Tenancy.KeywordSuggestionService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.LeadDiscovery.ILeadDiscoveryKeywordSuggestionService, WhatsAppSalesAutomation.Application.LeadDiscovery.LeadDiscoveryKeywordSuggestionService>();
@@ -165,6 +166,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformConfigurationService, PlatformConfigurationService>();
         services.AddScoped<IPlatformAwsSettingsService, PlatformAwsSettingsService>();
         services.AddScoped<IPlatformDeliverySettingsService, PlatformDeliverySettingsService>();
+        services.AddScoped<IPlatformIntegrationSettingsService, PlatformIntegrationSettingsService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();

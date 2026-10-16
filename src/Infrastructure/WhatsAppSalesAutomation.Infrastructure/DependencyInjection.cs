@@ -285,8 +285,16 @@ public static class DependencyInjection
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
         }
 
-        // Simulated until a real mobile-number verification provider is chosen; it replaces this registration only.
-        services.AddScoped<IPhoneVerificationProvider, WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
+        // The DND check and the consent SMS go to the simulator or to a third-party API, as the platform admin chose on the Integrations
+        // page (absent settings mean the simulator). Read per request, so a save is live without a restart.
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.ConsentSmsIntegrationOptions>(configuration.GetSection("Integrations:ConsentSms"));
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.DndCheckIntegrationOptions>(configuration.GetSection("Integrations:DndCheck"));
+        services.AddHttpClient();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>();
+        services.AddScoped<IPhoneVerificationProvider, WhatsAppSalesAutomation.Infrastructure.Integrations.RoutingPhoneVerificationProvider>();
+        services.AddScoped<IConsentSmsSender, WhatsAppSalesAutomation.Infrastructure.Integrations.RoutingConsentSmsSender>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Platform.IIntegrationTester, WhatsAppSalesAutomation.Infrastructure.Integrations.IntegrationTester>();
 
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddHttpClient<GoogleEmbeddingClient>();
