@@ -1,5 +1,6 @@
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
@@ -39,20 +40,21 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 {
     public const int MaxSuggestions = 15;
 
-    /// <summary>Lead discovery keywords are always written by ChatGPT (the OpenAI key saved under Configuration > AI Providers), whichever provider
-    /// the platform uses for customer conversations. With no OpenAI key the suggestions fall back to the built-in ones.</summary>
-    private const string AiProviderName = "OpenAI";
-
     private const string SystemPrompt =
         "You are a local-search expert. Reply with ONLY a JSON array of strings - no prose, no code fences.";
 
     private readonly IAiTextGenerator _ai;
     private readonly IValidator<SuggestLeadKeywordsRequest> _validator;
 
-    public LeadDiscoveryKeywordSuggestionService(IAiTextGenerator ai, IValidator<SuggestLeadKeywordsRequest> validator)
+    private readonly IAiFeatureRouting _routing;
+
+    /// <summary>The engine is the platform admin's choice for discovery leads (Integrations page): the simulator, or ChatGPT, Claude or Gemini
+    /// with the key saved under Configuration > AI Providers. It falls back to the built-in terms whenever there is no real answer.</summary>
+    public LeadDiscoveryKeywordSuggestionService(IAiTextGenerator ai, IValidator<SuggestLeadKeywordsRequest> validator, IAiFeatureRouting routing)
     {
         _ai = ai;
         _validator = validator;
+        _routing = routing;
     }
 
     public async Task<KeywordSuggestionsDto> SuggestAsync(SuggestLeadKeywordsRequest request, CancellationToken cancellationToken = default)
@@ -61,7 +63,11 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 
         var existing = new HashSet<string>(TenantBusinessDetails.NormalizeKeywords(request.Existing), StringComparer.OrdinalIgnoreCase);
 
-        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken, provider: AiProviderName);
+        // The simulator makes no outside call: the built-in terms below answer instead.
+        var choice = _routing.Resolve(AiFeatures.DiscoveryLead);
+        var reply = choice.UsesThirdParty
+            ? await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken, provider: choice.Provider)
+            : null;
         var fromAi = Clean(KeywordSuggestionService.ParseList(reply), existing);
         if (fromAi.Count > 0)
             return new KeywordSuggestionsDto(fromAi, "AI");

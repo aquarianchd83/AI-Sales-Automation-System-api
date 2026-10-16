@@ -173,6 +173,17 @@ public static class AppSettingCatalog
         new("Integrations:DndCheck:SenderId", "Integrations", IsSecret: false),
         new("Integrations:DndCheck:TimeoutSeconds", "Integrations", IsSecret: false),
 
+        // Which engine each AI feature runs on: the simulator or ChatGPT / Claude / Gemini (the keys are the AiProviders:* ones). Kept on the
+        // Integrations page (PlatformAiFeatureSettingsService). Discovery leads default to Claude, the only tool they support.
+        new("Integrations:Ai:DiscoveryLead:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how discovery lead keyword suggestions are produced.", DefaultValue: "Api", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:DiscoveryLead:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for discovery leads. Only Anthropic (Claude) is supported.", DefaultValue: "Anthropic", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+        new("Integrations:Ai:KnowledgeBase:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how the knowledge base is produced.", DefaultValue: "Simulator", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:KnowledgeBase:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for the knowledge base: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "OpenAI", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+        new("Integrations:Ai:ContentGeneration:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how content generation is produced.", DefaultValue: "Simulator", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:ContentGeneration:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for content generation: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "OpenAI", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+        new("Integrations:Ai:VideoRenders:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how video renders are produced.", DefaultValue: "Simulator", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:VideoRenders:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for video renders: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "OpenAI", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+
         // The WhatsApp number the PLATFORM sends tenant notices from (plan expiring, credits running out). Managed on the Platform Admin
         // Console's WhatsApp page (PlatformWhatsAppSettingsService) and live only in this table. All are live: the sender reads them through
         // IOptionsSnapshot. Separate from the WhatsApp:* block above, which is the shared Meta app (webhooks), not a number to send from.
