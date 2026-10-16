@@ -104,7 +104,8 @@ public class CustomerService : ICustomerService
         var firstAfter = rest.Count > 0 ? rest[0].OccurredAtUtc : (DateTime?)null;
         return discovered.Concat(rest)
             .Select(e => new CustomerHistoryEventDto(
-                e.Id, e.EventType, e.EventType == CustomerHistoryEventTypes.Discovered && firstAfter is { } next && next < e.OccurredAtUtc ? next : e.OccurredAtUtc,
+                // Read back as Kind.Unspecified; without a "Z" the browser would show these digits as local time.
+                e.Id, e.EventType, DateTime.SpecifyKind(e.EventType == CustomerHistoryEventTypes.Discovered && firstAfter is { } next && next < e.OccurredAtUtc ? next : e.OccurredAtUtc, DateTimeKind.Utc),
                 e.PreviousStatus, e.NewStatus, e.Reason, e.ExecutionId, e.CampaignId, e.CorrelationId, e.ProviderReference))
             .ToList();
     }
