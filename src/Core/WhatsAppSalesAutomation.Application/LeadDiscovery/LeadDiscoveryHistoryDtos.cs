@@ -87,7 +87,11 @@ public record LeadDiscoveryExecutionCustomerDto(
     string? ConsentSmsStatus = null,
     string? ConsentSmsFailureReason = null,
     /// <summary>When the customer's own WhatsApp message answered the invitation and consent was recorded; null until then.</summary>
-    DateTime? ConsentRecordedAtUtc = null);
+    DateTime? ConsentRecordedAtUtc = null,
+    /// <summary>Why no consent SMS went to this row, in words - "Not sent: ..." - so the column is never an unexplained blank. Null when an SMS was sent.</summary>
+    string? ConsentSmsNote = null,
+    /// <summary>True when the SMS was not sent because the consent SMS switch in the discovery profile is Off, so the screen can link to where it is turned on.</summary>
+    bool ConsentSmsNeedsSetting = false);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

@@ -976,6 +976,47 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         if (profile.ConsentSmsEnabled)
             await SendConsentInvitationsAsync(run, campaignId.Value, eligible, cancellationToken);
+        else
+            await RecordConsentSmsOffAsync(run, eligible, cancellationToken);
+    }
+
+    /// <summary>The reason recorded on each customer's history, and shown on the execution, when the consent SMS is switched off.</summary>
+    internal const string ConsentSmsOffReason = "The consent SMS was Off, so no invitation was sent. Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
+
+    /// <summary>
+    /// When the consent SMS is off, each customer the campaign took still gets one history entry saying no SMS was sent and why - an empty
+    /// column would not tell the tenant whether something went wrong. Once per customer per execution, so a retried execution adds none.
+    /// </summary>
+    private async Task RecordConsentSmsOffAsync(ExecutionRun run, IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken)
+    {
+        if (customerIds.Count == 0)
+            return;
+
+        var executionId = run.Execution.Id;
+        var already = (await _context.CustomerHistoryEvents.AsNoTracking()
+                .Where(e => e.ExecutionId == executionId && e.EventType == CustomerHistoryEventTypes.SmsSkipped && customerIds.Contains(e.CustomerId))
+                .Select(e => e.CustomerId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var now = _dateTime.UtcNow;
+        foreach (var customerId in customerIds.Where(id => !already.Contains(id)))
+        {
+            _context.CustomerHistoryEvents.Add(new CustomerHistoryEvent
+            {
+                TenantId = run.Profile.TenantId,
+                CustomerId = customerId,
+                EventType = CustomerHistoryEventTypes.SmsSkipped,
+                OccurredAtUtc = now,
+                NewStatus = "NotSent",
+                Reason = ConsentSmsOffReason,
+                CampaignId = run.Execution.GeneratedCampaignId,
+                ExecutionId = executionId,
+                CorrelationId = executionId.ToString("N")
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

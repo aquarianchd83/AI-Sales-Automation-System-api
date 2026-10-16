@@ -3,6 +3,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -86,6 +87,32 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         return new PagedResult<LeadDiscoveryHistoryDayDto>(days, totalDays, query.Page, query.PageSize);
     }
 
+    /// <summary>The note shown when a row was not sent the consent SMS - never blank - and whether it is because the switch is Off (so the screen links to the setting).</summary>
+    internal static (string Note, bool NeedsSetting) ConsentSmsNoteFor(LeadDiscoveryExecutionCustomerDto row, IReadOnlyDictionary<Guid, string?> skippedReasons)
+    {
+        const string off = "Not sent: the consent SMS was Off";
+
+        if (row.CustomerId is not { } customerId)
+        {
+            return row.VerificationStatus switch
+            {
+                // Rejected by the DND check: no customer, so the consent SMS logic never runs for it.
+                nameof(LeadDiscoveryVerificationStatus.Fail) => ("Not sent: Not applicable", false),
+                nameof(LeadDiscoveryVerificationStatus.Pending) or nameof(LeadDiscoveryVerificationStatus.Error) =>
+                    ("Not sent: the DND check has not completed yet, so no customer exists to invite.", false),
+                _ => ("Not sent: Not applicable", false)
+            };
+        }
+
+        // No invitation exists for this customer. Unless a specific reason was recorded (no WhatsApp number, say), the consent SMS was Off.
+        if (skippedReasons.TryGetValue(customerId, out var reason)
+            && !string.IsNullOrWhiteSpace(reason)
+            && reason != LeadDiscoveryRunService.ConsentSmsOffReason)
+            return ($"Not sent: {reason}", false);
+
+        return (off, true);
+    }
+
     public async Task<LeadDiscoveryExecutionDetailDto> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default)
     {
         var tenantId = CurrentTenantId();
@@ -99,7 +126,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false))
             .ToListAsync(cancellationToken);
 
         var customerIds = customers.Where(c => c.CustomerId != null).Select(c => c.CustomerId!.Value).Distinct().ToList();
@@ -146,6 +173,26 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
                     : c)
                 .ToList();
         }
+
+        // Rows that got no SMS say why. The reason recorded when the invitation was skipped wins; otherwise it follows from the row.
+        var skippedReasons = customerIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : (await _context.CustomerHistoryEvents.AsNoTracking()
+                    .Where(e => e.ExecutionId == executionId && e.EventType == CustomerHistoryEventTypes.SmsSkipped && customerIds.Contains(e.CustomerId))
+                    .OrderBy(e => e.OccurredAtUtc)
+                    .Select(e => new { e.CustomerId, e.Reason })
+                    .ToListAsync(cancellationToken))
+                .GroupBy(e => e.CustomerId)
+                .ToDictionary(g => g.Key, g => g.Last().Reason);
+
+        customers = customers.Select(c =>
+        {
+            if (c.ConsentSmsStatus is not null)
+                return c;
+
+            var (note, needsSetting) = ConsentSmsNoteFor(c, skippedReasons);
+            return c with { ConsentSmsNote = note, ConsentSmsNeedsSetting = needsSetting };
+        }).ToList();
 
         var templates = await _context.LeadDiscoveryExecutionTemplates.AsNoTracking()
             .Where(t => t.ExecutionId == executionId && t.TenantId == tenantId)

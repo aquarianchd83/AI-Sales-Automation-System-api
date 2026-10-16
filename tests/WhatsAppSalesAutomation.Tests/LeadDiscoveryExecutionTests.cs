@@ -413,6 +413,86 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task With_the_consent_sms_off_each_customer_the_campaign_took_gets_one_history_entry_saying_why_no_sms_was_sent()
+    {
+        await RunWithOneRejectedAsync();   // A passes and joins the campaign, B is rejected by the DND check; the consent SMS is off
+
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        var skipped = await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped).ToListAsync();
+
+        var entry = Assert.Single(skipped);                  // the rejected number has no customer, so nothing is recorded for it
+        Assert.Equal(passed.Id, entry.CustomerId);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, entry.Reason);
+        Assert.Equal((await SingleExecutionAsync()).Id, entry.ExecutionId);
+        Assert.Empty(_consent.Sent);
+    }
+
+    [Fact]
+    public async Task The_consent_sms_column_is_never_blank_it_says_why_nothing_was_sent()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.All(detail.Customers, c => Assert.False(string.IsNullOrWhiteSpace(c.ConsentSmsNote), c.CustomerName));
+        var rejected = detail.Customers.Single(c => c.CustomerName.Contains("B"));
+        Assert.Equal("Not sent: Not applicable", rejected.ConsentSmsNote);   // the SMS logic is skipped for a number that failed the DND check
+        var passed = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal("Not sent: the consent SMS was Off", passed.ConsentSmsNote);
+        Assert.True(passed.ConsentSmsNeedsSetting);      // the screen links this one to the discovery profile
+        Assert.False(rejected.ConsentSmsNeedsSetting);   // a rejected number is not fixed by a setting
+        Assert.All(detail.Customers.Where(c => c.CustomerId is null), c => Assert.StartsWith("Not sent:", c.ConsentSmsNote));
+
+    }
+
+    [Fact]
+    public void A_business_with_no_customer_that_was_not_rejected_is_not_applicable_and_a_customer_with_a_specific_skip_reason_keeps_it()
+    {
+        LeadDiscoveryExecutionCustomerDto Row(Guid? customerId, string verification) =>
+            new(Guid.NewGuid(), customerId, null, "Closed Business", null, "Skipped", true, null, null, null, null, verification);
+
+        var none = new Dictionary<Guid, string?>();
+        Assert.Equal(("Not sent: Not applicable", false), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(null, "NotChecked"), none));
+
+        var customerId = Guid.NewGuid();
+        var reasons = new Dictionary<Guid, string?> { [customerId] = "The business's WhatsApp number is not set up, so the invitation has nowhere to point." };
+        var (note, needsSetting) = LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons);
+        Assert.StartsWith("Not sent: The business's WhatsApp number is not set up", note);
+        Assert.False(needsSetting);
+
+        // The recorded "switch is Off" reason and a missing record both read the same, and link to the setting.
+        reasons[customerId] = LeadDiscoveryRunService.ConsentSmsOffReason;
+        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
+        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
+    }
+
+    [Fact]
+    public async Task A_row_that_was_sent_an_sms_has_its_status_and_no_note()
+    {
+        await RunWithOneRejectedAsync();
+        var execution = await SingleExecutionAsync();
+        var passed = await _db.Customers.SingleAsync(c => c.FirstName == "A Contact");
+        _db.ConsentInvitations.Add(new ConsentInvitation
+        {
+            TenantId = _tenant, CustomerId = passed.Id, CampaignId = execution.GeneratedCampaignId, ExecutionId = execution.Id,
+            IdempotencyKey = "k-a", ToPhoneE164 = passed.PhoneNumberE164, Body = "b", WhatsAppLink = "https://wa.me/1",
+            Status = ConsentInvitationStatus.Delivered
+        });
+        await _db.SaveChangesAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant),
+            Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        var row = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal("Delivered", row.ConsentSmsStatus);
+        Assert.Null(row.ConsentSmsNote);
+    }
+
+    [Fact]
     public async Task The_execution_detail_shows_the_name_of_each_customer_created()
     {
         _agent.Rounds.Add(Candidates("A", "B"));
