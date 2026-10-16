@@ -122,6 +122,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<CustomerHistoryEvent> CustomerHistoryEvents => Set<CustomerHistoryEvent>();
 
+    public DbSet<ConsentInvitation> ConsentInvitations => Set<ConsentInvitation>();
+
     public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
 
     public DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments => Set<AutoCampaignEnrollment>();

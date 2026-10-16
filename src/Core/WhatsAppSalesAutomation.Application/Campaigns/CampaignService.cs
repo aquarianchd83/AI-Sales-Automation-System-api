@@ -502,7 +502,12 @@ public class CampaignService : ICampaignService
             .OrderBy(m => m.CreatedAt).Take(5)
             .ToListAsync(cancellationToken);
 
-        return CampaignJourneyBuilder.Build(campaign, member, customer, outbound, inbound);
+        var invitations = await _context.ConsentInvitations.AsNoTracking()
+            .Where(i => i.CustomerId == customerId && i.CampaignId == campaignId)
+            .ToListAsync(cancellationToken);
+        var options = await _tenantConfig.GetMessagingOptionsAsync(cancellationToken);
+
+        return CampaignJourneyBuilder.Build(campaign, member, customer, outbound, inbound, invitations, options.CustomerServiceWindowHours);
     }
 
     public async Task<PagedResult<CampaignAudienceMemberDto>> GetAudienceAsync(Guid campaignId, PagedRequest request, CancellationToken cancellationToken = default)
@@ -732,7 +737,7 @@ public class CampaignService : ICampaignService
                     m.Status.ToString(), m.Id, m.FailureReason, m.SentAt, m.DeliveredAt, m.ReadAt, null, null);
             }
 
-            var stillDue = a.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.AwaitingResponse
+            var stillDue = a.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.WaitingForContent or CampaignCustomerStatus.AwaitingResponse
                 && a.CurrentStepNumber < stepNumber;
 
             return stillDue

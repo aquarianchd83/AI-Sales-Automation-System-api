@@ -18,6 +18,15 @@ public interface ICampaignSendService
     /// null runs across every eligible campaign; given, scopes to that one campaign's customers.</summary>
     Task<SendRunResult> ProcessFollowUpsAsync(Guid? campaignId = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Sends the campaign's first message to one audience member right now - used when their consent has just been recorded, so the
+    /// message goes out while the customer is in conversation with the business. Every rule of a normal send still applies (campaign
+    /// running, consent gate, volume limits, quota), and the per-step idempotency key means it can never go out twice: a member who is
+    /// not Pending or WaitingForContent is reported AlreadyProcessed and nothing is sent. When the message content is not ready the member
+    /// becomes WaitingForContent and the scheduled send picks them up once it is.
+    /// </summary>
+    Task<FirstMessageOutcome> SendFirstMessageAsync(Guid campaignCustomerId, CancellationToken cancellationToken = default);
+
     /// <summary>Retries Failed sends within their attempt budget, and reconciles sends stuck at Queued
     /// past a staleness threshold (see the class remarks on the residual double-send risk this
     /// carries). <paramref name="campaignId"/> null runs across every eligible message; given, scopes
@@ -57,6 +66,27 @@ public record CampaignCompletionResult(IReadOnlyList<string> Completed, IReadOnl
 public record SendRunResult(int Considered, int Sent, int Failed, int Skipped)
 {
     public static readonly SendRunResult Empty = new(0, 0, 0, 0);
+}
+
+/// <summary>What <see cref="ICampaignSendService.SendFirstMessageAsync"/> did. <paramref name="Status"/> is one of <see cref="FirstMessageStatus"/>.</summary>
+public record FirstMessageOutcome(string Status, string? Detail = null);
+
+public static class FirstMessageStatus
+{
+    /// <summary>The message went out.</summary>
+    public const string Sent = "Sent";
+
+    /// <summary>The provider rejected it; the retry job tries again within its attempt budget.</summary>
+    public const string Failed = "Failed";
+
+    /// <summary>The content is not ready; the member is WaitingForContent and resumes by itself.</summary>
+    public const string WaitingForContent = "WaitingForContent";
+
+    /// <summary>A rule held it (campaign not running yet, daily cap, quota, consent gate); the scheduled send picks it up later.</summary>
+    public const string Held = "Held";
+
+    /// <summary>The member is past their first message already, so nothing was sent.</summary>
+    public const string AlreadyProcessed = "AlreadyProcessed";
 }
 
 /// <summary>The outcome of one manual RetryMessageAsync call.</summary>

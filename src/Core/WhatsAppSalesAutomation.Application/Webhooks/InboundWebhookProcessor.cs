@@ -3,7 +3,9 @@ using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.Conversations;
+using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Webhooks;
@@ -27,6 +29,7 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
     private readonly INotificationService _notifications;
     private readonly ITenantContext _tenantContext;
     private readonly ILogger<InboundWebhookProcessor> _logger;
+    private readonly IConsentInvitationService _consent;
 
     public InboundWebhookProcessor(
         IApplicationDbContext context,
@@ -36,8 +39,10 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         IConversationOrchestrator orchestrator,
         INotificationService notifications,
         ITenantContext tenantContext,
-        ILogger<InboundWebhookProcessor> logger)
+        ILogger<InboundWebhookProcessor> logger,
+        IConsentInvitationService consent)
     {
+        _consent = consent;
         _context = context;
         _dateTime = dateTime;
         _parser = parser;
@@ -309,6 +314,24 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
 
         await MarkCampaignRepliesAsync(customer.Id, isOptOut, inbound.Timestamp, cancellationToken);
 
+        // The customer messaging the business first is what answers an SMS invitation: consent is recorded with this message as the
+        // evidence, and the campaign's first message follows. Never for a STOP, and after the reply-marking above so the message that
+        // starts the conversation is not itself counted as a reply to the first message it triggers. A failure here must not lose the
+        // inbound message, which is already saved and would be dropped as a duplicate on a retry.
+        var consentOutcome = ConsentReplyOutcome.None;
+        if (!isOptOut)
+        {
+            try
+            {
+                consentOutcome = await _consent.HandleInboundMessageAsync(
+                    customer, new InboundConsentMessage(inbound.WhatsAppMessageId, inbound.TextBody, inbound.Timestamp), cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Could not handle inbound message {WhatsAppMessageId} as an answer to a consent invitation", inbound.WhatsAppMessageId);
+            }
+        }
+
         if (isOptOut)
         {
             // Opting out is itself the resolution - Phase 1's rule is "stop all automation, log,
@@ -320,7 +343,9 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
             // The AI/Human/Hybrid decision - auto-reply, escalate to a HumanHandoff, or defer entirely
             // to a human (Mode == Human) - is ConversationOrchestrator's job (architecture doc §8), not
             // this processor's. `message.Id` is populated by the SaveChangesAsync just above.
-            await _orchestrator.HandleInboundMessageAsync(conversationId, customer.Id, message.Id, cancellationToken);
+            // The campaign's first message has just gone out in answer to this "Hi" - the AI does not also reply to it.
+            if (consentOutcome.FirstMessage?.Status != FirstMessageStatus.Sent)
+                await _orchestrator.HandleInboundMessageAsync(conversationId, customer.Id, message.Id, cancellationToken);
         }
 
         await _notifications.NotifyNewInboundMessageAsync(conversationId, customer.Id, inbound.TextBody, cancellationToken);
