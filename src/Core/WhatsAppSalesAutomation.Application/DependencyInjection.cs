@@ -166,6 +166,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformConfigurationService, PlatformConfigurationService>();
         services.AddScoped<IPlatformAwsSettingsService, PlatformAwsSettingsService>();
         services.AddScoped<IPlatformDeliverySettingsService, PlatformDeliverySettingsService>();
+        services.AddScoped<IPlatformIntegrationSettingsService, PlatformIntegrationSettingsService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();
