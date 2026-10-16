@@ -115,6 +115,18 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
     {
         var steps = NotStartedSteps();
 
+        // Where the popup was opened from decides whether Meta's code can be exchanged at all (the address has to be an HTTPS one listed
+        // in the Meta app's Valid OAuth Redirect URIs and Allowed Domains), so it is the first thing to look at when the exchange is refused.
+        // Address and path only: a query string or fragment is dropped before it reaches the log.
+        _logger.LogInformation("Meta onboarding for tenant {TenantId}: popup opened from {PageAddress}, client event {ClientEvent}",
+            tenantId, DescribePage(request.PageUrl)?.Address ?? "(not reported)", Cap(request.ClientEvent));
+
+        // Whether Meta's "finished" message reached the page. When it did not (no event, no ids) the sign-up was most likely left
+        // unfinished in the popup, and the code that comes back is then not one Meta will exchange. Only presence is logged, not the ids.
+        _logger.LogInformation(
+            "Meta onboarding for tenant {TenantId}: code returned {HasCode}, business account id reported {HasWaba}, phone number id reported {HasPhone}",
+            tenantId, !string.IsNullOrWhiteSpace(request.Code), !string.IsNullOrWhiteSpace(request.WabaId), !string.IsNullOrWhiteSpace(request.PhoneNumberId));
+
         if (!PlatformReady)
         {
             _logger.LogWarning("Meta onboarding unavailable for tenant {TenantId}: the platform Meta App id, secret or Embedded Signup configuration id is not set.", tenantId);
@@ -143,7 +155,7 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
         }
 
         // 2. code -> business token
-        var exchange = await ExchangeCodeAsync(request.Code.Trim(), cancellationToken);
+        var exchange = await ExchangeCodeAsync(request.Code.Trim(), request.PageUrl, tenantId, cancellationToken);
         if (exchange.Error is not null)
             return Fail(tenantId, MetaSignupSteps.Authorization, steps, exchange.Error, await CurrentConfigAsync(tenantId, cancellationToken));
 
@@ -386,21 +398,94 @@ public class MetaEmbeddedSignupService : IMetaEmbeddedSignupService
 
     // ---- Meta calls ---------------------------------------------------------------------------------------------------
 
-    private async Task<(string? Token, MetaErrorInfo? Error)> ExchangeCodeAsync(string code, CancellationToken cancellationToken)
+    /// <summary>The page that opened the popup, reduced to what is safe to log and to send as a redirect address: http(s) only, no
+    /// credentials, no query or fragment in <c>Address</c>. Null when nothing usable was reported.</summary>
+    private static (string Address, string Origin, string PageWithQuery)? DescribePage(string? pageUrl)
     {
-        // Documented as a GET with the secret in the query; the typed client has its loggers removed (see DependencyInjection).
+        if (string.IsNullOrWhiteSpace(pageUrl) || pageUrl.Length > 500
+            || !Uri.TryCreate(pageUrl.Trim(), UriKind.Absolute, out var page)
+            || (page.Scheme != Uri.UriSchemeHttps && page.Scheme != Uri.UriSchemeHttp)
+            || !string.IsNullOrEmpty(page.UserInfo))
+            return null;
+
+        return (page.GetLeftPart(UriPartial.Path), page.GetLeftPart(UriPartial.Authority), page.GetLeftPart(UriPartial.Query));
+    }
+
+    /// <summary>
+    /// Meta ties an authorization code to the redirect address it was issued for. For the JavaScript SDK popup that address is not
+    /// something this server is told, so a "redirect_uri mismatch" (code 100, subcode 36008) is retried with the forms Meta is
+    /// reported to accept: none (what Meta documents - tried first), an empty one, then the page that opened the popup (its address
+    /// and its origin). Any other answer, success or not, ends the attempts at once, and the variant that worked is logged so it
+    /// can be made the only one. The code and secret never reach the log. The code lives about 30 seconds, so nothing here waits.
+    /// </summary>
+    private async Task<(string? Token, MetaErrorInfo? Error)> ExchangeCodeAsync(string code, string? pageUrl, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var variants = new List<(string Name, string? RedirectUri)>
+        {
+            ("none", null),
+            ("empty", string.Empty),
+        };
+        if (DescribePage(pageUrl) is { } page)
+        {
+            variants.Add(("page", page.PageWithQuery));
+            if (page.Origin != page.PageWithQuery && page.Origin + "/" != page.PageWithQuery)
+                variants.Add(("origin", page.Origin));
+        }
+
+        MetaErrorInfo? last = null;
+        foreach (var (name, redirectUri) in variants)
+        {
+            // Documented as a GET with the secret in the query; the typed client has its loggers removed (see DependencyInjection).
+            var path = "oauth/access_token" +
+                       $"?client_id={Uri.EscapeDataString(Platform.AppId)}" +
+                       $"&client_secret={Uri.EscapeDataString(Platform.AppSecret)}" +
+                       $"&code={Uri.EscapeDataString(code)}" +
+                       (redirectUri is null ? string.Empty : $"&redirect_uri={Uri.EscapeDataString(redirectUri)}");
+            var call = await SendAsync(HttpMethod.Get, path, null, null, cancellationToken);
+
+            if (call.Error is null)
+            {
+                var token = call.Json!.Value.TryGetProperty("access_token", out var t) ? t.GetString() : null;
+                if (string.IsNullOrWhiteSpace(token))
+                    return (null, new MetaErrorInfo(200, 190, null, "no access_token in the exchange response", null));
+
+                _logger.LogInformation("Meta code exchange for tenant {TenantId} succeeded with redirect_uri variant {Variant}", tenantId, name);
+                return (token, null);
+            }
+
+            last = call.Error;
+            if (call.Error is not { Code: 100, Subcode: 36008 })
+                return (null, call.Error);
+
+            _logger.LogInformation("Meta code exchange for tenant {TenantId} refused redirect_uri variant {Variant} (code 100, subcode 36008)", tenantId, name);
+        }
+
+        // Every form was refused. Before blaming the code, find out whether Meta accepts this platform app's id and secret at all:
+        // a stale or wrong secret (or an id from another app) makes every exchange fail whatever the code is.
+        await ProbePlatformCredentialsAsync(tenantId, cancellationToken);
+        return (null, last);
+    }
+
+    /// <summary>Asks Meta for an app access token with the platform's app id and secret (the documented client-credentials call, no
+    /// user involved) and logs whether it was accepted. Diagnostic only - the token is never read or kept, and nothing secret is logged.</summary>
+    private async Task ProbePlatformCredentialsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
         var path = "oauth/access_token" +
                    $"?client_id={Uri.EscapeDataString(Platform.AppId)}" +
                    $"&client_secret={Uri.EscapeDataString(Platform.AppSecret)}" +
-                   $"&code={Uri.EscapeDataString(code)}";
+                   "&grant_type=client_credentials";
         var call = await SendAsync(HttpMethod.Get, path, null, null, cancellationToken);
-        if (call.Error is not null)
-            return (null, call.Error);
 
-        var token = call.Json!.Value.TryGetProperty("access_token", out var t) ? t.GetString() : null;
-        return string.IsNullOrWhiteSpace(token)
-            ? (null, new MetaErrorInfo(200, 190, null, "no access_token in the exchange response", null))
-            : (token, null);
+        if (call.Error is null)
+            _logger.LogWarning(
+                "Meta accepts the platform app id and secret (app {AppId}), so the refusal above is about the code itself, not the app credentials: " +
+                "the sign-up was probably not finished in the popup, was done under another Meta app, or the code was used or expired before the exchange (tenant {TenantId})",
+                Platform.AppId, tenantId);
+        else
+            _logger.LogWarning(
+                "Meta REJECTS the platform app id and secret (app {AppId}): HTTP {HttpStatus}, code {MetaCode}, subcode {MetaSubcode}, trace {TraceId}, message {MetaMessage}. " +
+                "Fix WhatsApp:AppId / WhatsApp:AppSecret in the platform settings - every exchange will fail until then (tenant {TenantId})",
+                Platform.AppId, call.Error.HttpStatus, call.Error.Code, call.Error.Subcode, call.Error.TraceId, Cap(call.Error.Message), tenantId);
     }
 
     private async Task<(List<string> Ids, MetaErrorInfo? Error)> GetGrantedWabaIdsAsync(string token, CancellationToken cancellationToken)
