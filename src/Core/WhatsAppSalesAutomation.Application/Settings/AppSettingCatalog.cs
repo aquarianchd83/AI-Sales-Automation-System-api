@@ -82,14 +82,17 @@ public static class AppSettingCatalog
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),
         new("AiProviders:EmbeddingProvider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"OpenAI\" or \"Google\" - provider that embeds knowledge-base text for every tenant. Live once saved."),
         new("AiProviders:SimulatedFailureRatePercent", "AiProviders", IsSecret: false),
+        new("AiProviders:Anthropic:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Claude off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Anthropic:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:ApiVersion", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:BaseUrl", "AiProviders", IsSecret: false),
+        new("AiProviders:OpenAI:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns ChatGPT off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:OpenAI:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:OpenAI:ChatModel", "AiProviders", IsSecret: false),
         new("AiProviders:OpenAI:EmbeddingModel", "AiProviders", IsSecret: false),
         new("AiProviders:OpenAI:BaseUrl", "AiProviders", IsSecret: false),
+        new("AiProviders:Google:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Gemini off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Google:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:Google:ChatModel", "AiProviders", IsSecret: false),
         new("AiProviders:Google:EmbeddingModel", "AiProviders", IsSecret: false),
@@ -183,6 +186,10 @@ public static class AppSettingCatalog
         new("Integrations:Ai:ContentGeneration:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for content generation: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "OpenAI", Options: new[] { "OpenAI", "Anthropic", "Google" }),
         new("Integrations:Ai:VideoRenders:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how video renders are produced.", DefaultValue: "Simulator", Options: new[] { "Simulator", "Api" }),
         new("Integrations:Ai:VideoRenders:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for video renders: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "OpenAI", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+        new("Integrations:Ai:BusinessKeywords:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how the domain keyword suggestions are produced.", DefaultValue: "Api", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:DiscoveryKeywords:Mode", "Integrations", IsSecret: false, Description: "\"Simulator\" or \"Api\" - how the lead discovery AI suggest is produced.", DefaultValue: "Api", Options: new[] { "Simulator", "Api" }),
+        new("Integrations:Ai:DiscoveryKeywords:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for the lead discovery AI suggest: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "Anthropic", Options: new[] { "OpenAI", "Anthropic", "Google" }),
+        new("Integrations:Ai:BusinessKeywords:Provider", "Integrations", IsSecret: false, Description: "Third-party tool for the domain keyword suggestions: OpenAI (ChatGPT), Anthropic (Claude) or Google (Gemini).", DefaultValue: "Anthropic", Options: new[] { "OpenAI", "Anthropic", "Google" }),
 
         // The WhatsApp number the PLATFORM sends tenant notices from (plan expiring, credits running out). Managed on the Platform Admin
         // Console's WhatsApp page (PlatformWhatsAppSettingsService) and live only in this table. All are live: the sender reads them through

@@ -41,6 +41,13 @@ public class AiFeatureSettingsTests
         public AiCredentials Get() => new(Provider, Embedding, ClaudeKey, "m", "v", "u", OpenAiKey, "m", "e", "u", GeminiKey, "m", "e", "u");
     }
 
+    private sealed class FixedCredentials : IPlatformAiConfigProvider
+    {
+        private readonly AiCredentials _value;
+        public FixedCredentials(AiCredentials value) => _value = value;
+        public AiCredentials Get() => _value;
+    }
+
     private sealed class FakeAi : IAiTextGenerator
     {
         public string? Reply { get; set; } = "OK";
@@ -53,7 +60,7 @@ public class AiFeatureSettingsTests
         }
     }
 
-    private static PlatformAiFeatureSettingsService Service(MemoryStore store, FakeCredentials? credentials = null, FakeAi? ai = null) =>
+    private static PlatformAiFeatureSettingsService Service(MemoryStore store, IPlatformAiConfigProvider? credentials = null, FakeAi? ai = null) =>
         new(store, credentials ?? new FakeCredentials(), ai ?? new FakeAi());
 
     private static AiFeatureChannelRequest Sim() => new("Simulator", "OpenAI");
@@ -73,6 +80,8 @@ public class AiFeatureSettingsTests
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.KnowledgeBase));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.ContentGeneration));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.VideoRenders));
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, AiFeatures.SupportedProviders(AiFeatures.BusinessKeywords));
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, AiFeatures.SupportedProviders(AiFeatures.DiscoveryKeywords));
         Assert.Empty(AiFeatures.SupportedProviders("Payroll"));
     }
 
@@ -99,6 +108,96 @@ public class AiFeatureSettingsTests
         Assert.Equal("Simulator", dto.KnowledgeBase.Mode);
         Assert.Equal("Simulator", dto.ContentGeneration.Mode);
         Assert.Equal("Simulator", dto.VideoRenders.Mode);
+    }
+
+    [Fact]
+    public async Task Business_keywords_were_always_on_a_third_party_tool_so_they_stay_on_Claude_until_chosen()
+    {
+        var dto = await Service(new MemoryStore()).GetAsync();
+
+        Assert.Equal("Api", dto.BusinessKeywords.Mode);
+        Assert.Equal("Anthropic", dto.BusinessKeywords.Provider);
+        Assert.True(dto.BusinessKeywords.IsLive);
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, dto.BusinessKeywords.SupportedProviders);
+    }
+
+    [Fact]
+    public async Task Discovery_keywords_are_their_own_choice_apart_from_the_discovery_agent()
+    {
+        var store = new MemoryStore();
+
+        var dto = await Service(store).UpdateAsync(Valid() with { DiscoveryKeywords = Api("OpenAI") }, null);
+
+        Assert.Equal("OpenAI", store.Rows["Integrations:Ai:DiscoveryKeywords:Provider"]);
+        Assert.Equal("OpenAI", dto.DiscoveryKeywords.Provider);
+        Assert.Equal("Anthropic", dto.DiscoveryLead.Provider); // the agent is untouched
+        Assert.Equal(new[] { "Anthropic" }, dto.DiscoveryLead.SupportedProviders);
+    }
+
+    [Fact]
+    public async Task Saves_the_business_keywords_choice_and_leaves_it_alone_when_the_request_omits_it()
+    {
+        var store = new MemoryStore();
+
+        await Service(store).UpdateAsync(Valid() with { BusinessKeywords = Api("Google") }, null);
+        Assert.Equal("Api", store.Rows["Integrations:Ai:BusinessKeywords:Mode"]);
+        Assert.Equal("Google", store.Rows["Integrations:Ai:BusinessKeywords:Provider"]);
+
+        var other = new MemoryStore();
+        await Service(other).UpdateAsync(Valid(), null);
+        Assert.DoesNotContain(other.Rows.Keys, k => k.Contains("BusinessKeywords"));
+    }
+
+    [Fact]
+    public async Task Refuses_business_keywords_on_a_tool_whose_key_is_not_saved_and_saves_nothing()
+    {
+        var store = new MemoryStore();
+
+        var error = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(store, new FakeCredentials { GeminiKey = null }).UpdateAsync(Valid() with { BusinessKeywords = Api("Google") }, null));
+
+        Assert.Contains(error.Errors, e => e.PropertyName == "BusinessKeywords.Provider" && e.ErrorMessage.Contains("No Gemini key"));
+        Assert.Empty(store.Rows);
+    }
+
+    [Fact]
+    public async Task Refuses_a_tool_that_is_turned_off_under_AI_Providers_even_with_its_key_saved()
+    {
+        var store = new MemoryStore();
+        var off = new AiCredentials("Simulated", "Simulated", "k", "m", "v", "u", "k", "m", "e", "u", null, "m", "e", "u", GoogleEnabled: false);
+
+        var error = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(store, new FixedCredentials(off)).UpdateAsync(Valid() with { BusinessKeywords = Api("Google") }, null));
+
+        Assert.Contains(error.Errors, e => e.PropertyName == "BusinessKeywords.Provider" && e.ErrorMessage.Contains("turned off"));
+        Assert.Empty(store.Rows);
+    }
+
+    [Fact]
+    public async Task A_saved_choice_on_a_tool_that_is_turned_off_is_kept_but_reported_not_live()
+    {
+        var store = new MemoryStore();
+        store.Rows["Integrations:Ai:DiscoveryKeywords:Mode"] = "Api";
+        store.Rows["Integrations:Ai:DiscoveryKeywords:Provider"] = "OpenAI";
+        var off = new AiCredentials("Simulated", "Simulated", "k", "m", "v", "u", null, "m", "e", "u", "g", "m", "e", "u", OpenAiEnabled: false);
+
+        var dto = await Service(store, new FixedCredentials(off)).GetAsync();
+
+        Assert.Equal("Api", dto.DiscoveryKeywords.Mode);
+        Assert.Equal("OpenAI", dto.DiscoveryKeywords.Provider);
+        Assert.False(dto.DiscoveryKeywords.ProviderEnabled);
+        Assert.False(dto.DiscoveryKeywords.IsLive);
+    }
+
+    [Fact]
+    public async Task The_test_button_works_for_business_keywords()
+    {
+        var ai = new FakeAi();
+
+        var result = await Service(new MemoryStore(), ai: ai).TestAsync(AiFeatures.BusinessKeywords, new TestAiFeatureRequest(Api("OpenAI")));
+
+        Assert.True(result.Success);
+        Assert.Equal("OpenAI", ai.LastProvider);
     }
 
     // ---- saving ----
@@ -329,12 +428,19 @@ public class AiFeatureSettingsTests
         var unset = new AiFeatureRouting(new Snapshot(new AiFeatureOptions()));
         Assert.Equal(new AiFeatureChoice(true, "Anthropic"), unset.Resolve(AiFeatures.DiscoveryLead));
         Assert.False(unset.Resolve(AiFeatures.VideoRenders).UsesThirdParty);
+        Assert.Equal(new AiFeatureChoice(true, "Anthropic"), unset.Resolve(AiFeatures.BusinessKeywords));
 
         var simulated = new AiFeatureRouting(new Snapshot(new AiFeatureOptions
         {
             DiscoveryLead = new AiFeatureOption { Mode = "Simulator", Provider = "Anthropic" },
         }));
         Assert.False(simulated.Resolve(AiFeatures.DiscoveryLead).UsesThirdParty);
+
+        var keywords = new AiFeatureRouting(new Snapshot(new AiFeatureOptions
+        {
+            BusinessKeywords = new AiFeatureOption { Mode = "Api", Provider = "google" },
+        }));
+        Assert.Equal(new AiFeatureChoice(true, "Google"), keywords.Resolve(AiFeatures.BusinessKeywords));
     }
 
     [Fact]

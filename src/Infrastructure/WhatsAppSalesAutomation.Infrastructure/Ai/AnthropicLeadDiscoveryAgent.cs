@@ -38,19 +38,28 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
     private readonly HttpClient _httpClient;
     private readonly LeadDiscoveryAgentSettings _settings;
     private readonly ILogger<AnthropicLeadDiscoveryAgent> _logger;
+    private readonly IPlatformAiConfigProvider _aiConfig;
 
     public AnthropicLeadDiscoveryAgent(
         HttpClient httpClient,
         IOptions<LeadDiscoveryAgentSettings> settings,
-        ILogger<AnthropicLeadDiscoveryAgent> logger)
+        ILogger<AnthropicLeadDiscoveryAgent> logger,
+        IPlatformAiConfigProvider aiConfig)
     {
         _httpClient = httpClient;
+        _aiConfig = aiConfig;
         _settings = settings.Value;
         _logger = logger;
     }
 
     public async Task<LeadDiscoveryAgentResult> DiscoverAsync(LeadDiscoveryAgentRequest request, CancellationToken cancellationToken = default)
     {
+        // Claude switched Off under Configuration > AI Providers: lead discovery has its own key, but the switch covers the whole application.
+        if (_aiConfig.Get() is { AnthropicEnabled: false })
+        {
+            return LeadDiscoveryAgentResult.NotConfigured("Claude (Anthropic) is turned off under Configuration > AI Providers, so lead discovery cannot run.");
+        }
+
         if (string.IsNullOrWhiteSpace(_settings.ApiKey))
         {
             return LeadDiscoveryAgentResult.NotConfigured(

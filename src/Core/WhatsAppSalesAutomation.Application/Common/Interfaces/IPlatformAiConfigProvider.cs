@@ -28,4 +28,17 @@ public record AiCredentials(
     string? GoogleApiKey,
     string GoogleChatModel,
     string GoogleEmbeddingModel,
-    string GoogleBaseUrl);
+    string GoogleBaseUrl,
+    bool AnthropicEnabled = true,
+    bool OpenAiEnabled = true,
+    bool GoogleEnabled = true)
+{
+    /// <summary>Whether the platform admin has this provider switched on. A provider that is off has no key in this record.</summary>
+    public bool IsEnabled(string provider) => provider?.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => AnthropicEnabled,
+        "openai" => OpenAiEnabled,
+        "google" => GoogleEnabled,
+        _ => true,
+    };
+}
