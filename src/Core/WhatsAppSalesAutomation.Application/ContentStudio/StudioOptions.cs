@@ -23,6 +23,10 @@ public class StudioOptions
     /// <summary>How long a signed address stays valid, in minutes. Only used in SignedUrls mode.</summary>
     public int SignedUrlMinutes { get; set; } = 60;
 
+    /// <summary>JSON describing what each kind of content needs to be ready (see ReadinessRules). Empty = the built-in rules. Platform-wide, not
+    /// tenant-overridable: readiness means the same thing for every tenant.</summary>
+    public string ReadinessRules { get; set; } = string.Empty;
+
     public StudioStorageMode ResolvedStorageMode =>
         Enum.TryParse<StudioStorageMode>(StorageMode?.Trim(), ignoreCase: true, out var mode) ? mode : StudioStorageMode.PublicBucket;
 }

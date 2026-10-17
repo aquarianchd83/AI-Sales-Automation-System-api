@@ -217,6 +217,10 @@ try
         // own doc comment).
         await FaqSeeder.SeedAsync(scope.ServiceProvider);
 
+        // The AI Content Studio's starter questionnaires (generic, healthcare, software, manufacturing) - insert-only by template key, so a
+        // platform admin's edits survive a restart (see QuestionnaireTemplateSeeder's own doc comment).
+        await QuestionnaireTemplateSeeder.SeedAsync(scope.ServiceProvider);
+
         // The platform's WhatsApp notice templates (plan expiring, credits running out ...) - one per kind of notice, insert-only, so
         // the admin's edits survive a restart. Always runs: without them no tenant notice can go out on WhatsApp.
         await PlatformTemplateSeeder.SeedAsync(scope.ServiceProvider);

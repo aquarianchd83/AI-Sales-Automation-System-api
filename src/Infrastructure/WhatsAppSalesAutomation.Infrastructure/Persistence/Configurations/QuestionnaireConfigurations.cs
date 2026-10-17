@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
 
@@ -65,9 +66,63 @@ public class BusinessFactConfiguration : IEntityTypeConfiguration<BusinessFact>
         builder.Property(f => f.Statement).IsRequired().HasMaxLength(QuestionnaireEngine.MaxFactStatementLength);
         builder.Property(f => f.SourceType).HasConversion<string>().HasMaxLength(15);
         builder.Property(f => f.SourceRef).HasMaxLength(60);
+        builder.Property(f => f.Subject).HasMaxLength(120);
+        builder.Property(f => f.Context).HasMaxLength(300);
+        builder.Property(f => f.Evidence).HasMaxLength(500);
+        builder.Property(f => f.Origin).HasConversion<string>().HasMaxLength(20).HasDefaultValue(BusinessFactOrigin.TenantProvided);
         builder.Property(f => f.Status).HasConversion<string>().HasMaxLength(15);
 
         builder.HasIndex(f => new { f.TenantId, f.Status, f.Category });
         builder.HasIndex(f => new { f.TenantId, f.SourceType, f.SourceRef });
+    }
+}
+
+public class BusinessFactRevisionConfiguration : IEntityTypeConfiguration<BusinessFactRevision>
+{
+    public void Configure(EntityTypeBuilder<BusinessFactRevision> builder)
+    {
+        builder.ToTable("BusinessFactRevisions");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.Kind).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.Category).IsRequired().HasMaxLength(60);
+        builder.Property(r => r.Subject).HasMaxLength(120);
+        builder.Property(r => r.Statement).IsRequired().HasMaxLength(QuestionnaireEngine.MaxFactStatementLength);
+        builder.Property(r => r.Context).HasMaxLength(300);
+        builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(15);
+        builder.Property(r => r.Note).HasMaxLength(300);
+
+        // The history is part of the fact's record: deleting a fact is not a thing, and neither is deleting its history from under it.
+        builder.HasOne<BusinessFact>().WithMany().HasForeignKey(r => r.FactId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(r => new { r.TenantId, r.FactId, r.Number }).IsUnique();
+    }
+}
+
+public class QuestionnaireAnswerRevisionConfiguration : IEntityTypeConfiguration<QuestionnaireAnswerRevision>
+{
+    public void Configure(EntityTypeBuilder<QuestionnaireAnswerRevision> builder)
+    {
+        builder.ToTable("QuestionnaireAnswerRevisions");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.QuestionKey).IsRequired().HasMaxLength(60);
+        builder.Property(r => r.Kind).IsRequired().HasMaxLength(15);
+
+        builder.HasOne<QuestionnaireResponse>().WithMany().HasForeignKey(r => r.ResponseId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(r => new { r.TenantId, r.ResponseId, r.CreatedAt });
+    }
+}
+
+public class KnowledgeGapDecisionConfiguration : IEntityTypeConfiguration<KnowledgeGapDecision>
+{
+    public void Configure(EntityTypeBuilder<KnowledgeGapDecision> builder)
+    {
+        builder.ToTable("KnowledgeGapDecisions");
+        builder.HasKey(d => d.Id);
+
+        builder.Property(d => d.RequirementKey).IsRequired().HasMaxLength(60);
+        builder.Property(d => d.Kind).HasConversion<string>().HasMaxLength(15);
+
+        builder.HasIndex(d => new { d.TenantId, d.RequirementKey }).IsUnique();
     }
 }

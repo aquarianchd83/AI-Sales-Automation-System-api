@@ -77,6 +77,7 @@ public static class AppSettingCatalog
         new("ContentStudio:StorageMode", "ContentStudio", IsSecret: false, Description: "\"PublicBucket\" (the platform's existing public bucket, files reached by unguessable keys) or \"SignedUrls\" (short-lived addresses). Switching needs no migration.", IsTenantOverridable: true, DefaultValue: "PublicBucket", Options: new[] { "PublicBucket", "SignedUrls" }),
         new("ContentStudio:StorageKeyPrefix", "ContentStudio", IsSecret: false, Description: "Folder studio files are stored under. Default \"studio\".", IsTenantOverridable: true, DefaultValue: "studio"),
         new("ContentStudio:SignedUrlMinutes", "ContentStudio", IsSecret: false, Description: "How long a signed address stays valid, in minutes. Only used in SignedUrls mode.", IsTenantOverridable: true, DefaultValue: "60", Options: new[] { "15", "30", "60", "120", "240" }),
+        new("ContentStudio:ReadinessRules", "ContentStudio", IsSecret: false, Description: "JSON that decides what each kind of content needs to be ready (requirements, weights, critical items, minimum scores). Leave empty to use the built-in rules. An invalid value is ignored and the built-in rules are used.", DefaultValue: ""),
 
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),

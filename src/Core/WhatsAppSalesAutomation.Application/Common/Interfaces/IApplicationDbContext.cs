@@ -187,6 +187,12 @@ public interface IApplicationDbContext
 
     DbSet<BusinessFact> BusinessFacts { get; }
 
+    DbSet<BusinessFactRevision> BusinessFactRevisions { get; }
+
+    DbSet<QuestionnaireAnswerRevision> QuestionnaireAnswerRevisions { get; }
+
+    DbSet<KnowledgeGapDecision> KnowledgeGapDecisions { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

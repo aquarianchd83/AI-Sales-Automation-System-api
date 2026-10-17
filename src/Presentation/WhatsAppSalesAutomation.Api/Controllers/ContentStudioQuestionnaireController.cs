@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
 using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 using WhatsAppSalesAutomation.Domain.Constants;
 
@@ -20,14 +21,16 @@ public class ContentStudioQuestionnaireController : ControllerBase
 {
     private readonly IQuestionnaireService _questionnaire;
     private readonly IBusinessFactService _facts;
+    private readonly IKnowledgeService _knowledge;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
     public ContentStudioQuestionnaireController(
-        IQuestionnaireService questionnaire, IBusinessFactService facts, ITenantContext tenantContext, ICurrentUserService currentUser)
+        IQuestionnaireService questionnaire, IBusinessFactService facts, IKnowledgeService knowledge, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _questionnaire = questionnaire;
         _facts = facts;
+        _knowledge = knowledge;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
     }
@@ -43,7 +46,7 @@ public class ContentStudioQuestionnaireController : ControllerBase
 
     [HttpPut("questionnaire/answers")]
     public async Task<ActionResult<QuestionnaireStateDto>> SaveAnswers([FromBody] SaveQuestionnaireAnswersRequest request, CancellationToken cancellationToken)
-        => Ok(await _questionnaire.SaveAnswersAsync(RequireTenantId(), request, cancellationToken));
+        => Ok(await _questionnaire.SaveAnswersAsync(RequireTenantId(), request, _currentUser.UserId, cancellationToken));
 
     [HttpPost("questionnaire/complete")]
     public async Task<ActionResult<QuestionnaireCompletionDto>> Complete(CancellationToken cancellationToken)
@@ -72,12 +75,53 @@ public class ContentStudioQuestionnaireController : ControllerBase
     /// <summary>Admin only: confirming a fact is true is the one thing the studio's content depends on.</summary>
     [HttpPost("facts/{id:guid}/verify")]
     [Authorize(Roles = AppRoles.Admin)]
-    public async Task<ActionResult<BusinessFactDto>> VerifyFact(Guid id, CancellationToken cancellationToken)
-        => Ok(await _facts.VerifyAsync(RequireTenantId(), id, _currentUser.UserId ?? throw new InvalidOperationException("A verification needs a signed-in user."), cancellationToken));
+    public async Task<ActionResult<BusinessFactDto>> VerifyFact(Guid id, [FromQuery] bool reconfirm = false, CancellationToken cancellationToken = default)
+        => Ok(await _facts.VerifyAsync(RequireTenantId(), id, _currentUser.UserId ?? throw new InvalidOperationException("A verification needs a signed-in user."), reconfirm, cancellationToken));
 
     [HttpPost("facts/{id:guid}/retire")]
     public async Task<ActionResult<BusinessFactDto>> RetireFact(Guid id, CancellationToken cancellationToken)
         => Ok(await _facts.RetireAsync(RequireTenantId(), id, _currentUser.UserId, cancellationToken));
+
+    /// <summary>The newest changes to the tenant's answers, optionally for one question - who changed what, and when.</summary>
+    [HttpGet("questionnaire/history")]
+    public async Task<ActionResult<IReadOnlyList<AnswerRevisionDto>>> GetAnswerHistory([FromQuery] string? questionKey, [FromQuery] int take = 50, CancellationToken cancellationToken = default)
+        => Ok(await _questionnaire.GetHistoryAsync(RequireTenantId(), questionKey, take, cancellationToken));
+
+    /// <summary>Adds proof or an end date to a fact without changing what it states.</summary>
+    [HttpPut("facts/{id:guid}/details")]
+    public async Task<ActionResult<BusinessFactDto>> UpdateFactDetails(Guid id, [FromBody] UpdateFactDetailsRequest request, CancellationToken cancellationToken)
+        => Ok(await _facts.UpdateDetailsAsync(RequireTenantId(), id, _currentUser.UserId, request, cancellationToken));
+
+    [HttpGet("facts/{id:guid}/history")]
+    public async Task<ActionResult<IReadOnlyList<BusinessFactRevisionDto>>> GetFactHistory(Guid id, CancellationToken cancellationToken)
+        => Ok(await _facts.GetHistoryAsync(RequireTenantId(), id, cancellationToken));
+
+    // ----- readiness and the missing-information workflow ----------------------------------------------------------------------------
+
+    [HttpGet("knowledge/readiness")]
+    public async Task<ActionResult<KnowledgeReadinessDto>> GetReadiness(CancellationToken cancellationToken)
+        => Ok(await _knowledge.GetReadinessAsync(RequireTenantId(), cancellationToken));
+
+    [HttpPost("knowledge/gaps/{key}/answer")]
+    public async Task<ActionResult<KnowledgeReadinessDto>> AnswerGap(string key, [FromBody] AnswerGapRequest request, CancellationToken cancellationToken)
+        => Ok(await _knowledge.AnswerGapAsync(RequireTenantId(), _currentUser.UserId, key, request, cancellationToken));
+
+    [HttpPost("knowledge/gaps/{key}/skip")]
+    public async Task<ActionResult<KnowledgeReadinessDto>> SkipGap(string key, CancellationToken cancellationToken)
+        => Ok(await _knowledge.SkipGapAsync(RequireTenantId(), _currentUser.UserId, key, cancellationToken));
+
+    [HttpPost("knowledge/gaps/{key}/defer")]
+    public async Task<ActionResult<KnowledgeReadinessDto>> DeferGap(string key, [FromBody] DeferGapRequest request, CancellationToken cancellationToken)
+        => Ok(await _knowledge.DeferGapAsync(RequireTenantId(), _currentUser.UserId, key, request, cancellationToken));
+
+    [HttpPost("knowledge/gaps/{key}/reopen")]
+    public async Task<ActionResult<KnowledgeReadinessDto>> ReopenGap(string key, CancellationToken cancellationToken)
+        => Ok(await _knowledge.ReopenGapAsync(RequireTenantId(), key, cancellationToken));
+
+    /// <summary>Checks sentences against the tenant's verified facts and flags the ones nothing supports.</summary>
+    [HttpPost("knowledge/claims/check")]
+    public async Task<ActionResult<ClaimCheckResultDto>> CheckClaims([FromBody] CheckClaimsRequest request, CancellationToken cancellationToken)
+        => Ok(await _knowledge.CheckClaimsAsync(RequireTenantId(), request, cancellationToken));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated content studio request has no tenant in scope.");
