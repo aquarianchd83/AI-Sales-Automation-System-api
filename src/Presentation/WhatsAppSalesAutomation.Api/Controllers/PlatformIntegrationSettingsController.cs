@@ -71,7 +71,7 @@ public class PlatformIntegrationSettingsController : ControllerBase
             details: $"Conversation: {(result.Conversation.Mode == "Api" ? result.Conversation.Provider : "Simulator")} " +
                      $"(embeddings {(result.Conversation.EmbeddingMode == "Api" ? result.Conversation.EmbeddingProvider : "Simulator")}), " +
                      $"discovery lead: {Describe(result.DiscoveryLead)}, knowledge base: {Describe(result.KnowledgeBase)}, " +
-                     $"content generation: {Describe(result.ContentGeneration)}, video renders: {Describe(result.VideoRenders)}",
+                     $"content generation: {Describe(result.ContentGeneration)}, video renders: {Describe(result.VideoRenders)}, business keywords: {Describe(result.BusinessKeywords)}, discovery keywords: {Describe(result.DiscoveryKeywords)}",
             cancellationToken: cancellationToken);
 
         return Ok(result);

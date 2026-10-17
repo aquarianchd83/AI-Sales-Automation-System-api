@@ -48,7 +48,7 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 
     private readonly IAiFeatureRouting _routing;
 
-    /// <summary>The engine is the platform admin's choice for discovery leads (Integrations page): the simulator, or ChatGPT, Claude or Gemini
+    /// <summary>The engine is the platform admin's choice for discovery keywords (Integrations page): the simulator, or ChatGPT, Claude or Gemini
     /// with the key saved under Configuration > AI Providers. It falls back to the built-in terms whenever there is no real answer.</summary>
     public LeadDiscoveryKeywordSuggestionService(IAiTextGenerator ai, IValidator<SuggestLeadKeywordsRequest> validator, IAiFeatureRouting routing)
     {
@@ -64,7 +64,7 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
         var existing = new HashSet<string>(TenantBusinessDetails.NormalizeKeywords(request.Existing), StringComparer.OrdinalIgnoreCase);
 
         // The simulator makes no outside call: the built-in terms below answer instead.
-        var choice = _routing.Resolve(AiFeatures.DiscoveryLead);
+        var choice = _routing.Resolve(AiFeatures.DiscoveryKeywords);
         var reply = choice.UsesThirdParty
             ? await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken, provider: choice.Provider)
             : null;
