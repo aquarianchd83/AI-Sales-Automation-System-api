@@ -39,6 +39,10 @@ public class AiProviderSettings
 
 public class AnthropicSettings
 {
+    /// <summary>The platform admin's On/Off switch (Configuration > AI Providers). Off means this provider is not used anywhere in the
+    /// application, whatever else is saved: its key is treated as absent and anything that was set to it runs on the simulator.</summary>
+    public bool Enabled { get; set; } = true;
+
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Anthropic's cheapest current model as of this codebase's knowledge cutoff (Jan 2026) -
@@ -56,6 +60,10 @@ public class AnthropicSettings
 
 public class OpenAiSettings
 {
+    /// <summary>The platform admin's On/Off switch (Configuration > AI Providers). Off means this provider is not used anywhere in the
+    /// application, whatever else is saved: its key is treated as absent and anything that was set to it runs on the simulator.</summary>
+    public bool Enabled { get; set; } = true;
+
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>See AnthropicSettings.Model's doc comment - the same "verify before relying on this"
@@ -71,6 +79,10 @@ public class OpenAiSettings
 
 public class GoogleAiSettings
 {
+    /// <summary>The platform admin's On/Off switch (Configuration > AI Providers). Off means this provider is not used anywhere in the
+    /// application, whatever else is saved: its key is treated as absent and anything that was set to it runs on the simulator.</summary>
+    public bool Enabled { get; set; } = true;
+
     public string ApiKey { get; set; } = string.Empty;
 
     public string ChatModel { get; set; } = "gemini-flash-lite-latest";

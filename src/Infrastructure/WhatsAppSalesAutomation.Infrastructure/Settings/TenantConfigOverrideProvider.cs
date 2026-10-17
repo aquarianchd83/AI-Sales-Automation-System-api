@@ -136,6 +136,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             StorageMode = overrides.GetValueOrDefault("ContentStudio:StorageMode") ?? global.StorageMode,
             StorageKeyPrefix = overrides.GetValueOrDefault("ContentStudio:StorageKeyPrefix") ?? global.StorageKeyPrefix,
             SignedUrlMinutes = ParseInt(overrides, "ContentStudio:SignedUrlMinutes", global.SignedUrlMinutes),
+            ReadinessRules = global.ReadinessRules,
         };
     }
 

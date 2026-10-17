@@ -14,7 +14,12 @@ public interface IQuestionnaireService
     /// <summary>The questionnaire for this tenant, started (and pre-filled from the business profile) the first time it is asked for.</summary>
     Task<QuestionnaireStateDto> GetStateAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
-    Task<QuestionnaireStateDto> SaveAnswersAsync(Guid tenantId, SaveQuestionnaireAnswersRequest request, CancellationToken cancellationToken = default);
+    /// <summary>Saves the given answers (the page does this on its own as the tenant types, so nothing is lost and they can resume later). Each
+    /// change is recorded in the answer history, and a fact whose answer changed is updated or sent back to Draft straight away.</summary>
+    Task<QuestionnaireStateDto> SaveAnswersAsync(Guid tenantId, SaveQuestionnaireAnswersRequest request, Guid? actorUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>The newest changes to the tenant's answers, optionally for one question.</summary>
+    Task<IReadOnlyList<AnswerRevisionDto>> GetHistoryAsync(Guid tenantId, string? questionKey, int take, CancellationToken cancellationToken = default);
 
     /// <summary>Checks every asked, required question is answered, then completes it and turns the answers into draft business facts.</summary>
     Task<QuestionnaireCompletionDto> CompleteAsync(Guid tenantId, Guid? actorUserId, CancellationToken cancellationToken = default);
@@ -37,9 +42,21 @@ public interface IBusinessFactService
     Task<BusinessFactDto> UpdateAsync(Guid tenantId, Guid id, Guid? actorUserId, SaveBusinessFactRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Records that <paramref name="actorUserId"/> confirmed the fact is true. Who may call this is decided by the endpoint.</summary>
-    Task<BusinessFactDto> VerifyAsync(Guid tenantId, Guid id, Guid actorUserId, CancellationToken cancellationToken = default);
+    /// <param name="reconfirm">Confirms again a fact that is already verified - for one that has expired or gone out of date. Without it, verifying an already
+    /// verified, current fact changes nothing: the first verification stands.</param>
+    Task<BusinessFactDto> VerifyAsync(Guid tenantId, Guid id, Guid actorUserId, bool reconfirm = false, CancellationToken cancellationToken = default);
 
     Task<BusinessFactDto> RetireAsync(Guid tenantId, Guid id, Guid? actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds how the tenant knows a fact is true and/or the date it stops being true. Does not touch what the fact states, so a verified
+    /// fact stays verified.</summary>
+    Task<BusinessFactDto> UpdateDetailsAsync(Guid tenantId, Guid id, Guid? actorUserId, UpdateFactDetailsRequest request, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<BusinessFactRevisionDto>> GetHistoryAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Records something the system or an AI model concluded about the business, as a Draft that no one has stood behind. Refused for
+    /// <see cref="Domain.Enums.BusinessFactOrigin.TenantProvided"/>: the tenant's own words come in through the other methods.</summary>
+    Task<BusinessFactDto> ProposeAsync(Guid tenantId, ProposeFactRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>The platform operator's side: the templates every tenant is asked, their versions, and publishing.</summary>

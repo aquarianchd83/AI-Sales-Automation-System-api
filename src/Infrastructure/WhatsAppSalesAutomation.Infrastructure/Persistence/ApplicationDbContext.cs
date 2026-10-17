@@ -199,6 +199,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<BusinessFact> BusinessFacts => Set<BusinessFact>();
 
+    public DbSet<BusinessFactRevision> BusinessFactRevisions => Set<BusinessFactRevision>();
+
+    public DbSet<QuestionnaireAnswerRevision> QuestionnaireAnswerRevisions => Set<QuestionnaireAnswerRevision>();
+
+    public DbSet<KnowledgeGapDecision> KnowledgeGapDecisions => Set<KnowledgeGapDecision>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();

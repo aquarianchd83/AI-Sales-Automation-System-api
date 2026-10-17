@@ -76,8 +76,29 @@ public class BusinessFact : BaseEntity, ITenantOwned
 {
     public Guid TenantId { get; set; }
 
-    /// <summary>Free grouping label, e.g. "About", "Services", "Contact".</summary>
+    /// <summary>Free grouping label, e.g. "About", "Services", "Contact". Readiness rules match facts by this.</summary>
     public string Category { get; set; } = string.Empty;
+
+    /// <summary>What the fact is about within its category ("Cataract surgery"), when that is narrower than the category.</summary>
+    public string? Subject { get; set; }
+
+    /// <summary>When or where the fact holds ("At the Pune clinic", "Until 31 December"), when it is not true everywhere and always.</summary>
+    public string? Context { get; set; }
+
+    /// <summary>How the tenant knows it is true (a signed consent form, an invoice, a lab report). Claims such as customer results need it.</summary>
+    public string? Evidence { get; set; }
+
+    public BusinessFactOrigin Origin { get; set; } = BusinessFactOrigin.TenantProvided;
+
+    /// <summary>The questionnaire response whose answer produced this fact. Null for a manual or follow-up fact.</summary>
+    public Guid? SourceResponseId { get; set; }
+
+    /// <summary>After this moment the fact is out of date and is neither counted nor asserted until it is confirmed again. Null = does not expire.</summary>
+    public DateTime? ExpiresAtUtc { get; set; }
+
+    /// <summary>For a fact that goes stale (an offer, a price): confirming it sets <see cref="ExpiresAtUtc"/> this many days ahead, so it has to be
+    /// confirmed again. Null = confirming never starts a clock.</summary>
+    public int? ReviewEveryDays { get; set; }
 
     public string Statement { get; set; } = string.Empty;
 

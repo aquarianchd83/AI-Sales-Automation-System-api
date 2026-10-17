@@ -34,7 +34,8 @@ public class QuestionnaireService : IQuestionnaireService
         return await BuildStateAsync(tenantId, response, latest, cancellationToken);
     }
 
-    public async Task<QuestionnaireStateDto> SaveAnswersAsync(Guid tenantId, SaveQuestionnaireAnswersRequest request, CancellationToken cancellationToken = default)
+    public async Task<QuestionnaireStateDto> SaveAnswersAsync(
+        Guid tenantId, SaveQuestionnaireAnswersRequest request, Guid? actorUserId = null, CancellationToken cancellationToken = default)
     {
         await StudioGate.EnsureEnabledAsync(_config, tenantId, cancellationToken);
         var (response, latest) = await LoadAsync(tenantId, createIfMissing: true, cancellationToken);
@@ -44,9 +45,12 @@ public class QuestionnaireService : IQuestionnaireService
             throw new ConflictException("This questionnaire is already completed. Choose \"Update my answers\" to change them.");
 
         var definition = await DefinitionOfAsync(response.VersionId, cancellationToken);
-        var merged = QuestionnaireEngine.ReadAnswers(response.AnswersJson);
+        var before = QuestionnaireEngine.ReadAnswers(response.AnswersJson);
+        var merged = new Dictionary<string, JsonElement>(before, StringComparer.Ordinal);
+        var touched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (key, value) in request.Answers ?? new())
         {
+            touched.Add(key);
             if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined || (value.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(value.GetString())))
                 merged.Remove(key);
             else
@@ -57,9 +61,71 @@ public class QuestionnaireService : IQuestionnaireService
         if (issues.Count > 0)
             throw ToValidationException(issues);
 
-        response.AnswersJson = QuestionnaireEngine.WriteAnswers(QuestionnaireEngine.Prune(definition, merged));
+        var after = QuestionnaireEngine.Prune(definition, merged);
+        var changed = RecordRevisions(tenantId, response.Id, before, after, touched, actorUserId);
+
+        response.AnswersJson = QuestionnaireEngine.WriteAnswers(after);
+
+        // An answer that changed after it became a fact must not leave the old words standing as a verified claim.
+        if (changed.Count > 0)
+            await SyncFactsAsync(tenantId, response.Id, definition, after, actorUserId, changed, createMissing: false, cancellationToken);
+
         await _context.SaveChangesAsync(cancellationToken);
         return await BuildStateAsync(tenantId, response, latest, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AnswerRevisionDto>> GetHistoryAsync(Guid tenantId, string? questionKey, int take, CancellationToken cancellationToken = default)
+    {
+        await StudioGate.EnsureEnabledAsync(_config, tenantId, cancellationToken);
+
+        var rows = _context.QuestionnaireAnswerRevisions.IgnoreQueryFilters().Where(r => r.TenantId == tenantId);
+        if (!string.IsNullOrWhiteSpace(questionKey))
+            rows = rows.Where(r => r.QuestionKey == questionKey);
+
+        var page = await rows.OrderByDescending(r => r.CreatedAt).Take(Math.Clamp(take, 1, 200)).ToListAsync(cancellationToken);
+        var ids = page.Where(r => r.ChangedBy != null).Select(r => r.ChangedBy!.Value).Distinct().ToList();
+        var names = ids.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _context.Users.IgnoreQueryFilters().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName ?? u.Email ?? string.Empty, cancellationToken);
+
+        return page.Select(r => new AnswerRevisionDto(
+            r.Id, r.QuestionKey, r.Kind, Parse(r.PreviousJson), Parse(r.NewJson), r.ChangedBy,
+            r.ChangedBy is { } by && names.TryGetValue(by, out var name) ? name : null, r.CreatedAt)).ToList();
+
+        static JsonElement? Parse(string? json) => json is null ? null : JsonSerializer.Deserialize<JsonElement>(json);
+    }
+
+    /// <summary>Adds an audit row for every answer that differs between <paramref name="before"/> and <paramref name="after"/>, and returns
+    /// the keys that differ. "Cleared" is the tenant removing an answer; "Hidden" is an answer dropped because an earlier answer changed.</summary>
+    private HashSet<string> RecordRevisions(
+        Guid tenantId, Guid responseId, IReadOnlyDictionary<string, JsonElement> before, IReadOnlyDictionary<string, JsonElement> after,
+        IReadOnlySet<string> touched, Guid? actorUserId)
+    {
+        var changed = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var key in before.Keys.Concat(after.Keys).Distinct(StringComparer.Ordinal))
+        {
+            before.TryGetValue(key, out var was);
+            after.TryGetValue(key, out var now);
+            var wasJson = before.ContainsKey(key) ? JsonSerializer.Serialize(was) : null;
+            var nowJson = after.ContainsKey(key) ? JsonSerializer.Serialize(now) : null;
+            if (wasJson == nowJson)
+                continue;
+
+            changed.Add(key);
+            _context.QuestionnaireAnswerRevisions.Add(new QuestionnaireAnswerRevision
+            {
+                TenantId = tenantId,
+                ResponseId = responseId,
+                QuestionKey = key,
+                PreviousJson = wasJson,
+                NewJson = nowJson,
+                Kind = wasJson is null ? "Set" : nowJson is null ? (touched.Contains(key) ? "Cleared" : "Hidden") : "Changed",
+                ChangedBy = actorUserId
+            });
+        }
+
+        return changed;
     }
 
     public async Task<QuestionnaireCompletionDto> CompleteAsync(Guid tenantId, Guid? actorUserId, CancellationToken cancellationToken = default)
@@ -83,7 +149,7 @@ public class QuestionnaireService : IQuestionnaireService
         response.CompletedAtUtc = _dateTime.UtcNow;
         response.CompletedBy = actorUserId;
 
-        var (created, updated, retired) = await SyncFactsAsync(tenantId, definition, answers, actorUserId, cancellationToken);
+        var (created, updated, retired) = await SyncFactsAsync(tenantId, response.Id, definition, answers, actorUserId, null, createMissing: true, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         return new QuestionnaireCompletionDto(await BuildStateAsync(tenantId, response, latest, cancellationToken), created, updated, retired);
@@ -253,8 +319,12 @@ public class QuestionnaireService : IQuestionnaireService
 
     /// <summary>Makes the tenant's questionnaire facts match the answers: new ones are drafted, a changed one is updated (a verified one that
     /// changed goes back to Draft), and one whose question is no longer asked or answered is retired.</summary>
+    /// <param name="onlyKeys">When given, only facts that came from these questions are looked at - used while answers are being edited, to
+    /// invalidate exactly the facts an edit touches.</param>
+    /// <param name="createMissing">False while editing: a new fact is drafted when the questionnaire is completed, not on every keystroke.</param>
     private async Task<(int Created, int Updated, int Retired)> SyncFactsAsync(
-        Guid tenantId, QuestionnaireDefinition definition, IReadOnlyDictionary<string, JsonElement> answers, Guid? actorUserId, CancellationToken cancellationToken)
+        Guid tenantId, Guid responseId, QuestionnaireDefinition definition, IReadOnlyDictionary<string, JsonElement> answers, Guid? actorUserId,
+        IReadOnlySet<string>? onlyKeys, bool createMissing, CancellationToken cancellationToken)
     {
         var wanted = QuestionnaireEngine.FactsFrom(definition, answers).ToDictionary(f => f.SourceRef, StringComparer.Ordinal);
         var existing = await _context.BusinessFacts.IgnoreQueryFilters()
@@ -265,44 +335,71 @@ public class QuestionnaireService : IQuestionnaireService
 
         foreach (var fact in existing)
         {
+            if (onlyKeys is not null && (fact.SourceRef is null || !onlyKeys.Contains(fact.SourceRef)))
+            {
+                wanted.Remove(fact.SourceRef ?? string.Empty);
+                continue;
+            }
+
             if (fact.SourceRef is null || !wanted.TryGetValue(fact.SourceRef, out var next))
             {
                 fact.Status = BusinessFactStatus.Retired;
                 fact.UpdatedBy = actorUserId;
+                await BusinessFactHistory.RecordAsync(_context, fact, BusinessFactChangeKind.Retired, "The answer behind this fact was removed or is no longer asked.", actorUserId, false, cancellationToken);
                 retired++;
                 continue;
             }
 
             wanted.Remove(fact.SourceRef);
-            if (fact.Statement == next.Statement && fact.Category == next.Category)
+            fact.SourceResponseId = responseId;
+            fact.ReviewEveryDays = next.ValidDays;
+            if (fact.Statement == next.Statement && fact.Category == next.Category && fact.Context == next.Context && fact.Subject == next.Subject)
                 continue;
 
+            var wasVerified = fact.Status == BusinessFactStatus.Verified;
             fact.Statement = next.Statement;
             fact.Category = next.Category;
+            fact.Subject = next.Subject;
+            fact.Context = next.Context;
             fact.UpdatedBy = actorUserId;
-            if (fact.Status == BusinessFactStatus.Verified)
+            if (wasVerified)
             {
                 // The wording changed, so the person who confirmed the old words has not confirmed these.
                 fact.Status = BusinessFactStatus.Draft;
                 fact.VerifiedBy = null;
                 fact.VerifiedAtUtc = null;
+                fact.ExpiresAtUtc = null;
             }
+
+            await BusinessFactHistory.RecordAsync(
+                _context, fact, wasVerified ? BusinessFactChangeKind.Invalidated : BusinessFactChangeKind.Edited,
+                wasVerified ? "The answer behind this fact changed, so it needs confirming again." : "The answer behind this fact changed.", actorUserId, false, cancellationToken);
             updated++;
         }
 
-        foreach (var next in wanted.Values)
+        if (createMissing)
         {
-            _context.BusinessFacts.Add(new BusinessFact
+            foreach (var next in wanted.Values)
             {
-                TenantId = tenantId,
-                Category = next.Category,
-                Statement = next.Statement,
-                SourceType = BusinessFactSource.Questionnaire,
-                SourceRef = next.SourceRef,
-                Status = BusinessFactStatus.Draft,
-                UpdatedBy = actorUserId
-            });
-            created++;
+                var fact = new BusinessFact
+                {
+                    TenantId = tenantId,
+                    Category = next.Category,
+                    Subject = next.Subject,
+                    Context = next.Context,
+                    Statement = next.Statement,
+                    SourceType = BusinessFactSource.Questionnaire,
+                    SourceRef = next.SourceRef,
+                    SourceResponseId = responseId,
+                    Origin = BusinessFactOrigin.TenantProvided,
+                    ReviewEveryDays = next.ValidDays,
+                    Status = BusinessFactStatus.Draft,
+                    UpdatedBy = actorUserId
+                };
+                _context.BusinessFacts.Add(fact);
+                await BusinessFactHistory.RecordAsync(_context, fact, BusinessFactChangeKind.Created, "From your answer in the questionnaire.", actorUserId, true, cancellationToken);
+                created++;
+            }
         }
 
         return (created, updated, retired);

@@ -360,9 +360,15 @@ public sealed class QuestionnaireServiceTests : IDisposable
 
         await _questionnaire.RestartAsync(_tenant);
         await _questionnaire.SaveAnswersAsync(_tenant, Save(("business_name", "\"New Name\"")));
+
+        // The old words stop being a verified claim the moment the answer behind them changes - not only once the questionnaire is completed again.
+        var whileEditing = await _db.BusinessFacts.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(BusinessFactStatus.Draft, whileEditing.Status);
+        Assert.Equal("Called New Name.", whileEditing.Statement);
+
         var again = await _questionnaire.CompleteAsync(_tenant, _admin);
 
-        Assert.Equal(1, again.FactsUpdated);
+        Assert.Equal(0, again.FactsUpdated); // already brought up to date when the answer was saved
         Assert.Equal(0, again.FactsCreated);
         var updated = await _db.BusinessFacts.IgnoreQueryFilters().SingleAsync();
         Assert.Equal(fact.Id, updated.Id);
@@ -395,9 +401,13 @@ public sealed class QuestionnaireServiceTests : IDisposable
 
         await _questionnaire.RestartAsync(_tenant);
         await _questionnaire.SaveAnswersAsync(_tenant, Save(("has_offer", "false")));
+
+        // The offer question stops being asked as soon as the answer changes, so its fact is retired then.
+        Assert.Equal(BusinessFactStatus.Retired, (await _db.BusinessFacts.IgnoreQueryFilters().SingleAsync(f => f.SourceRef == "offer")).Status);
+
         var again = await _questionnaire.CompleteAsync(_tenant, _admin);
 
-        Assert.Equal(1, again.FactsRetired);
+        Assert.Equal(0, again.FactsRetired);
         Assert.Equal(BusinessFactStatus.Retired, (await _db.BusinessFacts.IgnoreQueryFilters().SingleAsync(f => f.SourceRef == "offer")).Status);
     }
 

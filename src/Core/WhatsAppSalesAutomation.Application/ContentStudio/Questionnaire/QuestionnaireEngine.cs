@@ -25,6 +25,12 @@ public static class QuestionnaireEngine
     public const int MaxFieldLabel = 60;
     public const int MaxFactTemplate = 300;
     public const int MaxFactCategory = 60;
+    public const int MaxFactSubject = 120;
+    public const int MaxFactContext = 300;
+    public const int MaxValidDays = 3650;
+    public const int MaxHelpText = 500;
+    public const int MaxExample = 300;
+    public const int MaxGroup = 60;
 
     /// <summary>The longest statement a fact can have. The database column must be at least this wide.</summary>
     public const int MaxFactStatementLength = 4500;
@@ -37,6 +43,62 @@ public static class QuestionnaireEngine
     };
 
     private static readonly Regex KeyPattern = new("^[a-z][a-z0-9_]{0,59}$", RegexOptions.Compiled);
+
+    public const string SecretMessage = "This looks like a password, access key or card number. Please don't put secrets here - leave them out.";
+
+    private static readonly Regex[] SecretPatterns =
+    {
+        new(@"-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.Compiled),
+        new(@"\bsk-[A-Za-z0-9_\-]{20,}", RegexOptions.Compiled),
+        new(@"\bAKIA[0-9A-Z]{16}\b", RegexOptions.Compiled),
+        new(@"\bAIza[0-9A-Za-z_\-]{30,}", RegexOptions.Compiled),
+        new(@"\bgh[pousr]_[A-Za-z0-9]{30,}", RegexOptions.Compiled),
+        new(@"\bxox[baprs]-[A-Za-z0-9\-]{10,}", RegexOptions.Compiled),
+        new(@"\bEAA[A-Za-z0-9]{40,}", RegexOptions.Compiled),
+        new(@"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}", RegexOptions.Compiled),
+        new(@"\b(password|passwd|pwd|passcode|secret|api[ _\-]?key|access[ _\-]?token|auth[ _\-]?token|client[ _\-]?secret)\b\s*(is|:|=)\s*\S{4,}",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase)
+    };
+
+    private static readonly Regex CardCandidate = new(@"(?<![\d])(?:\d[ \-]?){12,18}\d(?![\d])", RegexOptions.Compiled);
+
+    /// <summary>Whether free text looks like it contains a credential: a private key, a well-known API key or token shape, "password: ...",
+    /// or a card number (13-19 digits that pass the Luhn check, so phone numbers and PIN codes are left alone). Answers become facts that
+    /// are read by AI models and shown on videos, so a secret typed into one must be refused rather than stored.</summary>
+    public static bool LooksLikeSecret(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        if (SecretPatterns.Any(p => p.IsMatch(text)))
+            return true;
+
+        foreach (Match m in CardCandidate.Matches(text))
+        {
+            var digits = new string(m.Value.Where(char.IsDigit).ToArray());
+            if (digits.Length is >= 13 and <= 19 && PassesLuhn(digits))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool PassesLuhn(string digits)
+    {
+        var sum = 0;
+        var alternate = false;
+        for (var i = digits.Length - 1; i >= 0; i--)
+        {
+            var n = digits[i] - '0';
+            if (alternate)
+            {
+                n *= 2;
+                if (n > 9) n -= 9;
+            }
+            sum += n;
+            alternate = !alternate;
+        }
+        return sum % 10 == 0;
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -139,6 +201,15 @@ public static class QuestionnaireEngine
             if (q.MaxLength is { } maxLength && (maxLength < 1 || maxLength > MaxTextLength))
                 issues.Add(new(key, $"MaxLength must be between 1 and {MaxTextLength}."));
 
+            if (q.HelpText?.Length > MaxHelpText)
+                issues.Add(new(key, $"The help text can be at most {MaxHelpText} characters."));
+            if (q.Example?.Length > MaxExample)
+                issues.Add(new(key, $"The example can be at most {MaxExample} characters."));
+            if (q.Group?.Length > MaxGroup)
+                issues.Add(new(key, $"The group name can be at most {MaxGroup} characters."));
+            if (q.RequireKnown && !q.Required)
+                issues.Add(new(key, "RequireKnown only makes sense on a required question."));
+
             if (q.Fact is not null)
             {
                 if (string.IsNullOrWhiteSpace(q.Fact.Category))
@@ -149,6 +220,12 @@ public static class QuestionnaireEngine
                     issues.Add(new(key, "A fact rule's template must contain {value}, where the answer goes."));
                 if (q.Fact.Template?.Length > MaxFactTemplate)
                     issues.Add(new(key, $"A fact rule's template can be at most {MaxFactTemplate} characters."));
+                if (q.Fact.Subject?.Length > MaxFactSubject)
+                    issues.Add(new(key, $"A fact rule's subject can be at most {MaxFactSubject} characters."));
+                if (q.Fact.Context?.Length > MaxFactContext)
+                    issues.Add(new(key, $"A fact rule's context can be at most {MaxFactContext} characters."));
+                if (q.Fact.ValidDays is { } validDays && (validDays < 1 || validDays > MaxValidDays))
+                    issues.Add(new(key, $"A fact rule's ValidDays must be between 1 and {MaxValidDays}."));
             }
 
             if (KeyPattern.IsMatch(q.Key ?? string.Empty))
@@ -260,7 +337,8 @@ public static class QuestionnaireEngine
                 continue;
 
             visible.Add(q.Key);
-            if (answers.TryGetValue(q.Key, out var answer) && IsAnswered(answer))
+            // "I don't know" is an answer for progress but says nothing a later question can depend on.
+            if (answers.TryGetValue(q.Key, out var answer) && IsAnswered(answer) && !IsSpecial(answer))
                 effective[q.Key] = answer;
         }
 
@@ -285,6 +363,28 @@ public static class QuestionnaireEngine
         JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => true,
         _ => false
     };
+
+    /// <summary>Whether the answer is "I don't know" / "I need help" / "Not applicable" rather than an answer to the question itself.</summary>
+    public static bool IsSpecial(JsonElement value) => SpecialKind(value) is not null;
+
+    /// <summary>The special answer's kind ("unknown", "need_help" or "not_applicable"), or null for anything else. A malformed marker is
+    /// reported by <see cref="ValidateForSave"/>, not here.</summary>
+    public static string? SpecialKind(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(SpecialAnswer.Property, out var kind))
+            return null;
+        return kind.ValueKind == JsonValueKind.String ? kind.GetString() : string.Empty;
+    }
+
+    /// <summary>The questions the tenant answered with a special answer, in question order: what is still unknown to the studio.</summary>
+    public static List<(string Key, string Kind)> SpecialsFrom(QuestionnaireDefinition definition, IReadOnlyDictionary<string, JsonElement> answers)
+    {
+        var visible = VisibleKeys(definition, answers);
+        return definition.Questions
+            .Where(q => visible.Contains(q.Key) && answers.TryGetValue(q.Key, out var a) && IsSpecial(a))
+            .Select(q => (q.Key, SpecialKind(answers[q.Key])!))
+            .ToList();
+    }
 
     public static bool Evaluate(ConditionDef condition, IReadOnlyDictionary<string, JsonElement> answers)
     {
@@ -357,12 +457,20 @@ public static class QuestionnaireEngine
             if (!IsAnswered(value) && value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 continue;
 
-            var problem = ValueProblem(q, value);
+            var problem = IsSpecial(value) ? SpecialProblem(q, value) : ValueProblem(q, value);
             if (problem is not null)
                 issues.Add(new(key, problem));
         }
 
         return issues;
+    }
+
+    private static string? SpecialProblem(QuestionDef q, JsonElement value)
+    {
+        var kind = SpecialKind(value);
+        if (value.EnumerateObject().Count() != 1 || kind is null || !SpecialAnswer.All.Contains(kind, StringComparer.Ordinal))
+            return "That is not a valid way to skip a question.";
+        return q.RequireKnown ? "This one needs a real answer - \"I don't know\" is not accepted here." : null;
     }
 
     /// <summary>The save checks plus: every question that is asked and required has an answer (and every required field of a structured
@@ -382,7 +490,8 @@ public static class QuestionnaireEngine
                 continue;
             }
 
-            if (q.Type == QuestionType.Structured)
+            // A tenant who said they don't know has answered; the studio treats it as a gap to follow up, not a reason to hold them here.
+            if (q.Type == QuestionType.Structured && !IsSpecial(value))
             {
                 foreach (var field in q.Fields.Where(f => f.Required))
                 {
@@ -406,7 +515,9 @@ public static class QuestionnaireEngine
                 if (value.ValueKind != JsonValueKind.String)
                     return "Answer with text.";
                 var max = q.MaxLength ?? (q.Type == QuestionType.ShortText ? DefaultShortTextLength : DefaultLongTextLength);
-                return value.GetString()!.Length > max ? $"Keep this to {max} characters or fewer." : null;
+                if (value.GetString()!.Length > max)
+                    return $"Keep this to {max} characters or fewer.";
+                return LooksLikeSecret(value.GetString()!) ? SecretMessage : null;
             }
             case QuestionType.Number:
                 return NumberProblem(value, q.Min, q.Max);
@@ -441,7 +552,8 @@ public static class QuestionnaireEngine
                         QuestionType.Number => NumberProblem(prop.Value, null, null),
                         QuestionType.Boolean => prop.Value.ValueKind is JsonValueKind.True or JsonValueKind.False ? null : "Answer yes or no.",
                         _ => prop.Value.ValueKind == JsonValueKind.String
-                            ? (prop.Value.GetString()!.Length > DefaultShortTextLength ? $"Keep this to {DefaultShortTextLength} characters or fewer." : null)
+                            ? (prop.Value.GetString()!.Length > DefaultShortTextLength ? $"Keep this to {DefaultShortTextLength} characters or fewer."
+                                : LooksLikeSecret(prop.Value.GetString()!) ? SecretMessage : null)
                             : "Answer with text."
                     };
                     if (problem is not null)
@@ -466,7 +578,7 @@ public static class QuestionnaireEngine
     // ----- facts ---------------------------------------------------------------------------------------------------------------------------
 
     /// <summary>One fact a set of answers states: the question it came from, and the words.</summary>
-    public sealed record GeneratedFact(string SourceRef, string Category, string Statement);
+    public sealed record GeneratedFact(string SourceRef, string Category, string Statement, string? Subject, string? Context, int? ValidDays);
 
     /// <summary>The facts the answers produce, one per asked, answered question that has a fact rule.</summary>
     public static List<GeneratedFact> FactsFrom(QuestionnaireDefinition definition, IReadOnlyDictionary<string, JsonElement> answers)
@@ -476,7 +588,8 @@ public static class QuestionnaireEngine
 
         foreach (var q in definition.Questions.Where(q => q.Fact is not null && visible.Contains(q.Key)))
         {
-            if (!answers.TryGetValue(q.Key, out var value) || !IsAnswered(value))
+            // "I don't know" states nothing, so it produces no fact - it shows up as a gap to follow up instead.
+            if (!answers.TryGetValue(q.Key, out var value) || !IsAnswered(value) || IsSpecial(value))
                 continue;
 
             var words = InWords(q, value);
@@ -487,7 +600,10 @@ public static class QuestionnaireEngine
             // The definition limits make this unreachable; it is the last line of defence so a fact can never overflow its column.
             if (statement.Length > MaxFactStatementLength)
                 statement = statement[..MaxFactStatementLength];
-            facts.Add(new GeneratedFact(q.Key, q.Fact.Category.Trim(), statement));
+            facts.Add(new GeneratedFact(q.Key, q.Fact.Category.Trim(), statement,
+                string.IsNullOrWhiteSpace(q.Fact.Subject) ? null : q.Fact.Subject.Trim(),
+                string.IsNullOrWhiteSpace(q.Fact.Context) ? null : q.Fact.Context.Trim(),
+                q.Fact.ValidDays));
         }
 
         return facts;

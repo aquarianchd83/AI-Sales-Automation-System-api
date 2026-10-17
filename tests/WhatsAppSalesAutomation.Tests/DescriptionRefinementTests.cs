@@ -22,6 +22,11 @@ public sealed class DescriptionRefinementTests
         }
     }
 
+    private sealed class AlwaysThirdParty : WhatsAppSalesAutomation.Application.Platform.IAiFeatureRouting
+    {
+        public WhatsAppSalesAutomation.Application.Platform.AiFeatureChoice Resolve(string feature) => new(true, "Anthropic");
+    }
+
     private readonly FakeAi _ai = new();
 
     private DescriptionRefinementService Service() => new(_ai, new RefineDescriptionRequestValidator());
@@ -91,7 +96,7 @@ public sealed class DescriptionRefinementTests
     public async Task Keyword_suggestions_are_for_the_speciality_not_the_whole_industry()
     {
         _ai.Reply = "[]";
-        var keywords = new KeywordSuggestionService(_ai, new SuggestKeywordsRequestValidator());
+        var keywords = new KeywordSuggestionService(_ai, new SuggestKeywordsRequestValidator(), new AlwaysThirdParty());
 
         await keywords.SuggestAsync(new SuggestKeywordsRequest("Healthcare", null, null, "Eye clinic"));
 
