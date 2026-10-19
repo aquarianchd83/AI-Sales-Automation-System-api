@@ -8,7 +8,8 @@ namespace WhatsAppSalesAutomation.Application.ProductKnowledge;
 
 public record AnswerEvidenceDto(Guid SourceId, string SourceName, string Location, string? Heading, string Excerpt);
 
-public record ConflictDto(Guid Id, string Fact, IReadOnlyList<ConflictValue> Values, string Status);
+/// <param name="ChosenValue">What the tenant decided is right, once they have; null while open.</param>
+public record ConflictDto(Guid Id, string Fact, IReadOnlyList<ConflictValue> Values, string Status, string? ChosenValue = null);
 
 /// <param name="Confidence">NoEvidence, Low, Medium or High - worked out by the application from verified quotations.</param>
 /// <param name="Status">The verification status, separate from confidence: PendingVerification until the tenant acts.</param>
@@ -16,7 +17,12 @@ public record ConflictDto(Guid Id, string Fact, IReadOnlyList<ConflictValue> Val
 public record KnowledgeAnswerDto(
     Guid Id, int Version, string? Summary, string? Detail, string Kind, string Confidence, string Status, string? Limitation, string? ClarifyingQuestion,
     IReadOnlyList<string> Reasons, bool IsMaterialClaim, bool HasUnsupportedClaim, bool HasConflict, string Provider, string? Model, bool IsSimulated,
-    DateTime GeneratedAt, IReadOnlyList<AnswerEvidenceDto> Evidence, IReadOnlyList<ConflictDto> Conflicts);
+    DateTime GeneratedAt, IReadOnlyList<AnswerEvidenceDto> Evidence, IReadOnlyList<ConflictDto> Conflicts, DateTime? ApprovedAt = null);
+
+/// <summary>Where the tenant's review stands, one count per question: each question is in exactly one of these.</summary>
+/// <param name="Waiting">Drafted from the sources and waiting for the tenant's check (or reopened for correction).</param>
+/// <param name="NeedsInformation">Not drafted yet, or the sources do not answer it: it needs the tenant's own input.</param>
+public record AnswerProgressDto(int Total, int Approved, int Waiting, int NeedsInformation, int Rejected, int Unknown, int NotApplicable);
 
 public record KnowledgeQuestionDto(Guid Id, string? Key, string Text, bool IsStandard, string Category, int SortOrder, KnowledgeAnswerDto? Answer);
 
@@ -32,7 +38,7 @@ public record DraftRunDto(
 /// <param name="ReadySources">Sources that have been read. Drafting needs at least one.</param>
 public record KnowledgeAnswersOverviewDto(
     IReadOnlyList<KnowledgeQuestionDto> Questions, IReadOnlyList<FeatureBenefitDto> Features, DraftRunDto? Run, int ReadySources, int Passages, string AiMode,
-    string AiProvider, int MaxCustomQuestions, int CustomQuestions);
+    string AiProvider, int MaxCustomQuestions, int CustomQuestions, AnswerProgressDto? Progress = null);
 
 public record AskQuestionRequest(string Text);
 

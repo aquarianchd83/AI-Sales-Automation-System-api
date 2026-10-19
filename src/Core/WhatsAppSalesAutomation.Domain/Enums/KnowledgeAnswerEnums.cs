@@ -26,6 +26,9 @@ public enum KnowledgeVerificationStatus
     CorrectionRequired = 2,
     Rejected = 3,
     InformationNotAvailable = 4,
+
+    /// <summary>The tenant says the question does not apply to their business. Drafting leaves it alone.</summary>
+    NotApplicable = 5,
 }
 
 public enum KnowledgeConflictStatus
@@ -40,4 +43,18 @@ public enum KnowledgeDraftRunStatus
     Running = 1,
     Completed = 2,
     Failed = 3,
+}
+
+/// <summary>What happened to an answer or a conflict - the kinds of entry in its audit trail.</summary>
+public enum KnowledgeRevisionKind
+{
+    Drafted = 0,
+    Approved = 1,
+    Edited = 2,
+    InformationProvided = 3,
+    Rejected = 4,
+    MarkedUnknown = 5,
+    MarkedNotApplicable = 6,
+    Reopened = 7,
+    ConflictResolved = 8,
 }

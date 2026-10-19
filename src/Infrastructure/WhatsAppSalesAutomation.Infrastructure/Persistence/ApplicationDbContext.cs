@@ -193,6 +193,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Domain.Entities.ProductKnowledge.KnowledgeDraftRun> KnowledgeDraftRuns => Set<Domain.Entities.ProductKnowledge.KnowledgeDraftRun>();
 
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswerRevision> KnowledgeAnswerRevisions => Set<Domain.Entities.ProductKnowledge.KnowledgeAnswerRevision>();
+
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
     public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();

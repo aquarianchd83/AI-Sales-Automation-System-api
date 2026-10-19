@@ -101,3 +101,20 @@ public class KnowledgeDraftRunConfiguration : IEntityTypeConfiguration<Knowledge
         builder.HasIndex(r => new { r.TenantId, r.CreatedAt });
     }
 }
+
+public class KnowledgeAnswerRevisionConfiguration : IEntityTypeConfiguration<KnowledgeAnswerRevision>
+{
+    public void Configure(EntityTypeBuilder<KnowledgeAnswerRevision> builder)
+    {
+        builder.ToTable("KnowledgeAnswerRevisions");
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Kind).HasConversion<string>().HasMaxLength(30);
+        builder.Property(r => r.FromStatus).HasMaxLength(30);
+        builder.Property(r => r.ToStatus).HasMaxLength(30);
+        builder.Property(r => r.FromText).HasMaxLength(2000);
+        builder.Property(r => r.ToText).HasMaxLength(2000);
+        builder.Property(r => r.Note).HasMaxLength(1000);
+        builder.Property(r => r.ActorEmail).HasMaxLength(256);
+        builder.HasIndex(r => new { r.TenantId, r.QuestionId, r.CreatedAt });
+    }
+}

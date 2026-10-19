@@ -209,3 +209,37 @@ public class KnowledgeDraftRun : BaseEntity, ITenantOwned
 
     public Guid? CreatedBy { get; set; }
 }
+
+/// <summary>
+/// One entry in the audit trail of a question's answer: drafted, approved, edited, rejected, reopened, a conflict resolved. Append-only - an
+/// approval is never overwritten, only followed by what happened next - and it records who did it and when, and what the text was before and
+/// after. Tenant approval means the tenant accepted the information; it does not prove an outside claim is true.
+/// </summary>
+public class KnowledgeAnswerRevision : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid QuestionId { get; set; }
+
+    public Guid? AnswerId { get; set; }
+
+    public Guid? ConflictId { get; set; }
+
+    public KnowledgeRevisionKind Kind { get; set; }
+
+    public string? FromStatus { get; set; }
+
+    public string? ToStatus { get; set; }
+
+    public string? FromText { get; set; }
+
+    public string? ToText { get; set; }
+
+    /// <summary>A reason, or what was chosen ("Chose 1499 for the price").</summary>
+    public string? Note { get; set; }
+
+    /// <summary>The tenant user who acted, or null when the application did (a draft).</summary>
+    public Guid? ActorUserId { get; set; }
+
+    public string? ActorEmail { get; set; }
+}

@@ -81,7 +81,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         return new KnowledgeAnswersOverviewDto(
             dtos, features.Select(ToDto).ToList(), run is null ? null : ToDto(run), sources, passages,
             route.IsOff ? AiFeatures.OffMode : route.UsesThirdParty ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode,
-            route.UsesThirdParty ? route.Provider : AiCapabilities.Simulator, limits.MaxCustomQuestions, questions.Count(q => !q.IsStandard));
+            route.UsesThirdParty ? route.Provider : AiCapabilities.Simulator, limits.MaxCustomQuestions, questions.Count(q => !q.IsStandard), ComputeProgress(dtos));
     }
 
     public async Task<DraftRunDto> GetRunAsync(Guid tenantId, Guid runId, CancellationToken cancellationToken = default)
@@ -122,7 +122,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         var question = await FindQuestionAsync(tenantId, questionId, cancellationToken);
         var candidates = await LoadCandidatesAsync(tenantId, cancellationToken);
 
-        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken);
+        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken, explicitRequest: true);
         if (result.Outcome == Outcome.Skipped)
             throw new ConflictException("This answer is already approved, so it is not replaced. Reject or correct it first to ask for another suggestion.");
         if (result.Outcome == Outcome.Failed)
@@ -268,10 +268,13 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
 
     // ----- one answer ------------------------------------------------------------------------------------------------------------
 
-    private async Task<DraftResult> DraftOneAsync(Guid tenantId, KnowledgeQuestion question, IReadOnlyList<PassageCandidate> all, CancellationToken ct)
+    private async Task<DraftResult> DraftOneAsync(
+        Guid tenantId, KnowledgeQuestion question, IReadOnlyList<PassageCandidate> all, CancellationToken ct, bool explicitRequest = false)
     {
         var previous = await _db.KnowledgeAnswers.FirstOrDefaultAsync(a => a.TenantId == tenantId && a.QuestionId == question.Id && a.IsCurrent, ct);
-        if (previous is { Status: KnowledgeVerificationStatus.VerifiedAndApproved })
+
+        // An approved answer is never replaced; a question the tenant called "not applicable" is left alone by a run (they can still ask for a suggestion).
+        if (previous is { Status: KnowledgeVerificationStatus.VerifiedAndApproved } || (!explicitRequest && previous is { Status: KnowledgeVerificationStatus.NotApplicable }))
             return new DraftResult(Outcome.Skipped, previous, null);
 
         var hints = StandardQuestions.All.FirstOrDefault(s => s.Key == question.Key)?.Hints;
@@ -383,6 +386,13 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
                 TenantId = answer.TenantId, AnswerId = answer.Id, Fact = conflict.Fact, ValuesJson = JsonSerializer.Serialize(conflict.Values, Json), DetectedAt = DateTime.UtcNow
             });
         }
+
+        _db.KnowledgeAnswerRevisions.Add(new KnowledgeAnswerRevision
+        {
+            TenantId = answer.TenantId, QuestionId = answer.QuestionId, AnswerId = answer.Id, Kind = KnowledgeRevisionKind.Drafted,
+            FromStatus = previous?.Status.ToString(), ToStatus = answer.Status.ToString(), FromText = Truncate(previous?.Summary, 2000), ToText = Truncate(answer.Summary, 2000),
+            Note = Truncate(answer.IsSimulated ? "Test data from the simulator." : $"Drafted by {answer.Provider}: {answer.Confidence} confidence, {evidence.Count} verified quotation{(evidence.Count == 1 ? string.Empty : "s")}.", 1000)
+        });
 
         await _db.SaveChangesAsync(ct);
     }
@@ -542,14 +552,16 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         return list;
     }
 
-    private async Task<KnowledgeQuestionDto> ToQuestionDtoAsync(Guid tenantId, KnowledgeQuestion question, CancellationToken ct)
+    private Task<KnowledgeQuestionDto> ToQuestionDtoAsync(Guid tenantId, KnowledgeQuestion question, CancellationToken ct) => BuildQuestionDtoAsync(_db, tenantId, question, ct);
+
+    internal static async Task<KnowledgeQuestionDto> BuildQuestionDtoAsync(IApplicationDbContext db, Guid tenantId, KnowledgeQuestion question, CancellationToken ct)
     {
-        var answer = await _db.KnowledgeAnswers.AsNoTracking().FirstOrDefaultAsync(a => a.TenantId == tenantId && a.QuestionId == question.Id && a.IsCurrent, ct);
+        var answer = await db.KnowledgeAnswers.AsNoTracking().FirstOrDefaultAsync(a => a.TenantId == tenantId && a.QuestionId == question.Id && a.IsCurrent, ct);
         if (answer is null)
             return new KnowledgeQuestionDto(question.Id, question.Key, question.Text, question.IsStandard, question.Category, question.SortOrder, null);
 
-        var evidence = await _db.AnswerEvidences.AsNoTracking().Where(e => e.TenantId == tenantId && e.AnswerId == answer.Id).ToListAsync(ct);
-        var conflicts = await _db.KnowledgeConflicts.AsNoTracking().Where(c => c.TenantId == tenantId && c.AnswerId == answer.Id).ToListAsync(ct);
+        var evidence = await db.AnswerEvidences.AsNoTracking().Where(e => e.TenantId == tenantId && e.AnswerId == answer.Id).ToListAsync(ct);
+        var conflicts = await db.KnowledgeConflicts.AsNoTracking().Where(c => c.TenantId == tenantId && c.AnswerId == answer.Id).ToListAsync(ct);
         return new KnowledgeQuestionDto(question.Id, question.Key, question.Text, question.IsStandard, question.Category, question.SortOrder, ToDto(answer, evidence, conflicts));
     }
 
@@ -558,7 +570,32 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         string.IsNullOrEmpty(a.ConfidenceReasons) ? Array.Empty<string>() : a.ConfidenceReasons.Split('\n', StringSplitOptions.RemoveEmptyEntries),
         a.IsMaterialClaim, a.HasUnsupportedClaim, a.HasConflict, a.Provider, a.Model, a.IsSimulated, a.GeneratedAt,
         evidence.Select(e => new AnswerEvidenceDto(e.SourceId, e.SourceName, e.Location, e.Heading, e.Excerpt)).ToList(),
-        conflicts.Select(c => new ConflictDto(c.Id, c.Fact, ReadValues(c.ValuesJson), c.Status.ToString())).ToList());
+        conflicts.Select(c => new ConflictDto(c.Id, c.Fact, ReadValues(c.ValuesJson), c.Status.ToString(), c.ChosenValue)).ToList(), a.ApprovedAt);
+
+    /// <summary>Each question is in exactly one state. "Needs information" is no answer yet, or sources that do not answer it.</summary>
+    internal static AnswerProgressDto ComputeProgress(IReadOnlyList<KnowledgeQuestionDto> questions)
+    {
+        int approved = 0, waiting = 0, needs = 0, rejected = 0, unknown = 0, notApplicable = 0;
+        foreach (var q in questions)
+        {
+            switch (q.Answer?.Status)
+            {
+                case nameof(KnowledgeVerificationStatus.VerifiedAndApproved): approved++; break;
+                case nameof(KnowledgeVerificationStatus.Rejected): rejected++; break;
+                case nameof(KnowledgeVerificationStatus.InformationNotAvailable): unknown++; break;
+                case nameof(KnowledgeVerificationStatus.NotApplicable): notApplicable++; break;
+                case nameof(KnowledgeVerificationStatus.CorrectionRequired): waiting++; break;
+                case null: needs++; break;
+                default:
+                    if (q.Answer!.Confidence == nameof(KnowledgeConfidence.NoEvidence))
+                        needs++;
+                    else
+                        waiting++;
+                    break;
+            }
+        }
+        return new AnswerProgressDto(questions.Count, approved, waiting, needs, rejected, unknown, notApplicable);
+    }
 
     private static IReadOnlyList<ConflictValue> ReadValues(string json)
     {

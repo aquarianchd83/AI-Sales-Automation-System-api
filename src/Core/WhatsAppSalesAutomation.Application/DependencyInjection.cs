@@ -181,6 +181,9 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftingService>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>());
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>());
+
+        // Phase 4: the tenant's decisions about the drafts, each recorded in the audit trail.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeVerificationService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeVerificationService>();
         services.AddScoped<IPlatformAiProvidersService, PlatformAiProvidersService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
