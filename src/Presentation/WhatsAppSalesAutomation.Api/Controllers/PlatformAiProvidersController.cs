@@ -8,9 +8,9 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 /// <summary>
-/// The Integrations page's AI provider cards: Simulator, ChatGPT, Claude and Gemini - on/off, key, model, Verify Connection, status,
-/// capabilities, price, measured accuracy and cost, fallback policy and the execution log. PlatformSuperAdmin only: no tenant ever reaches
-/// provider configuration, and a key is write-only (it is never returned, only a masked hint). Every change is audited.
+/// What the AI screens add to the existing provider settings: per provider, the last Verify result, declared versus verified capabilities and a
+/// measured accuracy test (on Configuration &gt; AI Providers); and the product-knowledge AI policy and the AI call log (on Integrations). The
+/// providers' own settings - On/Off, key, model, prices - are edited only through the settings API, as before. PlatformSuperAdmin only.
 /// </summary>
 [ApiController]
 [Route("api/v1/platform/ai-providers")]
@@ -30,16 +30,8 @@ public class PlatformAiProvidersController : ControllerBase
     public async Task<ActionResult<AiProvidersOverviewDto>> Get(CancellationToken cancellationToken)
         => Ok(await _providers.GetAsync(cancellationToken));
 
-    [HttpPut("{provider}")]
-    public async Task<ActionResult<AiProviderPanelDto>> Update(string provider, [FromBody] UpdateAiProviderRequest request, CancellationToken cancellationToken)
-        => Ok(await _providers.UpdateProviderAsync(provider, request, ActorId, ActorEmail, cancellationToken));
-
-    [HttpPost("{provider}/verify")]
-    public async Task<ActionResult<AiProviderCheckResultDto>> Verify(string provider, CancellationToken cancellationToken)
-        => Ok(await _providers.VerifyAsync(provider, ActorId, ActorEmail, cancellationToken));
-
     [HttpPost("{provider}/benchmark")]
-    public async Task<ActionResult<AiProviderPanelDto>> Benchmark(string provider, CancellationToken cancellationToken)
+    public async Task<ActionResult<AiProviderInsightDto>> Benchmark(string provider, CancellationToken cancellationToken)
         => Ok(await _providers.RunBenchmarkAsync(provider, ActorId, ActorEmail, cancellationToken));
 
     [HttpPut("policy")]

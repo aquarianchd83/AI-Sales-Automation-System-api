@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Infrastructure.Settings;
@@ -42,8 +43,14 @@ public class SettingsController : ControllerBase
     /// <summary>Tries each saved AI provider key (Anthropic, OpenAI, Google), or only the one named by ?provider=, by listing the provider's models - no tokens
     /// spent. Uses what is SAVED, so save first. Always 200: each result says whether its key worked.</summary>
     [HttpPost("ai-providers/verify")]
-    public async Task<ActionResult<IReadOnlyList<AiProviderCheckDto>>> VerifyAiProviders([FromServices] IAiProviderVerifier verifier, [FromQuery] string? provider, CancellationToken cancellationToken)
-        => Ok(await verifier.VerifyAsync(provider, cancellationToken));
+    public async Task<ActionResult<IReadOnlyList<AiProviderCheckDto>>> VerifyAiProviders(
+        [FromServices] IAiProviderVerifier verifier, [FromServices] IPlatformAiProvidersService insights, [FromQuery] string? provider, CancellationToken cancellationToken)
+    {
+        var checks = await verifier.VerifyAsync(provider, cancellationToken);
+        // Recorded so the screen can say when each provider was last checked, and how - the check itself is unchanged.
+        await insights.RecordChecksAsync(checks, _currentUser.UserId, _currentUser.Email ?? string.Empty, cancellationToken);
+        return Ok(checks);
+    }
 
     [HttpGet("{category}")]
     public async Task<ActionResult<SettingCategoryDto>> GetCategory(string category, CancellationToken cancellationToken)
@@ -57,6 +64,14 @@ public class SettingsController : ControllerBase
     public async Task<IActionResult> UpdateCategory(string category, [FromBody] UpdateSettingsRequest request, CancellationToken cancellationToken)
     {
         await _settingsService.UpdateCategoryAsync(category, request, _currentUser.UserId, cancellationToken);
+
+        // AI provider keys, models and switches, and the integration settings, are audited (which keys changed - never their values).
+        if (string.Equals(category, "AiProviders", StringComparison.OrdinalIgnoreCase) || string.Equals(category, "Integrations", StringComparison.OrdinalIgnoreCase))
+        {
+            var insights = HttpContext.RequestServices.GetRequiredService<IPlatformAiProvidersService>();
+            await insights.AuditSettingsChangeAsync(category, request.Values.Keys.ToList(), _currentUser.UserId, _currentUser.Email ?? string.Empty, cancellationToken);
+        }
+
         return NoContent();
     }
 

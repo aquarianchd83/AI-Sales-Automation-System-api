@@ -23,7 +23,6 @@ public class AiFeatureOptions
     public AiFeatureOption VideoRenders { get; set; } = new();
     public AiFeatureOption ProductKnowledge { get; set; } = new();
     public AiPolicyOptions Policy { get; set; } = new();
-    public AiPricingOptions Pricing { get; set; } = new();
 
     public AiFeatureOption BusinessKeywords { get; set; } = new();
 
@@ -84,21 +83,4 @@ public class AiPolicyOptions
     public int MaxRetriesPerProvider { get; set; } = 1;
 
     public int RetryDelayMs { get; set; } = 500;
-}
-
-public class AiPriceOption
-{
-    public decimal InputPer1MUsd { get; set; }
-
-    public decimal OutputPer1MUsd { get; set; }
-}
-
-/// <summary>The "Integrations:Ai:Pricing" settings: what each provider charges, as entered by the platform admin.</summary>
-public class AiPricingOptions
-{
-    public AiPriceOption OpenAI { get; set; } = new();
-
-    public AiPriceOption Anthropic { get; set; } = new();
-
-    public AiPriceOption Google { get; set; } = new();
 }

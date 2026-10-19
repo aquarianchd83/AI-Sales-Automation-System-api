@@ -21,9 +21,9 @@ using Xunit;
 namespace WhatsAppSalesAutomation.Tests;
 
 /// <summary>
-/// The Integrations page's AI provider cards: status that only says "Verified" for what was really checked, write-only keys, audited changes,
-/// the measured benchmark, the execution list, and the settings the cards are made of. Provider calls are scripted fakes; nothing here
-/// contacts a real provider.
+/// What the AI screens add around the existing provider settings: the recorded Verify result that only says "Verified" for what was really
+/// checked, audited settings saves (names, never values), the measured benchmark, capabilities, the policy and the execution list. Provider
+/// calls are scripted fakes; nothing here contacts a real provider.
 /// </summary>
 public sealed class PlatformAiProvidersServiceTests : IDisposable
 {
@@ -102,17 +102,6 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         public AiTaskPolicy Get() => Value;
     }
 
-    private sealed class FakeVerifier : IAiProviderVerifier
-    {
-        public bool KeyAccepted { get; set; } = true;
-
-        public Task<IReadOnlyList<AiProviderCheckDto>> VerifyAsync(string? provider, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<AiProviderCheckDto>>(new[]
-            {
-                new AiProviderCheckDto(provider ?? "OpenAI", true, false, KeyAccepted, KeyAccepted ? "ChatGPT accepted the API key." : "ChatGPT rejected the API key (HTTP 401).")
-            });
-    }
-
     private sealed class FakeClient : IAiCompletionClient
     {
         public Func<AiCompletionRequest, AiCompletionResult> Respond { get; set; } =
@@ -166,7 +155,6 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     private readonly FakeSettings _settings = new();
     private readonly FakeCredentials _credentials = new();
     private readonly FakePolicy _policy = new();
-    private readonly FakeVerifier _verifier = new();
     private readonly FakeClient _client = new();
     private readonly FakeRouting _routing = new();
     private readonly RecordingAudit _audit = new();
@@ -187,7 +175,7 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
                 entry.Entity.CreatedAt = Now.AddSeconds(++tick);
         };
 
-        _service = new PlatformAiProvidersService(_settings, _credentials, _policy, _verifier, _client, new DbLog(_db), _routing, _db, _audit);
+        _service = new PlatformAiProvidersService(_settings, _credentials, _policy, _client, new DbLog(_db), _routing, _db, _audit);
     }
 
     public void Dispose()
@@ -196,31 +184,30 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         _connection.Dispose();
     }
 
-    private async Task<AiProviderPanelDto> Panel(string provider) =>
+    private async Task<AiProviderInsightDto> Panel(string provider) =>
         (await _service.GetAsync()).Providers.Single(p => p.Provider == provider);
+
+    private static AiProviderCheckDto Check(string provider, bool success, string message) => new(provider, true, false, success, message);
 
     // ----- the overview ----------------------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task The_overview_lists_the_simulator_and_the_three_providers_with_what_product_knowledge_runs_on()
+    public async Task The_overview_lists_the_three_providers_with_what_product_knowledge_runs_on()
     {
         var overview = await _service.GetAsync();
 
-        Assert.Equal(new[] { "Simulator", "OpenAI", "Anthropic", "Google" }, overview.Providers.Select(p => p.Provider));
+        // The simulator is not a provider card: it is an engine choice on the Integrations page, as for every other AI feature.
+        Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, overview.Providers.Select(p => p.Provider));
         Assert.Equal("Simulator", overview.ChosenMode);
-        var simulator = overview.Providers[0];
-        Assert.True(simulator.IsSimulator);
-        Assert.Equal("Ready", simulator.Status);
-        Assert.True(simulator.ChosenForProductKnowledge);
-        Assert.Contains("can never be published as verified", simulator.LastCheckMessage);
-        Assert.False(overview.Providers[1].ChosenForProductKnowledge);
+        Assert.Equal("Simulator", overview.ChosenProvider);
+        Assert.All(overview.Providers, p => Assert.False(p.ChosenForProductKnowledge));
 
         _routing.Choice = new AiFeatureChoice(true, "Google");
         var live = await _service.GetAsync();
         Assert.Equal("Api", live.ChosenMode);
         Assert.Equal("Google", live.ChosenProvider);
         Assert.True(live.Providers.Single(p => p.Provider == "Google").ChosenForProductKnowledge);
-        Assert.False(live.Providers[0].ChosenForProductKnowledge);
+        Assert.False(live.Providers.Single(p => p.Provider == "OpenAI").ChosenForProductKnowledge);
     }
 
     [Fact]
@@ -233,66 +220,64 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task A_provider_with_a_key_that_has_never_been_checked_says_so_and_shows_only_a_masked_key()
+    public async Task A_provider_with_a_key_that_has_never_been_checked_says_so()
     {
         var panel = await Panel("OpenAI");
 
         Assert.Equal("NotVerified", panel.Status);
         Assert.True(panel.HasKey);
-        Assert.Equal("••••1234", panel.KeyHint);
         Assert.Equal("gpt-model", panel.Model);
         Assert.Null(panel.LastCheckedAtUtc);
     }
 
-    [Fact]
-    public async Task Verify_checks_the_key_and_then_the_model_and_only_then_says_verified_with_the_time()
-    {
-        var result = await _service.VerifyAsync("OpenAI", _admin, "root@platform.test");
+    // ----- recording the existing Verify button -------------------------------------------------------------------------------------------
 
-        Assert.True(result.Success);
-        Assert.Contains("gpt-served answered", result.Message);
-        Assert.Equal("Verified", result.Provider.Status);
-        Assert.NotNull(result.Provider.LastCheckedAtUtc);
-        var call = Assert.Single(_client.Calls);
-        Assert.Equal("OpenAI", call.Provider);
+    [Fact]
+    public async Task The_existing_verify_result_is_recorded_so_the_screen_shows_when_it_was_checked()
+    {
+        await _service.RecordChecksAsync(new[] { Check("OpenAI", true, "ChatGPT accepted the API key.") }, _admin, "root@platform.test");
+
+        var panel = await Panel("OpenAI");
+        Assert.Equal("Verified", panel.Status);
+        Assert.NotNull(panel.LastCheckedAtUtc);
+        Assert.Equal("ChatGPT accepted the API key.", panel.LastCheckMessage);
         Assert.Contains(_audit.Entries, e => e.Action == "AiProviderVerified" && e.Details == "ChatGPT: OK");
 
-        // The check is a real, recorded execution - with tokens and an estimated cost from the price table.
+        // The check is not a new provider call: it only records what the settings screen's Verify found.
+        Assert.Empty(_client.Calls);
         var row = await _db.AiExecutions.SingleAsync(e => e.Task == AiTaskKinds.ConnectionCheck);
         Assert.Equal(AiExecutionMode.Live, row.Mode);
-        Assert.Equal(10, row.InputTokens);
-        Assert.Equal(0.000014m, row.EstimatedCostUsd);
+        Assert.Equal("gpt-model", row.Model);
     }
 
     [Fact]
-    public async Task A_rejected_key_fails_the_check_without_making_a_model_call()
+    public async Task A_failed_check_shows_as_failed_with_the_reason()
     {
-        _verifier.KeyAccepted = false;
+        await _service.RecordChecksAsync(new[] { Check("OpenAI", false, "ChatGPT rejected the API key (HTTP 401).") }, _admin, "root@platform.test");
 
-        var result = await _service.VerifyAsync("OpenAI", _admin, "root@platform.test");
-
-        Assert.False(result.Success);
-        Assert.Equal("Failed", result.Provider.Status);
-        Assert.Contains("rejected", result.Provider.LastCheckMessage);
-        Assert.Empty(_client.Calls);
+        var panel = await Panel("OpenAI");
+        Assert.Equal("Failed", panel.Status);
+        Assert.Contains("rejected", panel.LastCheckMessage);
+        Assert.Contains(_audit.Entries, e => e.Action == "AiProviderVerified" && e.Details == "ChatGPT: failed");
     }
 
     [Fact]
-    public async Task A_key_that_works_with_a_model_that_does_not_is_reported_as_a_model_problem()
+    public async Task A_check_of_all_providers_records_each_one_and_ignores_unknown_names()
     {
-        _client.Respond = _ => new AiCompletionResult(false, null, null, null, null, 50, AiErrorCodes.ProviderError, "The model 'gpt-model' does not exist", 404);
+        await _service.RecordChecksAsync(new[]
+        {
+            Check("OpenAI", true, "ok"), Check("Google", false, "no"), Check("Simulated", true, "ignored")
+        }, _admin, "root@platform.test");
 
-        var result = await _service.VerifyAsync("OpenAI", _admin, "root@platform.test");
-
-        Assert.False(result.Success);
-        Assert.Contains("model 'gpt-model' did not answer", result.Message);
-        Assert.Equal("Failed", result.Provider.Status);
+        Assert.Equal(2, await _db.AiExecutions.CountAsync(e => e.Task == AiTaskKinds.ConnectionCheck));
+        Assert.Equal("Verified", (await Panel("OpenAI")).Status);
+        Assert.Equal("Failed", (await Panel("Google")).Status);
     }
 
     [Fact]
     public async Task Verified_describes_only_the_key_and_model_that_were_checked()
     {
-        await _service.VerifyAsync("OpenAI", _admin, "root@platform.test");
+        await _service.RecordChecksAsync(new[] { Check("OpenAI", true, "ok") }, _admin, "root@platform.test");
         Assert.Equal("Verified", (await Panel("OpenAI")).Status);
 
         _credentials.OpenAiModel = "a-different-model";
@@ -308,7 +293,7 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     [Fact]
     public async Task Nothing_stored_by_a_check_contains_the_key()
     {
-        await _service.VerifyAsync("OpenAI", _admin, "root@platform.test");
+        await _service.RecordChecksAsync(new[] { Check("OpenAI", false, "Rejected key sk-test-openai-1234 for this project") }, _admin, "root@platform.test");
 
         var stored = JsonSerializer.Serialize(await _db.AiExecutions.AsNoTracking().ToListAsync());
         Assert.DoesNotContain("sk-test-openai-1234", stored);
@@ -345,84 +330,50 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         CorrelationId = Guid.NewGuid(), Task = task, RequestedProvider = provider, Provider = provider, Mode = mode, Status = status
     };
 
-    // ----- changing a provider -----------------------------------------------------------------------------------------------------------
+    // ----- audited settings saves and prices ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Updating_a_provider_saves_through_the_existing_settings_and_audits_what_changed_without_the_key()
+    public async Task A_save_of_provider_settings_is_audited_with_the_names_of_what_changed_and_never_the_values()
     {
-        var panel = await _service.UpdateProviderAsync(
-            "Anthropic", new UpdateAiProviderRequest(true, " claude-sonnet-x ", "ant-secret-key-0042", 3m, 15m), _admin, "root@platform.test");
+        await _service.AuditSettingsChangeAsync("AiProviders", new[] { "AiProviders:Anthropic:Model", "AiProviders:Anthropic:ApiKey" }, _admin, "root@platform.test");
 
-        var providers = _settings.Updates.Single(u => u.Category == "AiProviders").Values;
-        Assert.Equal("true", providers["AiProviders:Anthropic:Enabled"]);
-        Assert.Equal("claude-sonnet-x", providers["AiProviders:Anthropic:Model"]);
-        Assert.Equal("ant-secret-key-0042", providers["AiProviders:Anthropic:ApiKey"]);
-        var integrations = _settings.Updates.Single(u => u.Category == "Integrations").Values;
-        Assert.Equal("3", integrations["Integrations:Ai:Pricing:Anthropic:InputPer1MUsd"]);
-        Assert.Equal("15", integrations["Integrations:Ai:Pricing:Anthropic:OutputPer1MUsd"]);
-
-        var audit = Assert.Single(_audit.Entries, e => e.Action == "AiProviderUpdated");
-        Assert.Contains("Claude", audit.Details);
-        Assert.Contains("key replaced", audit.Details);
-        Assert.DoesNotContain("ant-secret-key-0042", audit.Details);
-
-        // The key can be written but never read back: only a masked hint exists on the panel.
-        Assert.True(panel.HasKey);
-        Assert.Equal("••••0042", panel.KeyHint);
-        Assert.DoesNotContain("ant-secret-key-0042", JsonSerializer.Serialize(panel));
+        var audit = Assert.Single(_audit.Entries);
+        Assert.Equal("SettingsUpdated", audit.Action);
+        Assert.Equal("AiProviders: AiProviders:Anthropic:ApiKey, AiProviders:Anthropic:Model", audit.Details);
     }
 
     [Fact]
-    public async Task An_empty_key_keeps_the_saved_one_and_a_request_with_no_changes_writes_nothing()
+    public async Task An_empty_save_or_one_without_a_signed_in_user_writes_no_audit_entry()
     {
-        await _service.UpdateProviderAsync("OpenAI", new UpdateAiProviderRequest(null, null, "", null, null), _admin, "root@platform.test");
-        await _service.UpdateProviderAsync("OpenAI", new UpdateAiProviderRequest(null, "  ", null, null, null), _admin, "root@platform.test");
+        await _service.AuditSettingsChangeAsync("AiProviders", Array.Empty<string>(), _admin, "a@b.c");
+        await _service.AuditSettingsChangeAsync("AiProviders", new[] { "AiProviders:OpenAI:Enabled" }, null, "");
 
-        Assert.Empty(_settings.Updates);
         Assert.Empty(_audit.Entries);
-        Assert.Equal("sk-test-openai-1234", _settings.Store["AiProviders:OpenAI:ApiKey"]);
-    }
-
-    [Theory]
-    [InlineData("OpenAI", "bad model name!", null, null, "Model")]
-    [InlineData("OpenAI", null, "has a space inside", null, "ApiKey")]
-    [InlineData("OpenAI", null, "short", null, "ApiKey")]
-    [InlineData("OpenAI", null, null, -1, "Price")]
-    [InlineData("OpenAI", null, null, 20000, "Price")]
-    public async Task Invalid_changes_are_refused_and_nothing_is_saved(string provider, string? model, string? key, int? price, string property)
-    {
-        var request = new UpdateAiProviderRequest(null, model, key, price, null);
-
-        var ex = await Assert.ThrowsAsync<ValidationException>(() => _service.UpdateProviderAsync(provider, request, _admin, "root@platform.test"));
-
-        Assert.Contains(ex.Errors, e => e.PropertyName == property);
-        Assert.Empty(_settings.Updates);
     }
 
     [Theory]
     [InlineData("Simulator")]
     [InlineData("Cohere")]
     [InlineData("")]
-    public async Task Only_the_three_real_providers_can_be_changed_checked_or_benchmarked(string provider)
+    public async Task Only_the_three_real_providers_can_be_benchmarked(string provider)
     {
-        await Assert.ThrowsAsync<ValidationException>(() => _service.UpdateProviderAsync(provider, new UpdateAiProviderRequest(true, null, null, null, null), _admin, "a@b.c"));
-        await Assert.ThrowsAsync<ValidationException>(() => _service.VerifyAsync(provider, _admin, "a@b.c"));
         await Assert.ThrowsAsync<ValidationException>(() => _service.RunBenchmarkAsync(provider, _admin, "a@b.c"));
     }
 
     [Fact]
     public async Task Provider_names_are_matched_without_regard_to_case()
     {
-        var panel = await _service.UpdateProviderAsync("openai", new UpdateAiProviderRequest(false, null, null, null, null), _admin, "a@b.c");
+        await _service.RecordChecksAsync(new[] { Check("openai", true, "ok") }, _admin, "a@b.c");
 
-        Assert.Equal("OpenAI", panel.Provider);
-        Assert.Equal("false", _settings.Updates.Single().Values["AiProviders:OpenAI:Enabled"]);
+        Assert.Equal("OpenAI", (await _db.AiExecutions.SingleAsync()).Provider);
     }
 
     [Fact]
-    public async Task Prices_set_on_the_page_show_up_on_the_panel_as_set()
+    public async Task Prices_from_the_provider_settings_show_up_on_the_panel_as_set()
     {
-        Assert.True((await Panel("OpenAI")).PriceSet);
+        var openAi = await Panel("OpenAI");
+        Assert.True(openAi.PriceSet);
+        Assert.Equal((1m, 2m), (openAi.InputPer1MUsd, openAi.OutputPer1MUsd));
         Assert.False((await Panel("Anthropic")).PriceSet);
     }
 
@@ -617,11 +568,12 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     [Fact]
     public void Every_new_setting_is_in_the_catalog_with_a_default_and_fixed_choices_are_dropdowns()
     {
-        var keys = AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:Ai:Policy:") || d.Key.StartsWith("Integrations:Ai:Pricing:") || d.Key.StartsWith("Integrations:Ai:ProductKnowledge:")).ToList();
+        var keys = AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:Ai:Policy:") || d.Key.StartsWith("Integrations:Ai:ProductKnowledge:")).ToList();
 
-        Assert.Equal(8 + 6 + 2, keys.Count);
+        Assert.Equal(8 + 2, keys.Count);
         Assert.All(keys, d => Assert.False(string.IsNullOrWhiteSpace(d.DefaultValue), d.Key));
         Assert.All(keys, d => Assert.False(d.IsSecret));
+        Assert.All(keys, d => Assert.Equal("Integrations", d.Category));
         Assert.Equal(AiSimulatorScenarios.All, keys.Single(d => d.Key.EndsWith("SimulatorScenario")).Options);
         Assert.Equal(new[] { "true", "false" }, keys.Single(d => d.Key.EndsWith("FallbackEnabled")).Options);
         Assert.Equal("false", keys.Single(d => d.Key.EndsWith("ScannedDocumentsViaAi")).DefaultValue); // the scanned-document switch starts off
@@ -629,16 +581,35 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     }
 
     [Fact]
-    public void Only_a_platform_admin_reaches_the_provider_endpoints_and_no_response_can_carry_a_key()
+    public void Prices_are_provider_settings_on_the_ai_providers_screen_and_nothing_is_left_under_integrations()
+    {
+        var prices = AppSettingCatalog.All.Where(d => d.Key.EndsWith("Per1MUsd")).ToList();
+
+        Assert.Equal(6, prices.Count);
+        Assert.All(prices, d => Assert.Equal("AiProviders", d.Category));
+        Assert.All(prices, d => Assert.Equal("0", d.DefaultValue));
+        foreach (var provider in new[] { "OpenAI", "Anthropic", "Google" })
+        {
+            Assert.Contains(prices, d => d.Key == $"AiProviders:{provider}:InputPer1MUsd");
+            Assert.Contains(prices, d => d.Key == $"AiProviders:{provider}:OutputPer1MUsd");
+        }
+
+        Assert.DoesNotContain(AppSettingCatalog.All, d => d.Key.StartsWith("Integrations:Ai:Pricing:"));
+    }
+
+    [Fact]
+    public void Only_a_platform_admin_reaches_the_provider_endpoints_and_they_do_not_repeat_the_settings_screen()
     {
         var controller = typeof(PlatformAiProvidersController);
         Assert.Equal(AppRoles.PlatformSuperAdmin, controller.GetCustomAttribute<AuthorizeAttribute>()!.Roles);
-        foreach (var method in controller.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        var methods = controller.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        foreach (var method in methods)
             Assert.Null(method.GetCustomAttribute<AllowAnonymousAttribute>());
 
-        // The write side may take a key; nothing the page reads back has a property that could hold one.
-        foreach (var dto in new[] { typeof(AiProviderPanelDto), typeof(AiProvidersOverviewDto), typeof(AiProviderCheckResultDto), typeof(AiPolicyDto), typeof(AiExecutionDto), typeof(AiBenchmarkSummaryDto) })
-            Assert.DoesNotContain(dto.GetProperties(), p => p.Name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("Key", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Secret", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(typeof(UpdateAiProviderRequest).GetProperties(), p => p.Name == nameof(UpdateAiProviderRequest.ApiKey));
+        // Keys, models and On/Off are saved only through the settings API, and Verify is the settings screen's own.
+        Assert.DoesNotContain(methods, m => m.Name is "Update" or "Verify");
+
+        foreach (var dto in new[] { typeof(AiProviderInsightDto), typeof(AiProvidersOverviewDto), typeof(AiPolicyDto), typeof(AiExecutionDto), typeof(AiBenchmarkSummaryDto) })
+            Assert.DoesNotContain(dto.GetProperties(), p => p.Name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Key", StringComparison.Ordinal) && !p.Name.StartsWith("Has") || p.Name.Contains("Secret", StringComparison.OrdinalIgnoreCase));
     }
 }

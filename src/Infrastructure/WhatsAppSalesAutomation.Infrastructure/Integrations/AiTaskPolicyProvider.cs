@@ -1,14 +1,20 @@
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Ai.Tasks;
+using WhatsAppSalesAutomation.Infrastructure.Ai;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Integrations;
 
-/// <summary>Reads the policy and price settings at request time, so a change on the Integrations page applies from the next AI task.</summary>
+/// <summary>Reads the policy settings and each provider's prices at request time, so a change on the Integrations page applies from the next AI task.</summary>
 public sealed class AiTaskPolicyProvider : IAiTaskPolicyProvider
 {
     private readonly IOptionsSnapshot<AiFeatureOptions> _options;
+    private readonly IOptionsSnapshot<AiProviderSettings> _providers;
 
-    public AiTaskPolicyProvider(IOptionsSnapshot<AiFeatureOptions> options) => _options = options;
+    public AiTaskPolicyProvider(IOptionsSnapshot<AiFeatureOptions> options, IOptionsSnapshot<AiProviderSettings> providers)
+    {
+        _options = options;
+        _providers = providers;
+    }
 
     public AiTaskPolicy Get()
     {
@@ -31,9 +37,10 @@ public sealed class AiTaskPolicyProvider : IAiTaskPolicyProvider
             Math.Max(0m, p.MaxCostPerCallUsd), Math.Clamp(p.TimeoutSeconds, 5, 300), Math.Clamp(p.MaxRetriesPerProvider, 0, 3), Math.Clamp(p.RetryDelayMs, 0, 10_000),
             new Dictionary<string, ProviderPrice>(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI"] = new(o.Pricing.OpenAI.InputPer1MUsd, o.Pricing.OpenAI.OutputPer1MUsd),
-                ["Anthropic"] = new(o.Pricing.Anthropic.InputPer1MUsd, o.Pricing.Anthropic.OutputPer1MUsd),
-                ["Google"] = new(o.Pricing.Google.InputPer1MUsd, o.Pricing.Google.OutputPer1MUsd),
+                // Prices are each provider's own settings on the AI Providers screen, next to its key and model.
+                ["OpenAI"] = new(_providers.Value.OpenAI.InputPer1MUsd, _providers.Value.OpenAI.OutputPer1MUsd),
+                ["Anthropic"] = new(_providers.Value.Anthropic.InputPer1MUsd, _providers.Value.Anthropic.OutputPer1MUsd),
+                ["Google"] = new(_providers.Value.Google.InputPer1MUsd, _providers.Value.Google.OutputPer1MUsd),
             });
     }
 }

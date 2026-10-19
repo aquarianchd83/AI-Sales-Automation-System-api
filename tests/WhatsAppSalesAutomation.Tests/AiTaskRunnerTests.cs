@@ -486,11 +486,11 @@ public sealed class AiTaskRunnerTests
             {
                 FallbackEnabled = true, FallbackOrder = "google, Simulator ,openai;OpenAI,nonsense", SimulatorScenario = "conflict", TimeoutSeconds = 9999,
                 MaxRetriesPerProvider = 99, RetryDelayMs = -5, MaxCostPerCallUsd = -1
-            },
-            Pricing = new AiPricingOptions { OpenAI = new AiPriceOption { InputPer1MUsd = 0.5m, OutputPer1MUsd = 1.5m } }
+            }
         };
+        var providers = new AiProviderSettings { OpenAI = new OpenAiSettings { InputPer1MUsd = 0.5m, OutputPer1MUsd = 1.5m } };
 
-        var policy = new AiTaskPolicyProvider(new FixedOptions<AiFeatureOptions>(options)).Get();
+        var policy = new AiTaskPolicyProvider(new FixedOptions<AiFeatureOptions>(options), new FixedOptions<AiProviderSettings>(providers)).Get();
 
         Assert.True(policy.FallbackEnabled);
         Assert.Equal(new[] { "Google", "OpenAI" }, policy.FallbackOrder);
@@ -507,7 +507,7 @@ public sealed class AiTaskRunnerTests
     [Fact]
     public void An_unknown_scenario_falls_back_to_success()
     {
-        var policy = new AiTaskPolicyProvider(new FixedOptions<AiFeatureOptions>(new AiFeatureOptions { Policy = new AiPolicyOptions { SimulatorScenario = "chaos" } })).Get();
+        var policy = new AiTaskPolicyProvider(new FixedOptions<AiFeatureOptions>(new AiFeatureOptions { Policy = new AiPolicyOptions { SimulatorScenario = "chaos" } }), new FixedOptions<AiProviderSettings>(new AiProviderSettings())).Get();
 
         Assert.Equal("Success", policy.SimulatorScenario);
     }

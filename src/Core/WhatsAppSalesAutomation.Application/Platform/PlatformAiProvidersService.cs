@@ -2,9 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using FluentValidation;
-using ValidationFailure = FluentValidation.Results.ValidationFailure;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Ai.Tasks;
@@ -13,10 +11,11 @@ using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
+using ValidationFailure = FluentValidation.Results.ValidationFailure;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
 
-// ----- what the Integrations page shows -----------------------------------------------------------------------------------------------
+// ----- what the screens show ----------------------------------------------------------------------------------------------------------
 
 public record AiCapabilityDto(string Task, bool Declared, bool Verified, DateTime? VerifiedAtUtc);
 
@@ -26,15 +25,17 @@ public record AiBenchmarkSummaryDto(
     int Passed, int Total, int AccuracyPercent, int AverageLatencyMs, decimal? TotalCostUsd, int? InputTokens, int? OutputTokens, DateTime RanAtUtc,
     string Model, IReadOnlyList<AiBenchmarkCaseDto> Cases);
 
-/// <param name="Status">Ready (simulator), Off, NotConfigured (no key), NotVerified, Verified or Failed. Verified is only ever shown for the key and model
-/// that were actually checked: changing either puts it back to NotVerified.</param>
-public record AiProviderPanelDto(
+/// <summary>
+/// What the AI Providers screen adds beside each provider's own settings (which stay where they are: On/Off, key, model and prices are the
+/// <c>AiProviders:*</c> settings on that screen). This is only the picture around them.
+/// </summary>
+/// <param name="Status">Off, NotConfigured (no key), NotVerified, Verified or Failed - from the last time the screen's Verify button checked the
+/// key. Verified is only ever shown for the key and model that were checked: changing either puts it back to NotVerified.</param>
+public record AiProviderInsightDto(
     string Provider,
     string DisplayName,
-    bool IsSimulator,
     bool Enabled,
     bool HasKey,
-    string? KeyHint,
     string? Model,
     string Status,
     DateTime? LastCheckedAtUtc,
@@ -57,15 +58,10 @@ public record AiPolicyDto(
     IReadOnlyList<string> Scenarios);
 
 /// <param name="ChosenMode">"Simulator" or "Api" - what product-knowledge tasks run on right now.</param>
-public record AiProvidersOverviewDto(IReadOnlyList<AiProviderPanelDto> Providers, AiPolicyDto Policy, string ChosenMode, string ChosenProvider);
-
-/// <summary>Only what is given changes. An empty <see cref="ApiKey"/> keeps the saved key; a key is never read back.</summary>
-public record UpdateAiProviderRequest(bool? Enabled, string? Model, string? ApiKey, decimal? InputPer1MUsd, decimal? OutputPer1MUsd);
+public record AiProvidersOverviewDto(IReadOnlyList<AiProviderInsightDto> Providers, AiPolicyDto Policy, string ChosenMode, string ChosenProvider);
 
 public record UpdateAiPolicyRequest(
     bool FallbackEnabled, IReadOnlyList<string> FallbackOrder, string SimulatorScenario, bool ScannedDocumentsViaAi, decimal MaxCostPerCallUsd);
-
-public record AiProviderCheckResultDto(bool Success, string Message, AiProviderPanelDto Provider);
 
 public record AiExecutionDto(
     Guid Id, Guid CorrelationId, string Task, string? Feature, string RequestedProvider, string Provider, string? Model, string Mode, string Status, int Attempt,
@@ -84,34 +80,31 @@ public interface IPlatformAiProvidersService
 {
     Task<AiProvidersOverviewDto> GetAsync(CancellationToken cancellationToken = default);
 
-    Task<AiProviderPanelDto> UpdateProviderAsync(string provider, UpdateAiProviderRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
-
-    /// <summary>Checks the saved key, then makes one tiny real request with the configured model. Records the outcome; never throws for a provider problem.</summary>
-    Task<AiProviderCheckResultDto> VerifyAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
-
-    /// <summary>Runs the fixed fitness test against the provider with its configured model, records the measured accuracy, latency and cost.</summary>
-    Task<AiProviderPanelDto> RunBenchmarkAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+    /// <summary>Runs the fixed fitness test against the provider with its configured model, and records the measured accuracy, latency and cost.</summary>
+    Task<AiProviderInsightDto> RunBenchmarkAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 
     Task<AiPolicyDto> UpdatePolicyAsync(UpdateAiPolicyRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 
     Task<PagedResult<AiExecutionDto>> ListExecutionsAsync(AiExecutionQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>Records what the AI Providers screen's own Verify button found, so the screen can show when each provider was last checked and how.</summary>
+    Task RecordChecksAsync(IReadOnlyList<AiProviderCheckDto> checks, Guid? actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>Audits a save of AI provider or integration settings: which keys changed, never their values.</summary>
+    Task AuditSettingsChangeAsync(string category, IReadOnlyCollection<string> keys, Guid? actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// The Integrations page's AI provider cards. It adds nothing of its own to configuration: keys, models and On/Off are the existing
-/// <c>AiProviders:*</c> settings (saved through the same settings service as Configuration, so they stay masked and live), prices and policy
-/// are <c>Integrations:Ai:*</c> settings. What it adds is the picture around them - status that is only "Verified" for the key and model that
-/// were really checked, capabilities that are only "Verified" after a real call succeeded, a measured accuracy and cost - and an audit entry
-/// for every change.
+/// Adds to the existing AI configuration screens rather than repeating them. Keys, models, On/Off and prices are edited on Configuration &gt; AI
+/// Providers as before, and Verify there is the same check as before; this service records that check, measures each provider with the accuracy
+/// test, shows declared versus verified capabilities, and holds the product-knowledge policy (fallback, scanned documents, cost cap, simulator
+/// scenario) and the AI call log shown on the Integrations page.
 /// </summary>
 public class PlatformAiProvidersService : IPlatformAiProvidersService
 {
-    private static readonly Regex ModelName = new(@"^[A-Za-z0-9._:\-/]{1,100}$", RegexOptions.Compiled);
-
     private readonly ISettingsService _settings;
     private readonly IPlatformAiConfigProvider _credentials;
     private readonly IAiTaskPolicyProvider _policy;
-    private readonly IAiProviderVerifier _verifier;
     private readonly IAiCompletionClient _client;
     private readonly IAiExecutionLog _log;
     private readonly IAiFeatureRouting _routing;
@@ -119,13 +112,12 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
     private readonly IPlatformAuditService _audit;
 
     public PlatformAiProvidersService(
-        ISettingsService settings, IPlatformAiConfigProvider credentials, IAiTaskPolicyProvider policy, IAiProviderVerifier verifier, IAiCompletionClient client,
-        IAiExecutionLog log, IAiFeatureRouting routing, IApplicationDbContext context, IPlatformAuditService audit)
+        ISettingsService settings, IPlatformAiConfigProvider credentials, IAiTaskPolicyProvider policy, IAiCompletionClient client, IAiExecutionLog log,
+        IAiFeatureRouting routing, IApplicationDbContext context, IPlatformAuditService audit)
     {
         _settings = settings;
         _credentials = credentials;
         _policy = policy;
-        _verifier = verifier;
         _client = client;
         _log = log;
         _routing = routing;
@@ -138,21 +130,16 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
     public async Task<AiProvidersOverviewDto> GetAsync(CancellationToken cancellationToken = default)
     {
         var route = _routing.Resolve(AiFeatures.ProductKnowledge);
-        var panels = new List<AiProviderPanelDto> { SimulatorPanel(route) };
+        var insights = new List<AiProviderInsightDto>();
         foreach (var provider in AiFeatures.Providers)
-            panels.Add(await BuildAsync(provider, route, cancellationToken));
+            insights.Add(await BuildAsync(provider, route, cancellationToken));
 
         return new AiProvidersOverviewDto(
-            panels, ToDto(_policy.Get()), route.UsesThirdParty ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode,
+            insights, ToDto(_policy.Get()), route.UsesThirdParty ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode,
             route.UsesThirdParty ? route.Provider : AiCapabilities.Simulator);
     }
 
-    private AiProviderPanelDto SimulatorPanel(AiFeatureChoice route) => new(
-        AiCapabilities.Simulator, "Simulator", true, true, false, null, null, "Ready", null,
-        "Returns fixed, labelled test data. It reads no documents and contacts no provider, and its answers can never be published as verified.",
-        AiTaskKinds.Product.Select(t => new AiCapabilityDto(t, true, false, null)).ToList(), 0m, 0m, false, null, !route.UsesThirdParty);
-
-    private async Task<AiProviderPanelDto> BuildAsync(string provider, AiFeatureChoice route, CancellationToken ct)
+    private async Task<AiProviderInsightDto> BuildAsync(string provider, AiFeatureChoice route, CancellationToken ct)
     {
         var credentials = _credentials.Get();
         var category = await _settings.GetCategoryAsync("AiProviders", ct);
@@ -174,9 +161,8 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         else if (!hasKey) status = "NotConfigured";
         else if (checkRow is not null)
         {
-            message = checkRow.ErrorSummary ?? (checkRow.Status == AiExecutionStatus.Succeeded ? "The key and model worked." : null);
-            var current = Fingerprint(KeyOf(credentials, provider), model);
-            if (checkRow.Detail is not null && checkRow.Detail != current)
+            message = checkRow.ErrorSummary;
+            if (checkRow.Detail is not null && checkRow.Detail != Fingerprint(KeyOf(credentials, provider), model))
                 message = "The key or model changed since the last check. Verify again.";
             else
                 status = checkRow.Status == AiExecutionStatus.Succeeded ? "Verified" : "Failed";
@@ -198,8 +184,8 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
             .Where(e => e.Provider == provider && e.Task == AiTaskKinds.Benchmark && e.Detail != null)
             .OrderByDescending(e => e.CreatedAt).FirstOrDefaultAsync(ct);
 
-        return new AiProviderPanelDto(
-            provider, DisplayName(provider), false, enabled, hasKey, keySetting?.ValueHint, model, status, checkRow?.CreatedAt, message, capabilities,
+        return new AiProviderInsightDto(
+            provider, DisplayName(provider), enabled, hasKey, model, status, checkRow?.CreatedAt, message, capabilities,
             price.InputPer1MUsd, price.OutputPer1MUsd, price.InputPer1MUsd > 0 || price.OutputPer1MUsd > 0, ReadBenchmark(benchmarkRow),
             route.UsesThirdParty && string.Equals(route.Provider, provider, StringComparison.OrdinalIgnoreCase));
     }
@@ -225,67 +211,51 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         }
     }
 
-    // ----- changing --------------------------------------------------------------------------------------------------------------
+    // ----- recording what the existing screens do ----------------------------------------------------------------------------------
 
-    public async Task<AiProviderPanelDto> UpdateProviderAsync(
-        string provider, UpdateAiProviderRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    public async Task RecordChecksAsync(IReadOnlyList<AiProviderCheckDto> checks, Guid? actorUserId, string actorEmail, CancellationToken cancellationToken = default)
     {
-        provider = RequireProvider(provider);
-        var failures = new List<ValidationFailure>();
-
-        if (!string.IsNullOrWhiteSpace(request.Model) && !ModelName.IsMatch(request.Model.Trim()))
-            failures.Add(new ValidationFailure(nameof(request.Model), "Enter a model name using letters, digits and . _ - : / only."));
-        if (request.ApiKey is { Length: > 0 } key && (key.Trim().Length is < 8 or > 400 || key.Any(char.IsWhiteSpace)))
-            failures.Add(new ValidationFailure(nameof(request.ApiKey), "That does not look like an API key. Paste the key exactly, without spaces."));
-        if (request.InputPer1MUsd is < 0 or > 10_000 || request.OutputPer1MUsd is < 0 or > 10_000)
-            failures.Add(new ValidationFailure("Price", "Enter a price between 0 and 10,000 US dollars per million tokens."));
-        if (failures.Count > 0)
-            throw new ValidationException(failures);
-
-        var providerValues = new Dictionary<string, string?>();
-        var integrationValues = new Dictionary<string, string?>();
-        var changed = new List<string>();
-
-        if (request.Enabled is { } enabled)
+        var credentials = _credentials.Get();
+        foreach (var check in checks)
         {
-            providerValues[$"AiProviders:{provider}:Enabled"] = enabled ? "true" : "false";
-            changed.Add(enabled ? "switched on" : "switched off");
+            var provider = PlatformAiFeatureSettingsService.Canonical(check.Provider);
+            if (provider is null)
+                continue;
+
+            var model = ModelOf(credentials, provider);
+            await _log.WriteAsync(new AiExecution
+            {
+                CorrelationId = Guid.NewGuid(),
+                Task = AiTaskKinds.ConnectionCheck,
+                RequestedProvider = provider,
+                Provider = provider,
+                Model = model,
+                Mode = AiExecutionMode.Live,
+                Status = check.Success ? AiExecutionStatus.Succeeded : AiExecutionStatus.Failed,
+                ErrorCode = check.Success ? null : "CHECK_FAILED",
+                ErrorSummary = AiLogScrubber.Scrub(check.Message),
+                // A one-way fingerprint of what was checked, so "Verified" can never describe a key or model that was not.
+                Detail = Fingerprint(KeyOf(credentials, provider), model)
+            }, cancellationToken);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Model))
+        if (actorUserId is { } actor && checks.Count > 0)
         {
-            providerValues[ModelKey(provider)] = request.Model.Trim();
-            changed.Add("model");
+            await _audit.LogAsync(actor, actorEmail, "AiProviderVerified",
+                details: string.Join("; ", checks.Select(c => $"{DisplayName(c.Provider)}: {(c.Success ? "OK" : "failed")}")), cancellationToken: cancellationToken);
         }
-
-        if (!string.IsNullOrWhiteSpace(request.ApiKey))
-        {
-            providerValues[$"AiProviders:{provider}:ApiKey"] = request.ApiKey.Trim();
-            changed.Add("key replaced");
-        }
-
-        if (request.InputPer1MUsd is { } input)
-        {
-            integrationValues[$"Integrations:Ai:Pricing:{provider}:InputPer1MUsd"] = input.ToString(CultureInfo.InvariantCulture);
-            changed.Add("input price");
-        }
-
-        if (request.OutputPer1MUsd is { } output)
-        {
-            integrationValues[$"Integrations:Ai:Pricing:{provider}:OutputPer1MUsd"] = output.ToString(CultureInfo.InvariantCulture);
-            changed.Add("output price");
-        }
-
-        if (providerValues.Count > 0)
-            await _settings.UpdateCategoryAsync("AiProviders", new UpdateSettingsRequest(providerValues), actorUserId, cancellationToken);
-        if (integrationValues.Count > 0)
-            await _settings.UpdateCategoryAsync("Integrations", new UpdateSettingsRequest(integrationValues), actorUserId, cancellationToken);
-
-        if (changed.Count > 0)
-            await _audit.LogAsync(actorUserId, actorEmail, "AiProviderUpdated", details: $"{DisplayName(provider)}: {string.Join(", ", changed)}", cancellationToken: cancellationToken);
-
-        return await BuildAsync(provider, _routing.Resolve(AiFeatures.ProductKnowledge), cancellationToken);
     }
+
+    public async Task AuditSettingsChangeAsync(string category, IReadOnlyCollection<string> keys, Guid? actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        if (actorUserId is not { } actor || keys.Count == 0)
+            return;
+
+        // Names only: a key or any other value never goes into the audit log.
+        await _audit.LogAsync(actor, actorEmail, "SettingsUpdated", details: $"{category}: {string.Join(", ", keys.OrderBy(k => k))}", cancellationToken: cancellationToken);
+    }
+
+    // ----- policy ----------------------------------------------------------------------------------------------------------------
 
     public async Task<AiPolicyDto> UpdatePolicyAsync(UpdateAiPolicyRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
     {
@@ -320,59 +290,9 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         return ToDto(_policy.Get());
     }
 
-    // ----- checking --------------------------------------------------------------------------------------------------------------
+    // ----- benchmark -------------------------------------------------------------------------------------------------------------
 
-    public async Task<AiProviderCheckResultDto> VerifyAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
-    {
-        provider = RequireProvider(provider);
-        var credentials = _credentials.Get();
-        var policy = _policy.Get();
-        var model = ModelOf(credentials, provider);
-        var fingerprint = Fingerprint(KeyOf(credentials, provider), model);
-        var route = _routing.Resolve(AiFeatures.ProductKnowledge);
-
-        var keyCheck = (await _verifier.VerifyAsync(provider, cancellationToken)).FirstOrDefault();
-        var success = keyCheck is { Success: true };
-        var message = keyCheck?.Message ?? $"{DisplayName(provider)} could not be checked.";
-        int? inputTokens = null, outputTokens = null;
-        var duration = 0;
-
-        if (success)
-        {
-            // The key opening the door is not enough: the configured model has to answer too.
-            var call = await _client.CompleteAsync(new AiCompletionRequest(provider, "Reply with the single word OK.", "Say OK.", 20, false, policy.TimeoutSeconds), cancellationToken);
-            duration = call.DurationMs;
-            inputTokens = call.InputTokens;
-            outputTokens = call.OutputTokens;
-            success = call.Success;
-            message = call.Success
-                ? $"{DisplayName(provider)} accepted the key and the model {call.Model ?? model} answered."
-                : $"The key was accepted, but the model '{model}' did not answer: {call.ErrorMessage ?? "no reason given"}";
-        }
-
-        await _log.WriteAsync(new AiExecution
-        {
-            CorrelationId = Guid.NewGuid(),
-            Task = AiTaskKinds.ConnectionCheck,
-            RequestedProvider = provider,
-            Provider = provider,
-            Model = model,
-            Mode = AiExecutionMode.Live,
-            Status = success ? AiExecutionStatus.Succeeded : AiExecutionStatus.Failed,
-            DurationMs = duration,
-            InputTokens = inputTokens,
-            OutputTokens = outputTokens,
-            EstimatedCostUsd = policy.PriceOf(provider).Cost(inputTokens, outputTokens),
-            ErrorCode = success ? null : "CHECK_FAILED",
-            ErrorSummary = AiLogScrubber.Scrub(message),
-            Detail = fingerprint
-        }, cancellationToken);
-
-        await _audit.LogAsync(actorUserId, actorEmail, "AiProviderVerified", details: $"{DisplayName(provider)}: {(success ? "OK" : "failed")}", cancellationToken: cancellationToken);
-        return new AiProviderCheckResultDto(success, AiLogScrubber.Scrub(message) ?? string.Empty, await BuildAsync(provider, route, cancellationToken));
-    }
-
-    public async Task<AiProviderPanelDto> RunBenchmarkAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    public async Task<AiProviderInsightDto> RunBenchmarkAsync(string provider, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
     {
         provider = RequireProvider(provider);
         var credentials = _credentials.Get();
@@ -426,6 +346,8 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         return await BuildAsync(provider, route, cancellationToken);
     }
 
+    // ----- execution log ---------------------------------------------------------------------------------------------------------
+
     public async Task<PagedResult<AiExecutionDto>> ListExecutionsAsync(AiExecutionQuery query, CancellationToken cancellationToken = default)
     {
         var rows = _context.AiExecutions.AsNoTracking().AsQueryable();
@@ -452,13 +374,6 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
     private static AiPolicyDto ToDto(AiTaskPolicy p) =>
         new(p.FallbackEnabled, p.FallbackOrder, p.SimulatorScenario, p.ScannedDocumentsViaAi, p.MaxCostPerCallUsd, p.TimeoutSeconds, p.MaxRetriesPerProvider, AiSimulatorScenarios.All);
 
-    private static string ModelKey(string provider) => provider switch
-    {
-        "OpenAI" => "AiProviders:OpenAI:ChatModel",
-        "Google" => "AiProviders:Google:ChatModel",
-        _ => "AiProviders:Anthropic:Model"
-    };
-
     private static string ModelOf(AiCredentials c, string provider) => provider switch
     {
         "OpenAI" => c.OpenAiChatModel,
@@ -473,7 +388,7 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         _ => c.AnthropicApiKey
     };
 
-    /// <summary>A short one-way fingerprint of the key and model that were checked, so "Verified" can only ever describe what was actually verified.</summary>
+    /// <summary>A short one-way fingerprint of the key and model that were checked.</summary>
     private static string Fingerprint(string? key, string model) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{key}|{model}")))[..12];
 
