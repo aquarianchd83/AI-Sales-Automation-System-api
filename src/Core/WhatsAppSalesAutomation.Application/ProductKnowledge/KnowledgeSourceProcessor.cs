@@ -286,6 +286,10 @@ public sealed class KnowledgeSourceProcessor : IKnowledgeSourceProcessor
         source.ProcessedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
+        // A re-read replaced the passages: answers drawn from words that are no longer there are marked for another look.
+        if (version > 1)
+            await KnowledgeRevalidation.MarkAffectedAsync(_db, source.TenantId, source.Id, sourceRemoved: false, ct);
+
         if (!string.IsNullOrEmpty(previousText) && previousText != source.TextStorageKey)
         {
             try

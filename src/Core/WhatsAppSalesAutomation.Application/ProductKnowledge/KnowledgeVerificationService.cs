@@ -56,11 +56,13 @@ public sealed class KnowledgeVerificationService : IKnowledgeVerificationService
 {
     private readonly IApplicationDbContext _db;
     private readonly ICurrentUserService _user;
+    private readonly ISourceLimitsProvider _limits;
 
-    public KnowledgeVerificationService(IApplicationDbContext db, ICurrentUserService user)
+    public KnowledgeVerificationService(IApplicationDbContext db, ICurrentUserService user, ISourceLimitsProvider limits)
     {
         _db = db;
         _user = user;
+        _limits = limits;
     }
 
     // ----- approving and rejecting ---------------------------------------------------------------------------------------------------
@@ -70,7 +72,26 @@ public sealed class KnowledgeVerificationService : IKnowledgeVerificationService
         var (answer, question) = await FindCurrentAsync(tenantId, answerId, ct);
 
         if (answer.Status == KnowledgeVerificationStatus.VerifiedAndApproved)
-            return await DtoAsync(tenantId, question, ct); // already approved: nothing to do, nothing to record
+        {
+            // Approving an approved answer is only meaningful when it needs another look: a source changed, or an approved price has lapsed.
+            var lapsed = answer.ReviewDueAt is { } due && due < DateTime.UtcNow;
+            if (!answer.NeedsRevalidation && !lapsed)
+                return await DtoAsync(tenantId, question, ct);
+
+            var again = NeedsConfirmation(answer);
+            if (again is not null && !request.Confirmed)
+                throw Invalid("confirmed", $"{again} Tick \"I have checked this\" to confirm it is still correct.");
+
+            var why2 = answer.NeedsRevalidation ? answer.RevalidationReason : "The approval of this price, guarantee or result had lapsed.";
+            answer.NeedsRevalidation = false;
+            answer.RevalidationReason = null;
+            answer.ApprovedBy = _user.UserId;
+            answer.ApprovedAt = DateTime.UtcNow;
+            answer.ReviewDueAt = answer.IsMaterialClaim ? DateTime.UtcNow.AddDays(_limits.Get().MaterialReviewDays) : null;
+            Record(tenantId, answer.QuestionId, answer.Id, KnowledgeRevisionKind.Approved, answer.Status, answer.Status, answer.Summary, answer.Summary, Trim($"Confirmed again. {why2}", 1000));
+            await _db.SaveChangesAsync(ct);
+            return await DtoAsync(tenantId, question, ct);
+        }
         if (answer.IsSimulated)
             throw new ConflictException("This is test data from the simulator. It is not an answer and cannot be approved.");
         if (string.IsNullOrWhiteSpace(answer.Summary))
@@ -86,6 +107,9 @@ public sealed class KnowledgeVerificationService : IKnowledgeVerificationService
         answer.Status = KnowledgeVerificationStatus.VerifiedAndApproved;
         answer.ApprovedBy = _user.UserId;
         answer.ApprovedAt = DateTime.UtcNow;
+        answer.NeedsRevalidation = false;
+        answer.RevalidationReason = null;
+        answer.ReviewDueAt = answer.IsMaterialClaim ? DateTime.UtcNow.AddDays(_limits.Get().MaterialReviewDays) : null;
         Record(tenantId, answer.QuestionId, answer.Id, KnowledgeRevisionKind.Approved, from, answer.Status, null, answer.Summary, why is null ? null : "Confirmed after review: " + why);
         await _db.SaveChangesAsync(ct);
         return await DtoAsync(tenantId, question, ct);
@@ -141,6 +165,7 @@ public sealed class KnowledgeVerificationService : IKnowledgeVerificationService
         answer.Summary = summary;
         answer.Detail = detail;
         answer.IsMaterialClaim = material;
+        answer.ReviewDueAt = material ? DateTime.UtcNow.AddDays(_limits.Get().MaterialReviewDays) : null;
         answer.ConfidenceReasons = "Written by you. It is your answer, not something found in the sources.";
         Supersede(previous, answer);
 

@@ -97,6 +97,15 @@ public class KnowledgeAnswer : BaseEntity, ITenantOwned
     public Guid? ApprovedBy { get; set; }
 
     public DateTime? ApprovedAt { get; set; }
+
+    /// <summary>True when a source this answer was drawn from changed or was removed after it was drafted. An approved answer stays approved - and
+    /// what is already published keeps serving - but it is held out of the next publish until the tenant has looked at it again.</summary>
+    public bool NeedsRevalidation { get; set; }
+
+    public string? RevalidationReason { get; set; }
+
+    /// <summary>For a price, guarantee or other material claim: when its approval lapses and it must be confirmed again. Null for other answers.</summary>
+    public DateTime? ReviewDueAt { get; set; }
 }
 
 /// <summary>One verified quotation supporting an answer. The excerpt was checked against the passage's real text before it was stored.</summary>
@@ -242,4 +251,71 @@ public class KnowledgeAnswerRevision : BaseEntity, ITenantOwned
     public Guid? ActorUserId { get; set; }
 
     public string? ActorEmail { get; set; }
+}
+
+/// <summary>
+/// A published version of a tenant's product knowledge: an immutable snapshot of the answers the tenant had approved when they published.
+/// Customers' answers are read from the current version only, never from drafts, so editing an answer never silently changes what customers
+/// are told. A newer version supersedes it but never deletes it; restoring an old one publishes a new version that copies it.
+/// </summary>
+public class KnowledgeVersion : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    /// <summary>1, 2, 3... per tenant.</summary>
+    public int Number { get; set; }
+
+    public KnowledgeVersionStatus Status { get; set; } = KnowledgeVersionStatus.Current;
+
+    public Guid? PublishedBy { get; set; }
+
+    public string? PublishedByEmail { get; set; }
+
+    public DateTime PublishedAt { get; set; }
+
+    public string? Note { get; set; }
+
+    public int ItemCount { get; set; }
+
+    /// <summary>Set when this version was made by restoring an earlier one.</summary>
+    public int? RestoredFromNumber { get; set; }
+}
+
+/// <summary>
+/// One approved answer as it stood when it was published, with the evidence behind it. Never changed afterwards: if the answer is edited,
+/// the next version carries the edit and this one keeps what was published then - including who approved it and when.
+/// </summary>
+public class KnowledgeItem : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid VersionId { get; set; }
+
+    public Guid QuestionId { get; set; }
+
+    /// <summary>The answer version this snapshot was taken from.</summary>
+    public Guid AnswerId { get; set; }
+
+    public string Category { get; set; } = string.Empty;
+
+    public string Question { get; set; } = string.Empty;
+
+    public string Summary { get; set; } = string.Empty;
+
+    public string? Detail { get; set; }
+
+    public KnowledgeAnswerKind Kind { get; set; }
+
+    public KnowledgeConfidence Confidence { get; set; }
+
+    public bool IsMaterialClaim { get; set; }
+
+    public Guid? ApprovedBy { get; set; }
+
+    public DateTime ApprovedAt { get; set; }
+
+    public DateTime? ReviewDueAt { get; set; }
+
+    /// <summary>JSON: the quotations with their source, page or address and the source version and passage fingerprint they came from.</summary>
+    public string EvidenceJson { get; set; } = "[]";
 }

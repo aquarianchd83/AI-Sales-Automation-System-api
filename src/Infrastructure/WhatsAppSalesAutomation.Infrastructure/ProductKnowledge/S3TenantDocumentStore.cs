@@ -155,6 +155,7 @@ public sealed class ProductKnowledgeSettings
     public bool CrawlRespectRobots { get; set; } = true;
     public int DraftPassages { get; set; } = 6;
     public int MaxCustomQuestions { get; set; } = 20;
+    public int MaterialReviewDays { get; set; } = 180;
 }
 
 /// <summary>The two On/Off switches on the Integrations page, bound from "Integrations:ProductSources". Absent means On.</summary>
@@ -192,6 +193,7 @@ public sealed class SourceLimitsProvider : ISourceLimitsProvider
             _switches?.Value.DocumentUpload ?? true,
             _switches?.Value.WebsiteScanning ?? true,
             Math.Clamp(o.DraftPassages, 2, 12),
-            Math.Clamp(o.MaxCustomQuestions, 0, 100));
+            Math.Clamp(o.MaxCustomQuestions, 0, 100),
+            Math.Clamp(o.MaterialReviewDays, 7, 730));
     }
 }

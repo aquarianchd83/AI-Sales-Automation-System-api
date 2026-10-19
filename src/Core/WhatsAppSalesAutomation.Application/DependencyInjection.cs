@@ -184,6 +184,9 @@ public static class DependencyInjection
 
         // Phase 4: the tenant's decisions about the drafts, each recorded in the audit trail.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeVerificationService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeVerificationService>();
+
+        // Phase 5: publishing the approved answers as an immutable version.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgePublishingService>();
         services.AddScoped<IPlatformAiProvidersService, PlatformAiProvidersService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();

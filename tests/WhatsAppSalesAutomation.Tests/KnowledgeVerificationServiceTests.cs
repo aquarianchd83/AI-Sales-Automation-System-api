@@ -101,7 +101,7 @@ public sealed class KnowledgeVerificationServiceTests : IDisposable
         _connection.Dispose();
     }
 
-    private KnowledgeVerificationService Service() => new(_db, _admin);
+    private KnowledgeVerificationService Service() => new(_db, _admin, new Limits());
 
     private KnowledgeDraftingService Drafting() => new(_db, _ai, _routing, new Limits(), new Queue(), NullLogger<KnowledgeDraftingService>.Instance);
 

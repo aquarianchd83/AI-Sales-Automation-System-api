@@ -243,6 +243,9 @@ public sealed class KnowledgeSourceService : IKnowledgeSourceService
             }
         }
 
+        // Answers drawn from this source are marked for another look before its passages go; the answers and the audit trail themselves stay.
+        await KnowledgeRevalidation.MarkAffectedAsync(_db, tenantId, sourceId, sourceRemoved: true, cancellationToken);
+
         var passages = await _db.SourcePassages.Where(p => p.TenantId == tenantId && p.SourceId == sourceId).ToListAsync(cancellationToken);
         var pages = await _db.KnowledgeSourcePages.Where(p => p.TenantId == tenantId && p.SourceId == sourceId).ToListAsync(cancellationToken);
         _db.SourcePassages.RemoveRange(passages);

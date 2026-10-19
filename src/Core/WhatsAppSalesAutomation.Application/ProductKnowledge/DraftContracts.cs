@@ -17,7 +17,8 @@ public record ConflictDto(Guid Id, string Fact, IReadOnlyList<ConflictValue> Val
 public record KnowledgeAnswerDto(
     Guid Id, int Version, string? Summary, string? Detail, string Kind, string Confidence, string Status, string? Limitation, string? ClarifyingQuestion,
     IReadOnlyList<string> Reasons, bool IsMaterialClaim, bool HasUnsupportedClaim, bool HasConflict, string Provider, string? Model, bool IsSimulated,
-    DateTime GeneratedAt, IReadOnlyList<AnswerEvidenceDto> Evidence, IReadOnlyList<ConflictDto> Conflicts, DateTime? ApprovedAt = null);
+    DateTime GeneratedAt, IReadOnlyList<AnswerEvidenceDto> Evidence, IReadOnlyList<ConflictDto> Conflicts, DateTime? ApprovedAt = null,
+    bool NeedsRevalidation = false, string? RevalidationReason = null, DateTime? ReviewDueAt = null);
 
 /// <summary>Where the tenant's review stands, one count per question: each question is in exactly one of these.</summary>
 /// <param name="Waiting">Drafted from the sources and waiting for the tenant's check (or reopened for correction).</param>

@@ -183,6 +183,10 @@ public interface IApplicationDbContext
 
     DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswerRevision> KnowledgeAnswerRevisions { get; }
 
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeVersion> KnowledgeVersions { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeItem> KnowledgeItems { get; }
+
     DbSet<Announcement> Announcements { get; }
 
     DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }

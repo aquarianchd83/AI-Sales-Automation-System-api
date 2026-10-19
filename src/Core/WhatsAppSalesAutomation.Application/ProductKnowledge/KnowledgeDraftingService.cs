@@ -570,7 +570,8 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         string.IsNullOrEmpty(a.ConfidenceReasons) ? Array.Empty<string>() : a.ConfidenceReasons.Split('\n', StringSplitOptions.RemoveEmptyEntries),
         a.IsMaterialClaim, a.HasUnsupportedClaim, a.HasConflict, a.Provider, a.Model, a.IsSimulated, a.GeneratedAt,
         evidence.Select(e => new AnswerEvidenceDto(e.SourceId, e.SourceName, e.Location, e.Heading, e.Excerpt)).ToList(),
-        conflicts.Select(c => new ConflictDto(c.Id, c.Fact, ReadValues(c.ValuesJson), c.Status.ToString(), c.ChosenValue)).ToList(), a.ApprovedAt);
+        conflicts.Select(c => new ConflictDto(c.Id, c.Fact, ReadValues(c.ValuesJson), c.Status.ToString(), c.ChosenValue)).ToList(), a.ApprovedAt,
+        a.NeedsRevalidation, a.RevalidationReason, a.ReviewDueAt);
 
     /// <summary>Each question is in exactly one state. "Needs information" is no answer yet, or sources that do not answer it.</summary>
     internal static AnswerProgressDto ComputeProgress(IReadOnlyList<KnowledgeQuestionDto> questions)

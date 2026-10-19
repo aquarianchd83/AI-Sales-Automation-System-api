@@ -36,6 +36,7 @@ public class KnowledgeAnswerConfiguration : IEntityTypeConfiguration<KnowledgeAn
         builder.Property(a => a.Provider).IsRequired().HasMaxLength(20);
         builder.Property(a => a.Model).HasMaxLength(100);
         builder.Property(a => a.SourceVersions).HasMaxLength(4000);
+        builder.Property(a => a.RevalidationReason).HasMaxLength(500);
         builder.HasOne<KnowledgeQuestion>().WithMany().HasForeignKey(a => a.QuestionId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(a => new { a.TenantId, a.QuestionId, a.IsCurrent });
     }
@@ -116,5 +117,36 @@ public class KnowledgeAnswerRevisionConfiguration : IEntityTypeConfiguration<Kno
         builder.Property(r => r.Note).HasMaxLength(1000);
         builder.Property(r => r.ActorEmail).HasMaxLength(256);
         builder.HasIndex(r => new { r.TenantId, r.QuestionId, r.CreatedAt });
+    }
+}
+
+public class KnowledgeVersionConfiguration : IEntityTypeConfiguration<KnowledgeVersion>
+{
+    public void Configure(EntityTypeBuilder<KnowledgeVersion> builder)
+    {
+        builder.ToTable("KnowledgeVersions");
+        builder.HasKey(v => v.Id);
+        builder.Property(v => v.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(v => v.PublishedByEmail).HasMaxLength(256);
+        builder.Property(v => v.Note).HasMaxLength(1000);
+        builder.HasIndex(v => new { v.TenantId, v.Number }).IsUnique();
+    }
+}
+
+public class KnowledgeItemConfiguration : IEntityTypeConfiguration<KnowledgeItem>
+{
+    public void Configure(EntityTypeBuilder<KnowledgeItem> builder)
+    {
+        builder.ToTable("KnowledgeItems");
+        builder.HasKey(i => i.Id);
+        builder.Property(i => i.Category).IsRequired().HasMaxLength(60);
+        builder.Property(i => i.Question).IsRequired().HasMaxLength(500);
+        builder.Property(i => i.Summary).IsRequired().HasMaxLength(2000);
+        builder.Property(i => i.Detail).HasMaxLength(8000);
+        builder.Property(i => i.Kind).HasConversion<string>().HasMaxLength(30);
+        builder.Property(i => i.Confidence).HasConversion<string>().HasMaxLength(20);
+        builder.Property(i => i.EvidenceJson).IsRequired();
+        builder.HasOne<KnowledgeVersion>().WithMany().HasForeignKey(i => i.VersionId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(i => new { i.TenantId, i.VersionId });
     }
 }

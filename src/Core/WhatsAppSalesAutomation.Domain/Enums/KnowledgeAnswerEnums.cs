@@ -57,4 +57,16 @@ public enum KnowledgeRevisionKind
     MarkedNotApplicable = 6,
     Reopened = 7,
     ConflictResolved = 8,
+
+    /// <summary>A source this answer was drawn from changed or was removed: the answer needs another look.</summary>
+    SourceChanged = 9,
+}
+
+public enum KnowledgeVersionStatus
+{
+    /// <summary>The version customers' answers are read from now.</summary>
+    Current = 0,
+
+    /// <summary>Replaced by a newer version. Kept, never deleted: it is the record of what was published and when.</summary>
+    Superseded = 1,
 }
