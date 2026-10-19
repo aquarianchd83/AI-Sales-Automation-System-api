@@ -23,8 +23,11 @@ public record SourcePassageDto(Guid Id, int Order, int? PageNumber, string? Url,
 public record KnowledgeSourceDetailDto(KnowledgeSourceDto Source, IReadOnlyList<KnowledgeSourcePageDto> Pages, IReadOnlyList<SourcePassageDto> Passages, int PassageTotal);
 
 /// <param name="ScannedReading">"Off", "Simulator" or "Api": how scanned pages are read right now (the platform's switch on Integrations).</param>
+/// <param name="DocumentUploadEnabled">The platform's "Document upload" switch on Integrations.</param>
+/// <param name="WebsiteScanningEnabled">The platform's "Website scanning" switch on Integrations.</param>
 public record KnowledgeSourcesOverviewDto(
-    IReadOnlyList<KnowledgeSourceDto> Sources, int MaxSources, int MaxFileMb, IReadOnlyList<string> SupportedExtensions, string ScannedReading, bool StorageReady);
+    IReadOnlyList<KnowledgeSourceDto> Sources, int MaxSources, int MaxFileMb, IReadOnlyList<string> SupportedExtensions, string ScannedReading, bool StorageReady,
+    bool DocumentUploadEnabled = true, bool WebsiteScanningEnabled = true);
 
 public record AddWebsiteSourceRequest(string Url);
 
@@ -91,7 +94,8 @@ public sealed class KnowledgeSourceService : IKnowledgeSourceService
         var scannedMode = scanned.IsOff ? AiFeatures.OffMode : scanned.UsesThirdParty ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode;
 
         return new KnowledgeSourcesOverviewDto(
-            sources.Select(ToDto).ToList(), limits.MaxSourcesPerTenant, limits.MaxFileMb, _reader.SupportedExtensions, scannedMode, _store.IsConfigured);
+            sources.Select(ToDto).ToList(), limits.MaxSourcesPerTenant, limits.MaxFileMb, _reader.SupportedExtensions, scannedMode, _store.IsConfigured,
+            limits.DocumentUploadEnabled, limits.WebsiteScanningEnabled);
     }
 
     public async Task<KnowledgeSourceDetailDto> GetAsync(Guid tenantId, Guid sourceId, CancellationToken cancellationToken = default)
@@ -117,6 +121,8 @@ public sealed class KnowledgeSourceService : IKnowledgeSourceService
         Guid tenantId, Guid? userId, string fileName, string? contentType, Stream content, long length, CancellationToken cancellationToken = default)
     {
         var limits = _limits.Get();
+        if (!limits.DocumentUploadEnabled)
+            throw new FeatureDisabledException(SourceLimits.DocumentUploadOffMessage);
         fileName = Path.GetFileName(fileName ?? string.Empty).Trim();
         if (fileName.Length == 0)
             throw Invalid("file", "Choose a file to upload.");
@@ -171,6 +177,8 @@ public sealed class KnowledgeSourceService : IKnowledgeSourceService
     public async Task<KnowledgeSourceDto> AddWebsiteAsync(Guid tenantId, Guid? userId, AddWebsiteSourceRequest request, CancellationToken cancellationToken = default)
     {
         var limits = _limits.Get();
+        if (!limits.WebsiteScanningEnabled)
+            throw new FeatureDisabledException(SourceLimits.WebsiteScanningOffMessage);
         var url = NormaliseWebsite(request?.Url);
 
         await EnsureRoomAsync(tenantId, limits, cancellationToken);
@@ -200,6 +208,11 @@ public sealed class KnowledgeSourceService : IKnowledgeSourceService
     public async Task<KnowledgeSourceDto> RetryAsync(Guid tenantId, Guid sourceId, CancellationToken cancellationToken = default)
     {
         var source = await FindTrackedAsync(tenantId, sourceId, cancellationToken);
+        var limits = _limits.Get();
+        if (source.Kind == KnowledgeSourceKind.Website && !limits.WebsiteScanningEnabled)
+            throw new FeatureDisabledException(SourceLimits.WebsiteScanningOffMessage);
+        if (source.Kind == KnowledgeSourceKind.Document && !limits.DocumentUploadEnabled)
+            throw new FeatureDisabledException(SourceLimits.DocumentUploadOffMessage);
         if (!CanRetry(source) && !CanRescan(source))
             throw new ConflictException(source.Status is KnowledgeSourceStatus.Queued or KnowledgeSourceStatus.Processing
                 ? "This source is being read right now."

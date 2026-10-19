@@ -65,6 +65,15 @@ public sealed class KnowledgeSourceProcessor : IKnowledgeSourceProcessor
         if (source is null || source.Status != KnowledgeSourceStatus.Queued)
             return; // removed meanwhile, or already picked up by another run
 
+        var limits = _limits.Get();
+        if (source.Kind == KnowledgeSourceKind.Website ? !limits.WebsiteScanningEnabled : !limits.DocumentUploadEnabled)
+        {
+            Fail(source, source.Kind == KnowledgeSourceKind.Website ? "WebsiteScanningOff" : "DocumentUploadOff",
+                source.Kind == KnowledgeSourceKind.Website ? SourceLimits.WebsiteScanningOffMessage : SourceLimits.DocumentUploadOffMessage, Array.Empty<string>());
+            await _db.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
         source.Status = KnowledgeSourceStatus.Processing;
         source.Attempts++;
         await _db.SaveChangesAsync(cancellationToken);

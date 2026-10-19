@@ -155,12 +155,25 @@ public sealed class ProductKnowledgeSettings
     public bool CrawlRespectRobots { get; set; } = true;
 }
 
-/// <summary>Reads the limits per request, clamped to sane ranges so a typo in the settings cannot open the gates.</summary>
+/// <summary>The two On/Off switches on the Integrations page, bound from "Integrations:ProductSources". Absent means On.</summary>
+public sealed class ProductSourceSwitches
+{
+    public bool DocumentUpload { get; set; } = true;
+    public bool WebsiteScanning { get; set; } = true;
+}
+
+/// <summary>Reads the limits and switches per request (so a save applies at once), the limits clamped to sane ranges so a typo in the
+/// settings cannot open the gates.</summary>
 public sealed class SourceLimitsProvider : ISourceLimitsProvider
 {
     private readonly IOptionsSnapshot<ProductKnowledgeSettings> _options;
+    private readonly IOptionsSnapshot<ProductSourceSwitches>? _switches;
 
-    public SourceLimitsProvider(IOptionsSnapshot<ProductKnowledgeSettings> options) => _options = options;
+    public SourceLimitsProvider(IOptionsSnapshot<ProductKnowledgeSettings> options, IOptionsSnapshot<ProductSourceSwitches>? switches = null)
+    {
+        _options = options;
+        _switches = switches;
+    }
 
     public SourceLimits Get()
     {
@@ -173,6 +186,8 @@ public sealed class SourceLimitsProvider : ISourceLimitsProvider
             Math.Clamp(o.CrawlMaxDepth, 0, 5),
             Math.Clamp(o.CrawlPageTimeoutSeconds, 3, 60),
             Math.Clamp(o.CrawlMaxPageKb, 64, 10_240),
-            o.CrawlRespectRobots);
+            o.CrawlRespectRobots,
+            _switches?.Value.DocumentUpload ?? true,
+            _switches?.Value.WebsiteScanning ?? true);
     }
 }

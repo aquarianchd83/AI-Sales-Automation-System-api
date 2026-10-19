@@ -11,8 +11,16 @@ public sealed record SourceLimits(
     int CrawlMaxDepth,
     int CrawlPageTimeoutSeconds,
     int CrawlMaxPageKb,
-    bool CrawlRespectRobots)
+    bool CrawlRespectRobots,
+    bool DocumentUploadEnabled = true,
+    bool WebsiteScanningEnabled = true)
 {
+    public const string DocumentUploadOffMessage =
+        "Uploading documents is switched off on this platform for now. Documents already read stay available. Ask your platform administrator if you need it.";
+
+    public const string WebsiteScanningOffMessage =
+        "Reading websites is switched off on this platform for now. Pages already read stay available. Ask your platform administrator if you need it.";
+
     public long MaxFileBytes => MaxFileMb * 1024L * 1024L;
 }
 

@@ -651,4 +651,69 @@ public sealed class KnowledgeSourceServiceTests : IDisposable
 
         Assert.Equal((200, 1, 5, 200, 3), (limits.MaxFileMb, limits.CrawlMaxPages, limits.CrawlMaxDepth, limits.MaxScannedPages, limits.CrawlPageTimeoutSeconds));
     }
+
+    // ----- the platform's two switches on Integrations ----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task With_document_upload_switched_off_no_file_is_taken_or_read_again_and_what_was_read_stays()
+    {
+        var uploaded = await Upload("brochure.pdf", TwoPagePdf);
+        await Processor().ProcessAsync(uploaded.Id);
+        _limits.Value = _limits.Value with { DocumentUploadEnabled = false };
+
+        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => Upload("other.txt", Encoding.UTF8.GetBytes("Another document with enough text in it.")));
+        Assert.Contains("Uploading documents is switched off", ex.Message);
+        Assert.Single(_store.Files.Keys, k => k.EndsWith("original.pdf"));
+
+        Assert.Equal(2, await _db.SourcePassages.CountAsync(p => p.SourceId == uploaded.Id)); // the earlier reading stays
+        var overview = await Service().ListAsync(_tenantA);
+        Assert.False(overview.DocumentUploadEnabled);
+        Assert.True(overview.WebsiteScanningEnabled);
+    }
+
+    [Fact]
+    public async Task With_website_scanning_switched_off_no_website_is_added_or_scanned_again()
+    {
+        _crawler.Result = new CrawlResult("https://clinic.example/", new[] { new CrawledPage("https://clinic.example/", 0, "Read", 200, "Home", "Fee is Rs 500.", null) }, null);
+        var id = await Website();
+        await Processor().ProcessAsync(id);
+        _limits.Value = _limits.Value with { WebsiteScanningEnabled = false };
+
+        Assert.Contains("Reading websites is switched off",
+            (await Assert.ThrowsAsync<FeatureDisabledException>(() => Service().AddWebsiteAsync(_tenantA, _user, new AddWebsiteSourceRequest("other.example")))).Message);
+        await Assert.ThrowsAsync<FeatureDisabledException>(() => Service().RetryAsync(_tenantA, id));
+        Assert.Single(_crawler.Options); // never crawled again
+        Assert.Equal(1, await _db.SourcePassages.CountAsync(p => p.SourceId == id));
+    }
+
+    [Fact]
+    public async Task A_source_queued_just_before_its_switch_went_off_is_not_read()
+    {
+        var id = await Website();
+        _limits.Value = _limits.Value with { WebsiteScanningEnabled = false };
+
+        await Processor().ProcessAsync(id);
+
+        var source = await Reload(id);
+        Assert.Equal(KnowledgeSourceStatus.Failed, source.Status);
+        Assert.Equal("WebsiteScanningOff", source.ErrorCode);
+        Assert.Empty(_crawler.Options);
+        Assert.Equal(0, source.Attempts);
+    }
+
+    [Fact]
+    public void Both_switches_are_integrations_settings_that_start_on()
+    {
+        var keys = WhatsAppSalesAutomation.Application.Settings.AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:ProductSources:")).ToList();
+
+        Assert.Equal(new[] { "Integrations:ProductSources:DocumentUpload", "Integrations:ProductSources:WebsiteScanning" }, keys.Select(k => k.Key));
+        Assert.All(keys, k => Assert.Equal(("Integrations", "true"), (k.Category, k.DefaultValue)));
+
+        var defaults = new SourceLimitsProvider(new FixedOptions<ProductKnowledgeSettings>(new ProductKnowledgeSettings())).Get();
+        Assert.True(defaults.DocumentUploadEnabled && defaults.WebsiteScanningEnabled);
+        var off = new SourceLimitsProvider(new FixedOptions<ProductKnowledgeSettings>(new ProductKnowledgeSettings()),
+            new FixedOptions<ProductSourceSwitches>(new ProductSourceSwitches { WebsiteScanning = false })).Get();
+        Assert.False(off.WebsiteScanningEnabled);
+        Assert.True(off.DocumentUploadEnabled);
+    }
 }

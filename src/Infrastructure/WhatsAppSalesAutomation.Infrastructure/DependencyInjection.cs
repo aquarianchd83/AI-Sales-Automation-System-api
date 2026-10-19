@@ -75,6 +75,7 @@ public static class DependencyInjection
 
         // Product-knowledge sources: private files in the tenant's AWS folder, page-level reading, the SSRF-guarded website crawler, the background job.
         services.Configure<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.ProductKnowledgeSettings>(configuration.GetSection("ProductKnowledge"));
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.ProductSourceSwitches>(configuration.GetSection("Integrations:ProductSources"));
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ISourceLimitsProvider, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.SourceLimitsProvider>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ITenantDocumentStore, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.S3TenantDocumentStore>();
         services.AddSingleton<WhatsAppSalesAutomation.Application.ProductKnowledge.IPagedDocumentReader, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.PagedDocumentReader>();
