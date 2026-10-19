@@ -173,6 +173,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries => Set<PlatformAuditLogEntry>();
 
+    public DbSet<AiExecution> AiExecutions => Set<AiExecution>();
+
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
     public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();

@@ -161,6 +161,8 @@ public interface IApplicationDbContext
 
     DbSet<PlatformAuditLogEntry> PlatformAuditLogEntries { get; }
 
+    DbSet<AiExecution> AiExecutions { get; }
+
     DbSet<Announcement> Announcements { get; }
 
     DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }

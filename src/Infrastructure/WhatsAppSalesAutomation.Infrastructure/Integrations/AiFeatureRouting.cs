@@ -21,6 +21,9 @@ public class AiFeatureOptions
     public AiFeatureOption ContentGeneration { get; set; } = new();
 
     public AiFeatureOption VideoRenders { get; set; } = new();
+    public AiFeatureOption ProductKnowledge { get; set; } = new();
+    public AiPolicyOptions Policy { get; set; } = new();
+    public AiPricingOptions Pricing { get; set; } = new();
 
     public AiFeatureOption BusinessKeywords { get; set; } = new();
 
@@ -32,6 +35,7 @@ public class AiFeatureOptions
         AiFeatures.KnowledgeBase => KnowledgeBase,
         AiFeatures.ContentGeneration => ContentGeneration,
         AiFeatures.VideoRenders => VideoRenders,
+        AiFeatures.ProductKnowledge => ProductKnowledge,
         AiFeatures.BusinessKeywords => BusinessKeywords,
         AiFeatures.DiscoveryKeywords => DiscoveryKeywords,
         _ => new AiFeatureOption(),
@@ -60,4 +64,41 @@ public class AiFeatureRouting : IAiFeatureRouting
         // A tool the feature cannot run on (saved earlier, or by a request that skipped the page) is never called: the simulator answers.
         return new AiFeatureChoice(api && supported.Contains(provider), provider);
     }
+}
+
+/// <summary>How product-knowledge AI tasks behave (the "Integrations:Ai:Policy" settings).</summary>
+public class AiPolicyOptions
+{
+    public bool FallbackEnabled { get; set; }
+
+    public string? FallbackOrder { get; set; } = "OpenAI,Google,Anthropic";
+
+    public string SimulatorScenario { get; set; } = "Success";
+
+    public bool ScannedDocumentsViaAi { get; set; }
+
+    public decimal MaxCostPerCallUsd { get; set; } = 0.50m;
+
+    public int TimeoutSeconds { get; set; } = 60;
+
+    public int MaxRetriesPerProvider { get; set; } = 1;
+
+    public int RetryDelayMs { get; set; } = 500;
+}
+
+public class AiPriceOption
+{
+    public decimal InputPer1MUsd { get; set; }
+
+    public decimal OutputPer1MUsd { get; set; }
+}
+
+/// <summary>The "Integrations:Ai:Pricing" settings: what each provider charges, as entered by the platform admin.</summary>
+public class AiPricingOptions
+{
+    public AiPriceOption OpenAI { get; set; } = new();
+
+    public AiPriceOption Anthropic { get; set; } = new();
+
+    public AiPriceOption Google { get; set; } = new();
 }

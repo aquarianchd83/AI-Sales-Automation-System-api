@@ -11,6 +11,9 @@ public static class AiFeatures
     public const string ContentGeneration = "ContentGeneration";
     public const string VideoRenders = "VideoRenders";
 
+    /// <summary>Product knowledge: reading a tenant's documents and website, drafting answers from them, and any other AI step that builds the verified knowledge the chat answers from.</summary>
+    public const string ProductKnowledge = "ProductKnowledge";
+
     /// <summary>"AI suggest" on the tenant's Domain keywords (onboarding and business profile).</summary>
     public const string BusinessKeywords = "BusinessKeywords";
 
@@ -22,7 +25,7 @@ public static class AiFeatures
     /// AiProviders:EmbeddingProvider), not under Integrations:Ai, because the conversation engine has always read them there.</summary>
     public const string Conversation = "Conversation";
 
-    public static readonly IReadOnlyList<string> All = new[] { DiscoveryLead, KnowledgeBase, ContentGeneration, VideoRenders, BusinessKeywords, DiscoveryKeywords, Conversation };
+    public static readonly IReadOnlyList<string> All = new[] { DiscoveryLead, KnowledgeBase, ContentGeneration, VideoRenders, ProductKnowledge, BusinessKeywords, DiscoveryKeywords, Conversation };
 
     /// <summary>Embeddings: Claude has no embeddings endpoint, so only ChatGPT and Gemini are offered for them.</summary>
     public static readonly IReadOnlyList<string> EmbeddingProviders = new[] { "OpenAI", "Google" };
@@ -44,6 +47,7 @@ public static class AiFeatures
     {
         DiscoveryLead => new[] { "Anthropic" },
         Conversation => new[] { "OpenAI", "Anthropic", "Google" },
+        ProductKnowledge => new[] { "OpenAI", "Anthropic", "Google" },
         BusinessKeywords => new[] { "Anthropic", "OpenAI", "Google" },
         DiscoveryKeywords => new[] { "Anthropic", "OpenAI", "Google" },
         _ => Array.Empty<string>(),
@@ -82,7 +86,8 @@ public record PlatformAiFeatureSettingsDto(
     AiFeatureChannelDto VideoRenders,
     AiConversationDto Conversation,
     AiFeatureChannelDto BusinessKeywords,
-    AiFeatureChannelDto DiscoveryKeywords);
+    AiFeatureChannelDto DiscoveryKeywords,
+    AiFeatureChannelDto ProductKnowledge);
 
 /// <param name="Mode">"Simulator" or "Api".</param>
 /// <param name="Provider">"OpenAI" (ChatGPT), "Anthropic" (Claude) or "Google" (Gemini).</param>
@@ -100,7 +105,8 @@ public record UpdatePlatformAiFeatureSettingsRequest(
     AiFeatureChannelRequest VideoRenders,
     AiConversationRequest? Conversation = null,
     AiFeatureChannelRequest? BusinessKeywords = null,
-    AiFeatureChannelRequest? DiscoveryKeywords = null);
+    AiFeatureChannelRequest? DiscoveryKeywords = null,
+    AiFeatureChannelRequest? ProductKnowledge = null);
 
 public record TestAiFeatureRequest(AiFeatureChannelRequest Settings);
 
@@ -148,7 +154,7 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         AiFeatureChannelDto For(string feature) => ToDto(stored, feature, credentials);
         return new PlatformAiFeatureSettingsDto(
             For(AiFeatures.DiscoveryLead), For(AiFeatures.KnowledgeBase), For(AiFeatures.ContentGeneration), For(AiFeatures.VideoRenders),
-            ConversationDto(credentials), For(AiFeatures.BusinessKeywords), For(AiFeatures.DiscoveryKeywords));
+            ConversationDto(credentials), For(AiFeatures.BusinessKeywords), For(AiFeatures.DiscoveryKeywords), For(AiFeatures.ProductKnowledge));
     }
 
     public async Task<PlatformAiFeatureSettingsDto> UpdateAsync(UpdatePlatformAiFeatureSettingsRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
@@ -184,6 +190,8 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         Collect(AiFeatures.VideoRenders, request.VideoRenders);
         if (request.BusinessKeywords is not null)
             Collect(AiFeatures.BusinessKeywords, request.BusinessKeywords);
+        if (request.ProductKnowledge is not null)
+            Collect(AiFeatures.ProductKnowledge, request.ProductKnowledge);
         if (request.DiscoveryKeywords is not null)
             Collect(AiFeatures.DiscoveryKeywords, request.DiscoveryKeywords);
 

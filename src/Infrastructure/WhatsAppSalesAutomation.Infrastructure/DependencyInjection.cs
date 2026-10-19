@@ -291,6 +291,11 @@ public static class DependencyInjection
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.DndCheckIntegrationOptions>(configuration.GetSection("Integrations:DndCheck"));
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Integrations.AiFeatureOptions>(configuration.GetSection("Integrations:Ai"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Platform.IAiFeatureRouting, WhatsAppSalesAutomation.Infrastructure.Integrations.AiFeatureRouting>();
+
+        // Product-knowledge AI tasks: one resolver (provider choice, on/off, capability, fallback, execution log), the detailed provider client, and the policy/price settings.
+        services.AddScoped<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiTaskPolicyProvider, WhatsAppSalesAutomation.Infrastructure.Integrations.AiTaskPolicyProvider>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiExecutionLog, WhatsAppSalesAutomation.Infrastructure.Ai.AiExecutionLog>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiCompletionClient, WhatsAppSalesAutomation.Infrastructure.Ai.AiCompletionClient>().RemoveAllLoggers();
         services.AddHttpClient();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>();
