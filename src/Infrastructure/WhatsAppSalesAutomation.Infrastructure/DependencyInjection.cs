@@ -84,6 +84,8 @@ public static class DependencyInjection
             .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler);
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();
+        services.AddScoped<KnowledgeDraftJob>();
 
         // Keyword leg: Full-Text where the server has it and the index exists, BM25 in the application
         // otherwise. Probed once, logged loudly - same shape and reasoning as the vector store above.

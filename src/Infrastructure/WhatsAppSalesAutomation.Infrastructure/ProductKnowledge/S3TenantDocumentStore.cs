@@ -153,6 +153,8 @@ public sealed class ProductKnowledgeSettings
     public int CrawlPageTimeoutSeconds { get; set; } = 15;
     public int CrawlMaxPageKb { get; set; } = 2048;
     public bool CrawlRespectRobots { get; set; } = true;
+    public int DraftPassages { get; set; } = 6;
+    public int MaxCustomQuestions { get; set; } = 20;
 }
 
 /// <summary>The two On/Off switches on the Integrations page, bound from "Integrations:ProductSources". Absent means On.</summary>
@@ -188,6 +190,8 @@ public sealed class SourceLimitsProvider : ISourceLimitsProvider
             Math.Clamp(o.CrawlMaxPageKb, 64, 10_240),
             o.CrawlRespectRobots,
             _switches?.Value.DocumentUpload ?? true,
-            _switches?.Value.WebsiteScanning ?? true);
+            _switches?.Value.WebsiteScanning ?? true,
+            Math.Clamp(o.DraftPassages, 2, 12),
+            Math.Clamp(o.MaxCustomQuestions, 0, 100));
     }
 }

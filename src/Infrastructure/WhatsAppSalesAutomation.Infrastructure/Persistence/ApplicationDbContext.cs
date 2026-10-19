@@ -181,6 +181,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages => Set<Domain.Entities.ProductKnowledge.SourcePassage>();
 
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeQuestion> KnowledgeQuestions => Set<Domain.Entities.ProductKnowledge.KnowledgeQuestion>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswer> KnowledgeAnswers => Set<Domain.Entities.ProductKnowledge.KnowledgeAnswer>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.AnswerEvidence> AnswerEvidences => Set<Domain.Entities.ProductKnowledge.AnswerEvidence>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeConflict> KnowledgeConflicts => Set<Domain.Entities.ProductKnowledge.KnowledgeConflict>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.FeatureBenefit> FeatureBenefits => Set<Domain.Entities.ProductKnowledge.FeatureBenefit>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeDraftRun> KnowledgeDraftRuns => Set<Domain.Entities.ProductKnowledge.KnowledgeDraftRun>();
+
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
     public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();

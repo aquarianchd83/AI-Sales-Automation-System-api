@@ -169,6 +169,18 @@ public interface IApplicationDbContext
 
     DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages { get; }
 
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeQuestion> KnowledgeQuestions { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswer> KnowledgeAnswers { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.AnswerEvidence> AnswerEvidences { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeConflict> KnowledgeConflicts { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.FeatureBenefit> FeatureBenefits { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeDraftRun> KnowledgeDraftRuns { get; }
+
     DbSet<Announcement> Announcements { get; }
 
     DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }

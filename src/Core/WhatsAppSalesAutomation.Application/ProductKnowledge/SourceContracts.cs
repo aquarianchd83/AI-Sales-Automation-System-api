@@ -13,7 +13,9 @@ public sealed record SourceLimits(
     int CrawlMaxPageKb,
     bool CrawlRespectRobots,
     bool DocumentUploadEnabled = true,
-    bool WebsiteScanningEnabled = true)
+    bool WebsiteScanningEnabled = true,
+    int DraftPassages = 6,
+    int MaxCustomQuestions = 20)
 {
     public const string DocumentUploadOffMessage =
         "Uploading documents is switched off on this platform for now. Documents already read stay available. Ask your platform administrator if you need it.";
