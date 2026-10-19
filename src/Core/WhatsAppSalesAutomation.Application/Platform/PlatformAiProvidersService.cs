@@ -17,7 +17,9 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 
 // ----- what the screens show ----------------------------------------------------------------------------------------------------------
 
-public record AiCapabilityDto(string Task, bool Declared, bool Verified, DateTime? VerifiedAtUtc);
+/// <summary>One AI use of the application (see <see cref="AiUses"/>) for one provider: can its code call this provider (declared), and has a real
+/// call for it succeeded (verified).</summary>
+public record AiCapabilityDto(string Task, string Area, string Title, bool Declared, bool Verified, DateTime? VerifiedAtUtc);
 
 public record AiBenchmarkCaseDto(string Name, bool Passed, string? Note);
 
@@ -29,6 +31,7 @@ public record AiBenchmarkSummaryDto(
 /// What the AI Providers screen adds beside each provider's own settings (which stay where they are: On/Off, key, model and prices are the
 /// <c>AiProviders:*</c> settings on that screen). This is only the picture around them.
 /// </summary>
+/// <param name="UsedFor">What the application currently runs on this provider, by the names the Integrations page uses.</param>
 /// <param name="Status">Off, NotConfigured (no key), NotVerified, Verified or Failed - from the last time the screen's Verify button checked the
 /// key. Verified is only ever shown for the key and model that were checked: changing either puts it back to NotVerified.</param>
 public record AiProviderInsightDto(
@@ -45,23 +48,20 @@ public record AiProviderInsightDto(
     decimal OutputPer1MUsd,
     bool PriceSet,
     AiBenchmarkSummaryDto? Benchmark,
-    bool ChosenForProductKnowledge);
+    IReadOnlyList<string> UsedFor);
 
 public record AiPolicyDto(
     bool FallbackEnabled,
     IReadOnlyList<string> FallbackOrder,
     string SimulatorScenario,
-    bool ScannedDocumentsViaAi,
     decimal MaxCostPerCallUsd,
     int TimeoutSeconds,
     int MaxRetriesPerProvider,
     IReadOnlyList<string> Scenarios);
 
-/// <param name="ChosenMode">"Simulator" or "Api" - what product-knowledge tasks run on right now.</param>
-public record AiProvidersOverviewDto(IReadOnlyList<AiProviderInsightDto> Providers, AiPolicyDto Policy, string ChosenMode, string ChosenProvider);
+public record AiProvidersOverviewDto(IReadOnlyList<AiProviderInsightDto> Providers, AiPolicyDto Policy);
 
-public record UpdateAiPolicyRequest(
-    bool FallbackEnabled, IReadOnlyList<string> FallbackOrder, string SimulatorScenario, bool ScannedDocumentsViaAi, decimal MaxCostPerCallUsd);
+public record UpdateAiPolicyRequest(bool FallbackEnabled, IReadOnlyList<string> FallbackOrder, string SimulatorScenario, decimal MaxCostPerCallUsd);
 
 public record AiExecutionDto(
     Guid Id, Guid CorrelationId, string Task, string? Feature, string RequestedProvider, string Provider, string? Model, string Mode, string Status, int Attempt,
@@ -129,17 +129,46 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
 
     public async Task<AiProvidersOverviewDto> GetAsync(CancellationToken cancellationToken = default)
     {
-        var route = _routing.Resolve(AiFeatures.ProductKnowledge);
         var insights = new List<AiProviderInsightDto>();
         foreach (var provider in AiFeatures.Providers)
-            insights.Add(await BuildAsync(provider, route, cancellationToken));
+            insights.Add(await BuildAsync(provider, cancellationToken));
 
-        return new AiProvidersOverviewDto(
-            insights, ToDto(_policy.Get()), route.UsesThirdParty ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode,
-            route.UsesThirdParty ? route.Provider : AiCapabilities.Simulator);
+        return new AiProvidersOverviewDto(insights, ToDto(_policy.Get()));
     }
 
-    private async Task<AiProviderInsightDto> BuildAsync(string provider, AiFeatureChoice route, CancellationToken ct)
+    /// <summary>Everything the application runs on <paramref name="provider"/> right now: customer chat and its embeddings, the description rewrite
+    /// (all on the platform's active provider), and every feature whose engine on the Integrations page is this provider.</summary>
+    private IReadOnlyList<string> UsedFor(string provider, AiCredentials credentials)
+    {
+        var used = new List<string>();
+        bool Is(string? p) => string.Equals(PlatformAiFeatureSettingsService.Canonical(p), provider, StringComparison.Ordinal);
+
+        if (Is(credentials.Provider))
+        {
+            used.Add("Customer chat replies");
+            used.Add("Business description rewrite");
+        }
+        if (Is(credentials.EmbeddingProvider))
+            used.Add("Knowledge base search (embeddings)");
+
+        var features = new (string Feature, string Title)[]
+        {
+            (AiFeatures.BusinessKeywords, "Domain keyword suggestions"),
+            (AiFeatures.DiscoveryKeywords, "Search keyword suggestions"),
+            (AiFeatures.DiscoveryLead, "Lead discovery"),
+        }.Concat(AiFeatures.ProductTaskGroups.Select(g => (g.Feature, g.Title)));
+
+        foreach (var (feature, title) in features)
+        {
+            var route = _routing.Resolve(feature);
+            if (route.UsesThirdParty && Is(route.Provider))
+                used.Add(title);
+        }
+
+        return used;
+    }
+
+    private async Task<AiProviderInsightDto> BuildAsync(string provider, CancellationToken ct)
     {
         var credentials = _credentials.Get();
         var category = await _settings.GetCategoryAsync("AiProviders", ct);
@@ -169,14 +198,15 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         }
 
         var verified = await _context.AiExecutions.AsNoTracking()
-            .Where(e => e.Provider == provider && e.Mode == AiExecutionMode.Live && e.Status == AiExecutionStatus.Succeeded && AiTaskKinds.Product.Contains(e.Task))
+            .Where(e => e.Provider == provider && e.Mode == AiExecutionMode.Live && e.Status == AiExecutionStatus.Succeeded && AiUses.Tasks.Contains(e.Task))
             .GroupBy(e => e.Task).Select(g => new { Task = g.Key, At = g.Max(e => e.CreatedAt) }).ToListAsync(ct);
 
-        var capabilities = AiTaskKinds.Product
-            .Select(t =>
+        // Every AI use of the application, not only product knowledge, so a provider's fitness is judged on everything it would run.
+        var capabilities = AiUses.All
+            .Select(u =>
             {
-                var hit = verified.FirstOrDefault(v => v.Task == t);
-                return new AiCapabilityDto(t, AiCapabilities.IsDeclared(provider, t), hit is not null, hit?.At);
+                var hit = verified.FirstOrDefault(v => v.Task == u.Task);
+                return new AiCapabilityDto(u.Task, u.Area, u.Title, AiCapabilities.IsDeclared(provider, u.Task), hit is not null, hit?.At);
             })
             .ToList();
 
@@ -187,7 +217,7 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         return new AiProviderInsightDto(
             provider, DisplayName(provider), enabled, hasKey, model, status, checkRow?.CreatedAt, message, capabilities,
             price.InputPer1MUsd, price.OutputPer1MUsd, price.InputPer1MUsd > 0 || price.OutputPer1MUsd > 0, ReadBenchmark(benchmarkRow),
-            route.UsesThirdParty && string.Equals(route.Provider, provider, StringComparison.OrdinalIgnoreCase));
+            UsedFor(provider, credentials));
     }
 
     private static AiBenchmarkSummaryDto? ReadBenchmark(AiExecution? row)
@@ -279,12 +309,11 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
             ["Integrations:Ai:Policy:FallbackEnabled"] = request.FallbackEnabled ? "true" : "false",
             ["Integrations:Ai:Policy:FallbackOrder"] = string.Join(",", order.Select(p => p!).Distinct()),
             ["Integrations:Ai:Policy:SimulatorScenario"] = scenario,
-            ["Integrations:Ai:Policy:ScannedDocumentsViaAi"] = request.ScannedDocumentsViaAi ? "true" : "false",
             ["Integrations:Ai:Policy:MaxCostPerCallUsd"] = request.MaxCostPerCallUsd.ToString(CultureInfo.InvariantCulture)
         }), actorUserId, cancellationToken);
 
         await _audit.LogAsync(actorUserId, actorEmail, "AiPolicyUpdated",
-            details: $"fallback {(request.FallbackEnabled ? "on" : "off")} ({string.Join(" > ", order.Select(p => DisplayName(p!)))}); scanned documents via AI {(request.ScannedDocumentsViaAi ? "on" : "off")}; simulator scenario {scenario}",
+            details: $"fallback {(request.FallbackEnabled ? "on" : "off")} ({string.Join(" > ", order.Select(p => DisplayName(p!)))}); simulator scenario {scenario}",
             cancellationToken: cancellationToken);
 
         return ToDto(_policy.Get());
@@ -297,7 +326,6 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         provider = RequireProvider(provider);
         var credentials = _credentials.Get();
         var policy = _policy.Get();
-        var route = _routing.Resolve(AiFeatures.ProductKnowledge);
 
         if (!credentials.IsEnabled(provider))
             throw new ValidationException(new[] { new ValidationFailure("Provider", $"{DisplayName(provider)} is switched off.") });
@@ -343,7 +371,7 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         }, cancellationToken);
 
         await _audit.LogAsync(actorUserId, actorEmail, "AiBenchmarkRun", details: $"{DisplayName(provider)}: {passed} of {results.Count} passed", cancellationToken: cancellationToken);
-        return await BuildAsync(provider, route, cancellationToken);
+        return await BuildAsync(provider, cancellationToken);
     }
 
     // ----- execution log ---------------------------------------------------------------------------------------------------------
@@ -372,7 +400,7 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         ?? throw new ValidationException(new[] { new ValidationFailure("Provider", "Choose ChatGPT, Claude or Gemini.") });
 
     private static AiPolicyDto ToDto(AiTaskPolicy p) =>
-        new(p.FallbackEnabled, p.FallbackOrder, p.SimulatorScenario, p.ScannedDocumentsViaAi, p.MaxCostPerCallUsd, p.TimeoutSeconds, p.MaxRetriesPerProvider, AiSimulatorScenarios.All);
+        new(p.FallbackEnabled, p.FallbackOrder, p.SimulatorScenario, p.MaxCostPerCallUsd, p.TimeoutSeconds, p.MaxRetriesPerProvider, AiSimulatorScenarios.All);
 
     private static string ModelOf(AiCredentials c, string provider) => provider switch
     {

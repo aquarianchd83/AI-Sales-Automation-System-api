@@ -253,8 +253,13 @@ public static class DependencyInjection
         services.AddScoped<IPlatformAiConfigProvider, PlatformAiConfigProvider>();
         services.AddScoped<IActiveAiProviderAccessor, ActiveAiProviderAccessor>();
 
+        // Every existing AI feature's calls are recorded in the AI call log (AiCallRecording.cs): the registered interface is a thin recording
+        // wrapper around the unchanged client, so a provider's capability for each use can be verified by real calls.
+        services.AddScoped<AiCallRecorder>();
+
         // One-shot text for helper features (keyword suggestions). Loggers removed: it carries the tenant's API key.
-        services.AddHttpClient<IAiTextGenerator, AiTextGenerator>().RemoveAllLoggers();
+        services.AddHttpClient<AiTextGenerator>().RemoveAllLoggers();
+        services.AddScoped<IAiTextGenerator, RecordingAiTextGenerator>();
 
         // The Verify button on the AI Providers screen: lists each provider's models with the saved key. Loggers removed - it carries keys.
         services.AddHttpClient<IAiProviderVerifier, AiProviderVerifier>().RemoveAllLoggers();
@@ -263,7 +268,8 @@ public static class DependencyInjection
         services.AddHttpClient<OpenAiAiClient>();
         services.AddHttpClient<GoogleAiClient>();
         services.AddScoped<SimulatedAiClient>();
-        services.AddScoped<IAiService, AiServiceFactory>();
+        services.AddScoped<AiServiceFactory>();
+        services.AddScoped<IAiService, RecordingAiService>();
 
         // Lead discovery (LeadDiscoveryJob) runs on the platform's own Anthropic key, not a tenant's - see
         // LeadDiscoveryAgentSettings. Provider is a startup-time choice, not a per-tenant one like the chat
@@ -281,8 +287,9 @@ public static class DependencyInjection
         {
             // One request can run many web searches and fetches server-side before it responds, far beyond
             // HttpClient's 100-second default timeout.
-            services.AddHttpClient<ILeadDiscoveryAgent, AnthropicLeadDiscoveryAgent>(
+            services.AddHttpClient<AnthropicLeadDiscoveryAgent>(
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
+            services.AddScoped<ILeadDiscoveryAgent, RecordingLeadDiscoveryAgent>();
         }
 
         // The DND check and the consent SMS go to the simulator or to a third-party API, as the platform admin chose on the Integrations
@@ -310,10 +317,12 @@ public static class DependencyInjection
         // ReembedAsync to embed with every available provider at once) are two different DI
         // registrations against the same concrete clients - see IEmbeddingProviderCatalog's own doc
         // comment for why KnowledgeBaseService needs both.
-        services.AddScoped<IEmbeddingService, TenantEmbeddingService>();
+        services.AddScoped<TenantEmbeddingService>();
+        services.AddScoped<IEmbeddingService, RecordingEmbeddingService>();
 
         // The platform's own embedder, for platform-authored (GLOBAL) knowledge - see the type's doc.
-        services.AddScoped<IPlatformEmbeddingService, PlatformEmbeddingService>();
+        services.AddScoped<PlatformEmbeddingService>();
+        services.AddScoped<IPlatformEmbeddingService, RecordingPlatformEmbeddingService>();
         services.AddScoped<IEmbeddingProviderCatalog, TenantEmbeddingProviderCatalog>();
     }
 

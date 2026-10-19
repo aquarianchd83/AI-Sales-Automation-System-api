@@ -87,16 +87,18 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         public string OpenAiModel { get; set; } = "gpt-model";
         public bool AnthropicOn { get; set; } = true;
         public bool GoogleOn { get; set; } = true;
+        public string ChatProvider { get; set; } = "Simulated";
+        public string EmbeddingProvider { get; set; } = "Simulated";
 
         public AiCredentials Get() => new(
-            "Simulated", "Simulated", null, "claude-model", "2023-06-01", "https://a.test/", OpenAiOn ? OpenAiKey : null, OpenAiModel, "emb", "https://o.test/",
+            ChatProvider, EmbeddingProvider, null, "claude-model", "2023-06-01", "https://a.test/", OpenAiOn ? OpenAiKey : null, OpenAiModel, "emb", "https://o.test/",
             GoogleOn ? "goog-test-5678" : null, "gemini-model", "emb", "https://g.test/", AnthropicOn, OpenAiOn, GoogleOn);
     }
 
     private sealed class FakePolicy : IAiTaskPolicyProvider
     {
         public AiTaskPolicy Value { get; set; } = new(
-            false, new[] { "OpenAI", "Google", "Anthropic" }, "Success", false, 0.5m, 60, 1, 0,
+            false, new[] { "OpenAI", "Google", "Anthropic" }, "Success", 0.5m, 60, 1, 0,
             new Dictionary<string, ProviderPrice>(StringComparer.OrdinalIgnoreCase) { ["OpenAI"] = new(1m, 2m), ["Anthropic"] = new(0m, 0m), ["Google"] = new(0m, 0m) });
 
         public AiTaskPolicy Get() => Value;
@@ -192,22 +194,37 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     // ----- the overview ----------------------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task The_overview_lists_the_three_providers_with_what_product_knowledge_runs_on()
+    public async Task The_overview_lists_the_three_providers_and_what_the_application_runs_on_each()
     {
         var overview = await _service.GetAsync();
 
         // The simulator is not a provider card: it is an engine choice on the Integrations page, as for every other AI feature.
         Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, overview.Providers.Select(p => p.Provider));
-        Assert.Equal("Simulator", overview.ChosenMode);
-        Assert.Equal("Simulator", overview.ChosenProvider);
-        Assert.All(overview.Providers, p => Assert.False(p.ChosenForProductKnowledge));
+        Assert.All(overview.Providers, p => Assert.Empty(p.UsedFor));
 
+        // Chat on ChatGPT (with its key), embeddings on Gemini, and every Integrations feature on Gemini.
+        _credentials.ChatProvider = "OpenAI";
+        _credentials.EmbeddingProvider = "Google";
         _routing.Choice = new AiFeatureChoice(true, "Google");
         var live = await _service.GetAsync();
-        Assert.Equal("Api", live.ChosenMode);
-        Assert.Equal("Google", live.ChosenProvider);
-        Assert.True(live.Providers.Single(p => p.Provider == "Google").ChosenForProductKnowledge);
-        Assert.False(live.Providers.Single(p => p.Provider == "OpenAI").ChosenForProductKnowledge);
+
+        var openAi = live.Providers.Single(p => p.Provider == "OpenAI").UsedFor;
+        Assert.Equal(new[] { "Customer chat replies", "Business description rewrite" }, openAi);
+        var google = live.Providers.Single(p => p.Provider == "Google").UsedFor;
+        Assert.Contains("Knowledge base search (embeddings)", google);
+        Assert.Contains("Domain keyword suggestions", google);
+        Assert.Contains("Suggested answers", google);
+        Assert.Contains("Reading scanned pages and images", google);
+        Assert.DoesNotContain("Customer chat replies", google);
+        Assert.Empty(live.Providers.Single(p => p.Provider == "Anthropic").UsedFor);
+    }
+
+    [Fact]
+    public async Task A_feature_switched_off_or_on_the_simulator_is_not_counted_as_using_a_provider()
+    {
+        _routing.Choice = new AiFeatureChoice(false, "Google", IsOff: true);
+
+        Assert.Empty((await Panel("Google")).UsedFor);
     }
 
     [Fact]
@@ -307,9 +324,9 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     public async Task A_capability_is_declared_for_every_provider_but_verified_only_after_a_real_successful_call_for_that_task()
     {
         var before = await Panel("OpenAI");
-        Assert.All(before.Capabilities, c => Assert.True(c.Declared));
+        Assert.All(before.Capabilities.Where(c => c.Task != AiTaskKinds.LeadDiscovery), c => Assert.True(c.Declared));
         Assert.All(before.Capabilities, c => Assert.False(c.Verified));
-        Assert.Equal(12, before.Capabilities.Count);
+        Assert.Equal(AiUses.All.Count, before.Capabilities.Count);
 
         // A simulator success, a live failure and another provider's success must not count.
         _db.AiExecutions.AddRange(
@@ -323,6 +340,35 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         var verified = after.Capabilities.Where(c => c.Verified).Select(c => c.Task).ToList();
         Assert.Equal(new[] { AiTaskKinds.GroundedQuestionAnswering }, verified);
         Assert.NotNull(after.Capabilities.Single(c => c.Verified).VerifiedAtUtc);
+    }
+
+    [Fact]
+    public async Task The_capabilities_cover_every_ai_use_of_the_application_grouped_by_where_it_is_used()
+    {
+        var claude = await Panel("Anthropic");
+
+        Assert.Equal(AiUses.Tasks, claude.Capabilities.Select(c => c.Task));
+        Assert.Equal(new[] { AiUses.CustomerChat, AiUses.Onboarding, AiUses.Discovery, AiUses.ProductKnowledge }, claude.Capabilities.Select(c => c.Area).Distinct());
+        Assert.All(claude.Capabilities, c => Assert.False(string.IsNullOrWhiteSpace(c.Title)));
+
+        // What its code can and cannot call.
+        Assert.False(claude.Capabilities.Single(c => c.Task == AiTaskKinds.KnowledgeEmbedding).Declared);
+        Assert.True(claude.Capabilities.Single(c => c.Task == AiTaskKinds.LeadDiscovery).Declared);
+        Assert.False((await Panel("Google")).Capabilities.Single(c => c.Task == AiTaskKinds.LeadDiscovery).Declared);
+    }
+
+    [Fact]
+    public async Task A_recorded_call_of_an_existing_feature_verifies_that_use()
+    {
+        _db.AiExecutions.AddRange(
+            Row("OpenAI", AiTaskKinds.ConversationReply, AiExecutionMode.Live, AiExecutionStatus.Succeeded),
+            Row("OpenAI", AiTaskKinds.KnowledgeEmbedding, AiExecutionMode.Live, AiExecutionStatus.Failed));
+        await _db.SaveChangesAsync();
+
+        var panel = await Panel("OpenAI");
+
+        Assert.True(panel.Capabilities.Single(c => c.Task == AiTaskKinds.ConversationReply).Verified);
+        Assert.False(panel.Capabilities.Single(c => c.Task == AiTaskKinds.KnowledgeEmbedding).Verified);
     }
 
     private static AiExecution Row(string provider, string task, AiExecutionMode mode, AiExecutionStatus status) => new()
@@ -383,26 +429,26 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     public async Task The_policy_can_be_changed_and_is_audited()
     {
         var policy = await _service.UpdatePolicyAsync(
-            new UpdateAiPolicyRequest(true, new[] { "google", "OpenAI", "google" }, "conflict", true, 1.25m), _admin, "root@platform.test");
+            new UpdateAiPolicyRequest(true, new[] { "google", "OpenAI", "google" }, "conflict", 1.25m), _admin, "root@platform.test");
 
         var saved = _settings.Updates.Single().Values;
         Assert.Equal("true", saved["Integrations:Ai:Policy:FallbackEnabled"]);
         Assert.Equal("Google,OpenAI", saved["Integrations:Ai:Policy:FallbackOrder"]);
         Assert.Equal("Conflict", saved["Integrations:Ai:Policy:SimulatorScenario"]);
-        Assert.Equal("true", saved["Integrations:Ai:Policy:ScannedDocumentsViaAi"]);
+        Assert.False(saved.ContainsKey("Integrations:Ai:Policy:ScannedDocumentsViaAi")); // now the scanned-pages task group's own switch
         Assert.Equal("1.25", saved["Integrations:Ai:Policy:MaxCostPerCallUsd"]);
         Assert.NotNull(policy);
 
         var audit = Assert.Single(_audit.Entries, e => e.Action == "AiPolicyUpdated");
         Assert.Contains("Gemini > ChatGPT", audit.Details);
-        Assert.Contains("scanned documents via AI on", audit.Details);
+        Assert.Contains("simulator scenario Conflict", audit.Details);
     }
 
     [Fact]
     public async Task The_simulator_can_never_be_put_in_the_fallback_order_and_bad_values_are_refused()
     {
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            _service.UpdatePolicyAsync(new UpdateAiPolicyRequest(true, new[] { "OpenAI", "Simulator" }, "Chaos", false, -1m), _admin, "a@b.c"));
+            _service.UpdatePolicyAsync(new UpdateAiPolicyRequest(true, new[] { "OpenAI", "Simulator" }, "Chaos", -1m), _admin, "a@b.c"));
 
         var properties = ex.Errors.Select(e => e.PropertyName).ToList();
         Assert.Contains("FallbackOrder", properties);
@@ -550,33 +596,54 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
     // ----- the feature choice and the surface ----------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Product_knowledge_is_an_engine_choice_on_the_integrations_page_with_all_three_tools_and_the_simulator_by_default()
+    public void Each_product_knowledge_task_group_is_an_engine_choice_on_the_integrations_page_with_all_three_tools()
     {
-        Assert.Contains(AiFeatures.ProductKnowledge, AiFeatures.All);
-        Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, AiFeatures.SupportedProviders(AiFeatures.ProductKnowledge));
-        Assert.Equal(PlatformIntegrationSettingsService.SimulatorMode, AiFeatures.DefaultMode(AiFeatures.ProductKnowledge));
-        Assert.Equal("Integrations:Ai:ProductKnowledge", AiFeatures.Prefix(AiFeatures.ProductKnowledge));
+        foreach (var group in AiFeatures.ProductTaskGroups)
+        {
+            Assert.Contains(group.Feature, AiFeatures.All);
+            Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, AiFeatures.SupportedProviders(group.Feature));
+            Assert.Equal($"Integrations:Ai:{group.Feature}", AiFeatures.Prefix(group.Feature));
+        }
 
-        var options = new AiFeatureOptions { ProductKnowledge = new AiFeatureOption { Mode = "Api", Provider = "Anthropic" } };
-        var choice = new AiFeatureRouting(new FixedOptions<AiFeatureOptions>(options)).Resolve(AiFeatures.ProductKnowledge);
-        Assert.True(choice.UsesThirdParty);
-        Assert.Equal("Anthropic", choice.Provider);
+        var options = new AiFeatureOptions
+        {
+            ProductSuggestedAnswers = new AiFeatureOption { Mode = "Api", Provider = "Anthropic" },
+            ProductDocumentReading = new AiFeatureOption { Mode = "Off" },
+            // "Off" means something only for a product-knowledge group; anywhere else it reads as the simulator.
+            BusinessKeywords = new AiFeatureOption { Mode = "Off", Provider = "OpenAI" },
+        };
+        var routing = new AiFeatureRouting(new FixedOptions<AiFeatureOptions>(options));
 
-        Assert.False(new AiFeatureRouting(new FixedOptions<AiFeatureOptions>(new AiFeatureOptions())).Resolve(AiFeatures.ProductKnowledge).UsesThirdParty);
+        var answers = routing.Resolve(AiFeatures.ProductSuggestedAnswers);
+        Assert.True(answers.UsesThirdParty);
+        Assert.Equal("Anthropic", answers.Provider);
+        Assert.True(routing.Resolve(AiFeatures.ProductDocumentReading).IsOff);
+        Assert.False(routing.Resolve(AiFeatures.ProductDocumentReading).UsesThirdParty);
+        Assert.False(routing.Resolve(AiFeatures.BusinessKeywords).IsOff);
+        Assert.False(routing.Resolve(AiFeatures.BusinessKeywords).UsesThirdParty);
+
+        // Nothing saved: scanned pages start Off, the other groups on the simulator.
+        var defaults = new AiFeatureRouting(new FixedOptions<AiFeatureOptions>(new AiFeatureOptions()));
+        Assert.True(defaults.Resolve(AiFeatures.ProductScannedReading).IsOff);
+        Assert.False(defaults.Resolve(AiFeatures.ProductQuestionnaire).IsOff);
+        Assert.False(defaults.Resolve(AiFeatures.ProductQuestionnaire).UsesThirdParty);
     }
 
     [Fact]
     public void Every_new_setting_is_in_the_catalog_with_a_default_and_fixed_choices_are_dropdowns()
     {
-        var keys = AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:Ai:Policy:") || d.Key.StartsWith("Integrations:Ai:ProductKnowledge:")).ToList();
+        var groups = AiFeatures.ProductTaskGroups.Select(g => $"Integrations:Ai:{g.Feature}:").ToList();
+        var keys = AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:Ai:Policy:") || groups.Any(g => d.Key.StartsWith(g))).ToList();
 
-        Assert.Equal(8 + 2, keys.Count);
+        Assert.Equal(7 + 6 * 2, keys.Count);
+        Assert.DoesNotContain(AppSettingCatalog.All, d => d.Key.StartsWith("Integrations:Ai:ProductKnowledge:") || d.Key.EndsWith("ScannedDocumentsViaAi"));
+        Assert.All(keys.Where(d => d.Key.EndsWith(":Mode")), d => Assert.Equal(new[] { "Off", "Simulator", "Api" }, d.Options));
+        Assert.Equal("Off", keys.Single(d => d.Key == "Integrations:Ai:ProductScannedReading:Mode").DefaultValue); // the scanned-pages switch starts off
         Assert.All(keys, d => Assert.False(string.IsNullOrWhiteSpace(d.DefaultValue), d.Key));
         Assert.All(keys, d => Assert.False(d.IsSecret));
         Assert.All(keys, d => Assert.Equal("Integrations", d.Category));
         Assert.Equal(AiSimulatorScenarios.All, keys.Single(d => d.Key.EndsWith("SimulatorScenario")).Options);
         Assert.Equal(new[] { "true", "false" }, keys.Single(d => d.Key.EndsWith("FallbackEnabled")).Options);
-        Assert.Equal("false", keys.Single(d => d.Key.EndsWith("ScannedDocumentsViaAi")).DefaultValue); // the scanned-document switch starts off
         Assert.Equal("false", keys.Single(d => d.Key.EndsWith("FallbackEnabled")).DefaultValue);
     }
 

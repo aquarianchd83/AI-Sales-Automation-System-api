@@ -2,7 +2,8 @@ using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Ai.Tasks;
 
-/// <summary>The kinds of AI work the product-knowledge engine asks for. A provider is only asked for a task it is declared for.</summary>
+/// <summary>Every kind of AI work the application does: the product-knowledge engine's tasks, and the AI features that already existed before it
+/// (customer chat, knowledge base search, suggestions, lead discovery). A provider is only asked for a task it is declared for.</summary>
 public static class AiTaskKinds
 {
     public const string DocumentAnalysis = "DocumentAnalysis";
@@ -19,6 +20,15 @@ public static class AiTaskKinds
 
     /// <summary>Reading a scanned page or image. Needs a model that accepts images, which is why it is a task of its own.</summary>
     public const string ScannedDocumentReading = "ScannedDocumentReading";
+
+    // The AI features that existed before the product-knowledge engine. They keep their own code paths; their calls are recorded in the same
+    // log so a provider's capability for them can be verified by real use.
+    public const string ConversationReply = "ConversationReply";
+    public const string KnowledgeEmbedding = "KnowledgeEmbedding";
+    public const string BusinessKeywordSuggestion = "BusinessKeywordSuggestion";
+    public const string DescriptionRefinement = "DescriptionRefinement";
+    public const string DiscoveryKeywordSuggestion = "DiscoveryKeywordSuggestion";
+    public const string LeadDiscovery = "LeadDiscovery";
 
     /// <summary>Not product work: the platform's own checks, recorded in the same log.</summary>
     public const string ConnectionCheck = "ConnectionCheck";
@@ -45,15 +55,81 @@ public static class AiCapabilities
 
     public static IReadOnlyList<string> RealProviders => AllProviders;
 
+    /// <summary>The simulator stands in for the product-knowledge tasks only; a real provider for every use whose code can call it.</summary>
     public static IReadOnlyList<string> DeclaredFor(string provider) =>
         string.Equals(provider, Simulator, StringComparison.OrdinalIgnoreCase)
             ? AiTaskKinds.Product
-            : AllProviders.Contains(provider, StringComparer.OrdinalIgnoreCase)
-                ? AiTaskKinds.Product
-                : Array.Empty<string>();
+            : AiUses.All.Where(u => u.Providers.Contains(provider, StringComparer.OrdinalIgnoreCase)).Select(u => u.Task).ToList();
 
     public static bool IsDeclared(string provider, string task) =>
         DeclaredFor(provider).Contains(task, StringComparer.Ordinal) || task is AiTaskKinds.ConnectionCheck or AiTaskKinds.Benchmark;
+}
+
+/// <summary>One place the application uses AI, as the AI Providers screen lists it.</summary>
+/// <param name="Area">Where it shows up: Customer chat, Onboarding and profile, Lead discovery or Product knowledge.</param>
+/// <param name="Providers">The providers its code can call. Claude has no embeddings; the lead discovery agent is Claude's.</param>
+public sealed record AiUse(string Task, string Area, string Title, IReadOnlyList<string> Providers);
+
+/// <summary>Every AI use in the application - the list a provider's capabilities are checked against.</summary>
+public static class AiUses
+{
+    public const string CustomerChat = "Customer chat";
+    public const string Onboarding = "Onboarding and profile";
+    public const string Discovery = "Lead discovery";
+    public const string ProductKnowledge = "Product knowledge";
+
+    private static readonly string[] Three = { "OpenAI", "Anthropic", "Google" };
+
+    public static readonly IReadOnlyList<AiUse> All = new AiUse[]
+    {
+        new(AiTaskKinds.ConversationReply, CustomerChat, "Replying to customers in WhatsApp", Three),
+        new(AiTaskKinds.KnowledgeEmbedding, CustomerChat, "Knowledge base search (embeddings)", new[] { "OpenAI", "Google" }),
+        new(AiTaskKinds.BusinessKeywordSuggestion, Onboarding, "Domain keyword suggestions", Three),
+        new(AiTaskKinds.DescriptionRefinement, Onboarding, "Business description rewrite", Three),
+        new(AiTaskKinds.DiscoveryKeywordSuggestion, Discovery, "Search keyword suggestions", Three),
+        new(AiTaskKinds.LeadDiscovery, Discovery, "Finding new businesses (web search agent)", new[] { "Anthropic" }),
+        new(AiTaskKinds.DocumentAnalysis, ProductKnowledge, "Document and PDF analysis", Three),
+        new(AiTaskKinds.ProductInfoExtraction, ProductKnowledge, "Product information extraction", Three),
+        new(AiTaskKinds.ScannedDocumentReading, ProductKnowledge, "Reading scanned pages and images (needs an image-capable model)", Three),
+        new(AiTaskKinds.SuggestedAnswerGeneration, ProductKnowledge, "Suggested answers", Three),
+        new(AiTaskKinds.GroundedQuestionAnswering, ProductKnowledge, "Question answering from sources", Three),
+        new(AiTaskKinds.CustomQuestionAnswering, ProductKnowledge, "Tenant-created questions", Three),
+        new(AiTaskKinds.QuestionnaireGeneration, ProductKnowledge, "Questionnaire generation", Three),
+        new(AiTaskKinds.BenefitAnalysis, ProductKnowledge, "Benefits and customer value", Three),
+        new(AiTaskKinds.MissingInformationDetection, ProductKnowledge, "Missing-information detection", Three),
+        new(AiTaskKinds.ConflictIdentification, ProductKnowledge, "Conflict identification", Three),
+        new(AiTaskKinds.KnowledgeConsolidation, ProductKnowledge, "Knowledge consolidation", Three),
+        new(AiTaskKinds.KnowledgeDraft, ProductKnowledge, "Draft knowledge file", Three),
+    };
+
+    public static IReadOnlyList<string> Tasks { get; } = All.Select(u => u.Task).ToList();
+}
+
+/// <summary>
+/// Names the AI use a one-shot text call is for (keyword suggestions, the description rewrite), so the call can be recorded against it. Set by
+/// the feature around its call: <c>using var _ = AiCallLabel.Use(AiTaskKinds.BusinessKeywordSuggestion);</c>. An unlabelled call is not recorded.
+/// </summary>
+public static class AiCallLabel
+{
+    private static readonly AsyncLocal<string?> Label = new();
+
+    public static string? Current => Label.Value;
+
+    public static IDisposable Use(string task)
+    {
+        var previous = Label.Value;
+        Label.Value = task;
+        return new Restore(previous);
+    }
+
+    private sealed class Restore : IDisposable
+    {
+        private readonly string? _previous;
+
+        public Restore(string? previous) => _previous = previous;
+
+        public void Dispose() => Label.Value = _previous;
+    }
 }
 
 public static class AiSimulatorScenarios
@@ -73,6 +149,7 @@ public static class AiErrorCodes
     public const string ProviderUnavailable = "PROVIDER_UNAVAILABLE";
     public const string ProviderNotAllowed = "PROVIDER_NOT_ALLOWED";
     public const string CapabilityUnsupported = "CAPABILITY_UNSUPPORTED";
+    public const string FeatureOff = "FEATURE_OFF";
     public const string CostLimit = "COST_LIMIT";
     public const string Timeout = "TIMEOUT";
     public const string RateLimited = "RATE_LIMITED";
@@ -96,7 +173,6 @@ public sealed record AiTaskPolicy(
     bool FallbackEnabled,
     IReadOnlyList<string> FallbackOrder,
     string SimulatorScenario,
-    bool ScannedDocumentsViaAi,
     decimal MaxCostPerCallUsd,
     int TimeoutSeconds,
     int MaxRetriesPerProvider,
@@ -140,7 +216,8 @@ public sealed record AiTaskRequest(
     int MaxTokens = 1500,
     bool ExpectJson = true,
     Guid? TenantId = null,
-    string Feature = "ProductKnowledge",
+    /// <summary>Null: the product-knowledge task group the task belongs to, whose switch on the Integrations page decides.</summary>
+    string? Feature = null,
     IReadOnlyCollection<string>? AllowedProviders = null,
     bool Idempotent = true,
     string? ImageBase64 = null,

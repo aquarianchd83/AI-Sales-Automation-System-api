@@ -33,7 +33,7 @@ public sealed class AiTaskPolicyProvider : IAiTaskPolicyProvider
                        ?? AiSimulatorScenarios.Success;
 
         return new AiTaskPolicy(
-            p.FallbackEnabled, order, scenario, p.ScannedDocumentsViaAi,
+            p.FallbackEnabled, order, scenario,
             Math.Max(0m, p.MaxCostPerCallUsd), Math.Clamp(p.TimeoutSeconds, 5, 300), Math.Clamp(p.MaxRetriesPerProvider, 0, 3), Math.Clamp(p.RetryDelayMs, 0, 10_000),
             new Dictionary<string, ProviderPrice>(StringComparer.OrdinalIgnoreCase)
             {

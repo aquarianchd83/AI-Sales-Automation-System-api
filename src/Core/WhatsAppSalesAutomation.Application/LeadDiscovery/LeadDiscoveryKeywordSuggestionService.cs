@@ -1,4 +1,5 @@
 using FluentValidation;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
@@ -65,6 +66,7 @@ public class LeadDiscoveryKeywordSuggestionService : ILeadDiscoveryKeywordSugges
 
         // The simulator makes no outside call: the built-in terms below answer instead.
         var choice = _routing.Resolve(AiFeatures.DiscoveryKeywords);
+        using var aiUse = AiCallLabel.Use(AiTaskKinds.DiscoveryKeywordSuggestion); // recorded against this AI use in the AI call log
         var reply = choice.UsesThirdParty
             ? await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, existing), 500, cancellationToken, provider: choice.Provider)
             : null;

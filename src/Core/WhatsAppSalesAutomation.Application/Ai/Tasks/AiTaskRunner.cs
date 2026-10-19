@@ -40,15 +40,20 @@ public sealed class AiTaskRunner : IAiTaskRunner
     {
         var policy = _policy.Get();
         var correlation = Guid.NewGuid();
-        var route = _routing.Resolve(request.Feature);
         var attempts = new List<AiAttempt>();
 
         if (!AiTaskKinds.Product.Contains(request.Task, StringComparer.Ordinal))
-            return Fail(request, route, correlation, attempts, AiErrorCodes.CapabilityUnsupported, $"'{request.Task}' is not a product-knowledge task.");
+            return Fail(request, new AiFeatureChoice(false, AiCapabilities.Simulator), correlation, attempts, AiErrorCodes.CapabilityUnsupported, $"'{request.Task}' is not a product-knowledge task.");
 
-        if (request.Task == AiTaskKinds.ScannedDocumentReading && !policy.ScannedDocumentsViaAi)
-            return Fail(request, route, correlation, attempts, AiErrorCodes.CapabilityUnsupported,
-                "Reading scanned documents with AI is switched off on the Integrations page.");
+        // Each task follows the switch of its group on the Integrations page, unless the caller names a feature itself.
+        request = request with { Feature = request.Feature ?? AiFeatures.GroupOf(request.Task) };
+        var route = _routing.Resolve(request.Feature!);
+
+        if (route.IsOff)
+        {
+            var title = AiFeatures.ProductTaskGroups.FirstOrDefault(g => g.Feature == request.Feature)?.Title ?? request.Feature;
+            return Fail(request, route, correlation, attempts, AiErrorCodes.FeatureOff, $"{title} is switched off on the Integrations page.");
+        }
 
         if (!route.UsesThirdParty)
             return await RunSimulatorAsync(request, policy, correlation, route, attempts, cancellationToken);

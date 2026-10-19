@@ -25,7 +25,16 @@ public sealed class AiTaskRunnerTests
     {
         public AiFeatureChoice Choice { get; set; } = new(true, "OpenAI");
 
-        public AiFeatureChoice Resolve(string feature) => Choice;
+        /// <summary>Per task group, when a test sets one; otherwise <see cref="Choice"/>.</summary>
+        public Dictionary<string, AiFeatureChoice> PerFeature { get; } = new();
+
+        public List<string> Asked { get; } = new();
+
+        public AiFeatureChoice Resolve(string feature)
+        {
+            Asked.Add(feature);
+            return PerFeature.TryGetValue(feature, out var choice) ? choice : Choice;
+        }
     }
 
     private sealed class FakeCredentials : IPlatformAiConfigProvider
@@ -94,9 +103,9 @@ public sealed class AiTaskRunnerTests
         anthropic, openAi, google);
 
     private static AiTaskPolicy Policy(
-        bool fallback = false, string[]? order = null, string scenario = "Success", bool scanned = false, decimal maxCost = 0m, int retries = 0,
+        bool fallback = false, string[]? order = null, string scenario = "Success", decimal maxCost = 0m, int retries = 0,
         decimal inPrice = 1m, decimal outPrice = 2m) => new(
-        fallback, order ?? new[] { "OpenAI", "Google", "Anthropic" }, scenario, scanned, maxCost, 60, retries, 0,
+        fallback, order ?? new[] { "OpenAI", "Google", "Anthropic" }, scenario, maxCost, 60, retries, 0,
         new Dictionary<string, ProviderPrice>(StringComparer.OrdinalIgnoreCase)
         {
             ["OpenAI"] = new(inPrice, outPrice), ["Anthropic"] = new(inPrice, outPrice), ["Google"] = new(inPrice, outPrice)
@@ -399,20 +408,63 @@ public sealed class AiTaskRunnerTests
     }
 
     [Fact]
-    public async Task Reading_scanned_documents_with_ai_is_refused_while_the_switch_is_off_and_allowed_when_on()
+    public async Task A_task_group_switched_off_runs_nothing_not_even_the_simulator_and_switched_on_it_runs()
     {
         var scanned = new AiTaskRequest(AiTaskKinds.ScannedDocumentReading, "system", "read this", 800, true, Guid.NewGuid(), ImageBase64: "aGVsbG8=", ImageMediaType: "image/png");
+        _routing.PerFeature[AiFeatures.ProductScannedReading] = new AiFeatureChoice(false, "OpenAI", IsOff: true);
 
         var off = await Runner().RunAsync(scanned);
         Assert.False(off.Success);
-        Assert.Contains("switched off", off.ErrorMessage);
+        Assert.Equal(AiErrorCodes.FeatureOff, off.ErrorCode);
+        Assert.Equal("Reading scanned pages and images is switched off on the Integrations page.", off.ErrorMessage);
         Assert.Empty(_client.Calls);
+        Assert.Empty(_log.Rows);
 
-        _policy.Value = Policy(scanned: true);
+        _routing.PerFeature[AiFeatures.ProductScannedReading] = new AiFeatureChoice(true, "OpenAI");
         _client.On("OpenAI", Ok());
         var on = await Runner().RunAsync(scanned);
         Assert.True(on.Success);
         Assert.Equal("aGVsbG8=", _client.Calls.Single().ImageBase64);
+        Assert.Equal(AiFeatures.ProductScannedReading, _log.Rows.Single().Feature);
+    }
+
+    [Theory]
+    [InlineData(AiTaskKinds.DocumentAnalysis, AiFeatures.ProductDocumentReading)]
+    [InlineData(AiTaskKinds.ProductInfoExtraction, AiFeatures.ProductDocumentReading)]
+    [InlineData(AiTaskKinds.ScannedDocumentReading, AiFeatures.ProductScannedReading)]
+    [InlineData(AiTaskKinds.SuggestedAnswerGeneration, AiFeatures.ProductSuggestedAnswers)]
+    [InlineData(AiTaskKinds.GroundedQuestionAnswering, AiFeatures.ProductSuggestedAnswers)]
+    [InlineData(AiTaskKinds.CustomQuestionAnswering, AiFeatures.ProductSuggestedAnswers)]
+    [InlineData(AiTaskKinds.QuestionnaireGeneration, AiFeatures.ProductQuestionnaire)]
+    [InlineData(AiTaskKinds.BenefitAnalysis, AiFeatures.ProductQuestionnaire)]
+    [InlineData(AiTaskKinds.MissingInformationDetection, AiFeatures.ProductGapCheck)]
+    [InlineData(AiTaskKinds.ConflictIdentification, AiFeatures.ProductGapCheck)]
+    [InlineData(AiTaskKinds.KnowledgeConsolidation, AiFeatures.ProductGapCheck)]
+    [InlineData(AiTaskKinds.KnowledgeDraft, AiFeatures.ProductKnowledgeDraft)]
+    public async Task Each_task_follows_the_switch_of_its_own_group(string task, string group)
+    {
+        // Only this task's group is on a live provider; every other group is on the simulator.
+        _routing.Choice = new AiFeatureChoice(false, "OpenAI");
+        _routing.PerFeature[group] = new AiFeatureChoice(true, "Google");
+        _client.On("Google", Ok());
+
+        var result = await Runner().RunAsync(new AiTaskRequest(task, "s", "u"));
+
+        Assert.Equal(group, Assert.Single(_routing.Asked));
+        Assert.Equal("Google", result.Provider);
+        Assert.Equal(AiExecutionMode.Live, result.Mode);
+    }
+
+    [Fact]
+    public void Every_product_task_belongs_to_exactly_one_group_and_every_group_has_a_task()
+    {
+        foreach (var task in AiTaskKinds.Product)
+            Assert.Single(AiFeatures.ProductTaskGroups, g => g.Tasks.Contains(task));
+
+        Assert.Equal(6, AiFeatures.ProductTaskGroups.Count);
+        Assert.All(AiFeatures.ProductTaskGroups, g => Assert.NotEmpty(g.Tasks));
+        Assert.Equal(AiFeatures.OffMode, AiFeatures.DefaultMode(AiFeatures.ProductScannedReading)); // page images leave the platform: starts Off
+        Assert.Equal(PlatformIntegrationSettingsService.SimulatorMode, AiFeatures.DefaultMode(AiFeatures.ProductSuggestedAnswers));
     }
 
     [Fact]
@@ -428,12 +480,47 @@ public sealed class AiTaskRunnerTests
     [Fact]
     public void Every_product_task_is_declared_for_the_simulator_and_all_three_providers()
     {
-        foreach (var provider in new[] { "OpenAI", "Anthropic", "Google", "Simulator" })
-            Assert.Equal(AiTaskKinds.Product, AiCapabilities.DeclaredFor(provider));
+        Assert.Equal(AiTaskKinds.Product, AiCapabilities.DeclaredFor("Simulator"));
+        foreach (var provider in new[] { "OpenAI", "Anthropic", "Google" })
+            Assert.All(AiTaskKinds.Product, t => Assert.Contains(t, AiCapabilities.DeclaredFor(provider)));
 
         Assert.Empty(AiCapabilities.DeclaredFor("Nobody"));
         Assert.Contains(AiTaskKinds.GroundedQuestionAnswering, AiTaskKinds.Product);
         Assert.Equal(12, AiTaskKinds.Product.Count);
+    }
+
+    [Fact]
+    public void The_application_wide_list_covers_every_ai_use_with_only_the_providers_its_code_can_call()
+    {
+        // Every product task, and every AI feature that existed before the engine.
+        Assert.All(AiTaskKinds.Product, t => Assert.Contains(t, AiUses.Tasks));
+        foreach (var existing in new[] { AiTaskKinds.ConversationReply, AiTaskKinds.KnowledgeEmbedding, AiTaskKinds.BusinessKeywordSuggestion,
+                     AiTaskKinds.DescriptionRefinement, AiTaskKinds.DiscoveryKeywordSuggestion, AiTaskKinds.LeadDiscovery })
+            Assert.Contains(existing, AiUses.Tasks);
+        Assert.Equal(AiUses.Tasks.Count, AiUses.Tasks.Distinct().Count());
+
+        // Claude has no embeddings; the lead discovery agent is Claude's only.
+        Assert.DoesNotContain(AiTaskKinds.KnowledgeEmbedding, AiCapabilities.DeclaredFor("Anthropic"));
+        Assert.Contains(AiTaskKinds.KnowledgeEmbedding, AiCapabilities.DeclaredFor("OpenAI"));
+        Assert.Contains(AiTaskKinds.LeadDiscovery, AiCapabilities.DeclaredFor("Anthropic"));
+        Assert.DoesNotContain(AiTaskKinds.LeadDiscovery, AiCapabilities.DeclaredFor("Google"));
+        Assert.DoesNotContain(AiTaskKinds.ConversationReply, AiCapabilities.DeclaredFor("Simulator"));
+    }
+
+    [Fact]
+    public async Task A_call_label_names_the_use_for_its_scope_only()
+    {
+        Assert.Null(AiCallLabel.Current);
+        using (AiCallLabel.Use(AiTaskKinds.BusinessKeywordSuggestion))
+        {
+            Assert.Equal(AiTaskKinds.BusinessKeywordSuggestion, AiCallLabel.Current);
+            await Task.Yield();
+            Assert.Equal(AiTaskKinds.BusinessKeywordSuggestion, AiCallLabel.Current); // flows across awaits
+            using (AiCallLabel.Use(AiTaskKinds.DescriptionRefinement))
+                Assert.Equal(AiTaskKinds.DescriptionRefinement, AiCallLabel.Current);
+            Assert.Equal(AiTaskKinds.BusinessKeywordSuggestion, AiCallLabel.Current);
+        }
+        Assert.Null(AiCallLabel.Current);
     }
 
     // ----- the log must not hurt, or leak -----------------------------------------------------------------------------------------------
