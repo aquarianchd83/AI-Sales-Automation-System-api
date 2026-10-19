@@ -163,6 +163,12 @@ public interface IApplicationDbContext
 
     DbSet<AiExecution> AiExecutions { get; }
 
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeSource> KnowledgeSources { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.KnowledgeSourcePage> KnowledgeSourcePages { get; }
+
+    DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages { get; }
+
     DbSet<Announcement> Announcements { get; }
 
     DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }

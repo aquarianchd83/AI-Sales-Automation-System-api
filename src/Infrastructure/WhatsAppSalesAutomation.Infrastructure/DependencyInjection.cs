@@ -73,6 +73,17 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.KnowledgeBase.Ingestion.IKnowledgeIngestionQueue, HangfireKnowledgeIngestionQueue>();
         services.AddScoped<KnowledgeIndexingJob>();
 
+        // Product-knowledge sources: private files in the tenant's AWS folder, page-level reading, the SSRF-guarded website crawler, the background job.
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.ProductKnowledgeSettings>(configuration.GetSection("ProductKnowledge"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ISourceLimitsProvider, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.SourceLimitsProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ITenantDocumentStore, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.S3TenantDocumentStore>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.ProductKnowledge.IPagedDocumentReader, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.PagedDocumentReader>();
+        services.AddSingleton<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.IHostAddressResolver, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.DnsHostAddressResolver>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ProductKnowledge.IWebsiteCrawler, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.WebsiteCrawler>()
+            .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler);
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
+        services.AddScoped<KnowledgeSourceProcessingJob>();
+
         // Keyword leg: Full-Text where the server has it and the index exists, BM25 in the application
         // otherwise. Probed once, logged loudly - same shape and reasoning as the vector store above.
         services.AddSingleton<IKeywordSearchCapability>(sp => new SqlServerFullTextCapability(

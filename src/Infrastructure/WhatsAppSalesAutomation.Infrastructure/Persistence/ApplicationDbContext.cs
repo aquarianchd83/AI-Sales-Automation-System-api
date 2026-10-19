@@ -175,6 +175,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<AiExecution> AiExecutions => Set<AiExecution>();
 
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeSource> KnowledgeSources => Set<Domain.Entities.ProductKnowledge.KnowledgeSource>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.KnowledgeSourcePage> KnowledgeSourcePages => Set<Domain.Entities.ProductKnowledge.KnowledgeSourcePage>();
+
+    public DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages => Set<Domain.Entities.ProductKnowledge.SourcePassage>();
+
     public DbSet<Announcement> Announcements => Set<Announcement>();
 
     public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();
