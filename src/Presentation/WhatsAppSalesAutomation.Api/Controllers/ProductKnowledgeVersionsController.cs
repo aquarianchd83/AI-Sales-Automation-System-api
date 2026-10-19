@@ -17,11 +17,13 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class ProductKnowledgeVersionsController : ControllerBase
 {
     private readonly IKnowledgePublishingService _publishing;
+    private readonly IKnowledgeFileService _files;
     private readonly ITenantContext _tenantContext;
 
-    public ProductKnowledgeVersionsController(IKnowledgePublishingService publishing, ITenantContext tenantContext)
+    public ProductKnowledgeVersionsController(IKnowledgePublishingService publishing, IKnowledgeFileService files, ITenantContext tenantContext)
     {
         _publishing = publishing;
+        _files = files;
         _tenantContext = tenantContext;
     }
 
@@ -36,11 +38,37 @@ public class ProductKnowledgeVersionsController : ControllerBase
 
     [HttpPost("publish")]
     public async Task<ActionResult<KnowledgeVersionDto>> Publish([FromBody] PublishRequest request, CancellationToken cancellationToken)
-        => Ok(await _publishing.PublishAsync(RequireTenantId(), request ?? new PublishRequest(null), cancellationToken));
+    {
+        var tenantId = RequireTenantId();
+        var version = await _publishing.PublishAsync(tenantId, request ?? new PublishRequest(null), cancellationToken);
+        await _files.SaveFinalCopyAsync(tenantId, version.Id, cancellationToken); // a record in the tenant's AWS folder; never fails the publish
+        return Ok(version);
+    }
 
     [HttpPost("{id:guid}/restore")]
     public async Task<ActionResult<KnowledgeVersionDto>> Restore(Guid id, [FromBody] PublishRequest request, CancellationToken cancellationToken)
-        => Ok(await _publishing.RestoreAsync(RequireTenantId(), id, request ?? new PublishRequest(null), cancellationToken));
+    {
+        var tenantId = RequireTenantId();
+        var version = await _publishing.RestoreAsync(tenantId, id, request ?? new PublishRequest(null), cancellationToken);
+        await _files.SaveFinalCopyAsync(tenantId, version.Id, cancellationToken);
+        return Ok(version);
+    }
+
+    /// <summary>The working Draft file (plain text), clearly headed as not approved.</summary>
+    [HttpGet("draft-file")]
+    public async Task<IActionResult> DraftFile(CancellationToken cancellationToken)
+        => ToFile(await _files.BuildDraftAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>The Final file (plain text) of one published version: its approved answers only.</summary>
+    [HttpGet("{id:guid}/file")]
+    public async Task<IActionResult> FinalFile(Guid id, CancellationToken cancellationToken)
+        => ToFile(await _files.BuildFinalAsync(RequireTenantId(), id, cancellationToken));
+
+    private FileContentResult ToFile(KnowledgeFileResult file)
+    {
+        Response.Headers["Cache-Control"] = "private, no-store";
+        return File(file.Content, "text/plain; charset=utf-8", file.FileName);
+    }
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated product-knowledge request has no tenant in scope.");

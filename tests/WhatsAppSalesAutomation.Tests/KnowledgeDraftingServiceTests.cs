@@ -235,7 +235,8 @@ public sealed class KnowledgeDraftingServiceTests : IDisposable
     {
         await Source("brochure.pdf", _a, "The Premium Plan costs Rs 999 per month for every clinic.");
         await Source("clinic.example", _a, "The Premium Plan costs Rs 1,499 per month for every clinic.");
-        _ai.Respond = _ => ScriptedAi.Live(Reply("The Premium Plan costs Rs 999 per month.", quote: "Premium Plan costs Rs 999 per month"));
+        // The two passages score the same, so which one is [P1] is not fixed: cite the label of the one that says 999.
+        _ai.Respond = r => ScriptedAi.Live(Reply("The Premium Plan costs Rs 999 per month.", passage: System.Text.RegularExpressions.Regex.Match(r.User, @"\[(P\d+)\][^\n]*\n[^\n]*Rs 999").Groups[1].Value, quote: "Premium Plan costs Rs 999 per month"));
 
         var answer = (await Ask("How much does the Premium Plan cost per month?")).Answer!;
 
