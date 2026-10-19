@@ -42,7 +42,14 @@ public record BusinessFactDto(
     string? VerifiedByName,
     DateTime? VerifiedAtUtc,
     DateTime CreatedAt,
-    DateTime? UpdatedAt);
+    DateTime? UpdatedAt,
+    string? Subject,
+    string? Context,
+    string? Evidence,
+    BusinessFactOrigin Origin,
+    KnowledgeClassification Classification,
+    DateTime? ExpiresAtUtc,
+    int? ReviewEveryDays);
 
 public record BusinessFactQuery : PagedRequest
 {
@@ -51,9 +58,28 @@ public record BusinessFactQuery : PagedRequest
     public string? Category { get; init; }
 
     public BusinessFactSource? SourceType { get; init; }
+
+    public KnowledgeClassification? Classification { get; init; }
 }
 
-public record SaveBusinessFactRequest(string Category, string Statement);
+/// <summary>A fact the tenant writes itself. Subject, context, evidence and an end date are optional.</summary>
+public record SaveBusinessFactRequest(
+    string Category, string Statement, string? Subject = null, string? Context = null, string? Evidence = null, DateTime? ExpiresAtUtc = null);
+
+/// <summary>What the tenant can add to any fact - including one the questionnaire produced - without changing what it states: how they know
+/// it, and when it stops being true.</summary>
+public record UpdateFactDetailsRequest(string? Evidence, DateTime? ExpiresAtUtc);
+
+public record BusinessFactRevisionDto(
+    int Number, BusinessFactChangeKind Kind, string Category, string? Subject, string Statement, string? Context,
+    BusinessFactStatus Status, string? Note, Guid? ChangedBy, string? ChangedByName, DateTime ChangedAtUtc);
+
+/// <summary>One change to one answer. <see cref="Previous"/> or <see cref="New"/> is null when the answer did not exist before or was removed.</summary>
+public record AnswerRevisionDto(
+    Guid Id, string QuestionKey, string Kind, JsonElement? Previous, JsonElement? New, Guid? ChangedBy, string? ChangedByName, DateTime ChangedAtUtc);
+
+/// <summary>A proposal from the system or an AI model. It enters as a Draft and counts for nothing until a person verifies it.</summary>
+public record ProposeFactRequest(string Category, string Statement, string? Subject, string? Context, BusinessFactOrigin Origin, string? Basis);
 
 public record BusinessFactSummaryDto(int Draft, int Verified, int Retired, IReadOnlyList<string> Categories);
 

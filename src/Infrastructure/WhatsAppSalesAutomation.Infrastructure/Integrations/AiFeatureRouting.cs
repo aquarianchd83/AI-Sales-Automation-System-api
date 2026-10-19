@@ -22,12 +22,18 @@ public class AiFeatureOptions
 
     public AiFeatureOption VideoRenders { get; set; } = new();
 
+    public AiFeatureOption BusinessKeywords { get; set; } = new();
+
+    public AiFeatureOption DiscoveryKeywords { get; set; } = new();
+
     public AiFeatureOption For(string feature) => feature switch
     {
         AiFeatures.DiscoveryLead => DiscoveryLead,
         AiFeatures.KnowledgeBase => KnowledgeBase,
         AiFeatures.ContentGeneration => ContentGeneration,
         AiFeatures.VideoRenders => VideoRenders,
+        AiFeatures.BusinessKeywords => BusinessKeywords,
+        AiFeatures.DiscoveryKeywords => DiscoveryKeywords,
         _ => new AiFeatureOption(),
     };
 }

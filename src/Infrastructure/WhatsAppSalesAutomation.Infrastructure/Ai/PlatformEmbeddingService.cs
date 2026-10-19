@@ -44,8 +44,8 @@ public sealed class PlatformEmbeddingService : IPlatformEmbeddingService
     /// per-tenant service, so a fresh install still runs.</summary>
     private string Effective => Settings.EmbeddingProvider?.ToLowerInvariant() switch
     {
-        "openai" when !string.IsNullOrWhiteSpace(Settings.OpenAI.ApiKey) => "openai",
-        "google" when !string.IsNullOrWhiteSpace(Settings.Google.ApiKey) => "google",
+        "openai" when Settings.OpenAI.Enabled && !string.IsNullOrWhiteSpace(Settings.OpenAI.ApiKey) => "openai",
+        "google" when Settings.Google.Enabled && !string.IsNullOrWhiteSpace(Settings.Google.ApiKey) => "google",
         _ => "simulated"
     };
 
@@ -69,6 +69,8 @@ public sealed class PlatformEmbeddingService : IPlatformEmbeddingService
     public bool RealProviderRequestedButUnconfigured =>
         Effective == "simulated" &&
         Settings.EmbeddingProvider is { } p &&
+        !(string.Equals(p, "OpenAI", StringComparison.OrdinalIgnoreCase) && !Settings.OpenAI.Enabled) &&
+        !(string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase) && !Settings.Google.Enabled) &&
         !string.Equals(p, "Simulated", StringComparison.OrdinalIgnoreCase);
 
     public Task<float[]> GetEmbeddingAsync(string text, CancellationToken cancellationToken = default)

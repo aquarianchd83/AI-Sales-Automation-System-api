@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 
 namespace WhatsAppSalesAutomation.Application.Tenancy;
 
@@ -9,7 +10,7 @@ namespace WhatsAppSalesAutomation.Application.Tenancy;
 /// for context, and the keywords already added (never suggested again).</summary>
 public record SuggestKeywordsRequest(string Industry, string? BusinessDescription, IReadOnlyList<string>? Existing, string? IndustrySubcategory = null);
 
-/// <summary>What came back. <see cref="Source"/> is "AI" when the tenant's AI provider wrote them, "Common terms" when
+/// <summary>What came back. <see cref="Source"/> is "AI" when the chosen third-party tool wrote them, "Common terms" when
 /// they came from the built-in list for well-known industries - the screen says which, so a lookup is never passed off
 /// as AI.</summary>
 public record KeywordSuggestionsDto(IReadOnlyList<string> Keywords, string Source);
@@ -31,8 +32,8 @@ public class SuggestKeywordsRequestValidator : AbstractValidator<SuggestKeywords
 }
 
 /// <summary>
-/// Suggests domain keywords for the tenant's industry. Asks the tenant's AI provider when one is really configured;
-/// otherwise (Simulated, no key, or the call failed) falls back to <see cref="IndustryKeywordCatalog"/>. Whatever the
+/// Suggests domain keywords for the tenant's industry. Asks the tool the platform admin chose for business keywords
+/// (Integrations page) when it is a third-party one; otherwise (simulator, no key, or the call failed) falls back to <see cref="IndustryKeywordCatalog"/>. Whatever the
 /// source, the result is cleaned the way the profile cleans keywords - trimmed, short enough, no duplicates, nothing
 /// the tenant already has - so every suggestion can be added as is.
 /// </summary>
@@ -46,10 +47,13 @@ public class KeywordSuggestionService : IKeywordSuggestionService
     private readonly IAiTextGenerator _ai;
     private readonly IValidator<SuggestKeywordsRequest> _validator;
 
-    public KeywordSuggestionService(IAiTextGenerator ai, IValidator<SuggestKeywordsRequest> validator)
+    private readonly IAiFeatureRouting _routing;
+
+    public KeywordSuggestionService(IAiTextGenerator ai, IValidator<SuggestKeywordsRequest> validator, IAiFeatureRouting routing)
     {
         _ai = ai;
         _validator = validator;
+        _routing = routing;
     }
 
     public async Task<KeywordSuggestionsDto> SuggestAsync(SuggestKeywordsRequest request, CancellationToken cancellationToken = default)
@@ -60,7 +64,11 @@ public class KeywordSuggestionService : IKeywordSuggestionService
         var existing = new HashSet<string>(
             TenantBusinessDetails.NormalizeKeywords(request.Existing), StringComparer.OrdinalIgnoreCase);
 
-        var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(industry, request.IndustrySubcategory, request.BusinessDescription, existing), 400, cancellationToken);
+        // The simulator makes no outside call: the built-in common terms below answer instead.
+        var choice = _routing.Resolve(AiFeatures.BusinessKeywords);
+        var reply = choice.UsesThirdParty
+            ? await _ai.GenerateAsync(SystemPrompt, BuildPrompt(industry, request.IndustrySubcategory, request.BusinessDescription, existing), 400, cancellationToken, provider: choice.Provider)
+            : null;
         var fromAi = Clean(ParseList(reply), existing);
         if (fromAi.Count > 0)
             return new KeywordSuggestionsDto(fromAi, "AI");

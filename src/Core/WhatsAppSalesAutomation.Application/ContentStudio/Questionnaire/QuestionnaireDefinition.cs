@@ -51,9 +51,21 @@ public sealed class QuestionDef
 
     public string Prompt { get; set; } = string.Empty;
 
+    /// <summary>A plain-words explanation of why we ask or what a good answer looks like.</summary>
     public string? HelpText { get; set; }
 
+    /// <summary>A short sample answer, shown beside the question so a non-technical tenant can see what is wanted.</summary>
+    public string? Example { get; set; }
+
+    /// <summary>Questions with the same group are shown together as one small step ("About your business", "Brand"). Order of first appearance
+    /// is the order of the steps. Null = the question forms a group of its own.</summary>
+    public string? Group { get; set; }
+
     public bool Required { get; set; }
+
+    /// <summary>When false (the default) the tenant may answer "I don't know", "I need help" or "Not applicable" instead of inventing something,
+    /// and that counts as answered. True makes the question need a real answer - for the few where a guess or a skip is no use at all.</summary>
+    public bool RequireKnown { get; set; }
 
     /// <summary>Longest text answer. Defaults to 200 for ShortText and 4000 for LongText.</summary>
     public int? MaxLength { get; set; }
@@ -116,6 +128,27 @@ public sealed class FactRule
     public string Category { get; set; } = string.Empty;
 
     public string Template { get; set; } = string.Empty;
+
+    /// <summary>What the fact is about within its category ("Services"). Optional.</summary>
+    public string? Subject { get; set; }
+
+    /// <summary>When or where the fact holds. Optional.</summary>
+    public string? Context { get; set; }
+
+    /// <summary>For a fact that goes out of date (an offer, a price): how many days after it is confirmed it needs confirming again. Optional.</summary>
+    public int? ValidDays { get; set; }
+}
+
+/// <summary>The three ways to answer without giving an answer. Stored as <c>{"$special":"unknown"}</c>; the leading "$" cannot clash with a
+/// structured field key, which may not contain one.</summary>
+public static class SpecialAnswer
+{
+    public const string Property = "$special";
+    public const string Unknown = "unknown";
+    public const string NeedHelp = "need_help";
+    public const string NotApplicable = "not_applicable";
+
+    public static readonly IReadOnlyList<string> All = new[] { Unknown, NeedHelp, NotApplicable };
 }
 
 /// <summary>One thing wrong with a definition or an answer, keyed to the question (and field) it concerns.</summary>

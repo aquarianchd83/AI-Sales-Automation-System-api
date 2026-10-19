@@ -1,5 +1,6 @@
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using Xunit;
 
@@ -13,17 +14,60 @@ public sealed class KeywordSuggestionTests
     {
         public string? Reply { get; set; }
         public string? LastPrompt { get; private set; }
+        public string? LastProvider { get; private set; }
+        public int Calls { get; private set; }
 
         public Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default, string? provider = null)
         {
+            Calls++;
             LastPrompt = userPrompt;
+            LastProvider = provider;
             return Task.FromResult(Reply);
         }
     }
 
-    private readonly FakeAi _ai = new();
+    private sealed class FixedRouting : IAiFeatureRouting
+    {
+        public AiFeatureChoice Choice { get; set; } = new(true, "Anthropic");
+        public string? LastFeature { get; private set; }
 
-    private KeywordSuggestionService Service() => new(_ai, new SuggestKeywordsRequestValidator());
+        public AiFeatureChoice Resolve(string feature)
+        {
+            LastFeature = feature;
+            return Choice;
+        }
+    }
+
+    private readonly FakeAi _ai = new();
+    private readonly FixedRouting _routing = new();
+
+    private KeywordSuggestionService Service() => new(_ai, new SuggestKeywordsRequestValidator(), _routing);
+
+    [Fact]
+    public async Task Asks_the_tool_the_platform_admin_chose_for_business_keywords()
+    {
+        _ai.Reply = """["rooftop solar"]""";
+        _routing.Choice = new AiFeatureChoice(true, "Google");
+
+        var result = await Service().SuggestAsync(new SuggestKeywordsRequest("Solar & energy", null, null));
+
+        Assert.Equal(AiFeatures.BusinessKeywords, _routing.LastFeature);
+        Assert.Equal("Google", _ai.LastProvider);
+        Assert.Equal("AI", result.Source);
+    }
+
+    [Fact]
+    public async Task On_the_simulator_nothing_is_sent_anywhere_and_the_common_terms_answer()
+    {
+        _ai.Reply = """["this must never be used"]""";
+        _routing.Choice = new AiFeatureChoice(false, "Anthropic");
+
+        var result = await Service().SuggestAsync(new SuggestKeywordsRequest("Solar & energy", null, null));
+
+        Assert.Equal(0, _ai.Calls);
+        Assert.Equal("Common terms", result.Source);
+        Assert.Contains("solar panels", result.Keywords);
+    }
 
     [Fact]
     public async Task Uses_the_tenants_AI_when_it_answers_and_says_so()

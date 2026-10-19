@@ -69,6 +69,11 @@ public class AiProviderVerifier : IAiProviderVerifier
     private async Task<AiProviderCheckDto> CheckAsync(
         string provider, string? apiKey, bool isActive, CancellationToken cancellationToken, Func<string, HttpRequestMessage> build)
     {
+        if (!_configProvider.Get().IsEnabled(provider))
+        {
+            return new AiProviderCheckDto(provider, false, isActive, false, "Turned off. Switch it on to use or verify it.");
+        }
+
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return new AiProviderCheckDto(provider, false, isActive, false, "No API key is saved.");

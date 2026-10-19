@@ -76,5 +76,67 @@ public enum BusinessFactStatus
 public enum BusinessFactSource
 {
     Questionnaire = 0,
-    Manual = 1
+    Manual = 1,
+
+    /// <summary>The tenant's answer to a follow-up question the readiness check asked to fill a gap.</summary>
+    FollowUp = 2
+}
+
+/// <summary>Who stands behind the wording of a fact. Whatever the origin, only a person verifying it makes it a Verified fact - an
+/// inference by the system or an AI model is a proposal until then and is never counted, retrieved or asserted as verified.</summary>
+public enum BusinessFactOrigin
+{
+    /// <summary>The tenant said it (in the questionnaire or by typing it).</summary>
+    TenantProvided = 0,
+
+    /// <summary>The system worked it out from other data the tenant gave, by a fixed rule.</summary>
+    SystemDerived = 1,
+
+    /// <summary>An AI model inferred it. Never trusted without a person's confirmation.</summary>
+    AiInferred = 2
+}
+
+/// <summary>What happened to a fact, for its revision history.</summary>
+public enum BusinessFactChangeKind
+{
+    Created = 0,
+    Edited = 1,
+    Verified = 2,
+
+    /// <summary>A verified fact went back to Draft because what it states (or the answer behind it) changed.</summary>
+    Invalidated = 3,
+    Retired = 4,
+    DetailsChanged = 5
+}
+
+/// <summary>What kind of knowledge a fact is right now - worked out from its status, origin and dates, never stored, so it cannot go stale.
+/// Only <see cref="TenantApproved"/> may be asserted in content.</summary>
+public enum KnowledgeClassification
+{
+    /// <summary>The tenant said it; nobody has confirmed it yet.</summary>
+    TenantProvided = 0,
+
+    /// <summary>A person confirmed it is true and it has not expired.</summary>
+    TenantApproved = 1,
+
+    /// <summary>The system derived it by a fixed rule; unconfirmed.</summary>
+    SystemDerived = 2,
+
+    /// <summary>An AI inference, or any other claim nobody has stood behind. Never used.</summary>
+    UnverifiedClaim = 3,
+
+    /// <summary>Was confirmed, but its date has passed: out of date until confirmed again.</summary>
+    Expired = 4,
+
+    Retired = 5
+}
+
+/// <summary>What a tenant decided to do about a gap in its knowledge instead of filling it now.</summary>
+public enum KnowledgeGapDecisionKind
+{
+    /// <summary>"We don't need this." The gap stops blocking and stops counting against readiness.</summary>
+    Skipped = 0,
+
+    /// <summary>"Ask me later." Hidden until the chosen date, then it comes back.</summary>
+    Deferred = 1
 }

@@ -11,11 +11,18 @@ public static class AiFeatures
     public const string ContentGeneration = "ContentGeneration";
     public const string VideoRenders = "VideoRenders";
 
+    /// <summary>"AI suggest" on the tenant's Domain keywords (onboarding and business profile).</summary>
+    public const string BusinessKeywords = "BusinessKeywords";
+
+    /// <summary>"AI suggest" on the lead discovery profile (Who to find): the search words used to find new customers. Separate from
+    /// <see cref="DiscoveryLead"/>, which is the discovery agent that runs the searches.</summary>
+    public const string DiscoveryKeywords = "DiscoveryKeywords";
+
     /// <summary>What answers customers in WhatsApp conversations. Stored in the platform AI settings (AiProviders:Provider and
     /// AiProviders:EmbeddingProvider), not under Integrations:Ai, because the conversation engine has always read them there.</summary>
     public const string Conversation = "Conversation";
 
-    public static readonly IReadOnlyList<string> All = new[] { DiscoveryLead, KnowledgeBase, ContentGeneration, VideoRenders, Conversation };
+    public static readonly IReadOnlyList<string> All = new[] { DiscoveryLead, KnowledgeBase, ContentGeneration, VideoRenders, BusinessKeywords, DiscoveryKeywords, Conversation };
 
     /// <summary>Embeddings: Claude has no embeddings endpoint, so only ChatGPT and Gemini are offered for them.</summary>
     public static readonly IReadOnlyList<string> EmbeddingProviders = new[] { "OpenAI", "Google" };
@@ -28,6 +35,8 @@ public static class AiFeatures
     /// read this, so they cannot disagree. A provider appears here only when the feature's code can call it; a saved key does not make a
     /// provider supported. Adding a provider to one feature is a change to that feature's line only.
     ///   Discovery lead      - the discovery agent is Claude's (AnthropicLeadDiscoveryAgent), and its keyword suggestions use the same tool.
+    ///   Discovery keywords  - the same text generator as business keywords, so all three work.
+    ///   Business keywords   - AiTextGenerator calls ChatGPT, Claude or Gemini by name, so all three work.
     ///   Conversation        - AiServiceFactory has a client for ChatGPT, Claude and Gemini.
     ///   Knowledge base, content generation, video renders - nothing reads the choice yet, so no tool is offered until it is wired.
     /// </summary>
@@ -35,14 +44,16 @@ public static class AiFeatures
     {
         DiscoveryLead => new[] { "Anthropic" },
         Conversation => new[] { "OpenAI", "Anthropic", "Google" },
+        BusinessKeywords => new[] { "Anthropic", "OpenAI", "Google" },
+        DiscoveryKeywords => new[] { "Anthropic", "OpenAI", "Google" },
         _ => Array.Empty<string>(),
     };
 
     public static string Prefix(string feature) => $"Integrations:Ai:{feature}";
 
-    /// <summary>What a feature does until the admin chooses. Discovery leads were always on a third-party tool, so that stays on; the rest start on the simulator.</summary>
+    /// <summary>What a feature does until the admin chooses. Discovery leads, business keywords and discovery keywords were always on a third-party tool, so those stay on; the rest start on the simulator.</summary>
     public static string DefaultMode(string feature) =>
-        feature == DiscoveryLead ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode;
+        feature is DiscoveryLead or BusinessKeywords or DiscoveryKeywords ? PlatformIntegrationSettingsService.ApiMode : PlatformIntegrationSettingsService.SimulatorMode;
 }
 
 /// <summary>How a feature is handled. The key is the one already saved under Configuration > AI Providers - this only says whether one is there.</summary>
@@ -50,9 +61,11 @@ public static class AiFeatures
 /// the feature does not use a third-party tool yet.</param>
 /// <param name="SavedProviderSupported">False when a tool saved earlier is no longer supported: it is kept as saved, not used, and the
 /// simulator answers until the admin picks a supported one.</param>
+/// <param name="ProviderEnabled">False when the tool is switched Off under Configuration > AI Providers: the choice is kept as saved, not used,
+/// and the simulator answers until it is switched On again.</param>
 public record AiFeatureChannelDto(
     string Mode, string Provider, bool ProviderHasKey, bool IsLive,
-    IReadOnlyList<string> SupportedProviders, bool SavedProviderSupported);
+    IReadOnlyList<string> SupportedProviders, bool SavedProviderSupported, bool ProviderEnabled = true);
 
 /// <summary>The conversation engine: which tool answers customers, and which embeds the knowledge base text it searches. Each is the simulator
 /// or a third-party tool, and its key is the one saved under Configuration > AI Providers.</summary>
@@ -67,7 +80,9 @@ public record PlatformAiFeatureSettingsDto(
     AiFeatureChannelDto KnowledgeBase,
     AiFeatureChannelDto ContentGeneration,
     AiFeatureChannelDto VideoRenders,
-    AiConversationDto Conversation);
+    AiConversationDto Conversation,
+    AiFeatureChannelDto BusinessKeywords,
+    AiFeatureChannelDto DiscoveryKeywords);
 
 /// <param name="Mode">"Simulator" or "Api".</param>
 /// <param name="Provider">"OpenAI" (ChatGPT), "Anthropic" (Claude) or "Google" (Gemini).</param>
@@ -76,12 +91,16 @@ public record AiFeatureChannelRequest(string Mode, string Provider);
 public record AiConversationRequest(string Mode, string Provider, string EmbeddingMode, string EmbeddingProvider);
 
 /// <param name="Conversation">null leaves the conversation engine as it is.</param>
+/// <param name="BusinessKeywords">null leaves the domain keyword suggestions as they are.</param>
+/// <param name="DiscoveryKeywords">null leaves the discovery lead "AI suggest" as it is.</param>
 public record UpdatePlatformAiFeatureSettingsRequest(
     AiFeatureChannelRequest DiscoveryLead,
     AiFeatureChannelRequest KnowledgeBase,
     AiFeatureChannelRequest ContentGeneration,
     AiFeatureChannelRequest VideoRenders,
-    AiConversationRequest? Conversation = null);
+    AiConversationRequest? Conversation = null,
+    AiFeatureChannelRequest? BusinessKeywords = null,
+    AiFeatureChannelRequest? DiscoveryKeywords = null);
 
 public record TestAiFeatureRequest(AiFeatureChannelRequest Settings);
 
@@ -129,7 +148,7 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         AiFeatureChannelDto For(string feature) => ToDto(stored, feature, credentials);
         return new PlatformAiFeatureSettingsDto(
             For(AiFeatures.DiscoveryLead), For(AiFeatures.KnowledgeBase), For(AiFeatures.ContentGeneration), For(AiFeatures.VideoRenders),
-            ConversationDto(credentials));
+            ConversationDto(credentials), For(AiFeatures.BusinessKeywords), For(AiFeatures.DiscoveryKeywords));
     }
 
     public async Task<PlatformAiFeatureSettingsDto> UpdateAsync(UpdatePlatformAiFeatureSettingsRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
@@ -163,6 +182,10 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         Collect(AiFeatures.KnowledgeBase, request.KnowledgeBase);
         Collect(AiFeatures.ContentGeneration, request.ContentGeneration);
         Collect(AiFeatures.VideoRenders, request.VideoRenders);
+        if (request.BusinessKeywords is not null)
+            Collect(AiFeatures.BusinessKeywords, request.BusinessKeywords);
+        if (request.DiscoveryKeywords is not null)
+            Collect(AiFeatures.DiscoveryKeywords, request.DiscoveryKeywords);
 
         if (request.Conversation is { } conversation)
         {
@@ -227,6 +250,9 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         if (!supported.Contains(provider))
             return ("Provider", $"{DisplayName(provider)} is not available for this feature. Available: {string.Join(", ", supported.Select(DisplayName))}.");
 
+        if (!credentials.IsEnabled(provider))
+            return ("Provider", $"{DisplayName(provider)} is turned off. Switch it on under Configuration > AI Providers first.");
+
         if (!HasKey(credentials, provider))
             return ("Provider", $"No {DisplayName(provider)} key is saved yet. Add it under Configuration > AI Providers first.");
 
@@ -283,7 +309,8 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         var providerSupported = supported.Contains(provider);
         var hasKey = HasKey(credentials, provider);
         return new AiFeatureChannelDto(
-            mode, provider, hasKey, mode == PlatformIntegrationSettingsService.ApiMode && hasKey && providerSupported, supported, savedProvider is null || providerSupported);
+            mode, provider, hasKey, mode == PlatformIntegrationSettingsService.ApiMode && hasKey && providerSupported, supported, savedProvider is null || providerSupported,
+            credentials.IsEnabled(provider));
     }
 
     public static bool HasKey(AiCredentials credentials, string provider) => provider switch
