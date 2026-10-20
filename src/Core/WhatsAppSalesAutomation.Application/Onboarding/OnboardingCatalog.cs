@@ -36,7 +36,8 @@ public static class OnboardingCatalog
             "Connect your WhatsApp number with Meta. You choose or add the number in Meta's own window.", 20, "/tenant-settings"),
         new(LeadDiscovery, "Lead Discovery Profile",
             "Describe the businesses you want to find: type, keywords and locations.", 15, "/lead-discovery/profile"),
-        new(KnowledgeBase, "Knowledge Base / Voucher",
-            "Upload your voucher or brochure so the assistant can use it with customers.", 15, "/knowledge-base"),
+        // The key stays "knowledge-base" so tenants' saved progress is unchanged; the screen is now Product Sources.
+        new(KnowledgeBase, "Product Knowledge",
+            "Add your brochure, documents or website so the assistant can learn your products.", 15, "/product-knowledge/sources"),
     };
 }

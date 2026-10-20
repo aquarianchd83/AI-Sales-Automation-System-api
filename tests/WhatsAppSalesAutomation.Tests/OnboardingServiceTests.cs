@@ -380,6 +380,53 @@ public sealed class OnboardingServiceTests : IDisposable
         Assert.True((await StatusAsync()).IsCompleted);
     }
 
+    [Fact]
+    public async Task The_product_knowledge_step_points_at_product_sources_and_is_done_once_a_source_has_been_read()
+    {
+        await CompleteEverythingAsync();
+        _db.KnowledgeIngestionJobs.RemoveRange(await _db.KnowledgeIngestionJobs.ToListAsync()); // not done the old way
+        await _db.SaveChangesAsync();
+
+        var before = await StatusAsync();
+        var step = before.Steps.Single(s => s.Key == "knowledge-base");
+        Assert.Equal(("/product-knowledge/sources", "Product Knowledge"), (step.Route, step.Title));
+        Assert.Equal("knowledge-base", before.CurrentStepKey);
+
+        var source = new WhatsAppSalesAutomation.Domain.Entities.ProductKnowledge.KnowledgeSource
+        {
+            TenantId = _tenant, Name = "brochure.pdf", Status = KnowledgeSourceStatus.Processing
+        };
+        _db.KnowledgeSources.Add(source);
+        await _db.SaveChangesAsync();
+        Assert.Equal("knowledge-base", (await StatusAsync()).CurrentStepKey); // still being read
+
+        source.Status = KnowledgeSourceStatus.Failed;
+        await _db.SaveChangesAsync();
+        Assert.Equal("knowledge-base", (await StatusAsync()).CurrentStepKey); // unreadable does not count
+
+        source.Status = KnowledgeSourceStatus.Ready;
+        await _db.SaveChangesAsync();
+        Assert.True((await StatusAsync()).IsCompleted);
+
+        source.IsDeleted = true;
+        await _db.SaveChangesAsync();
+        Assert.Equal("knowledge-base", (await StatusAsync()).CurrentStepKey); // a removed source does not count
+    }
+
+    [Fact]
+    public async Task Another_tenants_source_does_not_complete_the_product_knowledge_step()
+    {
+        await CompleteEverythingAsync();
+        _db.KnowledgeIngestionJobs.RemoveRange(await _db.KnowledgeIngestionJobs.ToListAsync());
+        _db.KnowledgeSources.Add(new WhatsAppSalesAutomation.Domain.Entities.ProductKnowledge.KnowledgeSource
+        {
+            TenantId = Guid.NewGuid(), Name = "theirs.pdf", Status = KnowledgeSourceStatus.Ready
+        });
+        await _db.SaveChangesAsync();
+
+        Assert.Equal("knowledge-base", (await StatusAsync()).CurrentStepKey);
+    }
+
     // ---- completion --------------------------------------------------------------------------------------------------
 
     [Fact]

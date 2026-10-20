@@ -204,10 +204,17 @@ public class OnboardingService : IOnboardingService
 
             case OnboardingCatalog.KnowledgeBase:
             {
+                // A document or website of the tenant that has been read. (A tenant who finished this step the old way - an article that
+                // finished processing - keeps it.)
+                var sourceRead = await _context.KnowledgeSources.AnyAsync(s =>
+                    s.TenantId == tenantId && !s.IsDeleted && s.Status == KnowledgeSourceStatus.Ready, cancellationToken);
+                if (sourceRead)
+                    return null;
+
                 var processed = await _context.KnowledgeIngestionJobs.AnyAsync(j =>
                     j.TenantId == tenantId && j.State == KnowledgeIngestionState.Completed
                     && _context.KnowledgeBaseArticles.Any(a => a.Id == j.ArticleId && a.TenantId == tenantId && !a.IsDeleted), cancellationToken);
-                return processed ? null : "Upload your voucher and wait until it has been processed.";
+                return processed ? null : "Add a document or your website and wait until it has been read.";
             }
 
             default:
