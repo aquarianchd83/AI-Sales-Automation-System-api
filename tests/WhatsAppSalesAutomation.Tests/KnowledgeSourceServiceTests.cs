@@ -678,7 +678,7 @@ public sealed class KnowledgeSourceServiceTests : IDisposable
     public void Every_limit_is_a_platform_setting_with_a_default_and_the_endpoints_are_tenant_admin_only()
     {
         var keys = WhatsAppSalesAutomation.Application.Settings.AppSettingCatalog.All.Where(d => d.Key.StartsWith("ProductKnowledge:")).ToList();
-        Assert.Equal(13, keys.Count);
+        Assert.Equal(14, keys.Count);
         Assert.Equal("10", keys.Single(d => d.Key == "ProductKnowledge:DraftPassages").DefaultValue);
         Assert.Equal("2000", keys.Single(d => d.Key == "ProductKnowledge:MaxPassageChars").DefaultValue);
         Assert.Equal("true", keys.Single(d => d.Key == "ProductKnowledge:HybridRetrieval").DefaultValue);

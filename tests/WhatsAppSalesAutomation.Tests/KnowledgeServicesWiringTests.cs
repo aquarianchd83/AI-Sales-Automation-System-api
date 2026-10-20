@@ -69,6 +69,17 @@ public class KnowledgeServicesWiringTests
     }
 
     [Fact]
+    public void The_serving_index_and_the_per_tenant_switch_resolve_from_a_scope()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.IsType<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeServingIndexer>(
+            scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeServingIndexer>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService>());
+    }
+
+    [Fact]
     public void The_ingestion_stack_resolves_from_a_scope()
     {
         using var provider = BuildProvider();

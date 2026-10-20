@@ -49,7 +49,11 @@ public record UpdateKnowledgeBaseArticleRequest(string Title, string? Category, 
 
 /// <summary>What RetrieveRelevantChunksAsync returns - the chunk's text plus how well it matched the
 /// query, for both grounding the AI's prompt and recording AiInteractionSource rows.</summary>
-public record RetrievedChunk(Guid ChunkId, Guid ArticleId, string Text, double RelevanceScore);
+/// <param name="KnowledgeItemId">For product knowledge served to chat: the published item this chunk says. Null for every other chunk.</param>
+/// <param name="KnowledgeVersionId">The published version that item belongs to.</param>
+/// <param name="IsMaterialClaim">True when the item is a price, guarantee, certification, compliance or quantified-outcome claim.</param>
+public record RetrievedChunk(
+    Guid ChunkId, Guid ArticleId, string Text, double RelevanceScore, Guid? KnowledgeItemId = null, Guid? KnowledgeVersionId = null, bool IsMaterialClaim = false);
 
 public record BulkPublishArticlesRequest(IReadOnlyList<Guid> Ids);
 

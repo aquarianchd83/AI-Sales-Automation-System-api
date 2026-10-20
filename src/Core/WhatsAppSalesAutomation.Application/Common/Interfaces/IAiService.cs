@@ -52,7 +52,10 @@ public record AiConversationContext(
     /// <summary>What the CRM already knows about this customer before they typed anything: tags, where
     /// they came from, the campaign message they are replying to, answers from earlier enquiries. Null
     /// only for callers that have no CRM to consult.</summary>
-    AiCrmContext? Crm = null);
+    AiCrmContext? Crm = null,
+    /// <summary>True when this tenant's chat reads only its published product knowledge. Then an empty <see cref="GroundingChunks"/> means "nothing approved
+    /// covers this", and the agent must ask one clarifying question or leave it to a person - never answer from general knowledge.</summary>
+    bool ProductKnowledgeServing = false);
 
 /// <summary>The customer as the CRM already knows them. Everything here is data on file, not something
 /// the customer said in this chat - the prompt presents it that way, so the agent uses it to avoid
@@ -106,7 +109,10 @@ public record AiCapturedField(string FieldKey, string DisplayName, string RawVal
 
 public record AiConversationTurn(MessageDirection Direction, string Text, DateTime Timestamp);
 
-public record AiKnowledgeSnippet(Guid ChunkId, string Text, double RelevanceScore);
+/// <param name="KnowledgeItemId">For product knowledge served to chat: the published item behind this snippet (carried to the citation).</param>
+/// <param name="KnowledgeVersionId">The published version of that item.</param>
+/// <param name="IsMaterialClaim">The item is a price, guarantee, certification, compliance or quantified-outcome claim.</param>
+public record AiKnowledgeSnippet(Guid ChunkId, string Text, double RelevanceScore, Guid? KnowledgeItemId = null, Guid? KnowledgeVersionId = null, bool IsMaterialClaim = false);
 
 /// <summary>
 /// <paramref name="ConfidenceScore"/> is 0.0-1.0, compared against <c>AiOptions.ConfidenceThreshold</c>

@@ -188,6 +188,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeVerificationService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeVerificationService>();
 
         // Phase 5: publishing the approved answers as an immutable version.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeServingIndexer, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeServingIndexer>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgePublishingService>();
 
         // Phase 6: plain-text Draft and Final knowledge files.

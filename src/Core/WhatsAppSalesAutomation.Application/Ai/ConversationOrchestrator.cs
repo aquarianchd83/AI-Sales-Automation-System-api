@@ -48,6 +48,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly ICrmContextBuilder _crm;
     private readonly ILeadFollowUpService _followUps;
     private readonly ILogger<ConversationOrchestrator> _logger;
+    private readonly WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? _productKnowledge;
 
     public ConversationOrchestrator(
         IApplicationDbContext context,
@@ -66,8 +67,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
         IAiReplyValidator validator,
         ICrmContextBuilder crm,
         ILeadFollowUpService followUps,
-        ILogger<ConversationOrchestrator> logger)
+        ILogger<ConversationOrchestrator> logger,
+        WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? productKnowledge = null)
     {
+        _productKnowledge = productKnowledge;
         _aiUsage = aiUsage;
         _context = context;
         _dateTime = dateTime;
@@ -111,8 +114,14 @@ public class ConversationOrchestrator : IConversationOrchestrator
         if (conversation.Mode == ConversationMode.Human)
             return;
 
+        // The tenant's switch (set by the platform administrator). ON: facts come only from the published product knowledge, and "nothing approved found" is a
+        // state the agent must handle without inventing - see the validator and the escalation below. OFF (default): as it always was.
+        var serving = _productKnowledge is not null && await _productKnowledge.IsEnabledAsync(cancellationToken);
+
         var retrieved = await _knowledgeBase.RetrieveRelevantChunksAsync(inboundMessage.Text ?? string.Empty, cancellationToken);
-        var groundingChunks = retrieved.Select(r => new AiKnowledgeSnippet(r.ChunkId, r.Text, r.RelevanceScore)).ToList();
+        var groundingChunks = retrieved
+            .Select(r => new AiKnowledgeSnippet(r.ChunkId, r.Text, r.RelevanceScore, r.KnowledgeItemId, r.KnowledgeVersionId, r.IsMaterialClaim))
+            .ToList();
 
         // Resolved per call (not once per DI scope) - merges this tenant's Ai:* overrides, if any,
         // over the platform default. See ITenantConfigOverrideProvider's own doc comment. The ambient
@@ -162,7 +171,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
             plan.ToAsk,
             qualificationPaused,
             customer.PreferredLanguage,
-            crm);
+            crm,
+            serving);
 
         // Metered: subscription state and credit are checked, and one AI conversation is spent, before the model is
         // called (the provider bills whether or not the AI ends up replying or escalating). Refused - no credit, trial
@@ -271,9 +281,16 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 AiInteractionId: null),
             cancellationToken);
 
+        // Switch ON and nothing approved covered a question for the second time running: the clarifying question did not help, so a person takes over.
+        var noApprovedKnowledgeAgain = serving
+            && validated.Failures.Any(f => f.Code == AiReplyValidator.NoApprovedKnowledgeCode)
+            && await PreviousTurnFoundNoApprovedKnowledgeAsync(conversationId, cancellationToken);
+
         // Escalation is decided here, from validated signals and computed state - never from the
         // model's own sense of whether it did well.
         var escalate =
+            noApprovedKnowledgeAgain
+            ||
             validated.ConfidenceScore < options.ConfidenceThreshold
             || options.EscalationIntents.Any(i => string.Equals(i, validated.DetectedIntent, StringComparison.OrdinalIgnoreCase))
             || validated.HumanRequested
@@ -337,7 +354,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
             {
                 AiInteractionId = interaction.Id,
                 KnowledgeBaseChunkId = citedChunkId,
-                RelevanceScore = snippet.RelevanceScore
+                RelevanceScore = snippet.RelevanceScore,
+                // For published product knowledge, the item and version are kept on the citation itself: the chunk is replaced by the next publish, the citation is not.
+                KnowledgeItemId = snippet.KnowledgeItemId,
+                KnowledgeVersionId = snippet.KnowledgeVersionId
             });
         }
 
@@ -353,7 +373,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         {
             conversation.Status = ConversationStatus.Escalated;
 
-            var triggerReason = PickTriggerReason(validated, score);
+            var triggerReason = PickTriggerReason(validated, score, noApprovedKnowledgeAgain);
 
             // Built before the handoff row, and from this turn's own numbers: score.NewContributions
             // are still on the change tracker at this point, so the builder is handed them rather than
@@ -525,6 +545,19 @@ public class ConversationOrchestrator : IConversationOrchestrator
             customer.PreferredLanguage = detected;
     }
 
+    /// <summary>Whether the AI's previous turn in this conversation also found nothing approved for a question (it asked its one clarifying question then).</summary>
+    private async Task<bool> PreviousTurnFoundNoApprovedKnowledgeAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var previousId = await _context.AiInteractions
+            .Where(i => i.ConversationId == conversationId)
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => (Guid?)i.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return previousId is { } id
+            && await _context.AiInteractionValidationFailures.AnyAsync(f => f.AiInteractionId == id && f.Code == AiReplyValidator.NoApprovedKnowledgeCode, cancellationToken);
+    }
+
     /// <summary>The one-line version, for the queue list where there is room for a sentence and not a
     /// card. The full briefing goes to <see cref="HandoffSummary"/>; this stays because a list row that
     /// reads "AI escalation" and nothing else makes an agent open every item to triage any of them.</summary>
@@ -609,7 +642,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
 
     /// <summary>Why a human is being brought in, in the order that matters to whoever reads the queue:
     /// an explicit request first, then a customer ready to buy, then the intent, then the catch-all.</summary>
-    private static HandoffTriggerReason PickTriggerReason(ValidatedReply validated, LeadScoreResult score)
+    private static HandoffTriggerReason PickTriggerReason(ValidatedReply validated, LeadScoreResult score, bool noApprovedKnowledgeAgain = false)
     {
         if (validated.HumanRequested)
             return HandoffTriggerReason.CustomerRequested;
@@ -617,7 +650,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         if (score.IsHot)
             return HandoffTriggerReason.HotLead;
 
-        if (!validated.CanSend)
+        if (!validated.CanSend || noApprovedKnowledgeAgain)
             return HandoffTriggerReason.CannotAnswer;
 
         return Enum.TryParse<CustomerIntent>(validated.DetectedIntent, ignoreCase: true, out var intent)

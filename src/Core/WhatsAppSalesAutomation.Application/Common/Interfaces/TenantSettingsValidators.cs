@@ -56,6 +56,7 @@ public class UpdateTenantSettingsRequestValidator : AbstractValidator<UpdateTena
         ["Ai:MinFieldExtractionConfidence"] = (IsUnitInterval, "must be a number between 0 and 1"),
         ["Ai:MaxFieldsToAsk"] = (IsInt, "must be a whole number"),
         ["Ai:HandoffOnHotLead"] = (v => IsOneOf(v, "true", "false"), "must be true or false"),
+        ["ProductKnowledge:ServeChat"] = (v => IsOneOf(v, "true", "false"), "must be true or false"),
         ["ContentStudio:Enabled"] = (v => IsOneOf(v, "true", "false"), "must be true or false"),
         ["ContentStudio:StorageMode"] = (v => IsOneOf(v, "PublicBucket", "SignedUrls"), "must be PublicBucket or SignedUrls"),
         ["ContentStudio:StorageKeyPrefix"] = (IsFolderName, "must be a folder name of letters, digits, - or _"),

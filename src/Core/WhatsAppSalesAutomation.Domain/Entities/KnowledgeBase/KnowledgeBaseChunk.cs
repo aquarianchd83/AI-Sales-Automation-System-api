@@ -88,6 +88,13 @@ public class KnowledgeBaseChunk : BaseEntity, ITenantScopedOrGlobal
     /// built inactive, then one transaction flips the old set off and the new set on.</summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>For a chunk of the platform-written product-knowledge article: the published item (answer) this chunk says. Null for every other chunk.
+    /// Lets chat cite the item and drop a material claim whose approval has lapsed.</summary>
+    public Guid? KnowledgeItemId { get; set; }
+
+    /// <summary>For the same chunks: the published version this chunk belongs to.</summary>
+    public Guid? KnowledgeVersionId { get; set; }
+
     // ── Denormalized from the article (written ONLY by ingestion - see the type doc comment) ──
 
     public int AuthorityRank { get; set; }

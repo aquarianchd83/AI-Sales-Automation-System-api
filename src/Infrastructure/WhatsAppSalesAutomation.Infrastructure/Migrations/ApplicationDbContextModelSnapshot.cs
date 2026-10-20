@@ -234,7 +234,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid>("KnowledgeBaseChunkId")
+                    b.Property<Guid?>("KnowledgeBaseChunkId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("KnowledgeItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("KnowledgeVersionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<double>("RelevanceScore")
@@ -251,6 +257,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("AiInteractionId");
 
                     b.HasIndex("KnowledgeBaseChunkId");
+
+                    b.HasIndex("KnowledgeItemId");
 
                     b.ToTable("AiInteractionSources", (string)null);
                 });
@@ -2439,6 +2447,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("SupersedesArticleId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("SystemKey")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<Guid?>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2463,6 +2475,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("TenantId", "ContentHash")
                         .HasDatabaseName("IX_KBArticles_Dedup")
                         .HasFilter("[IsCurrentVersion] = 1 AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SystemKey")
+                        .IsUnique()
+                        .HasFilter("[SystemKey] IS NOT NULL");
 
                     b.HasIndex("Status", "ReviewDueAt", "EffectiveTo")
                         .HasDatabaseName("IX_KBArticles_Lifecycle")
@@ -2675,6 +2691,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<bool>("IsCurrentArticleVersion")
                         .HasColumnType("bit");
 
+                    b.Property<Guid?>("KnowledgeItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("KnowledgeVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("LanguageCode")
                         .IsRequired()
                         .HasMaxLength(10)
@@ -2709,6 +2731,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("KnowledgeItemId");
 
                     b.HasIndex("ArticleId", "ChunkIndex")
                         .HasDatabaseName("IX_KBChunks_Article");
@@ -5804,6 +5828,18 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<int?>("RestoredFromNumber")
                         .HasColumnType("int");
 
+                    b.Property<string>("ServingError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ServingIndexedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ServingStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -6544,8 +6580,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasOne("WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunk", null)
                         .WithMany()
                         .HasForeignKey("KnowledgeBaseChunkId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Ai.AiInteractionValidationFailure", b =>

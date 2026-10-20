@@ -62,6 +62,22 @@ public enum KnowledgeRevisionKind
     SourceChanged = 9,
 }
 
+/// <summary>Where a published version stands in the SERVING index - the chunks customer chat reads. Publishing never waits on this and is never undone by it.</summary>
+public enum KnowledgeServingStatus
+{
+    /// <summary>Being rendered, chunked and embedded.</summary>
+    Indexing = 0,
+
+    /// <summary>Its chunks are the ones chat reads now.</summary>
+    Live = 1,
+
+    /// <summary>Indexing did not finish. Chat keeps reading the last Live version, if any.</summary>
+    Failed = 2,
+
+    /// <summary>Was Live; a newer version's index replaced it.</summary>
+    Replaced = 3,
+}
+
 public enum KnowledgeVersionStatus
 {
     /// <summary>The version customers' answers are read from now.</summary>

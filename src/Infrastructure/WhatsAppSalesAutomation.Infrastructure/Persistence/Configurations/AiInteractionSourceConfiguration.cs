@@ -20,12 +20,14 @@ public class AiInteractionSourceConfiguration : IEntityTypeConfiguration<AiInter
             .HasForeignKey(s => s.AiInteractionId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Restrict: a chunk being deleted/reindexed should not silently delete historical citation
-        // records of what was cited at the time - it should fail loudly and be handled explicitly by
-        // whatever reindex/delete flow triggers it.
+        // SetNull: the ingestion swap deletes an article's old chunks when it re-indexes, and under the former Restrict that failed as soon as
+        // any chunk of the article had ever been cited. The citation record is kept (what was cited, how relevant, and for product knowledge which
+        // item and version); only the pointer to the replaced chunk is cleared.
         builder.HasOne<KnowledgeBaseChunk>()
             .WithMany()
             .HasForeignKey(s => s.KnowledgeBaseChunkId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(s => s.KnowledgeItemId);
     }
 }

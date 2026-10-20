@@ -40,6 +40,8 @@ public sealed class ConversationOrchestratorTests : IDisposable
     private readonly ScriptedAi _ai = new();
     private readonly List<string> _sent = new();
     private bool _hot;
+    private bool _serve;
+    private readonly List<RetrievedChunk> _retrieved = new();
     private readonly List<(Guid LeadId, string? Reason, int? Months)> _suggested = new();
 
     public ConversationOrchestratorTests()
@@ -47,6 +49,13 @@ public sealed class ConversationOrchestratorTests : IDisposable
         _connection.Open();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
         _db = new SqliteApplicationDbContext(options, new AmbientTenant(_tenant), new NoUser()) { StampTenantId = _tenant };
+        var tick = 0;
+        _db.BeforeSave = db =>
+        {
+            // Production stamps CreatedAt on save; this test database does not, and "the previous turn" needs the turns in order.
+            foreach (var entry in db.ChangeTracker.Entries<WhatsAppSalesAutomation.Domain.Common.BaseEntity>().Where(e => e.State == EntityState.Added && e.Entity.CreatedAt == default))
+                entry.Entity.CreatedAt = DateTime.UtcNow.AddSeconds(++tick);
+        };
         _db.Database.EnsureCreated();
 
         _db.Customers.Add(new Customer { Id = _customerId, TenantId = _tenant, FirstName = "Asha", PhoneNumberE164 = "+919000000001" });
@@ -75,7 +84,7 @@ public sealed class ConversationOrchestratorTests : IDisposable
             m.Name == nameof(ITenantConfigOverrideProvider.GetAiOptionsAsync) ? Task.FromResult(_options) : throw new NotImplementedException(m.Name));
         var knowledge = Fake.Of<IKnowledgeBaseService>((m, _) =>
             m.Name == nameof(IKnowledgeBaseService.RetrieveRelevantChunksAsync)
-                ? Task.FromResult<IReadOnlyList<RetrievedChunk>>(Array.Empty<RetrievedChunk>())
+                ? Task.FromResult<IReadOnlyList<RetrievedChunk>>(_retrieved.ToList())
                 : throw new NotImplementedException(m.Name));
         var leads = Fake.Of<ILeadService>((m, _) =>
             m.Name == nameof(ILeadService.GetOrCreateActiveLeadIdAsync) ? Task.FromResult(_leadId) : throw new NotImplementedException(m.Name));
@@ -84,7 +93,7 @@ public sealed class ConversationOrchestratorTests : IDisposable
             if (m.Name != nameof(IWhatsAppService.SendTextMessageAsync))
                 throw new NotImplementedException(m.Name);
             _sent.Add((string)a![1]!);
-            return Task.FromResult(WhatsAppSendResult.Succeeded("wamid.1"));
+            return Task.FromResult(WhatsAppSendResult.Succeeded("wamid." + _sent.Count));
         });
         var notifications = Fake.Of<INotificationService>((_, _) => Task.CompletedTask);
         var aiUsage = Fake.Of<IAiUsageService>((m, _) => m.Name switch
@@ -113,7 +122,7 @@ public sealed class ConversationOrchestratorTests : IDisposable
             whatsApp, notifications, config, aiUsage,
             new QualificationPlanner(_db, config, NullLogger<QualificationPlanner>.Instance),
             scoring, new AiReplyValidator(), new CrmContextBuilder(_db), followUps,
-            NullLogger<ConversationOrchestrator>.Instance);
+            NullLogger<ConversationOrchestrator>.Instance, new ServingSwitch(() => _serve));
     }
 
     private async Task<Guid> ReceiveAsync(string text, ConversationMode mode)
@@ -330,7 +339,175 @@ public sealed class ConversationOrchestratorTests : IDisposable
         Assert.Equal(new[] { "VIP" }, crm!.Tags);
     }
 
+    // ── Published product knowledge served to chat (the tenant's switch) ──────────────────────────────
+
+    private async Task<Guid> SeedChunkAsync(string text)
+    {
+        var article = new WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseArticle
+        {
+            TenantId = _tenant, ArticleKey = "pk-" + Guid.NewGuid().ToString("N"), Title = "Published product knowledge", Content = "x", ContentHash = "h",
+            SourceType = KnowledgeSourceType.AdminConfiguredArticle, AuthorityRank = 30, SystemKey = ProductKnowledgeSystem.ArticleKey
+        };
+        _db.KnowledgeBaseArticles.Add(article);
+        var chunk = new WhatsAppSalesAutomation.Domain.Entities.KnowledgeBase.KnowledgeBaseChunk { TenantId = _tenant, ArticleId = article.Id, ChunkText = text, ContextHeader = "h", EmbeddingInput = text, SearchText = text };
+        _db.KnowledgeBaseChunks.Add(chunk);
+        await _db.SaveChangesAsync();
+        return chunk.Id;
+    }
+
+    private async Task GroundedOnAsync(string text, bool material = false)
+    {
+        var chunkId = await SeedChunkAsync(text);
+        _retrieved.Add(new RetrievedChunk(chunkId, Guid.NewGuid(), text, 0.9, KnowledgeItemId: Guid.NewGuid(), KnowledgeVersionId: Guid.NewGuid(), IsMaterialClaim: material));
+    }
+
+    [Fact]
+    public async Task With_the_switch_off_the_chat_is_exactly_as_before_even_when_nothing_is_found()
+    {
+        _ai.Replies.Enqueue(Reply("Our fee is reasonable and our doctors are excellent."));
+
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+
+        Assert.False(_ai.Contexts.Single().ProductKnowledgeServing);
+        Assert.Equal(new[] { "Our fee is reasonable and our doctors are excellent." }, _sent); // sent as it always was
+        Assert.Equal(AiActionTaken.Replied, (await _db.AiInteractions.SingleAsync()).ActionTaken);
+        Assert.Empty(await _db.AiInteractionValidationFailures.ToListAsync());
+    }
+
+    [Fact]
+    public async Task With_the_switch_on_and_nothing_approved_the_agent_asks_one_clarifying_question_and_the_miss_is_recorded()
+    {
+        _serve = true;
+        _ai.Replies.Enqueue(Reply("Which treatment are you asking about?"));
+
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+
+        Assert.True(_ai.Contexts.Single().ProductKnowledgeServing);
+        Assert.Empty(_ai.Contexts.Single().GroundingChunks);
+        Assert.Equal(new[] { "Which treatment are you asking about?" }, _sent);
+        var turn = await _db.AiInteractions.SingleAsync();
+        Assert.Equal(AiActionTaken.Replied, turn.ActionTaken);
+        var miss = Assert.Single(await _db.AiInteractionValidationFailures.ToListAsync());
+        Assert.Equal(("NoApprovedKnowledge", false), (miss.Code, miss.Blocking));
+        Assert.Empty(await _db.HumanHandoffs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task With_the_switch_on_and_nothing_approved_an_answer_from_the_models_own_knowledge_is_not_sent_and_a_person_is_called_in()
+    {
+        _serve = true;
+        _ai.Replies.Enqueue(Reply("Our fee is reasonable and our doctors are excellent."));
+
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+
+        Assert.Empty(_sent);
+        Assert.Equal(AiActionTaken.Escalated, (await _db.AiInteractions.SingleAsync()).ActionTaken);
+        var handoff = Assert.Single(await _db.HumanHandoffs.ToListAsync());
+        Assert.Equal(HandoffTriggerReason.CannotAnswer, handoff.TriggerReason);
+        Assert.Contains(await _db.AiInteractionValidationFailures.ToListAsync(), f => f.Code == "NoApprovedKnowledge" && f.Blocking);
+    }
+
+    [Fact]
+    public async Task A_second_miss_in_a_row_hands_the_conversation_to_a_person_instead_of_asking_again()
+    {
+        _serve = true;
+        _ai.Replies.Enqueue(Reply("Which treatment are you asking about?"));
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+        Assert.Single(_sent);
+
+        _ai.Replies.Enqueue(Reply("And roughly when would you like to come?"));
+        await ReceiveAsync("Something for my eyes", ConversationMode.AI);
+
+        Assert.Single(_sent); // the second question was not sent
+        var handoff = Assert.Single(await _db.HumanHandoffs.ToListAsync());
+        Assert.Equal(HandoffTriggerReason.CannotAnswer, handoff.TriggerReason);
+        Assert.Equal(AiActionTaken.Escalated, (await _db.AiInteractions.SingleAsync(i => i.ProposedResponseText == "And roughly when would you like to come?")).ActionTaken);
+    }
+
+    [Fact]
+    public async Task A_turn_with_something_approved_in_between_resets_the_count_so_the_next_miss_asks_again()
+    {
+        _serve = true;
+        _ai.Replies.Enqueue(Reply("Which treatment are you asking about?"));
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+
+        await GroundedOnAsync("Parking is free for all patients.");
+        _ai.Replies.Enqueue(Reply("Parking is free for all patients."));
+        await ReceiveAsync("Is there parking?", ConversationMode.AI);
+
+        _retrieved.Clear();
+        _ai.Replies.Enqueue(Reply("Which department do you need?"));
+        await ReceiveAsync("And something else", ConversationMode.AI);
+
+        Assert.Equal(3, _sent.Count);
+        Assert.Empty(await _db.HumanHandoffs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task With_the_switch_on_a_greeting_with_nothing_approved_is_answered_normally()
+    {
+        _serve = true;
+        _ai.Replies.Enqueue(Reply("Hello! Welcome.", intent: "Qualification"));
+
+        await ReceiveAsync("Hi", ConversationMode.AI);
+
+        Assert.Equal(new[] { "Hello! Welcome." }, _sent);
+        Assert.Empty(await _db.AiInteractionValidationFailures.ToListAsync());
+    }
+
+    [Fact]
+    public async Task With_the_switch_on_an_answer_the_approved_knowledge_supports_is_sent_and_cites_the_item_and_version()
+    {
+        _serve = true;
+        await GroundedOnAsync("The consultation fee is Rs 500 for the first visit.", material: true);
+        var chunk = _retrieved.Single();
+        _ai.Replies.Enqueue(Reply("The consultation fee is Rs 500 for the first visit.") with { CitedChunkIds = new[] { chunk.ChunkId } });
+
+        await ReceiveAsync("What is the fee?", ConversationMode.AI);
+
+        Assert.Equal(new[] { "The consultation fee is Rs 500 for the first visit." }, _sent);
+        var snippet = _ai.Contexts.Single().GroundingChunks.Single();
+        Assert.Equal((chunk.KnowledgeItemId, chunk.KnowledgeVersionId, true), (snippet.KnowledgeItemId, snippet.KnowledgeVersionId, snippet.IsMaterialClaim));
+        var citation = await _db.AiInteractionSources.SingleAsync();
+        Assert.Equal((chunk.ChunkId, chunk.KnowledgeItemId, chunk.KnowledgeVersionId), (citation.KnowledgeBaseChunkId, citation.KnowledgeItemId, citation.KnowledgeVersionId));
+    }
+
+    [Fact]
+    public async Task With_the_switch_on_a_material_claim_the_approved_knowledge_does_not_state_is_not_sent()
+    {
+        _serve = true;
+        await GroundedOnAsync("Parking is free for all patients.");
+        _ai.Replies.Enqueue(Reply("Yes, and everything comes with a lifetime guarantee."));
+
+        await ReceiveAsync("Is there parking and what is the warranty?", ConversationMode.AI);
+
+        Assert.Empty(_sent);
+        Assert.Equal(AiActionTaken.Escalated, (await _db.AiInteractions.SingleAsync()).ActionTaken);
+        Assert.Contains(await _db.AiInteractionValidationFailures.ToListAsync(), f => f.Code == "UnbackedMaterialClaim" && f.Blocking);
+        Assert.Equal(HandoffTriggerReason.CannotAnswer, Assert.Single(await _db.HumanHandoffs.ToListAsync()).TriggerReason);
+    }
+
+    [Fact]
+    public async Task With_the_switch_off_the_same_unbacked_claim_is_sent_as_before()
+    {
+        await GroundedOnAsync("Parking is free for all patients.");
+        _ai.Replies.Enqueue(Reply("Yes, and everything comes with a lifetime guarantee."));
+
+        await ReceiveAsync("Is there parking and what is the warranty?", ConversationMode.AI);
+
+        Assert.Single(_sent);
+        Assert.Empty(await _db.AiInteractionValidationFailures.ToListAsync());
+    }
+
     // ── Doubles ──────────────────────────────────────────────────────────────────────────────
+
+    private sealed class ServingSwitch : WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing
+    {
+        private readonly Func<bool> _on;
+        public ServingSwitch(Func<bool> on) => _on = on;
+        public Task<bool> IsEnabledAsync(CancellationToken cancellationToken = default) => Task.FromResult(_on());
+        public Task<bool> IsEnabledForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) => Task.FromResult(_on());
+    }
 
     private sealed class ScriptedAi : IAiService
     {

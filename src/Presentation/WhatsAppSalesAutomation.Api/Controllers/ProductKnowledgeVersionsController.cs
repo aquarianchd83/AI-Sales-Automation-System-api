@@ -54,6 +54,11 @@ public class ProductKnowledgeVersionsController : ControllerBase
         return Ok(version);
     }
 
+    /// <summary>Builds the chat index of the current version again, after it failed. The version is not changed.</summary>
+    [HttpPost("{id:guid}/reindex")]
+    public async Task<ActionResult<KnowledgeVersionDto>> Reindex(Guid id, CancellationToken cancellationToken)
+        => Ok(await _publishing.ReindexAsync(RequireTenantId(), id, cancellationToken));
+
     /// <summary>The working Draft file (plain text), clearly headed as not approved.</summary>
     [HttpGet("draft-file")]
     public async Task<IActionResult> DraftFile(CancellationToken cancellationToken)

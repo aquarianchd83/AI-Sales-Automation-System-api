@@ -87,7 +87,7 @@ public class PlanLimitsService : IPlanLimitsService
         // + soft-delete - see ApplicationDbContext.SetTenantOwnedFilter), so IsDeleted is re-applied
         // by hand here the same way InboundWebhookProcessor's Customer lookup does.
         var currentCount = await _context.KnowledgeBaseArticles.IgnoreQueryFilters()
-            .CountAsync(a => a.TenantId == tenantId && !a.IsDeleted, cancellationToken);
+            .CountAsync(a => a.TenantId == tenantId && !a.IsDeleted && a.SystemKey == null, cancellationToken); // the platform-written product-knowledge article is not the tenant's
 
         if (currentCount >= plan.MaxKnowledgeBaseArticles)
             throw new PlanLimitExceededException($"Your plan allows up to {plan.MaxKnowledgeBaseArticles} knowledge base articles. Upgrade to add more.");

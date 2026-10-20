@@ -158,6 +158,9 @@ public sealed class ProductKnowledgeSettings
     public int MaterialReviewDays { get; set; } = 180;
     public int MaxPassageChars { get; set; } = 2000;
     public bool HybridRetrieval { get; set; } = true;
+
+    /// <summary>Platform default for the per-tenant ProductKnowledge:ServeChat switch (a tenant override wins).</summary>
+    public bool ServeChat { get; set; }
 }
 
 /// <summary>The two On/Off switches on the Integrations page, bound from "Integrations:ProductSources". Absent means On.</summary>
