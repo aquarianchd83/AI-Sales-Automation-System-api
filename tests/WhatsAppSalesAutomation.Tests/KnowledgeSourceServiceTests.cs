@@ -311,6 +311,56 @@ public sealed class KnowledgeSourceServiceTests : IDisposable
         Assert.Contains("25,000", text);
     }
 
+    private sealed class RecordingIndex : ISourcePassageIndex
+    {
+        public List<Guid> Ensured { get; } = new();
+        public bool Throws { get; set; }
+
+        public Task<PassageIndexResult> EnsureIndexedAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Ensured.Add(tenantId);
+            return Throws ? throw new InvalidOperationException("embedding provider down") : Task.FromResult(new PassageIndexResult("Complete", 0, 0, 0));
+        }
+
+        public Task<PassageVectors?> LoadVectorsAsync(Guid tenantId, CancellationToken cancellationToken = default) => Task.FromResult<PassageVectors?>(null);
+    }
+
+    [Fact]
+    public async Task When_a_source_becomes_ready_its_tenants_passages_are_embedded_and_a_failure_there_never_fails_the_source()
+    {
+        var index = new RecordingIndex();
+        var processor = new KnowledgeSourceProcessor(_db, _store, _reader, _crawler, _ai, _routing, _limits, NullLogger<KnowledgeSourceProcessor>.Instance, index);
+        var first = await Upload("brochure.pdf", TwoPagePdf);
+
+        await processor.ProcessAsync(first.Id);
+
+        Assert.Equal(KnowledgeSourceStatus.Ready, (await Reload(first.Id)).Status);
+        Assert.Equal(_tenantA, Assert.Single(index.Ensured));
+
+        index.Throws = true;
+        var second = await Upload("other.pdf", ProductKnowledgeReadingTests.Pdf("Parking is free for all patients visiting the clinic today."));
+        await processor.ProcessAsync(second.Id);
+
+        Assert.Equal(KnowledgeSourceStatus.Ready, (await Reload(second.Id)).Status);
+        Assert.Equal(2, index.Ensured.Count);
+    }
+
+    [Fact]
+    public async Task A_source_that_fails_to_read_is_not_embedded_and_the_switch_off_skips_embedding()
+    {
+        var index = new RecordingIndex();
+        var processor = new KnowledgeSourceProcessor(_db, _store, _reader, _crawler, _ai, _routing, _limits, NullLogger<KnowledgeSourceProcessor>.Instance, index);
+        var scanned = await Upload("scan.pdf", ProductKnowledgeReadingTests.Pdf(null, null));
+        await processor.ProcessAsync(scanned.Id);
+        Assert.Empty(index.Ensured);
+
+        _limits.Value = _limits.Value with { HybridRetrieval = false };
+        var ok = await Upload("brochure.pdf", TwoPagePdf);
+        await processor.ProcessAsync(ok.Id);
+        Assert.Equal(KnowledgeSourceStatus.Ready, (await Reload(ok.Id)).Status);
+        Assert.Empty(index.Ensured);
+    }
+
     [Fact]
     public async Task A_fully_scanned_document_fails_with_a_clear_reason_while_scanned_reading_is_off_and_no_ai_is_called()
     {
@@ -628,7 +678,10 @@ public sealed class KnowledgeSourceServiceTests : IDisposable
     public void Every_limit_is_a_platform_setting_with_a_default_and_the_endpoints_are_tenant_admin_only()
     {
         var keys = WhatsAppSalesAutomation.Application.Settings.AppSettingCatalog.All.Where(d => d.Key.StartsWith("ProductKnowledge:")).ToList();
-        Assert.Equal(11, keys.Count);
+        Assert.Equal(13, keys.Count);
+        Assert.Equal("10", keys.Single(d => d.Key == "ProductKnowledge:DraftPassages").DefaultValue);
+        Assert.Equal("2000", keys.Single(d => d.Key == "ProductKnowledge:MaxPassageChars").DefaultValue);
+        Assert.Equal("true", keys.Single(d => d.Key == "ProductKnowledge:HybridRetrieval").DefaultValue);
         Assert.All(keys, d => Assert.False(string.IsNullOrWhiteSpace(d.DefaultValue), d.Key));
         Assert.Equal("10", keys.Single(d => d.Key == "ProductKnowledge:MaxFileMb").DefaultValue);
         Assert.Equal("true", keys.Single(d => d.Key == "ProductKnowledge:CrawlRespectRobots").DefaultValue);
@@ -650,6 +703,19 @@ public sealed class KnowledgeSourceServiceTests : IDisposable
         var limits = provider.Get();
 
         Assert.Equal((200, 1, 5, 200, 3), (limits.MaxFileMb, limits.CrawlMaxPages, limits.CrawlMaxDepth, limits.MaxScannedPages, limits.CrawlPageTimeoutSeconds));
+    }
+
+    [Fact]
+    public void Drafting_limits_have_sensible_defaults_and_are_clamped()
+    {
+        var defaults = new SourceLimitsProvider(new FixedOptions<ProductKnowledgeSettings>(new ProductKnowledgeSettings())).Get();
+        Assert.Equal((10, 2000, true), (defaults.DraftPassages, defaults.MaxPassageChars, defaults.HybridRetrieval));
+
+        var wild = new SourceLimitsProvider(new FixedOptions<ProductKnowledgeSettings>(new ProductKnowledgeSettings { DraftPassages = 500, MaxPassageChars = 5 })).Get();
+        Assert.Equal((20, 800), (wild.DraftPassages, wild.MaxPassageChars));
+
+        var tiny = new SourceLimitsProvider(new FixedOptions<ProductKnowledgeSettings>(new ProductKnowledgeSettings { DraftPassages = 0, MaxPassageChars = 99999 })).Get();
+        Assert.Equal((2, 4000), (tiny.DraftPassages, tiny.MaxPassageChars));
     }
 
     // ----- the platform's two switches on Integrations ----------------------------------------------------------------------------

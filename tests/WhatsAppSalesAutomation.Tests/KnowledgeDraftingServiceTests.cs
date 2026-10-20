@@ -583,4 +583,245 @@ public sealed class KnowledgeDraftingServiceTests : IDisposable
         var text = DraftPrompts.AnswerUser("Q?", new[] { new PassageCandidate(Guid.NewGuid(), Guid.NewGuid(), "brochure.pdf", 1, "Page 1", null, "Text.", "h") });
         Assert.DoesNotMatch(@"[0-9a-f]{8}-[0-9a-f]{4}", text);
     }
+
+    // ----- finding passages by meaning (the source index) ------------------------------------------------------------------------------
+
+    /// <summary>Stands in for the source index: hands out the vectors it was given and counts how it was used.</summary>
+    private sealed class FakeIndex : ISourcePassageIndex
+    {
+        public Dictionary<string, float[]> ByHash { get; } = new();
+        public float[]? QueryVector { get; set; } = new[] { 1.0f, 0.0f };
+        public bool ReturnNothing { get; set; }
+        public bool Throws { get; set; }
+        public List<Guid> Ensured { get; } = new();
+        public List<Guid> Loaded { get; } = new();
+
+        public Task<PassageIndexResult> EnsureIndexedAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Ensured.Add(tenantId);
+            if (Throws)
+                throw new InvalidOperationException("embedding provider down");
+            return Task.FromResult(new PassageIndexResult("Complete", 0, 0, 0));
+        }
+
+        public Task<PassageVectors?> LoadVectorsAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Loaded.Add(tenantId);
+            if (Throws)
+                throw new InvalidOperationException("embedding provider down");
+            return Task.FromResult<PassageVectors?>(ReturnNothing ? null : new PassageVectors("OpenAI", "model", ByHash, (_, _) => Task.FromResult(QueryVector)));
+        }
+    }
+
+    private KnowledgeDraftingService ServiceWith(FakeIndex index) => new(_db, _ai, _routing, _limits, _queue, NullLogger<KnowledgeDraftingService>.Instance, index);
+
+    private const string Hinglish = "Ek visit ki keemat paanch sau rupaye hai.";
+
+    [Fact]
+    public async Task A_passage_that_only_means_the_same_is_offered_to_the_ai_when_its_vector_is_close_and_not_otherwise()
+    {
+        await Source("brochure.pdf", _a, Hinglish, "Parking is free for patients.");
+        _ai.Respond = _ => ScriptedAi.Live(Reply("A visit costs five hundred rupees.", quote: "keemat paanch sau rupaye hai"));
+
+        // Words alone find nothing: nothing is asked of the AI.
+        var wordsOnly = (await ServiceWith(new FakeIndex { ReturnNothing = true }).AskAsync(_a, null, new AskQuestionRequest("What is the consultation fee at the clinic?"))).Answer!;
+        Assert.Equal("NoEvidence", wordsOnly.Confidence);
+        Assert.Empty(_ai.Calls);
+
+        var index = new FakeIndex();
+        index.ByHash[PassageSplitter.HashOf(Hinglish)] = new[] { 0.9f, 0.436f };
+        index.ByHash[PassageSplitter.HashOf("Parking is free for patients.")] = new[] { 0.0f, 1.0f };
+        var withMeaning = (await ServiceWith(index).AskAsync(_a, null, new AskQuestionRequest("How much does the clinic charge per visit?"))).Answer!;
+
+        Assert.Equal("keemat paanch sau rupaye hai", Assert.Single(withMeaning.Evidence).Excerpt); // cut from the passage itself
+        var call = Assert.Single(_ai.Calls);
+        Assert.Contains("keemat paanch sau rupaye", call.User);
+        Assert.DoesNotContain("Parking", call.User); // below the similarity floor
+    }
+
+    [Theory]
+    [InlineData("nothing")]
+    [InlineData("throws")]
+    public async Task Without_usable_embeddings_drafting_falls_back_to_word_search(string mode)
+    {
+        await Source("brochure.pdf", _a, FeePassage, "Parking is free for patients.");
+        _ai.Respond = _ => ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "consultation fee is rs 500 for the first visit"));
+        var index = new FakeIndex { ReturnNothing = mode == "nothing", Throws = mode == "throws" };
+
+        var answer = (await ServiceWith(index).AskAsync(_a, null, new AskQuestionRequest("What is the consultation fee at the clinic?"))).Answer!;
+
+        Assert.Equal("High", answer.Confidence);
+        Assert.DoesNotContain("Parking", Assert.Single(_ai.Calls).User);
+        Assert.Single(index.Loaded);
+    }
+
+    [Fact]
+    public async Task The_switch_off_ignores_the_index_entirely()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _limits.Value = _limits.Value with { HybridRetrieval = false };
+        var index = new FakeIndex();
+        _ai.Respond = _ => ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "consultation fee is rs 500 for the first visit"));
+
+        await ServiceWith(index).AskAsync(_a, null, new AskQuestionRequest("What is the consultation fee at the clinic?"));
+
+        Assert.Empty(index.Loaded);
+        Assert.Empty(index.Ensured);
+    }
+
+    [Fact]
+    public async Task Another_tenants_passage_is_never_offered_even_if_its_vector_is_in_the_index()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        const string secret = "Secret wholesale rate for tenant B is Rs 99 per unit.";
+        await Source("b.pdf", _b, secret);
+        var index = new FakeIndex();
+        index.ByHash[PassageSplitter.HashOf(secret)] = new[] { 1.0f, 0.0f }; // a perfect match for the question
+        _ai.Respond = _ => ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "consultation fee is rs 500 for the first visit"));
+
+        await ServiceWith(index).AskAsync(_a, null, new AskQuestionRequest("What is the wholesale rate per unit?"));
+
+        Assert.All(_ai.Calls, c => Assert.DoesNotContain("tenant B", c.User));
+    }
+
+    [Fact]
+    public async Task The_number_of_passages_offered_and_how_much_of_each_follow_the_settings()
+    {
+        var passages = Enumerable.Range(1, 5).Select(i => $"Consultation fee detail {i}: the consultation fee is Rs {500 + i * 10} at branch {i}.").ToArray();
+        await Source("brochure.pdf", _a, passages);
+        _ai.Respond = _ => ScriptedAi.Live(Reply(null, insufficient: true));
+
+        _limits.Value = _limits.Value with { DraftPassages = 2 };
+        await Ask();
+        Assert.Contains("[P2]", _ai.Calls[0].User);
+        Assert.DoesNotContain("[P3]", _ai.Calls[0].User);
+
+        _limits.Value = _limits.Value with { DraftPassages = 10 };
+        await Ask("What is the consultation fee at the other branches?");
+        Assert.Contains("[P5]", _ai.Calls[1].User);
+
+        var longPassage = "Consultation fee policy. " + new string('x', 1500);
+        _db.SourcePassages.RemoveRange(await _db.SourcePassages.ToListAsync());
+        await _db.SaveChangesAsync();
+        await Source("long.pdf", _a, longPassage);
+        _limits.Value = _limits.Value with { MaxPassageChars = 800 };
+        await Ask("What is the consultation fee policy?");
+        Assert.Contains(new string('x', 700), _ai.Calls[2].User);
+        Assert.DoesNotContain(new string('x', 800), _ai.Calls[2].User);
+    }
+
+    [Fact]
+    public async Task A_background_run_brings_the_index_up_to_date_first_but_one_answer_never_waits_for_embedding()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => ScriptedAi.Live(Reply(null, insufficient: true));
+        var index = new FakeIndex();
+        var service = ServiceWith(index);
+
+        await service.AskAsync(_a, null, new AskQuestionRequest("What is the consultation fee at the clinic?"));
+        Assert.Empty(index.Ensured);
+
+        var run = await service.StartRunAsync(_a, null);
+        await service.RunAsync(run.Id);
+
+        Assert.Equal(_a, Assert.Single(index.Ensured));
+        Assert.Equal("Completed", (await service.GetRunAsync(_a, run.Id)).Status);
+    }
+
+    [Fact]
+    public async Task A_run_still_completes_when_the_embedding_provider_is_down()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => ScriptedAi.Live(Reply(null, insufficient: true));
+        var service = ServiceWith(new FakeIndex { Throws = true });
+
+        var run = await service.StartRunAsync(_a, null);
+        await service.RunAsync(run.Id);
+
+        Assert.Equal("Completed", (await service.GetRunAsync(_a, run.Id)).Status);
+    }
+
+    // ----- a second chance to quote ------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task When_no_quotation_checks_out_the_ai_is_asked_once_more_and_a_verified_quotation_then_makes_the_answer()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => _ai.Calls.Count == 1
+            ? ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "the fee for a first consultation is five hundred rupees"))
+            : ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "consultation fee is Rs 500 for the first visit"));
+
+        var answer = (await Ask()).Answer!;
+
+        Assert.Equal(2, _ai.Calls.Count);
+        Assert.Contains("YOUR PREVIOUS REPLY", _ai.Calls[1].User);
+        Assert.Contains("The consultation fee is Rs 500 for the first visit.", _ai.Calls[1].User); // told what it answered, and the same passages again
+        Assert.Contains("[P1]", _ai.Calls[1].User);
+        Assert.Equal("High", answer.Confidence);
+        Assert.Equal("consultation fee is Rs 500 for the first visit", Assert.Single(answer.Evidence).Excerpt); // the passage's own words
+        Assert.Contains(answer.Reasons, r => r.Contains("asked once more"));
+    }
+
+    [Fact]
+    public async Task A_quotation_that_is_still_not_in_the_passages_after_the_second_try_is_never_accepted()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => ScriptedAi.Live(Reply("The consultation fee is Rs 500 and includes free medicines.", quote: "the fee includes free medicines for every patient"));
+
+        var answer = (await Ask()).Answer!;
+
+        Assert.Equal(2, _ai.Calls.Count); // one retry, no more
+        Assert.Equal("NoEvidence", answer.Confidence);
+        Assert.Null(answer.Summary);
+        Assert.Empty(answer.Evidence);
+    }
+
+    [Fact]
+    public async Task A_retry_that_gives_a_different_answer_with_no_support_is_not_accepted_either()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => _ai.Calls.Count == 1
+            ? ScriptedAi.Live(Reply("The fee is Rs 500.", quote: "fee is five hundred"))
+            : ScriptedAi.Live(Reply("The fee is Rs 999.", quote: "fee is nine hundred ninety nine"));
+
+        var answer = (await Ask()).Answer!;
+
+        Assert.Equal("NoEvidence", answer.Confidence);
+        Assert.Null(answer.Summary);
+    }
+
+    [Fact]
+    public async Task A_failed_second_call_leaves_the_first_outcome_and_no_answer_is_invented()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+        _ai.Respond = _ => _ai.Calls.Count == 1
+            ? ScriptedAi.Live(Reply("The fee is Rs 500.", quote: "fee is five hundred"))
+            : ScriptedAi.Failure("provider down");
+
+        var answer = (await Ask()).Answer!;
+
+        Assert.Equal(2, _ai.Calls.Count);
+        Assert.Equal("NoEvidence", answer.Confidence);
+        Assert.Empty(answer.Evidence);
+    }
+
+    [Fact]
+    public async Task No_retry_when_the_model_already_says_the_sources_do_not_answer_or_when_some_quotation_was_verified_or_for_the_simulator()
+    {
+        await Source("brochure.pdf", _a, FeePassage);
+
+        _ai.Respond = _ => ScriptedAi.Live(Reply(null, insufficient: true));
+        await Ask();
+        Assert.Single(_ai.Calls);
+
+        _ai.Calls.Clear();
+        _ai.Respond = _ => ScriptedAi.Live(Reply("The consultation fee is Rs 500 for the first visit.", quote: "consultation fee is Rs 500 for the first visit"));
+        await Ask("What is the consultation fee for a first visit?");
+        Assert.Single(_ai.Calls);
+
+        _ai.Calls.Clear();
+        _ai.Respond = _ => ScriptedAi.Simulated(Reply("Simulated text.", quote: "not there at all"));
+        await Ask("What does the consultation cost the clinic charges?");
+        Assert.Single(_ai.Calls);
+    }
 }

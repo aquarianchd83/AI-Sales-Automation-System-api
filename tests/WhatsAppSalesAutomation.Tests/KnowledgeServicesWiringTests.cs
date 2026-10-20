@@ -57,6 +57,18 @@ public class KnowledgeServicesWiringTests
     }
 
     [Fact]
+    public void The_source_index_resolves_from_a_scope_and_is_a_separate_service_from_chat_retrieval()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.IsType<WhatsAppSalesAutomation.Application.ProductKnowledge.SourcePassageIndex>(
+            scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.ISourcePassageIndex>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceProcessor>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftingService>());
+    }
+
+    [Fact]
     public void The_ingestion_stack_resolves_from_a_scope()
     {
         using var provider = BuildProvider();

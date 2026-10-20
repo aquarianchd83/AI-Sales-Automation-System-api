@@ -14,9 +14,11 @@ public sealed record SourceLimits(
     bool CrawlRespectRobots,
     bool DocumentUploadEnabled = true,
     bool WebsiteScanningEnabled = true,
-    int DraftPassages = 6,
+    int DraftPassages = 10,
     int MaxCustomQuestions = 20,
-    int MaterialReviewDays = 180)
+    int MaterialReviewDays = 180,
+    int MaxPassageChars = 2000,
+    bool HybridRetrieval = true)
 {
     public const string DocumentUploadOffMessage =
         "Uploading documents is switched off on this platform for now. Documents already read stay available. Ask your platform administrator if you need it.";

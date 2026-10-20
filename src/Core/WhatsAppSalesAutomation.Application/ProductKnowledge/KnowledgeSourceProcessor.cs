@@ -44,11 +44,13 @@ public sealed class KnowledgeSourceProcessor : IKnowledgeSourceProcessor
     private readonly IAiFeatureRouting _routing;
     private readonly ISourceLimitsProvider _limits;
     private readonly ILogger<KnowledgeSourceProcessor> _logger;
+    private readonly ISourcePassageIndex? _index;
 
     public KnowledgeSourceProcessor(
         IApplicationDbContext db, ITenantDocumentStore store, IPagedDocumentReader reader, IWebsiteCrawler crawler, IAiTaskRunner ai,
-        IAiFeatureRouting routing, ISourceLimitsProvider limits, ILogger<KnowledgeSourceProcessor> logger)
+        IAiFeatureRouting routing, ISourceLimitsProvider limits, ILogger<KnowledgeSourceProcessor> logger, ISourcePassageIndex? index = null)
     {
+        _index = index;
         _db = db;
         _store = store;
         _reader = reader;
@@ -102,6 +104,7 @@ public sealed class KnowledgeSourceProcessor : IKnowledgeSourceProcessor
             }
 
             await SaveVersionAsync(source, outcome, cancellationToken);
+            await IndexPassagesAsync(source, limits, cancellationToken);
         }
         catch (DocumentRejectedException ex)
         {
@@ -242,6 +245,23 @@ public sealed class KnowledgeSourceProcessor : IKnowledgeSourceProcessor
 
         return new Outcome(passages, pages, pages.Count(p => p.Status == "Read"), null, false, warnings, "Unreachable",
             result.Error ?? "No page of the website had readable text.");
+    }
+
+    /// <summary>The source is Ready: embed its passages for drafting. A failure here never fails the source - drafting then searches by words, and the next
+    /// draft run finishes the embedding.</summary>
+    private async Task IndexPassagesAsync(KnowledgeSource source, SourceLimits limits, CancellationToken ct)
+    {
+        if (_index is null || !limits.HybridRetrieval)
+            return;
+
+        try
+        {
+            await _index.EnsureIndexedAsync(source.TenantId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Embedding the passages of source {SourceId} failed; they are searched by words until it succeeds", source.Id);
+        }
     }
 
     // ----- saving ------------------------------------------------------------------------------------------------------------------

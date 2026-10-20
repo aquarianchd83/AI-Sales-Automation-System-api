@@ -176,6 +176,8 @@ public static class DependencyInjection
         // Product knowledge, phase 2: the tenant's sources (documents and website) read into page-referenced passages.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceProcessor, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceProcessor>();
+        // The SOURCE index (working layer): embeddings of source passages, used only for drafting answers; chat never reads it.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ISourcePassageIndex, WhatsAppSalesAutomation.Application.ProductKnowledge.SourcePassageIndex>();
 
         // Phase 3: drafting answers from the sources, with verified quotations and an application-computed confidence.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>();

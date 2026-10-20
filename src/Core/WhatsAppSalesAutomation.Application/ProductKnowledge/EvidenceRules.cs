@@ -98,6 +98,53 @@ public static class PassageRetriever
 
         return ranked.OrderByDescending(r => r.Score).Take(take).ToList();
     }
+
+    /// <summary>Cosine floor for a passage to count as meaning-related at all (vectors are unit length, so this is a dot product).</summary>
+    public const double MinSimilarity = 0.30;
+
+    private const double RrfK = 60;
+
+    /// <summary>
+    /// Words and meaning together: the passages found by <see cref="Rank"/> and the passages whose embedding is close to the question's, fused by
+    /// reciprocal rank so a passage both agree on comes first. A passage with no vector is still found by its words. With no question vector
+    /// or no passage vectors (simulated provider, nothing embedded) this is exactly <see cref="Rank"/>.
+    /// </summary>
+    public static List<RankedPassage> RankHybrid(
+        string question, string? hints, IReadOnlyList<PassageCandidate> passages, int take, float[]? queryVector,
+        IReadOnlyDictionary<string, float[]>? vectorsByHash, double minCoverage = 0.34, double minSimilarity = MinSimilarity)
+    {
+        var byWords = Rank(question, hints, passages, passages.Count, minCoverage);
+        if (queryVector is null || vectorsByHash is null || vectorsByHash.Count == 0)
+            return byWords.Take(take).ToList();
+
+        var byMeaning = passages
+            .Select(p => (Passage: p, Sim: vectorsByHash.TryGetValue(p.Hash, out var v) && v.Length == queryVector.Length ? Dot(queryVector, v) : double.MinValue))
+            .Where(x => x.Sim >= minSimilarity)
+            .OrderByDescending(x => x.Sim)
+            .Select(x => x.Passage)
+            .ToList();
+
+        var fused = new Dictionary<Guid, (PassageCandidate Passage, double Score)>();
+        void Add(PassageCandidate passage, int rank)
+        {
+            fused[passage.Id] = fused.TryGetValue(passage.Id, out var f) ? (f.Passage, f.Score + 1 / (RrfK + rank)) : (passage, 1 / (RrfK + rank));
+        }
+
+        for (var i = 0; i < byWords.Count; i++)
+            Add(byWords[i].Passage, i + 1);
+        for (var i = 0; i < byMeaning.Count; i++)
+            Add(byMeaning[i], i + 1);
+
+        return fused.Values.OrderByDescending(f => f.Score).Take(take).Select(f => new RankedPassage(f.Passage, Math.Round(f.Score, 5))).ToList();
+    }
+
+    private static double Dot(float[] a, float[] b)
+    {
+        double sum = 0;
+        for (var i = 0; i < a.Length; i++)
+            sum += (double)a[i] * b[i];
+        return sum;
+    }
 }
 
 /// <summary>

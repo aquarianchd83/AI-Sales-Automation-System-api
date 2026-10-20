@@ -48,6 +48,23 @@ public class KnowledgeSourcePageConfiguration : IEntityTypeConfiguration<Knowled
     }
 }
 
+public class SourcePassageEmbeddingConfiguration : IEntityTypeConfiguration<SourcePassageEmbedding>
+{
+    public void Configure(EntityTypeBuilder<SourcePassageEmbedding> builder)
+    {
+        builder.ToTable("SourcePassageEmbeddings");
+        builder.HasKey(e => e.Id);
+
+        builder.Property(e => e.PassageHash).IsRequired().HasMaxLength(64);
+        builder.Property(e => e.Provider).IsRequired().HasMaxLength(40);
+        builder.Property(e => e.Model).IsRequired().HasMaxLength(120);
+        builder.Property(e => e.Embedding).IsRequired();
+
+        // One vector per tenant, passage text, provider and model: a re-read reuses it, a provider change adds a new one.
+        builder.HasIndex(e => new { e.TenantId, e.PassageHash, e.Provider, e.Model }).IsUnique();
+    }
+}
+
 public class SourcePassageConfiguration : IEntityTypeConfiguration<SourcePassage>
 {
     public void Configure(EntityTypeBuilder<SourcePassage> builder)
