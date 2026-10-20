@@ -140,3 +140,16 @@ public enum KnowledgeGapDecisionKind
     /// <summary>"Ask me later." Hidden until the chosen date, then it comes back.</summary>
     Deferred = 1
 }
+
+/// <summary>Whether an AI task ran against a real provider or the built-in simulator. A simulator result is never presented as live.</summary>
+public enum AiExecutionMode
+{
+    Live = 0,
+    Simulator = 1
+}
+
+public enum AiExecutionStatus
+{
+    Succeeded = 0,
+    Failed = 1
+}

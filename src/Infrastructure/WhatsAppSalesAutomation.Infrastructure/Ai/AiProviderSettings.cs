@@ -56,6 +56,12 @@ public class AnthropicSettings
     /// WhatsAppSettings.ApiBaseUrl: a regional endpoint or a mock server for testing shouldn't need a
     /// code change.</summary>
     public string BaseUrl { get; set; } = "https://api.anthropic.com/v1/";
+
+    /// <summary>US dollars per million input tokens for the model above, as entered by the platform admin. Used only to estimate cost.</summary>
+    public decimal InputPer1MUsd { get; set; }
+
+    /// <summary>US dollars per million output tokens.</summary>
+    public decimal OutputPer1MUsd { get; set; }
 }
 
 public class OpenAiSettings
@@ -75,6 +81,12 @@ public class OpenAiSettings
     /// <summary>See AnthropicSettings.BaseUrl's doc comment. Shared by both the chat and embeddings
     /// clients, same as OpenAI's own API structure.</summary>
     public string BaseUrl { get; set; } = "https://api.openai.com/v1/";
+
+    /// <summary>US dollars per million input tokens for the model above, as entered by the platform admin. Used only to estimate cost.</summary>
+    public decimal InputPer1MUsd { get; set; }
+
+    /// <summary>US dollars per million output tokens.</summary>
+    public decimal OutputPer1MUsd { get; set; }
 }
 
 public class GoogleAiSettings
@@ -91,4 +103,10 @@ public class GoogleAiSettings
 
     /// <summary>See AnthropicSettings.BaseUrl's doc comment.</summary>
     public string BaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta/";
+
+    /// <summary>US dollars per million input tokens for the model above, as entered by the platform admin. Used only to estimate cost.</summary>
+    public decimal InputPer1MUsd { get; set; }
+
+    /// <summary>US dollars per million output tokens.</summary>
+    public decimal OutputPer1MUsd { get; set; }
 }

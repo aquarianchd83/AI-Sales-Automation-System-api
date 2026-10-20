@@ -171,6 +171,26 @@ public static class DependencyInjection
         services.AddScoped<IPlatformDeliverySettingsService, PlatformDeliverySettingsService>();
         services.AddScoped<IPlatformIntegrationSettingsService, PlatformIntegrationSettingsService>();
         services.AddScoped<IPlatformAiFeatureSettingsService, PlatformAiFeatureSettingsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiTaskRunner, WhatsAppSalesAutomation.Application.Ai.Tasks.AiTaskRunner>();
+
+        // Product knowledge, phase 2: the tenant's sources (documents and website) read into page-referenced passages.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceProcessor, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceProcessor>();
+
+        // Phase 3: drafting answers from the sources, with verified quotations and an application-computed confidence.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftingService>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>());
+
+        // Phase 4: the tenant's decisions about the drafts, each recorded in the audit trail.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeVerificationService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeVerificationService>();
+
+        // Phase 5: publishing the approved answers as an immutable version.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgePublishingService>();
+
+        // Phase 6: plain-text Draft and Final knowledge files.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeFileService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeFileService>();
+        services.AddScoped<IPlatformAiProvidersService, PlatformAiProvidersService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();

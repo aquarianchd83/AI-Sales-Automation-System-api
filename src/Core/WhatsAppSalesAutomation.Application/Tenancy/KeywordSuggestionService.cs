@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentValidation;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 
@@ -66,6 +67,7 @@ public class KeywordSuggestionService : IKeywordSuggestionService
 
         // The simulator makes no outside call: the built-in common terms below answer instead.
         var choice = _routing.Resolve(AiFeatures.BusinessKeywords);
+        using var aiUse = AiCallLabel.Use(AiTaskKinds.BusinessKeywordSuggestion); // recorded against this AI use in the AI call log
         var reply = choice.UsesThirdParty
             ? await _ai.GenerateAsync(SystemPrompt, BuildPrompt(industry, request.IndustrySubcategory, request.BusinessDescription, existing), 400, cancellationToken, provider: choice.Provider)
             : null;

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using FluentValidation;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 namespace WhatsAppSalesAutomation.Application.Tenancy;
@@ -55,6 +56,8 @@ public class DescriptionRefinementService : IDescriptionRefinementService
         await _validator.ValidateAndThrowAsync(request, cancellationToken);
 
         var draft = Tidy(request.Description);
+        // Named so the call is recorded against this AI use in the AI call log.
+        using var aiUse = AiCallLabel.Use(AiTaskKinds.DescriptionRefinement);
         var reply = await _ai.GenerateAsync(SystemPrompt, BuildPrompt(request, draft), 700, cancellationToken);
         var refined = Clean(reply);
         return string.IsNullOrWhiteSpace(refined)
