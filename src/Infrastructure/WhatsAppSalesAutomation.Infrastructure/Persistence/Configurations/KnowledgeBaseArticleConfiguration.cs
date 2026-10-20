@@ -40,6 +40,9 @@ public class KnowledgeBaseArticleConfiguration : IEntityTypeConfiguration<Knowle
         builder.HasKey(a => a.Id);
 
         builder.Property(a => a.ArticleKey).IsRequired().HasMaxLength(200);
+        builder.Property(a => a.SystemKey).HasMaxLength(40);
+        // At most one system article of each kind per tenant.
+        builder.HasIndex(a => new { a.TenantId, a.SystemKey }).IsUnique().HasFilter("[SystemKey] IS NOT NULL");
         builder.Property(a => a.Title).IsRequired().HasMaxLength(200);
         builder.Property(a => a.Content).IsRequired().HasColumnType("nvarchar(max)");
         builder.Property(a => a.ContentHash).IsRequired().HasMaxLength(64);   // SHA-256 as lowercase hex

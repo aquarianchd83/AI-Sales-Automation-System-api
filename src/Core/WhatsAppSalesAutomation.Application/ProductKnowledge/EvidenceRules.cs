@@ -98,6 +98,53 @@ public static class PassageRetriever
 
         return ranked.OrderByDescending(r => r.Score).Take(take).ToList();
     }
+
+    /// <summary>Cosine floor for a passage to count as meaning-related at all (vectors are unit length, so this is a dot product).</summary>
+    public const double MinSimilarity = 0.30;
+
+    private const double RrfK = 60;
+
+    /// <summary>
+    /// Words and meaning together: the passages found by <see cref="Rank"/> and the passages whose embedding is close to the question's, fused by
+    /// reciprocal rank so a passage both agree on comes first. A passage with no vector is still found by its words. With no question vector
+    /// or no passage vectors (simulated provider, nothing embedded) this is exactly <see cref="Rank"/>.
+    /// </summary>
+    public static List<RankedPassage> RankHybrid(
+        string question, string? hints, IReadOnlyList<PassageCandidate> passages, int take, float[]? queryVector,
+        IReadOnlyDictionary<string, float[]>? vectorsByHash, double minCoverage = 0.34, double minSimilarity = MinSimilarity)
+    {
+        var byWords = Rank(question, hints, passages, passages.Count, minCoverage);
+        if (queryVector is null || vectorsByHash is null || vectorsByHash.Count == 0)
+            return byWords.Take(take).ToList();
+
+        var byMeaning = passages
+            .Select(p => (Passage: p, Sim: vectorsByHash.TryGetValue(p.Hash, out var v) && v.Length == queryVector.Length ? Dot(queryVector, v) : double.MinValue))
+            .Where(x => x.Sim >= minSimilarity)
+            .OrderByDescending(x => x.Sim)
+            .Select(x => x.Passage)
+            .ToList();
+
+        var fused = new Dictionary<Guid, (PassageCandidate Passage, double Score)>();
+        void Add(PassageCandidate passage, int rank)
+        {
+            fused[passage.Id] = fused.TryGetValue(passage.Id, out var f) ? (f.Passage, f.Score + 1 / (RrfK + rank)) : (passage, 1 / (RrfK + rank));
+        }
+
+        for (var i = 0; i < byWords.Count; i++)
+            Add(byWords[i].Passage, i + 1);
+        for (var i = 0; i < byMeaning.Count; i++)
+            Add(byMeaning[i], i + 1);
+
+        return fused.Values.OrderByDescending(f => f.Score).Take(take).Select(f => new RankedPassage(f.Passage, Math.Round(f.Score, 5))).ToList();
+    }
+
+    private static double Dot(float[] a, float[] b)
+    {
+        double sum = 0;
+        for (var i = 0; i < a.Length; i++)
+            sum += (double)a[i] * b[i];
+        return sum;
+    }
 }
 
 /// <summary>
@@ -199,6 +246,61 @@ public static class ClaimRules
 
     /// <summary>A price, guarantee, certification, compliance, refund or outcome claim: it needs the tenant's explicit approval before customers hear it.</summary>
     public static bool IsMaterial(string text) => Material.IsMatch(text) || Outcome.IsMatch(text);
+
+    /// <summary>A material statement in a customer reply and the normalised text that must appear in the approved knowledge for it to be backed.</summary>
+    public sealed record MaterialClaim(string Display, string Needle);
+
+    private static readonly Regex Amount = new(
+        @"(?:₹|\brs\.?|\binr\b|\$|\busd\b)\s?(?<n>\d[\d,]*(?:\.\d+)?)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ClaimTerms = new(
+        @"\b(?<t>guarantee[sd]?|warrant(?:y|ies)|certified|certifications?|iso\s?\d+|complian(?:t|ce)|hipaa|gdpr|refunds?|money[- ]back|cures?|clinically|fda|approved by)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Lowercase with spaces, commas and hyphens removed - how a claim and the knowledge it must appear in are compared.</summary>
+    public static string NormalizeForClaims(string text) => Regex.Replace((text ?? string.Empty).ToLowerInvariant(), @"[\s,\-]", string.Empty);
+
+    /// <summary>
+    /// The material statements in a reply: an amount of money, a guarantee, warranty, certification, compliance, refund or cure claim, or a quantified result
+    /// ("30%", "2x"). Narrower than <see cref="IsMaterial"/>: a bare "price" or "cost" is not a claim, so "I will confirm the price" is not flagged.
+    /// </summary>
+    public static List<MaterialClaim> MaterialClaims(string text)
+    {
+        var claims = new List<MaterialClaim>();
+        void Add(string display, string needle)
+        {
+            if (needle.Length > 0 && !claims.Any(c => c.Needle == needle))
+                claims.Add(new MaterialClaim(display.Trim(), needle));
+        }
+
+        foreach (Match m in Amount.Matches(text))
+        {
+            var amount = NormalizeForClaims(m.Groups["n"].Value);
+            Add(m.Value, amount.Contains('.') ? amount.TrimEnd('0').TrimEnd('.') : amount); // "500.00" is 500
+        }
+
+        foreach (Match m in ClaimTerms.Matches(text))
+        {
+            var term = NormalizeForClaims(m.Groups["t"].Value);
+            var needle = term switch
+            {
+                _ when term.StartsWith("guarant") => "guarant",
+                _ when term.StartsWith("warrant") => "warrant",
+                _ when term.StartsWith("certif") => "certif",
+                _ when term.StartsWith("complian") => "complian",
+                _ when term.StartsWith("refund") => "refund",
+                _ when term.StartsWith("cure") => "cure",
+                _ when term.StartsWith("clinical") => "clinical",
+                _ => term
+            };
+            Add(m.Value, needle);
+        }
+
+        foreach (Match m in Outcome.Matches(text))
+            Add(m.Value, NormalizeForClaims(m.Value));
+
+        return claims;
+    }
 
     /// <summary>A promised result as a number ("30% faster", "2x", "save 5000") - never accepted without evidence containing the same figure.</summary>
     public static bool HasQuantifiedOutcome(string text) => Outcome.IsMatch(text);

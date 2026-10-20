@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Api.Serialization;
 using Hangfire;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
@@ -113,7 +114,8 @@ try
             .AllowCredentials());
     });
 
-    builder.Services.AddControllers();
+    // UTC timestamps always carry a trailing Z, so the client shows them in the user's timezone rather than reading the digits as local time.
+    builder.Services.AddControllers().AddUtcDateTimeJson();
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerDocumentation();
 

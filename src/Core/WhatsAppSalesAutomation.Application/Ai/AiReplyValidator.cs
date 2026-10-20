@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.ProductKnowledge;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Ai;
@@ -130,6 +131,10 @@ public class AiReplyValidator : IAiReplyValidator
                 Blocking: true));
         }
 
+        // ── Product knowledge served to chat (the tenant's switch ON) ───────────────────────
+        if (context.ProductKnowledgeServing)
+            ValidateAgainstPublishedKnowledge(text, intent, context, failures);
+
         return new ValidatedReply(
             CanSend: !failures.Any(f => f.Blocking),
             Failures: failures,
@@ -149,6 +154,52 @@ public class AiReplyValidator : IAiReplyValidator
             CannotProceedNow: result.CannotProceedNow && !result.OptOutRequested,
             CannotProceedReason: Truncate(result.CannotProceedReason, 300),
             FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null);
+    }
+
+    /// <summary>Intents where the customer wants the business to state something: a reply to one of these needs approved knowledge behind it.</summary>
+    private static readonly HashSet<string> KnowledgeSeekingIntents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(CustomerIntent.Information), nameof(CustomerIntent.PriceEnquiry), nameof(CustomerIntent.ProductEnquiry),
+        nameof(CustomerIntent.ServiceEnquiry), nameof(CustomerIntent.Comparison)
+    };
+
+    /// <summary>Code of the failure recorded when a knowledge-seeking message found nothing approved. The orchestrator reads it back on the next turn.</summary>
+    public const string NoApprovedKnowledgeCode = "NoApprovedKnowledge";
+
+    /// <summary>
+    /// With the tenant's published product knowledge as the only source of facts:
+    ///  - a price, guarantee, warranty, certification, compliance, refund or quantified-result claim must appear in one of the approved items this turn was given
+    ///    (not merely in the customer's own message - repeating what they said is not backing it);
+    ///  - when nothing approved covers a question, the reply may only be ONE clarifying question; anything else is blocked, so the conversation goes to a person.
+    /// </summary>
+    private static void ValidateAgainstPublishedKnowledge(string text, string intent, AiConversationContext context, List<ValidationFailure> failures)
+    {
+        var approved = ClaimRules.NormalizeForClaims(string.Join(" ", context.GroundingChunks.Select(c => c.Text)));
+        var unbacked = ClaimRules.MaterialClaims(text).Where(c => !approved.Contains(c.Needle, StringComparison.Ordinal)).Select(c => c.Display).ToList();
+        if (unbacked.Count > 0)
+        {
+            failures.Add(new ValidationFailure(
+                "UnbackedMaterialClaim",
+                $"Reply states {string.Join(", ", unbacked)} which no approved published answer supports.",
+                Blocking: true));
+        }
+
+        if (context.GroundingChunks.Count == 0 && KnowledgeSeekingIntents.Contains(intent))
+        {
+            var clarifying = IsSingleQuestion(text);
+            failures.Add(new ValidationFailure(
+                NoApprovedKnowledgeCode,
+                clarifying
+                    ? "Nothing approved covers this; the reply asks one clarifying question."
+                    : "Nothing approved covers this and the reply is not a single clarifying question.",
+                Blocking: !clarifying));
+        }
+    }
+
+    private static bool IsSingleQuestion(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.Length is > 0 and <= 300 && trimmed.Count(ch => ch is '?' or '？') == 1 && trimmed[^1] is '?' or '？';
     }
 
     /// <summary>

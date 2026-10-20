@@ -27,6 +27,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
     private readonly IOptionsSnapshot<MessagingOptions> _messagingOptions;
     private readonly IOptionsSnapshot<AiOptions> _aiOptions;
     private readonly IOptionsSnapshot<StudioOptions> _studioOptions;
+    private readonly IOptionsSnapshot<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.ProductKnowledgeSettings>? _productKnowledge;
 
     public TenantConfigOverrideProvider(
         ApplicationDbContext context,
@@ -37,8 +38,10 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
         IOptionsSnapshot<MediaOptions> mediaOptions,
         IOptionsSnapshot<MessagingOptions> messagingOptions,
         IOptionsSnapshot<AiOptions> aiOptions,
-        IOptionsSnapshot<StudioOptions> studioOptions)
+        IOptionsSnapshot<StudioOptions> studioOptions,
+        IOptionsSnapshot<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.ProductKnowledgeSettings>? productKnowledge = null)
     {
+        _productKnowledge = productKnowledge;
         _context = context;
         _tenantContext = tenantContext;
         _dateTime = dateTime;
@@ -253,6 +256,7 @@ public class TenantConfigOverrideProvider : ITenantConfigOverrideProvider
             ["Ai:MinFieldExtractionConfidence"] = _aiOptions.Value.MinFieldExtractionConfidence.ToString(CultureInfo.InvariantCulture),
             ["Ai:MaxFieldsToAsk"] = _aiOptions.Value.MaxFieldsToAsk.ToString(CultureInfo.InvariantCulture),
             ["Ai:HandoffOnHotLead"] = _aiOptions.Value.HandoffOnHotLead ? "true" : "false",
+            ["ProductKnowledge:ServeChat"] = _productKnowledge?.Value.ServeChat == true ? "true" : "false",
             ["ContentStudio:Enabled"] = _studioOptions.Value.Enabled ? "true" : "false",
             ["ContentStudio:StorageMode"] = _studioOptions.Value.StorageMode,
             ["ContentStudio:StorageKeyPrefix"] = _studioOptions.Value.StorageKeyPrefix,

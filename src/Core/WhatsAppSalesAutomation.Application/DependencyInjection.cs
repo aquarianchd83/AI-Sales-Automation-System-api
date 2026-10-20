@@ -176,6 +176,8 @@ public static class DependencyInjection
         // Product knowledge, phase 2: the tenant's sources (documents and website) read into page-referenced passages.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceProcessor, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeSourceProcessor>();
+        // The SOURCE index (working layer): embeddings of source passages, used only for drafting answers; chat never reads it.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.ISourcePassageIndex, WhatsAppSalesAutomation.Application.ProductKnowledge.SourcePassageIndex>();
 
         // Phase 3: drafting answers from the sources, with verified quotations and an application-computed confidence.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeDraftingService>();
@@ -186,6 +188,8 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeVerificationService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeVerificationService>();
 
         // Phase 5: publishing the approved answers as an immutable version.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IProductTestChat, WhatsAppSalesAutomation.Application.ProductKnowledge.ProductTestChat>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeServingIndexer, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeServingIndexer>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgePublishingService>();
 
         // Phase 6: plain-text Draft and Final knowledge files.

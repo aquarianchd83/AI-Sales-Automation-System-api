@@ -169,6 +169,8 @@ public interface IApplicationDbContext
 
     DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages { get; }
 
+    DbSet<Domain.Entities.ProductKnowledge.SourcePassageEmbedding> SourcePassageEmbeddings { get; }
+
     DbSet<Domain.Entities.ProductKnowledge.KnowledgeQuestion> KnowledgeQuestions { get; }
 
     DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswer> KnowledgeAnswers { get; }

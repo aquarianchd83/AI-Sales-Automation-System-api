@@ -127,6 +127,8 @@ public class KnowledgeVersionConfiguration : IEntityTypeConfiguration<KnowledgeV
         builder.ToTable("KnowledgeVersions");
         builder.HasKey(v => v.Id);
         builder.Property(v => v.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(v => v.ServingStatus).HasConversion<string>().HasMaxLength(20);
+        builder.Property(v => v.ServingError).HasMaxLength(1000);
         builder.Property(v => v.PublishedByEmail).HasMaxLength(256);
         builder.Property(v => v.Note).HasMaxLength(1000);
         builder.HasIndex(v => new { v.TenantId, v.Number }).IsUnique();

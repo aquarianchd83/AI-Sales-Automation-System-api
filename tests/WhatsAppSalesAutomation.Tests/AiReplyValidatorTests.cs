@@ -242,6 +242,108 @@ public class AiReplyValidatorTests
         Assert.Null(result.FollowUpInMonths);
     }
 
+    // ----- published product knowledge served to chat (the tenant's switch ON) -----------------------------------------------------------
+
+    private static AiConversationContext Serving(string inbound = "what is the fee?", params string[] approved) => Context(inbound: inbound) with
+    {
+        ProductKnowledgeServing = true,
+        GroundingChunks = approved.Select(t => new AiKnowledgeSnippet(Guid.NewGuid(), t, 0.9)).ToList()
+    };
+
+    [Theory]
+    [InlineData("The consultation fee is Rs 500.")]
+    [InlineData("The fee is ₹ 500 for the first visit.")]
+    [InlineData("It is $500 per visit.")]
+    [InlineData("We offer a full refund on every booking.")]
+    [InlineData("All our work comes with a lifetime guarantee.")]
+    [InlineData("Our lab is ISO 9001 certified.")]
+    [InlineData("We are HIPAA compliant.")]
+    [InlineData("Patients see up to 40% improvement.")]
+    public void A_material_claim_that_no_approved_answer_states_is_blocked_when_serving_published_knowledge(string reply)
+    {
+        var result = _validator.Validate(Reply(reply), Serving("tell me more", "Parking is free for patients."));
+
+        var failure = Assert.Single(result.Failures, f => f.Code == "UnbackedMaterialClaim");
+        Assert.True(failure.Blocking);
+        Assert.False(result.CanSend);
+    }
+
+    [Theory]
+    [InlineData("The consultation fee is Rs 500.", "The consultation fee is Rs 500 for the first visit.")]
+    [InlineData("The fee is Rs 5,000.", "Fee: Rs 5000.")]
+    [InlineData("We offer a refund within 7 days.", "Refunds are available within 7 days.")]
+    [InlineData("It comes with a guarantee.", "All plans carry a 30-day money back guarantee.")]
+    [InlineData("Yes, we are ISO 9001 certified.", "Our lab holds ISO 9001 certification.")]
+    [InlineData("Patients see up to 40% improvement.", "Trials showed up to 40% improvement.")]
+    public void A_material_claim_that_an_approved_answer_states_is_allowed(string reply, string approved)
+    {
+        var result = _validator.Validate(Reply(reply), Serving("what is it?", approved));
+
+        Assert.DoesNotContain(result.Failures, f => f.Code == "UnbackedMaterialClaim");
+        Assert.True(result.CanSend);
+    }
+
+    [Fact]
+    public void Repeating_a_figure_the_customer_just_said_is_not_backing_it()
+    {
+        var result = _validator.Validate(Reply("Yes, the fee is Rs 500."), Serving("Is the fee Rs 500?", "Parking is free for patients."));
+
+        Assert.Contains(result.Failures, f => f.Code == "UnbackedMaterialClaim" && f.Blocking);
+    }
+
+    [Theory]
+    [InlineData("I will confirm the price with the team and get back to you.")]
+    [InlineData("Our cost depends on what you need - what are you looking for?")]
+    [InlineData("We have 3 branches and 2 are open on Sundays.")]
+    public void A_sentence_that_only_mentions_price_or_uses_small_numbers_is_not_a_material_claim(string reply)
+    {
+        var result = _validator.Validate(Reply(reply), Serving("hello", "Parking is free for patients."));
+
+        Assert.DoesNotContain(result.Failures, f => f.Code == "UnbackedMaterialClaim");
+    }
+
+    [Fact]
+    public void With_the_switch_off_the_same_unbacked_claim_is_not_judged_by_this_rule()
+    {
+        var off = Context(inbound: "tell me more") with { GroundingChunks = new[] { new AiKnowledgeSnippet(ChunkId, "Parking is free.", 0.9) } };
+
+        var result = _validator.Validate(Reply("We offer a lifetime guarantee."), off);
+
+        Assert.DoesNotContain(result.Failures, f => f.Code is "UnbackedMaterialClaim" or "NoApprovedKnowledge");
+        Assert.True(result.CanSend);
+    }
+
+    [Fact]
+    public void Nothing_approved_for_a_question_allows_only_one_clarifying_question()
+    {
+        var question = _validator.Validate(Reply("Which treatment are you asking about?"), Serving("What is the fee?"));
+        var noted = Assert.Single(question.Failures, f => f.Code == "NoApprovedKnowledge");
+        Assert.False(noted.Blocking); // recorded, so a second miss can hand the conversation to a person
+        Assert.True(question.CanSend);
+
+        foreach (var statement in new[] { "Our fee is reasonable and our doctors are excellent.", "Which treatment? And when would you like to come? Tell me your budget?", "Sure, happy to help" })
+        {
+            var result = _validator.Validate(Reply(statement), Serving("What is the fee?"));
+            Assert.Contains(result.Failures, f => f.Code == "NoApprovedKnowledge" && f.Blocking);
+            Assert.False(result.CanSend);
+        }
+    }
+
+    [Fact]
+    public void The_no_approved_knowledge_rule_applies_only_to_questions_about_the_business_and_only_when_serving_published_knowledge()
+    {
+        var greeting = Reply("Hello! Welcome.") with { DetectedIntent = nameof(CustomerIntent.Qualification) };
+        Assert.True(_validator.Validate(greeting, Serving("hi")).CanSend);
+        Assert.DoesNotContain(_validator.Validate(greeting, Serving("hi")).Failures, f => f.Code == "NoApprovedKnowledge");
+
+        var off = Context() with { GroundingChunks = Array.Empty<AiKnowledgeSnippet>() };
+        Assert.DoesNotContain(_validator.Validate(Reply("Our fee is reasonable."), off).Failures, f => f.Code == "NoApprovedKnowledge");
+
+        // With something approved, a normal grounded answer needs no clarifying question.
+        var grounded = _validator.Validate(Reply("Parking is free for patients."), Serving("is there parking?", "Parking is free for patients."));
+        Assert.DoesNotContain(grounded.Failures, f => f.Code == "NoApprovedKnowledge");
+    }
+
     private static AiReplyResult Reply(string text) => new(
         ResponseText: text,
         DetectedIntent: nameof(CustomerIntent.PriceEnquiry),

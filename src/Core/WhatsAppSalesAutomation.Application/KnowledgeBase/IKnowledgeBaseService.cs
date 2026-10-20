@@ -54,6 +54,11 @@ public interface IKnowledgeBaseService
     /// Archived.</summary>
     Task<KnowledgeBaseArticleDto> DeprecateAsync(Guid id, string note, CancellationToken cancellationToken = default);
 
+    /// <summary>Publishes an article the platform wrote itself (<c>SystemKey</c> set): marks it Published and runs it through the same ingestion as any article,
+    /// so chunking, the safety scan, embedding and the atomic swap are shared. Not reachable by a tenant; used by the product-knowledge serving index. Throws a
+    /// FluentValidation.ValidationException with a readable reason when indexing does not complete, leaving the previous index serving.</summary>
+    Task PublishSystemArticleAsync(Guid articleId, Guid approvedByUserId, CancellationToken cancellationToken = default);
+
     /// <summary>Makes this article eligible for retrieval when <paramref name="provider"/> (one of
     /// AiModelProvider's names, case-insensitive - "OpenAI"/"Google"/"Anthropic") is the active chat
     /// model - see KnowledgeBaseArticleModelPublication's doc comment. If the article is still Draft,
@@ -78,4 +83,8 @@ public interface IKnowledgeBaseService
     /// at most <c>AiOptions.KnowledgeBaseTopN</c> chunks, only those at or above
     /// <c>AiOptions.MinRelevanceScore</c>.</summary>
     Task<IReadOnlyList<RetrievedChunk>> RetrieveRelevantChunksAsync(string query, CancellationToken cancellationToken = default);
+
+    /// <summary>The tenant's published product knowledge as chat reads it when its switch is ON, whatever the switch says - for the tenant's own test chat. Same
+    /// rules as chat: only the tenant's published chunks, lapsed material claims dropped, same relevance floor and top-N.</summary>
+    Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(string query, CancellationToken cancellationToken = default);
 }

@@ -134,3 +134,30 @@ public class SourcePassage : BaseEntity, ITenantOwned
     /// <summary>When the text was taken from its source - the extraction time, as the requirements ask for websites.</summary>
     public DateTime ExtractedAt { get; set; }
 }
+
+/// <summary>
+/// The SOURCE index: one embedding of a source passage's text, kept per tenant, provider and model. It is the working layer's search aid for
+/// drafting answers and is never read by customer chat (which reads only the published serving index) - it is deliberately not stored in
+/// KnowledgeBaseChunks. Keyed by the passage's text hash rather than its id, so a re-read of a source re-embeds only the passages whose text
+/// changed; a change of embedding provider or model leaves these rows stale and they are rebuilt.
+/// </summary>
+public class SourcePassageEmbedding : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    /// <summary><see cref="SourcePassage.Hash"/> of the text that was embedded.</summary>
+    public string PassageHash { get; set; } = string.Empty;
+
+    /// <summary>IEmbeddingService.ProviderName at embed time ("OpenAI", "Google"). Simulated vectors are never stored.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    public string Model { get; set; } = string.Empty;
+
+    public int Dimensions { get; set; }
+
+    /// <summary>JSON array of floats, L2-normalised (same encoding as KnowledgeBaseChunk.Embedding).</summary>
+    public string Embedding { get; set; } = string.Empty;
+
+    /// <summary>UTC.</summary>
+    public DateTime EmbeddedAt { get; set; }
+}

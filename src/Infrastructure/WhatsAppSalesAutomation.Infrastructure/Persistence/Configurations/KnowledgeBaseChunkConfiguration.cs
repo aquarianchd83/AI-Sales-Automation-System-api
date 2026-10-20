@@ -64,6 +64,8 @@ public class KnowledgeBaseChunkConfiguration : IEntityTypeConfiguration<Knowledg
             })
             .HasFilter("[IsActive] = 1");
 
+        builder.HasIndex(c => c.KnowledgeItemId);
+
         builder.HasIndex(c => new { c.ArticleId, c.ChunkIndex })
             .HasDatabaseName("IX_KBChunks_Article");
 

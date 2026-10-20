@@ -36,11 +36,13 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
     private readonly ISourceLimitsProvider _limits;
     private readonly IKnowledgeDraftQueue _queue;
     private readonly ILogger<KnowledgeDraftingService> _logger;
+    private readonly ISourcePassageIndex? _index;
 
     public KnowledgeDraftingService(
         IApplicationDbContext db, IAiTaskRunner ai, IAiFeatureRouting routing, ISourceLimitsProvider limits, IKnowledgeDraftQueue queue,
-        ILogger<KnowledgeDraftingService> logger)
+        ILogger<KnowledgeDraftingService> logger, ISourcePassageIndex? index = null)
     {
+        _index = index;
         _db = db;
         _ai = ai;
         _routing = routing;
@@ -121,8 +123,9 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         EnsureNotOff();
         var question = await FindQuestionAsync(tenantId, questionId, cancellationToken);
         var candidates = await LoadCandidatesAsync(tenantId, cancellationToken);
+        var vectors = await LoadVectorsAsync(tenantId, ensure: false, cancellationToken);
 
-        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken, explicitRequest: true);
+        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken, explicitRequest: true, vectors: vectors);
         if (result.Outcome == Outcome.Skipped)
             throw new ConflictException("This answer is already approved, so it is not replaced. Reject or correct it first to ask for another suggestion.");
         if (result.Outcome == Outcome.Failed)
@@ -157,7 +160,8 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         await _db.SaveChangesAsync(cancellationToken);
 
         var candidates = await LoadCandidatesAsync(tenantId, cancellationToken);
-        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken);
+        var vectors = await LoadVectorsAsync(tenantId, ensure: false, cancellationToken);
+        var result = await DraftOneAsync(tenantId, question, candidates, cancellationToken, vectors: vectors);
         if (result.Outcome == Outcome.Failed)
         {
             // A question with no answer and no way to tell why would just sit there: take it back, so the text can be sent again.
@@ -205,6 +209,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
             await EnsureStandardQuestionsAsync(run.TenantId, cancellationToken);
             var questions = await _db.KnowledgeQuestions.Where(q => q.TenantId == run.TenantId).OrderBy(q => q.SortOrder).ThenBy(q => q.CreatedAt).ToListAsync(cancellationToken);
             var candidates = await LoadCandidatesAsync(run.TenantId, cancellationToken);
+            var vectors = await LoadVectorsAsync(run.TenantId, ensure: true, cancellationToken);
             run.Total = questions.Count + 1; // every question, then the feature-to-benefit map
             await _db.SaveChangesAsync(cancellationToken);
 
@@ -214,7 +219,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
                 DraftResult result;
                 try
                 {
-                    result = await DraftOneAsync(run.TenantId, question, candidates, cancellationToken);
+                    result = await DraftOneAsync(run.TenantId, question, candidates, cancellationToken, vectors: vectors);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -238,7 +243,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
 
             try
             {
-                await MapFeaturesAsync(run.TenantId, candidates, cancellationToken);
+                await MapFeaturesAsync(run.TenantId, candidates, vectors, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -269,7 +274,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
     // ----- one answer ------------------------------------------------------------------------------------------------------------
 
     private async Task<DraftResult> DraftOneAsync(
-        Guid tenantId, KnowledgeQuestion question, IReadOnlyList<PassageCandidate> all, CancellationToken ct, bool explicitRequest = false)
+        Guid tenantId, KnowledgeQuestion question, IReadOnlyList<PassageCandidate> all, CancellationToken ct, bool explicitRequest = false, PassageVectors? vectors = null)
     {
         var previous = await _db.KnowledgeAnswers.FirstOrDefaultAsync(a => a.TenantId == tenantId && a.QuestionId == question.Id && a.IsCurrent, ct);
 
@@ -278,7 +283,8 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
             return new DraftResult(Outcome.Skipped, previous, null);
 
         var hints = StandardQuestions.All.FirstOrDefault(s => s.Key == question.Key)?.Hints;
-        var offered = PassageRetriever.Rank(question.Text, hints, all, _limits.Get().DraftPassages).Select(r => r.Passage).ToList();
+        var limits = _limits.Get();
+        var offered = await FindPassagesAsync(question.Text, hints, all, limits.DraftPassages, vectors, limits, ct);
 
         KnowledgeAnswer answer;
         if (offered.Count == 0)
@@ -297,7 +303,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         }
 
         var task = question.IsStandard ? AiTaskKinds.SuggestedAnswerGeneration : AiTaskKinds.CustomQuestionAnswering;
-        var call = await _ai.RunAsync(new AiTaskRequest(task, DraftPrompts.AnswerSystem, DraftPrompts.AnswerUser(question.Text, offered), 900, ExpectJson: true, TenantId: tenantId), ct);
+        var call = await _ai.RunAsync(new AiTaskRequest(task, DraftPrompts.AnswerSystem, DraftPrompts.AnswerUser(question.Text, offered, limits.MaxPassageChars), 900, ExpectJson: true, TenantId: tenantId), ct);
         if (!call.Success)
             return new DraftResult(Outcome.Failed, null, call.ErrorMessage ?? "the AI provider gave no answer");
 
@@ -307,6 +313,22 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
 
         // Nothing the model says is believed until it is checked: quotations against the real passages...
         var (verified, dropped) = VerifyEvidence(reply.Evidence, offered, call.IsSimulated);
+
+        // An answer whose quotations were all missing is not thrown away at once: the model is asked, once, to copy exact words from the passages
+        // it was given. What comes back is checked exactly as the first reply was - a quotation that is not in a passage is never evidence.
+        var retried = false;
+        if (!call.IsSimulated && verified.Count == 0 && !reply.InsufficientEvidence && !string.IsNullOrWhiteSpace(reply.Answer))
+        {
+            retried = true;
+            var second = await _ai.RunAsync(new AiTaskRequest(task, DraftPrompts.AnswerSystem,
+                DraftPrompts.QuoteRetryUser(question.Text, offered, reply.Answer, limits.MaxPassageChars), 900, ExpectJson: true, TenantId: tenantId), ct);
+            if (second.Success && DraftPrompts.ParseAnswer(second.Text) is { } secondReply)
+            {
+                call = second;
+                reply = secondReply;
+                (verified, dropped) = VerifyEvidence(reply.Evidence, offered, call.IsSimulated);
+            }
+        }
         var answerText = reply.InsufficientEvidence ? null : reply.Answer;
         var cited = verified.Select(v => v.Passage).DistinctBy(p => p.Id).ToList();
 
@@ -327,7 +349,7 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
         answer.AiCorrelationId = call.CorrelationId;
         answer.Confidence = assessed.Confidence;
         answer.Kind = assessed.Kind;
-        answer.ConfidenceReasons = Truncate(string.Join('\n', assessed.Reasons), 1500);
+        answer.ConfidenceReasons = Truncate(string.Join('\n', retried ? assessed.Reasons.Append("The first reply's quotations were not found in your sources, so the AI was asked once more for exact quotations.") : assessed.Reasons), 1500);
         answer.HasConflict = conflicts.Count > 0;
         answer.HasUnsupportedClaim = unsupported.Count > 0;
         answer.ClarifyingQuestion = Truncate(reply.ClarifyingQuestion ?? question.ClarifyingQuestion, 500);
@@ -446,11 +468,12 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
 
     // ----- features and benefits -------------------------------------------------------------------------------------------------
 
-    private async Task MapFeaturesAsync(Guid tenantId, IReadOnlyList<PassageCandidate> all, CancellationToken ct)
+    private async Task MapFeaturesAsync(Guid tenantId, IReadOnlyList<PassageCandidate> all, PassageVectors? vectors, CancellationToken ct)
     {
-        var offered = PassageRetriever.Rank(
+        var limits = _limits.Get();
+        var offered = await FindPassagesAsync(
             "features of the product and how they help customers", "feature features includes offers provides capability helps allows service services benefits",
-            all, Math.Min(12, _limits.Get().DraftPassages * 2)).Select(r => r.Passage).ToList();
+            all, Math.Min(16, limits.DraftPassages * 2), vectors, limits, ct);
         if (offered.Count == 0)
             return;
 
@@ -533,6 +556,39 @@ public sealed class KnowledgeDraftingService : IKnowledgeDraftingService, IKnowl
     }
 
     /// <summary>Every passage of the current version of every source that has been read - the tenant's own, never anyone else's.</summary>
+    /// <summary>The passages to offer the AI: found by words and, when the tenant's passages have been embedded, by meaning too.</summary>
+    private static async Task<List<PassageCandidate>> FindPassagesAsync(
+        string question, string? hints, IReadOnlyList<PassageCandidate> all, int take, PassageVectors? vectors, SourceLimits limits, CancellationToken ct)
+    {
+        var queryVector = vectors is null || !limits.HybridRetrieval ? null : await vectors.EmbedQueryAsync(hints is null ? question : $"{question}. {hints}", ct);
+        return PassageRetriever.RankHybrid(question, hints, all, take, queryVector, queryVector is null ? null : vectors!.ByHash).Select(r => r.Passage).ToList();
+    }
+
+    /// <summary>The tenant's passage vectors for the provider in use, or null when there are none (then words alone are used). A background run first
+    /// brings the index up to date; a tenant waiting on one answer never waits for embedding. Never fails drafting.</summary>
+    private async Task<PassageVectors?> LoadVectorsAsync(Guid tenantId, bool ensure, CancellationToken ct)
+    {
+        if (_index is null || !_limits.Get().HybridRetrieval)
+            return null;
+
+        try
+        {
+            if (ensure)
+            {
+                var indexed = await _index.EnsureIndexedAsync(tenantId, ct);
+                if (indexed.Status == "Partial")
+                    _logger.LogWarning("Source index for tenant {TenantId} is partial: {Pending} passage(s) still to embed", tenantId, indexed.Pending);
+            }
+
+            return await _index.LoadVectorsAsync(tenantId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Source passage vectors could not be used for tenant {TenantId}; drafting by words only", tenantId);
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<PassageCandidate>> LoadCandidatesAsync(Guid tenantId, CancellationToken ct)
     {
         var sources = await _db.KnowledgeSources.AsNoTracking().Where(s => s.TenantId == tenantId && s.Status == KnowledgeSourceStatus.Ready).ToListAsync(ct);

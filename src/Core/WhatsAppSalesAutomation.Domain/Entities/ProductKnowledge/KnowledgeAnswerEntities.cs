@@ -279,6 +279,16 @@ public class KnowledgeVersion : BaseEntity, ITenantOwned
 
     /// <summary>Set when this version was made by restoring an earlier one.</summary>
     public int? RestoredFromNumber { get; set; }
+
+    /// <summary>Whether this version's chunks are what customer chat reads. Publishing is never rolled back by indexing: a Failed version stays published,
+    /// and chat keeps reading the last Live one.</summary>
+    public KnowledgeServingStatus ServingStatus { get; set; } = KnowledgeServingStatus.Indexing;
+
+    /// <summary>Why indexing failed, in a sentence the tenant can read. Null otherwise.</summary>
+    public string? ServingError { get; set; }
+
+    /// <summary>UTC: when this version's index last finished (Live) or failed.</summary>
+    public DateTime? ServingIndexedAt { get; set; }
 }
 
 /// <summary>

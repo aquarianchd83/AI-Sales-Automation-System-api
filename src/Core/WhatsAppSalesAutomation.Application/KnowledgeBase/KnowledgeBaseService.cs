@@ -34,6 +34,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     private readonly IValidator<BulkPublishArticlesRequest> _bulkPublishValidator;
     private readonly IKnowledgeIngestionService _ingestion;
     private readonly KnowledgeMetadataSyncService _metadataSync;
+    private readonly WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? _productKnowledge;
 
     public KnowledgeBaseService(
         IApplicationDbContext context,
@@ -48,8 +49,10 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         IValidator<UpdateKnowledgeBaseArticleRequest> updateValidator,
         IValidator<BulkPublishArticlesRequest> bulkPublishValidator,
         IKnowledgeIngestionService ingestion,
-        KnowledgeMetadataSyncService metadataSync)
+        KnowledgeMetadataSyncService metadataSync,
+        WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? productKnowledge = null)
     {
+        _productKnowledge = productKnowledge;
         _context = context;
         _dateTime = dateTime;
         _tenantContext = tenantContext;
@@ -75,9 +78,11 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     /// write, and expose platform content the tenant was never meant to browse.
     /// </summary>
     private IQueryable<KnowledgeBaseArticle> Managed() =>
+        // A platform-written article (the tenant's published product knowledge) is not one an author manages: it is absent from every list and lookup, so it
+        // cannot be read, edited, published, unpublished or deleted through the article endpoints.
         _tenantContext.TenantId is { } tenantId
-            ? _context.KnowledgeBaseArticles.Where(a => a.TenantId == tenantId)
-            : _context.KnowledgeBaseArticles.Where(a => a.TenantId == null);
+            ? _context.KnowledgeBaseArticles.Where(a => a.TenantId == tenantId && a.SystemKey == null)
+            : _context.KnowledgeBaseArticles.Where(a => a.TenantId == null && a.SystemKey == null);
 
     public async Task<PagedResult<KnowledgeBaseArticleDto>> GetPagedAsync(PagedRequest request, string? status = null, CancellationToken cancellationToken = default)
     {
@@ -287,6 +292,17 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         return await GetByIdAsync(id, cancellationToken);
     }
 
+    public async Task PublishSystemArticleAsync(Guid articleId, Guid approvedByUserId, CancellationToken cancellationToken = default)
+    {
+        var article = await _context.KnowledgeBaseArticles.FirstOrDefaultAsync(a => a.Id == articleId && a.SystemKey != null, cancellationToken)
+            ?? throw new NotFoundException(nameof(KnowledgeBaseArticle), articleId);
+
+        // The same pipeline as an author's publish - safety scan, structure-aware chunks, embedding, atomic swap - so a failure part-way leaves the previous
+        // index serving and the article's state is put back.
+        await PublishThroughIngestionAsync(article, approvedByUserId, securityReviewed: false, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<KnowledgeBaseArticleDto> PublishToModelAsync(Guid id, string provider, Guid publishedByUserId, CancellationToken cancellationToken = default)
     {
         var parsedProvider = ParseProvider(provider);
@@ -449,6 +465,10 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
         var queryEmbedding = await _embeddings.GetEmbeddingAsync(query, cancellationToken);
 
+        // The tenant's switch (set by the platform administrator): ON reads only the published product knowledge; OFF, the default, is the retrieval below, as it was.
+        if (_productKnowledge is not null && await _productKnowledge.IsEnabledAsync(cancellationToken))
+            return await RetrievePublishedProductKnowledgeAsync(queryEmbedding, cancellationToken);
+
         // "Simulated" (local/dev default, no API key) and an unrecognized/misconfigured provider
         // string both fail open - every Published article stays retrievable rather than the model
         // filter below silently returning nothing. Only a real, parseable provider narrows results
@@ -470,6 +490,8 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 // support knowledge - it must never be quoted to a tenant's customers in a sales chat.
                 where a.Status == KnowledgeArticleStatus.Published && c.Embedding != null
                     && c.IsActive && c.TenantId != null
+                    // The platform-written product-knowledge article is read only when the tenant's switch is ON (below); with it OFF chat is as it was.
+                    && a.SystemKey == null
                     && (!modelFilterApplies || _context.KnowledgeBaseArticleModelPublications.Any(p => p.ArticleId == a.Id && p.Provider == parsedProvider))
                 select c)
             .ToListAsync(cancellationToken);
@@ -486,6 +508,50 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             .ToList();
 
         return scored;
+    }
+
+    /// <summary>
+    /// Chat with the tenant's switch ON: the active chunks of the tenant's own product-knowledge article, nothing else - no articles an author wrote, no platform
+    /// knowledge, no other tenant. A chunk is served only if it is tied to a published item, and a price, guarantee, certification, compliance or quantified-outcome
+    /// claim is dropped once its review date has passed. Each result carries the item and version it came from, for citations. The model-publication filter does not
+    /// apply: the provider is chosen centrally for this content.
+    /// </summary>
+    public async Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(string query, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return Array.Empty<RetrievedChunk>();
+        return await RetrievePublishedProductKnowledgeAsync(await _embeddings.GetEmbeddingAsync(query, cancellationToken), cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(float[] queryEmbedding, CancellationToken cancellationToken)
+    {
+        // Explicit tenant on top of the global query filter: the second wall. Without an ambient tenant nothing is served.
+        if (_tenantContext.TenantId is not { } tenantId)
+            return Array.Empty<RetrievedChunk>();
+
+        var now = _dateTime.UtcNow;
+        var candidates = await (
+                from c in _context.KnowledgeBaseChunks
+                join a in _context.KnowledgeBaseArticles on c.ArticleId equals a.Id
+                join i in _context.KnowledgeItems on c.KnowledgeItemId equals i.Id
+                where a.TenantId == tenantId && a.SystemKey == WhatsAppSalesAutomation.Domain.Constants.ProductKnowledgeSystem.ArticleKey
+                    && a.Status == KnowledgeArticleStatus.Published
+                    && c.TenantId == tenantId && c.IsActive && c.Embedding != null
+                    && i.TenantId == tenantId
+                    && !(i.IsMaterialClaim && i.ReviewDueAt != null && i.ReviewDueAt < now)
+                select new { Chunk = c, ItemId = i.Id, VersionId = i.VersionId, i.IsMaterialClaim })
+            .ToListAsync(cancellationToken);
+
+        var aiOptions = await _tenantConfig.GetAiOptionsAsync(cancellationToken);
+
+        return candidates
+            .Select(x => new RetrievedChunk(
+                x.Chunk.Id, x.Chunk.ArticleId, x.Chunk.ChunkText, CosineSimilarity(queryEmbedding, DeserializeEmbedding(x.Chunk.Embedding!)),
+                x.ItemId, x.VersionId, x.IsMaterialClaim))
+            .Where(r => r.RelevanceScore >= aiOptions.MinRelevanceScore)
+            .OrderByDescending(r => r.RelevanceScore)
+            .Take(aiOptions.KnowledgeBaseTopN)
+            .ToList();
     }
 
     /// <summary>Publishes for the "first time this article goes live" branch of PublishToModelAsync -

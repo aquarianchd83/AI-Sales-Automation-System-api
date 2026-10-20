@@ -349,6 +349,12 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         await SetStateAsync(job, KnowledgeIngestionState.Chunking, ct);
         var drafts = _chunker.Chunk(article, sanitized.Content);
 
+        // The platform-written product-knowledge article carries a marker per published item. Reading it off ties each chunk to its item (so chat can cite the
+        // item and drop a lapsed material claim) and removes it before anything is embedded. No other article is touched.
+        IReadOnlyDictionary<int, Guid>? itemLinks = null;
+        if (article.SystemKey == WhatsAppSalesAutomation.Domain.Constants.ProductKnowledgeSystem.ArticleKey)
+            (drafts, itemLinks) = WhatsAppSalesAutomation.Application.ProductKnowledge.ProductKnowledgeMarkers.Extract(drafts);
+
         if (drafts.Count == 0)
         {
             await FinishAsync(job, KnowledgeIngestionState.Rejected, "NoContent", "Nothing was left to chunk after cleaning.", ct);
@@ -362,7 +368,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
         job.EmbeddingModel = _embedder.ModelName;
 
         // ── Staging (inactive) ──
-        var staged = await StageChunksAsync(article, drafts, ct);
+        var staged = await StageChunksAsync(article, drafts, ct, itemLinks);
 
         // ── Embedding ──
         await SetStateAsync(job, KnowledgeIngestionState.Embedding, ct);
@@ -387,7 +393,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
     /// would reuse a vector that describes different text.
     /// </summary>
     private async Task<List<KnowledgeBaseChunk>> StageChunksAsync(
-        KnowledgeBaseArticle article, IReadOnlyList<ChunkDraft> drafts, CancellationToken ct)
+        KnowledgeBaseArticle article, IReadOnlyList<ChunkDraft> drafts, CancellationToken ct, IReadOnlyDictionary<int, Guid>? itemLinks = null)
     {
         var existingStaged = await _context.KnowledgeBaseChunks
             .Where(c => c.ArticleId == article.Id && !c.IsActive && c.EmbeddedFromArticleVersion == article.VersionNumber)
@@ -411,6 +417,7 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
                 && candidate.EmbeddingModel == _embedder.ModelName)
             {
                 reused.Add(candidate.Id);
+                candidate.KnowledgeItemId = itemLinks is not null && itemLinks.TryGetValue(draft.Index, out var reusedItem) ? reusedItem : null;
                 if (draft.AtomicGroupId is { } fresh)
                     groupRemap[fresh] = candidate.AtomicGroupId;
 
@@ -435,6 +442,8 @@ public sealed class KnowledgeIngestionService : IKnowledgeIngestionService
                 : draft.AtomicGroupId;
 
             var chunk = ToEntity(article, draft, groupId);
+            if (itemLinks is not null && itemLinks.TryGetValue(draft.Index, out var itemId))
+                chunk.KnowledgeItemId = itemId;
             _context.KnowledgeBaseChunks.Add(chunk);
             result.Add(chunk);
         }

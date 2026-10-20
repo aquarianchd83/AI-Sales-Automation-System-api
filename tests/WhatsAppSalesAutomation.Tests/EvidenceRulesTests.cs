@@ -11,6 +11,79 @@ public sealed class EvidenceRulesTests
     private static PassageCandidate Passage(string text, string? heading = null, string source = "brochure.pdf", string location = "Page 1", Guid? id = null) =>
         new(id ?? Guid.NewGuid(), Guid.NewGuid(), source, 1, location, heading, text, PassageSplitter.HashOf(text));
 
+    // ----- finding passages by meaning too ----------------------------------------------------------------------------------------------
+
+    private static (PassageCandidate Passage, float[] Vector) WithVector(string text, params float[] v) => (Passage(text), v);
+
+    private static IReadOnlyDictionary<string, float[]> Vectors(params (PassageCandidate Passage, float[] Vector)[] items) =>
+        items.ToDictionary(i => i.Passage.Hash, i => i.Vector);
+
+    [Fact]
+    public void A_passage_that_means_the_same_is_found_even_when_it_shares_no_word_with_the_question()
+    {
+        var hinglish = WithVector("Ek visit ki keemat paanch sau rupaye hai.", 0.9f, 0.436f);
+        var parking = WithVector("Parking is free for patients.", 0.0f, 1.0f);
+        var all = new[] { hinglish.Passage, parking.Passage };
+
+        Assert.Empty(PassageRetriever.Rank("How much does a visit cost?", null, all, 3)); // words alone find nothing
+
+        var ranked = PassageRetriever.RankHybrid("How much does a visit cost?", null, all, 3, new[] { 1.0f, 0.0f }, Vectors(hinglish, parking));
+
+        Assert.Equal(hinglish.Passage.Id, Assert.Single(ranked).Passage.Id); // the unrelated one is below the similarity floor
+    }
+
+    [Fact]
+    public void A_passage_that_words_and_meaning_both_find_ranks_above_one_that_only_one_finds()
+    {
+        var both = WithVector("The consultation fee is Rs 500 for the first visit.", 0.8f, 0.6f);
+        var wordsOnly = WithVector("The fee for lab tests is shown at reception.", 0.0f, 1.0f);
+        var meaningOnly = WithVector("Rates for an appointment start at five hundred.", 0.95f, 0.312f);
+        var all = new[] { wordsOnly.Passage, meaningOnly.Passage, both.Passage };
+
+        var ranked = PassageRetriever.RankHybrid("What is the consultation fee?", null, all, 3, new[] { 1.0f, 0.0f }, Vectors(both, wordsOnly, meaningOnly));
+
+        Assert.Equal(both.Passage.Id, ranked[0].Passage.Id);
+        Assert.Contains(ranked, r => r.Passage.Id == wordsOnly.Passage.Id);
+        Assert.Contains(ranked, r => r.Passage.Id == meaningOnly.Passage.Id);
+    }
+
+    [Fact]
+    public void A_passage_with_no_vector_is_still_found_by_its_words_and_one_with_a_vector_of_the_wrong_size_is_ignored()
+    {
+        var fee = Passage("The consultation fee is Rs 500 for the first visit.");
+        var wrongSize = WithVector("Appointments cost five hundred.", 1f, 0f, 0f);
+
+        var ranked = PassageRetriever.RankHybrid("What is the consultation fee?", null, new[] { fee, wrongSize.Passage }, 3, new[] { 1.0f, 0.0f }, Vectors(wrongSize));
+
+        Assert.Equal(fee.Id, Assert.Single(ranked).Passage.Id);
+    }
+
+    [Fact]
+    public void With_no_question_vector_or_no_passage_vectors_the_result_is_exactly_the_word_search()
+    {
+        var fee = Passage("The consultation fee is Rs 500 for the first visit.");
+        var parking = Passage("Parking is free for patients.");
+        var all = new[] { parking, fee };
+        var expected = PassageRetriever.Rank("What is the consultation fee?", null, all, 3).Select(r => (r.Passage.Id, r.Score)).ToList();
+
+        var noQuery = PassageRetriever.RankHybrid("What is the consultation fee?", null, all, 3, null, new Dictionary<string, float[]>());
+        var noVectors = PassageRetriever.RankHybrid("What is the consultation fee?", null, all, 3, new[] { 1.0f, 0.0f }, null);
+        var emptyVectors = PassageRetriever.RankHybrid("What is the consultation fee?", null, all, 3, new[] { 1.0f, 0.0f }, new Dictionary<string, float[]>());
+
+        Assert.Equal(expected, noQuery.Select(r => (r.Passage.Id, r.Score)).ToList());
+        Assert.Equal(expected, noVectors.Select(r => (r.Passage.Id, r.Score)).ToList());
+        Assert.Equal(expected, emptyVectors.Select(r => (r.Passage.Id, r.Score)).ToList());
+    }
+
+    [Fact]
+    public void The_number_of_passages_offered_is_the_number_asked_for()
+    {
+        var all = Enumerable.Range(0, 8).Select(i => Passage($"The consultation fee number {i} is Rs 500.")).ToArray();
+
+        Assert.Equal(2, PassageRetriever.RankHybrid("consultation fee", null, all, 2, null, null).Count);
+        Assert.Equal(8, PassageRetriever.RankHybrid("consultation fee", null, all, 20, null, null).Count);
+    }
+
     // ----- quotations -----------------------------------------------------------------------------------------------------------------
 
     [Fact]

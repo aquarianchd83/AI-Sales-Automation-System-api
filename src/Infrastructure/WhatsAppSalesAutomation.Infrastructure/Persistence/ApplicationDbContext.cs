@@ -181,6 +181,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Domain.Entities.ProductKnowledge.SourcePassage> SourcePassages => Set<Domain.Entities.ProductKnowledge.SourcePassage>();
 
+    public DbSet<Domain.Entities.ProductKnowledge.SourcePassageEmbedding> SourcePassageEmbeddings => Set<Domain.Entities.ProductKnowledge.SourcePassageEmbedding>();
+
     public DbSet<Domain.Entities.ProductKnowledge.KnowledgeQuestion> KnowledgeQuestions => Set<Domain.Entities.ProductKnowledge.KnowledgeQuestion>();
 
     public DbSet<Domain.Entities.ProductKnowledge.KnowledgeAnswer> KnowledgeAnswers => Set<Domain.Entities.ProductKnowledge.KnowledgeAnswer>();

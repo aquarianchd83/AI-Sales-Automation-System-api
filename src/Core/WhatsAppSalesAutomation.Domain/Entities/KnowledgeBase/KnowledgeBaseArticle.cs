@@ -72,6 +72,11 @@ public class KnowledgeBaseArticle : BaseEntity, ISoftDelete, ITenantScopedOrGlob
     /// packet refers to when it names "the article", so a citation stays meaningful across a rewrite.</summary>
     public string ArticleKey { get; set; } = string.Empty;
 
+    /// <summary>Non-null for an article the platform writes and maintains itself (see <see cref="Constants.ProductKnowledgeSystem"/>); null for every article
+    /// an author wrote. Such an article is never edited, published or deleted through the article endpoints, and chat reads it only through the
+    /// tenant's product-knowledge switch.</summary>
+    public string? SystemKey { get; set; }
+
     // ── Content ──────────────────────────────────────────────────────────────
 
     public string Title { get; set; } = string.Empty;

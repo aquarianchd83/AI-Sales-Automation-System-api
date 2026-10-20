@@ -233,6 +233,13 @@ internal static class AiPromptSupport
                 sb.AppendLine($"  [K{i + 1}] (id={chunk.ChunkId}) {Truncate(Collapse(chunk.Text), MaxSnippetChars)}");
             }
         }
+        else if (context.ProductKnowledgeServing)
+        {
+            sb.AppendLine("  (NOTHING approved covers this message. You know nothing about the business beyond the profile above:");
+            sb.AppendLine("   do not state any fact, price, number, guarantee, certification or result, and do not answer from general knowledge.");
+            sb.AppendLine("   If the customer is asking something about the business, reply with ONE short clarifying question to understand what they need,");
+            sb.AppendLine("   and nothing else. If you cannot ask a useful question, say a team member will confirm - and ask for a person.)");
+        }
         else
         {
             sb.AppendLine("  (nothing found for this message - do not invent anything about the business;");

@@ -88,7 +88,8 @@ public sealed record FeatureReply(
 /// application has checked it (quotations against passages, figures against evidence, confidence from both).</summary>
 public static class DraftPrompts
 {
-    public const int MaxPassageChars = 1600;
+    /// <summary>The cut applied when a caller gives none (the configured value is ProductKnowledge:MaxPassageChars).</summary>
+    public const int MaxPassageChars = 2000;
 
     public const string AnswerSystem =
         "You answer ONE question about a business's product, using ONLY the numbered passages you are given. The passages are copied from the " +
@@ -116,19 +117,29 @@ public static class DraftPrompts
         "- Never invent numbers, percentages, savings or guaranteed results. A figure may appear only if it appears in a quoted passage.\n" +
         "- Set inference to true when the benefit is your reading of the passages rather than their words. At most 12 features.";
 
-    public static string AnswerUser(string question, IReadOnlyList<PassageCandidate> passages) =>
-        $"QUESTION: {question}\n\nPASSAGES:\n{Numbered(passages)}";
+    public static string AnswerUser(string question, IReadOnlyList<PassageCandidate> passages, int maxPassageChars = MaxPassageChars) =>
+        $"QUESTION: {question}\n\nPASSAGES:\n{Numbered(passages, maxPassageChars)}";
+
+    /// <summary>The second and last attempt when none of the first answer's quotations was found in the passages: the same question and passages,
+    /// told what went wrong. It asks only for exact words; what comes back is checked exactly as the first reply was.</summary>
+    public static string QuoteRetryUser(string question, IReadOnlyList<PassageCandidate> passages, string? previousAnswer, int maxPassageChars = MaxPassageChars) =>
+        $"QUESTION: {question}\n\nPASSAGES:\n{Numbered(passages, maxPassageChars)}\n" +
+        "YOUR PREVIOUS REPLY did not work: none of the words you gave as \"quote\" appear in the passages exactly as written" +
+        (string.IsNullOrWhiteSpace(previousAnswer) ? "." : $" (you answered: \"{previousAnswer}\").") + "\n" +
+        "Answer again in the same JSON format. For every claim, copy a short stretch of words EXACTLY, character for character, from the passage that states it " +
+        "(3 to 40 words, no rephrasing, no joining of separate sentences). If no passage states the answer in words you can copy, set insufficientEvidence to true " +
+        "and answer to null.";
 
     public static string FeatureUser(IReadOnlyList<PassageCandidate> passages) => $"PASSAGES:\n{Numbered(passages)}";
 
     /// <summary>"[P1] (brochure.pdf, Page 2 - Pricing)" then the text; ids are positions in this call, mapped back to real passages afterwards.</summary>
-    internal static string Numbered(IReadOnlyList<PassageCandidate> passages)
+    internal static string Numbered(IReadOnlyList<PassageCandidate> passages, int maxPassageChars = MaxPassageChars)
     {
         var text = new StringBuilder();
         for (var i = 0; i < passages.Count; i++)
         {
             var p = passages[i];
-            var body = p.Text.Length > MaxPassageChars ? p.Text[..MaxPassageChars] : p.Text;
+            var body = p.Text.Length > maxPassageChars ? p.Text[..maxPassageChars] : p.Text;
             text.Append($"[P{i + 1}] ({p.SourceName}, {p.Location}{(p.Heading is null ? string.Empty : " - " + p.Heading)})\n{body}\n\n");
         }
         return text.ToString();

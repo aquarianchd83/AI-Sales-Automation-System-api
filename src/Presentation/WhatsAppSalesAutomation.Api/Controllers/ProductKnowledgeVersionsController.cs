@@ -54,6 +54,16 @@ public class ProductKnowledgeVersionsController : ControllerBase
         return Ok(version);
     }
 
+    /// <summary>Talk to the AI as a customer would, answered only from the live published version. Nothing is stored or sent.</summary>
+    [HttpPost("/api/v1/product-knowledge/test-chat")]
+    public async Task<ActionResult<TestChatReply>> TestChat([FromBody] TestChatRequest request, [FromServices] IProductTestChat chat, CancellationToken cancellationToken)
+        => Ok(await chat.AskAsync(RequireTenantId(), request ?? new TestChatRequest(null, null), cancellationToken));
+
+    /// <summary>Builds the chat index of the current version again, after it failed. The version is not changed.</summary>
+    [HttpPost("{id:guid}/reindex")]
+    public async Task<ActionResult<KnowledgeVersionDto>> Reindex(Guid id, CancellationToken cancellationToken)
+        => Ok(await _publishing.ReindexAsync(RequireTenantId(), id, cancellationToken));
+
     /// <summary>The working Draft file (plain text), clearly headed as not approved.</summary>
     [HttpGet("draft-file")]
     public async Task<IActionResult> DraftFile(CancellationToken cancellationToken)
