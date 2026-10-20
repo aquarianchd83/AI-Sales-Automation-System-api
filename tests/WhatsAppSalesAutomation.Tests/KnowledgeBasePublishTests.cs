@@ -359,6 +359,7 @@ public sealed class KnowledgeBasePublishTests : IDisposable
         public Task<KnowledgeBaseArticleDto> PublishToModelAsync(Guid id, string provider, Guid publishedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<KnowledgeBaseArticleDto> UnpublishFromModelAsync(Guid id, string provider, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task ReindexAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(string query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task PublishSystemArticleAsync(Guid articleId, Guid approvedByUserId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<RetrievedChunk>> RetrieveRelevantChunksAsync(string query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }

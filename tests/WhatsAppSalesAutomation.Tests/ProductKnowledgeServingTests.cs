@@ -86,6 +86,19 @@ public sealed class ProductKnowledgeServingTests : IDisposable
         public void Enqueue(Guid jobId, Guid? tenantId, bool securityReviewed) { }
     }
 
+    private sealed class ScriptedChatAi : IAiService
+    {
+        public Queue<AiReplyResult> Replies { get; } = new();
+        public List<AiConversationContext> Contexts { get; } = new();
+        public bool Throws { get; set; }
+
+        public Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
+        {
+            Contexts.Add(context);
+            return Throws ? throw new InvalidOperationException("provider down") : Task.FromResult(Replies.Dequeue());
+        }
+    }
+
     private sealed class Switch : IProductKnowledgeServing
     {
         private readonly MutableTenant _tenant;
@@ -103,6 +116,11 @@ public sealed class ProductKnowledgeServingTests : IDisposable
     private readonly TestClock _clock = new() { UtcNow = new DateTime(2026, 10, 20, 12, 0, 0, DateTimeKind.Utc) };
     private readonly Switch _switch;
     private readonly Admin _admin = new();
+    private readonly ITenantConfigOverrideProvider _config = Fake.Of<ITenantConfigOverrideProvider>((m, _) =>
+        m.Name == nameof(ITenantConfigOverrideProvider.GetAiOptionsAsync)
+            ? Task.FromResult(new AiOptions { MinRelevanceScore = 0.5, KnowledgeBaseTopN = 10, ConfidenceThreshold = 0.5, EscalationIntents = new[] { "Complaint" } })
+            : throw new NotImplementedException(m.Name));
+    private readonly ScriptedChatAi _chatAi = new();
     private readonly KnowledgeBaseService _kb;
     private readonly KnowledgeServingIndexer _indexer;
     private readonly Guid _a = Guid.NewGuid();
@@ -127,10 +145,7 @@ public sealed class ProductKnowledgeServingTests : IDisposable
 
         _kb = new KnowledgeBaseService(
             _db, _clock, _tenant, Fake.Of<IPlanLimitsService>((m, _) => Task.CompletedTask), _embedder, catalog, _provider,
-            Fake.Of<ITenantConfigOverrideProvider>((m, _) =>
-                m.Name == nameof(ITenantConfigOverrideProvider.GetAiOptionsAsync)
-                    ? Task.FromResult(new AiOptions { MinRelevanceScore = 0.5, KnowledgeBaseTopN = 10 })
-                    : throw new NotImplementedException(m.Name)),
+            _config,
             new CreateKnowledgeBaseArticleRequestValidator(), new UpdateKnowledgeBaseArticleRequestValidator(), new BulkPublishArticlesRequestValidator(),
             ingestion, new KnowledgeMetadataSyncService(_db), _switch);
 
@@ -509,5 +524,176 @@ public sealed class ProductKnowledgeServingTests : IDisposable
 
         Assert.Matches("\"publishedAt\":\"[^\"]+Z\"", json);
         Assert.Matches("\"servingIndexedAt\":\"[^\"]+Z\"", json);
+    }
+
+    // ----- the tenant's test chat -----------------------------------------------------------------------------------------------------------
+
+    private ProductTestChat TestChat() => new(_db, _kb, _chatAi, new WhatsAppSalesAutomation.Application.Ai.AiReplyValidator(), _config);
+
+    private static AiReplyResult Says(string text, string intent = "Information", double confidence = 0.9) => new(
+        ResponseText: text, DetectedIntent: intent, ConfidenceScore: confidence, ExtractedEntities: new AiExtractedEntities(null, null, null), UpdatedSummary: "s",
+        ModelUsed: "Test:fake", PromptTokens: 1, CompletionTokens: 1, LatencyMs: 1, CitedChunkIds: Array.Empty<Guid>());
+
+    [Fact]
+    public async Task The_test_chat_needs_a_live_published_version()
+    {
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => TestChat().AskAsync(_a, new TestChatRequest("hello", null)));
+
+        Assert.Contains("Publish your product knowledge first", ex.Message);
+        Assert.Empty(_chatAi.Contexts); // the AI was not even asked
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_message_is_refused_and_so_is_a_very_long_one(string message)
+    {
+        await PublishStandardSet();
+
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => TestChat().AskAsync(_a, new TestChatRequest(message, null)));
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => TestChat().AskAsync(_a, new TestChatRequest(new string('x', ProductTestChat.MaxMessageChars + 1), null)));
+    }
+
+    [Fact]
+    public async Task A_question_the_published_knowledge_covers_is_answered_from_it_with_its_sources_even_with_the_live_switch_off()
+    {
+        var version = await PublishStandardSet(); // the switch for live chat is OFF
+        _chatAi.Replies.Enqueue(Says("The consultation fee is Rs 500 for the first visit. Is that for yourself or a family member?", "PriceEnquiry"));
+
+        var reply = await TestChat().AskAsync(_a, new TestChatRequest("What is the consultation fee?", null));
+
+        Assert.Equal("Answered", reply.Outcome);
+        Assert.Contains("Rs 500", reply.Reply);
+        var source = Assert.Single(reply.Sources);
+        Assert.Equal(("What is the consultation fee?", version.Number, true), (source.Question, source.VersionNumber, source.IsMaterialClaim));
+        Assert.Contains("consultation fee is Rs 500", source.Excerpt);
+        var context = Assert.Single(_chatAi.Contexts);
+        Assert.True(context.ProductKnowledgeServing);
+        Assert.Contains("Rs 500", Assert.Single(context.GroundingChunks).Text);
+    }
+
+    [Fact]
+    public async Task The_test_chat_stores_nothing_and_sends_nothing()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("Refunds are processed within 7 working days of an approved request."));
+
+        await TestChat().AskAsync(_a, new TestChatRequest("Do you offer refunds?", null));
+
+        Assert.Empty(await _db.Conversations.ToListAsync());
+        Assert.Empty(await _db.Messages.ToListAsync());
+        Assert.Empty(await _db.AiInteractions.ToListAsync());
+        Assert.Empty(await _db.Leads.ToListAsync());
+        Assert.Empty(await _db.AiTransactions.ToListAsync()); // no credit used
+    }
+
+    [Fact]
+    public async Task A_short_follow_up_is_searched_together_with_what_the_customer_asked_before_and_the_ai_sees_the_conversation()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("Refunds are processed within 7 working days of an approved request. Would you like to know about cards too?"));
+        var first = await TestChat().AskAsync(_a, new TestChatRequest("Tell me about refunds", null));
+
+        _chatAi.Replies.Enqueue(Says("Seven working days from the approval."));
+        await TestChat().AskAsync(_a, new TestChatRequest("how long?", new[]
+        {
+            new TestChatTurn("customer", "Tell me about refunds"), new TestChatTurn("assistant", first.Reply!, first.Outcome)
+        }));
+
+        var context = _chatAi.Contexts.Last();
+        Assert.Contains("7 working days", Assert.Single(context.GroundingChunks).Text); // "how long?" alone would have found nothing
+        Assert.Equal(new[] { "Tell me about refunds", first.Reply }, context.RecentHistory.Select(t => t.Text));
+        Assert.Equal("how long?", context.InboundMessageText);
+    }
+
+    [Fact]
+    public async Task When_nothing_published_covers_it_the_ai_asks_one_question_and_a_second_miss_hands_over_to_a_person()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("Which country are you travelling from?"));
+
+        var first = await TestChat().AskAsync(_a, new TestChatRequest("Do you arrange visas?", null));
+
+        Assert.Equal(("Clarifying", "Which country are you travelling from?"), (first.Outcome, first.Reply));
+        Assert.Empty(first.Sources);
+
+        _chatAi.Replies.Enqueue(Says("And when are you travelling?"));
+        var second = await TestChat().AskAsync(_a, new TestChatRequest("India", new[]
+        {
+            new TestChatTurn("customer", "Do you arrange visas?"), new TestChatTurn("assistant", first.Reply!, "Clarifying")
+        }));
+
+        Assert.Equal(("HandedOver", null), (second.Outcome, second.Reply));
+        Assert.Contains("a person would take over", second.Why);
+    }
+
+    [Fact]
+    public async Task An_answer_from_the_models_own_knowledge_is_not_shown_as_a_reply_but_what_it_tried_to_say_is_shown_to_the_tester()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("Visas usually take about two weeks and our team handles all of it."));
+
+        var reply = await TestChat().AskAsync(_a, new TestChatRequest("Do you arrange visas?", null));
+
+        Assert.Equal(("HandedOver", null), (reply.Outcome, reply.Reply));
+        Assert.Contains("two weeks", reply.DraftBlocked);
+    }
+
+    [Fact]
+    public async Task A_guarantee_the_published_knowledge_does_not_state_is_blocked()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("The consultation fee is Rs 500 and we guarantee a full cure.", "PriceEnquiry"));
+
+        var reply = await TestChat().AskAsync(_a, new TestChatRequest("What is the consultation fee?", null));
+
+        Assert.Equal("HandedOver", reply.Outcome);
+        Assert.Contains("guarantee", reply.DraftBlocked);
+    }
+
+    [Fact]
+    public async Task A_low_confidence_reply_or_a_request_for_a_person_is_handed_over_like_live_chat()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("Refunds are processed within 7 working days of an approved request.", confidence: 0.1));
+        Assert.Equal("HandedOver", (await TestChat().AskAsync(_a, new TestChatRequest("Do you offer refunds?", null))).Outcome);
+
+        _chatAi.Replies.Enqueue(Says("Sure, let me get someone.", "HumanRequest") with { HumanRequested = true });
+        var asked = await TestChat().AskAsync(_a, new TestChatRequest("Can I talk to a person?", null));
+        Assert.Equal(("HandedOver", "The customer asked for a person."), (asked.Outcome, asked.Why));
+    }
+
+    [Fact]
+    public async Task The_test_chat_never_uses_another_tenants_published_knowledge()
+    {
+        await PublishStandardSet();
+        As(_b);
+        await Approved("Do you offer refunds?", "Tenant B refunds are instant and unconditional, in 1 day.", "Policy");
+        await Publishing().PublishAsync(_b, new PublishRequest(null));
+
+        As(_a);
+        _chatAi.Replies.Enqueue(Says("Refunds are processed within 7 working days of an approved request."));
+        var reply = await TestChat().AskAsync(_a, new TestChatRequest("Do you offer refunds?", null));
+
+        Assert.DoesNotContain("Tenant B", _chatAi.Contexts.Last().GroundingChunks.Single().Text);
+        Assert.All(reply.Sources, s => Assert.DoesNotContain("Tenant B", s.Excerpt));
+
+        As(_b);
+        _chatAi.Replies.Enqueue(Says("Tenant B refunds are instant and unconditional, in 1 day."));
+        await TestChat().AskAsync(_b, new TestChatRequest("Do you offer refunds?", null));
+        Assert.DoesNotContain("7 working days", _chatAi.Contexts.Last().GroundingChunks.Single().Text);
+    }
+
+    [Fact]
+    public async Task A_failing_ai_is_reported_not_turned_into_a_reply()
+    {
+        await PublishStandardSet();
+        _chatAi.Throws = true;
+
+        await Assert.ThrowsAsync<ConflictException>(() => TestChat().AskAsync(_a, new TestChatRequest("Do you offer refunds?", null)));
+
+        _chatAi.Throws = false;
+        _chatAi.Replies.Enqueue(Says("x") with { ProviderFailed = true });
+        await Assert.ThrowsAsync<ConflictException>(() => TestChat().AskAsync(_a, new TestChatRequest("Do you offer refunds?", null)));
     }
 }

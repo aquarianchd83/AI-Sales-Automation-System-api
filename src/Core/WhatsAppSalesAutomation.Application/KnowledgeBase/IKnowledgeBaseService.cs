@@ -83,4 +83,8 @@ public interface IKnowledgeBaseService
     /// at most <c>AiOptions.KnowledgeBaseTopN</c> chunks, only those at or above
     /// <c>AiOptions.MinRelevanceScore</c>.</summary>
     Task<IReadOnlyList<RetrievedChunk>> RetrieveRelevantChunksAsync(string query, CancellationToken cancellationToken = default);
+
+    /// <summary>The tenant's published product knowledge as chat reads it when its switch is ON, whatever the switch says - for the tenant's own test chat. Same
+    /// rules as chat: only the tenant's published chunks, lapsed material claims dropped, same relevance floor and top-N.</summary>
+    Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(string query, CancellationToken cancellationToken = default);
 }

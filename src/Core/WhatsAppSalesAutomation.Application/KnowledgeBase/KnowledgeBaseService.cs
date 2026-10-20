@@ -516,6 +516,13 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     /// claim is dropped once its review date has passed. Each result carries the item and version it came from, for citations. The model-publication filter does not
     /// apply: the provider is chosen centrally for this content.
     /// </summary>
+    public async Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(string query, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return Array.Empty<RetrievedChunk>();
+        return await RetrievePublishedProductKnowledgeAsync(await _embeddings.GetEmbeddingAsync(query, cancellationToken), cancellationToken);
+    }
+
     private async Task<IReadOnlyList<RetrievedChunk>> RetrievePublishedProductKnowledgeAsync(float[] queryEmbedding, CancellationToken cancellationToken)
     {
         // Explicit tenant on top of the global query filter: the second wall. Without an ambient tenant nothing is served.
