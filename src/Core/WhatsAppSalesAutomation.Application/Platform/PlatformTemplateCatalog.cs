@@ -92,6 +92,11 @@ public static class PlatformTemplateCatalog
         Define(TenantNotificationKind.PlanRenewalFailed, "Plan expired - renewal failed", "tenant_alert_plan_expired",
             "Hi {{TenantName}}, your plan has ended and could not be renewed, so no new balance was added. {{Message}} Please contact support or check the Billing page in your dashboard.",
             "Your Growth plan ended on 4 Oct 2026 but can't renew automatically right now."),
+
+        // Goes to the product owner, not the tenant: {{TenantName}} is the company that ran into the problem.
+        Define(TenantNotificationKind.PlatformSetupNeeded, "Platform setup needed (to product owner)", "platform_alert_setup_needed",
+            "Urgent: {{TenantName}} ran into a platform setting that only you can change. {{Message}} An urgent ticket has been raised - open the Tickets page in the Platform Admin Console to see it and fix the setting.",
+            "The AI provider is set to Simulated, so published knowledge cannot be matched properly."),
     };
 
     public static PlatformTemplateDefinition? For(string eventKey) =>

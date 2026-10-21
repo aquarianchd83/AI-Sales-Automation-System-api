@@ -221,6 +221,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<PlatformNotification> PlatformNotifications => Set<PlatformNotification>();
 
+    public DbSet<PlatformTicket> PlatformTickets => Set<PlatformTicket>();
+
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();
 
     public DbSet<StudioActivity> StudioActivities => Set<StudioActivity>();

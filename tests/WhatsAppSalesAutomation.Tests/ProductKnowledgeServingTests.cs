@@ -433,11 +433,24 @@ public sealed class ProductKnowledgeServingTests : IDisposable
         Assert.Equal("Replaced", (await _db.KnowledgeVersions.AsNoTracking().SingleAsync(v => v.Id == first.Id)).ServingStatus.ToString());
     }
 
+    [Theory]
+    [InlineData("Simulated", "OpenAI", true)]
+    [InlineData("OpenAI", "Simulated", true)]
+    [InlineData("OpenAI", "OpenAI", false)]
+    public async Task The_overview_says_whether_the_platform_ai_is_the_simulator(string provider, string embedding, bool simulated)
+    {
+        await PublishStandardSet();
+        var service = new KnowledgePublishingService(_db, _admin, _indexer, _switch, new FakeAiConfig { Provider = provider, Embedding = embedding });
+
+        Assert.Equal(simulated, (await service.GetAsync(_a)).PlatformAiSimulated);
+    }
+
     [Fact]
-    public async Task A_version_that_is_already_live_or_not_current_cannot_be_indexed_again()
+    public async Task A_live_version_can_be_indexed_again_but_a_superseded_or_foreign_one_cannot()
     {
         var first = await PublishStandardSet();
-        await Assert.ThrowsAsync<ConflictException>(() => Publishing().ReindexAsync(_a, first.Id));
+        var again = await Publishing().ReindexAsync(_a, first.Id); // e.g. after the platform switched embedding provider
+        Assert.Equal("Live", again.ServingStatus);
 
         await Approved("Do you accept cards?", "We accept all major cards.");
         await Publishing().PublishAsync(_a, new PublishRequest(null));
@@ -528,7 +541,28 @@ public sealed class ProductKnowledgeServingTests : IDisposable
 
     // ----- the tenant's test chat -----------------------------------------------------------------------------------------------------------
 
-    private ProductTestChat TestChat() => new(_db, _kb, _chatAi, new WhatsAppSalesAutomation.Application.Ai.AiReplyValidator(), _config);
+    private sealed class FakeAiConfig : IPlatformAiConfigProvider
+    {
+        public string Provider { get; init; } = "OpenAI";
+        public string Embedding { get; init; } = "OpenAI";
+        public AiCredentials Get() => new(Provider, Embedding, null, "m", "v", "u", "k", "m", "e", "u", null, "m", "e", "u");
+    }
+
+    private sealed class RecordingAlerts : WhatsAppSalesAutomation.Application.Platform.IPlatformSetupAlerts
+    {
+        public List<(Guid TenantId, string Area)> Reports { get; } = new();
+
+        public Task ReportSimulatedAiAsync(Guid tenantId, string area, CancellationToken cancellationToken = default)
+        {
+            Reports.Add((tenantId, area));
+            return Task.CompletedTask;
+        }
+    }
+
+    private readonly RecordingAlerts _alerts = new();
+
+    private ProductTestChat TestChat(string provider = "OpenAI", string embedding = "OpenAI") =>
+        new(_db, _kb, _chatAi, new WhatsAppSalesAutomation.Application.Ai.AiReplyValidator(), _config, new FakeAiConfig { Provider = provider, Embedding = embedding }, _alerts);
 
     private static AiReplyResult Says(string text, string intent = "Information", double confidence = 0.9) => new(
         ResponseText: text, DetectedIntent: intent, ConfidenceScore: confidence, ExtractedEntities: new AiExtractedEntities(null, null, null), UpdatedSummary: "s",
@@ -552,6 +586,34 @@ public sealed class ProductKnowledgeServingTests : IDisposable
 
         await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => TestChat().AskAsync(_a, new TestChatRequest(message, null)));
         await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => TestChat().AskAsync(_a, new TestChatRequest(new string('x', ProductTestChat.MaxMessageChars + 1), null)));
+    }
+
+    [Theory]
+    [InlineData("Simulated", "OpenAI")]
+    [InlineData("OpenAI", "Simulated")]
+    public async Task A_simulated_ai_provider_tells_the_tester_to_carry_on_and_alerts_the_product_owner(string provider, string embedding)
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("The consultation fee is Rs 500 for the first visit.", "PriceEnquiry"));
+
+        var reply = await TestChat(provider, embedding).AskAsync(_a, new TestChatRequest("What is the consultation fee?", null));
+
+        Assert.Equal(ProductTestChat.SimulatedNotice, reply.PlatformNotice);
+        Assert.Contains("contact your product owner", reply.PlatformNotice);
+        Assert.Equal("Answered", reply.Outcome); // the tester is not blocked
+        Assert.Equal((_a, "the test chat"), Assert.Single(_alerts.Reports));
+    }
+
+    [Fact]
+    public async Task A_real_ai_provider_shows_no_notice_and_alerts_nobody()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("The consultation fee is Rs 500 for the first visit.", "PriceEnquiry"));
+
+        var reply = await TestChat().AskAsync(_a, new TestChatRequest("What is the consultation fee?", null));
+
+        Assert.Null(reply.PlatformNotice);
+        Assert.Empty(_alerts.Reports);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.ProductKnowledge;
@@ -19,8 +20,9 @@ public record TestChatSource(Guid ItemId, int VersionNumber, string Question, st
 /// <param name="Reply">What the customer would be sent. Null when nothing would be sent (a person would take over).</param>
 /// <param name="Outcome">Answered (from the published knowledge), Clarifying (nothing approved covers it, so one question), HandedOver (a person would take over).</param>
 /// <param name="Why">One sentence on what happened, for the tester; never shown to a customer.</param>
+/// <param name="PlatformNotice">Set when the platform itself is not fully set up (an AI provider is Simulated): tells the tester to carry on and to contact the product owner, who has already been alerted.</param>
 /// <param name="DraftBlocked">When a draft was written but would not be sent, what it was and which checks stopped it.</param>
-public record TestChatReply(string? Reply, string Outcome, string Why, IReadOnlyList<TestChatSource> Sources, string? DraftBlocked, string DetectedIntent);
+public record TestChatReply(string? Reply, string Outcome, string Why, IReadOnlyList<TestChatSource> Sources, string? DraftBlocked, string DetectedIntent, string? PlatformNotice = null);
 
 /// <summary>
 /// A tester talking to the AI as a customer would, answered only from the tenant's published product knowledge - the same retrieval, prompt and reply checks as
@@ -42,17 +44,41 @@ public sealed class ProductTestChat : IProductTestChat
     private readonly IAiService _ai;
     private readonly IAiReplyValidator _validator;
     private readonly ITenantConfigOverrideProvider _config;
+    private readonly IPlatformAiConfigProvider _platformAi;
+    private readonly IPlatformSetupAlerts _alerts;
 
-    public ProductTestChat(IApplicationDbContext db, IKnowledgeBaseService knowledge, IAiService ai, IAiReplyValidator validator, ITenantConfigOverrideProvider config)
+    public ProductTestChat(IApplicationDbContext db, IKnowledgeBaseService knowledge, IAiService ai, IAiReplyValidator validator, ITenantConfigOverrideProvider config,
+        IPlatformAiConfigProvider platformAi, IPlatformSetupAlerts alerts)
     {
         _db = db;
         _knowledge = knowledge;
         _ai = ai;
         _validator = validator;
         _config = config;
+        _platformAi = platformAi;
+        _alerts = alerts;
     }
 
     public async Task<TestChatReply> AskAsync(Guid tenantId, TestChatRequest request, CancellationToken ct = default)
+    {
+        var reply = await AskCoreAsync(tenantId, request, ct);
+
+        // The tester can carry on - the notice only says why answers may be off and who to talk to. The product owner is alerted once (see IPlatformSetupAlerts).
+        var ai = _platformAi.Get();
+        if (!IsSimulated(ai.Provider) && !IsSimulated(ai.EmbeddingProvider))
+            return reply;
+
+        await _alerts.ReportSimulatedAiAsync(tenantId, "the test chat", ct);
+        return reply with { PlatformNotice = SimulatedNotice };
+    }
+
+    public const string SimulatedNotice =
+        "Your AI assistant is running in test mode, so it may not find the knowledge you published. You can carry on, but please contact your product owner to finish the AI setup. "
+        + "We have already raised an urgent ticket and sent them an alert.";
+
+    private static bool IsSimulated(string? provider) => string.IsNullOrWhiteSpace(provider) || string.Equals(provider, "Simulated", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<TestChatReply> AskCoreAsync(Guid tenantId, TestChatRequest request, CancellationToken ct)
     {
         var message = (request?.Message ?? string.Empty).Trim();
         if (message.Length == 0)

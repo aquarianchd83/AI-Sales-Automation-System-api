@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace WhatsAppSalesAutomation.Domain.Enums;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum PlatformNotificationKind
 {
     /// <summary>A tenant's background job has failed several runs in a row.</summary>
@@ -18,9 +21,13 @@ public enum PlatformNotificationKind
     RefundFailed = 4,
 
     /// <summary>A tenant's plan period ended and could not be renewed - the plan has no price for the tenant's country.</summary>
-    PlanRenewalFailed = 5
+    PlanRenewalFailed = 5,
+
+    /// <summary>Something only the platform can change (e.g. a Simulated AI provider) affected a tenant; a ticket was raised for the product owner.</summary>
+    ConfigurationNeeded = 6
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum PlatformNotificationSeverity
 {
     Info = 0,

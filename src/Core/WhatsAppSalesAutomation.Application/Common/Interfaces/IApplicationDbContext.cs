@@ -209,6 +209,8 @@ public interface IApplicationDbContext
 
     DbSet<PlatformNotification> PlatformNotifications { get; }
 
+    DbSet<PlatformTicket> PlatformTickets { get; }
+
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
     DbSet<StudioActivity> StudioActivities { get; }

@@ -39,5 +39,7 @@ public enum TenantNotificationKind
     // while there is still time to change what they send.
     QualityWarning = 18,
     // Sending stopped: the number's quality fell to Red and the account is held for review.
-    SendingPaused = 19
+    SendingPaused = 19,
+    // Sent to the product owner (never a tenant) when a platform setting such as a Simulated AI provider needs fixing.
+    PlatformSetupNeeded = 20
 }

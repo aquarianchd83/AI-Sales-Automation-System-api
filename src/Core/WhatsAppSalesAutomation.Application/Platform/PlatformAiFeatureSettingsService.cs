@@ -337,13 +337,17 @@ public class PlatformAiFeatureSettingsService : IPlatformAiFeatureSettingsServic
         // What the conversation engine really runs on right now, so the page can never disagree with it.
         var provider = Canonical(credentials.Provider);
         var embedding = Canonical(credentials.EmbeddingProvider);
-        var providerKey = provider is not null && HasKey(credentials, provider);
-        var embeddingKey = embedding is not null && HasKey(credentials, embedding);
+        // On the Simulator the page still shows a tool (the first supported one) for the tester to pick, so the key flag is for THAT tool: reporting "no key" for it
+        // when one is saved made the page say "No ChatGPT key is saved yet" the moment ChatGPT was picked.
+        var shownProvider = provider ?? AiFeatures.Providers[0];
+        var shownEmbedding = embedding ?? AiFeatures.EmbeddingProviders[0];
+        var providerKey = HasKey(credentials, shownProvider);
+        var embeddingKey = HasKey(credentials, shownEmbedding);
         return new AiConversationDto(
             provider is null ? PlatformIntegrationSettingsService.SimulatorMode : PlatformIntegrationSettingsService.ApiMode,
-            provider ?? AiFeatures.Providers[0], providerKey,
+            shownProvider, providerKey,
             embedding is null ? PlatformIntegrationSettingsService.SimulatorMode : PlatformIntegrationSettingsService.ApiMode,
-            embedding ?? AiFeatures.EmbeddingProviders[0], embeddingKey,
+            shownEmbedding, embeddingKey,
             provider is not null && providerKey,
             AiFeatures.SupportedProviders(AiFeatures.Conversation), AiFeatures.EmbeddingProviders);
     }
