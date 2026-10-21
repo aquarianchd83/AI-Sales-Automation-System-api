@@ -143,3 +143,72 @@ public class CreditPackPriceConfiguration : IEntityTypeConfiguration<CreditPackP
         builder.HasIndex(p => new { p.CreditPackId, p.CountryCode }).IsUnique();
     }
 }
+
+public class CreditScenarioSettingConfiguration : IEntityTypeConfiguration<CreditScenarioSetting>
+{
+    public void Configure(EntityTypeBuilder<CreditScenarioSetting> builder)
+    {
+        builder.ToTable("CreditScenarioSettings");
+        builder.HasKey(s => s.Id);
+        builder.Property(s => s.Scenario).HasConversion<string>().HasMaxLength(40);
+        builder.Property(s => s.Payer).HasConversion<string>().HasMaxLength(20);
+        builder.Property(s => s.UnitsPerAction).HasColumnType("decimal(18,4)");
+        builder.HasIndex(s => s.Scenario).IsUnique();
+    }
+}
+
+public class PlatformCreditWalletConfiguration : IEntityTypeConfiguration<PlatformCreditWallet>
+{
+    public void Configure(EntityTypeBuilder<PlatformCreditWallet> builder)
+    {
+        builder.ToTable("PlatformCreditWallets");
+        builder.HasKey(w => w.Id);
+        builder.Property(w => w.QuotaType).HasConversion<string>().HasMaxLength(30);
+        builder.Property(w => w.Balance).HasColumnType("decimal(18,4)");
+        builder.Property(w => w.RowVersion).IsRowVersion();
+        builder.HasIndex(w => w.QuotaType).IsUnique();
+    }
+}
+
+public class PlatformCreditEntryConfiguration : IEntityTypeConfiguration<PlatformCreditEntry>
+{
+    public void Configure(EntityTypeBuilder<PlatformCreditEntry> builder)
+    {
+        builder.ToTable("PlatformCreditEntries");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.QuotaType).HasConversion<string>().HasMaxLength(30);
+        builder.Property(e => e.EntryType).HasConversion<string>().HasMaxLength(30);
+        builder.Property(e => e.UnitsDelta).HasColumnType("decimal(18,4)");
+        builder.Property(e => e.BalanceAfter).HasColumnType("decimal(18,4)");
+        builder.Property(e => e.OperationKey).IsRequired().HasMaxLength(200);
+        builder.Property(e => e.Note).HasMaxLength(500);
+        builder.HasIndex(e => new { e.QuotaType, e.OccurredAtUtc });
+        builder.HasIndex(e => e.OperationKey);
+    }
+}
+
+public class CreditUsageConfiguration : IEntityTypeConfiguration<CreditUsage>
+{
+    public void Configure(EntityTypeBuilder<CreditUsage> builder)
+    {
+        builder.ToTable("CreditUsages");
+        builder.HasKey(u => u.Id);
+        builder.Property(u => u.Scenario).HasConversion<string>().HasMaxLength(40);
+        builder.Property(u => u.QuotaType).HasConversion<string>().HasMaxLength(30);
+        builder.Property(u => u.ConfiguredPayer).HasConversion<string>().HasMaxLength(20);
+        builder.Property(u => u.ChargedTo).HasConversion<string>().HasMaxLength(20);
+        builder.Property(u => u.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(u => u.Units).HasColumnType("decimal(18,4)");
+        builder.Property(u => u.OperationKey).IsRequired().HasMaxLength(200);
+        builder.Property(u => u.ReferenceType).HasMaxLength(50);
+        builder.Property(u => u.ReferenceId).HasMaxLength(100);
+        builder.Property(u => u.Description).HasMaxLength(300);
+        builder.Property(u => u.SettlementNote).HasMaxLength(500);
+
+        builder.HasIndex(u => u.OccurredAtUtc);
+        builder.HasIndex(u => new { u.TenantId, u.OccurredAtUtc });
+        builder.HasIndex(u => new { u.Scenario, u.OccurredAtUtc });
+        // One row per spend: what makes a retried spend a no-op rather than a second record.
+        builder.HasIndex(u => new { u.TenantId, u.OperationKey }).IsUnique();
+    }
+}
