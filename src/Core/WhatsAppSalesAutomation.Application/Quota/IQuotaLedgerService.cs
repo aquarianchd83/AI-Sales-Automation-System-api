@@ -12,21 +12,16 @@ namespace WhatsAppSalesAutomation.Application.Quota;
 /// </summary>
 public interface IQuotaLedgerService
 {
-    /// <summary>Usable balance per quota type (expired grants excluded), with the live grants behind it.
-    /// Always returns all three types, zero when the tenant has never held any.</summary>
-    Task<IReadOnlyList<QuotaBalanceDto>> GetBalancesAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    /// <summary>Adds plan credits to the wallet, once per <paramref name="operationKey"/> (a repeat is a no-op, returning false). They never expire - the plan does not. <paramref name="paymentId"/> ties the grant to the payment that bought the plan, so a refund of that payment can take back what is unspent.</summary>
+    Task<bool> GrantPlanCreditsAsync(Guid tenantId, decimal units, string operationKey, string note, QuotaGrantOrigin origin, Guid? paymentId = null, CancellationToken cancellationToken = default);
 
-    /// <summary>Grants a period's included quota for every quota type the plan defines, expiring at
-    /// <paramref name="periodEndUtc"/>. Idempotent per (tenant, period start, type).</summary>
-    Task AllocatePlanQuotaAsync(Guid tenantId, Guid planId, DateTime periodStartUtc, DateTime periodEndUtc, Guid? paymentId, CancellationToken cancellationToken = default);
+    /// <summary>The usable credit balance (expired grants excluded), with the live grants behind it.
+    /// One entry - the credit wallet - zero when the tenant has never held any.</summary>
+    Task<IReadOnlyList<QuotaBalanceDto>> GetBalancesAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     /// <summary>Grants a purchased pack, valid for <see cref="QuotaLedgerService.CreditValidityMonths"/> months.
     /// Idempotent per payment.</summary>
     Task GrantCreditsAsync(Guid tenantId, CreditPack pack, Guid paymentId, DateTime purchasedAtUtc, CancellationToken cancellationToken = default);
-
-    /// <summary>Gives a new tenant its free trial allocation, expiring with the trial. Idempotent per
-    /// (tenant, quota type) - calling it again never grants twice.</summary>
-    Task GrantTrialQuotaAsync(Guid tenantId, IReadOnlyDictionary<QuotaType, decimal> units, DateTime expiresAtUtc, CancellationToken cancellationToken = default);
 
     Task<ConsumeResult> ConsumeAsync(ConsumeRequest request, CancellationToken cancellationToken = default);
 
@@ -52,11 +47,6 @@ public interface IQuotaLedgerService
     /// <summary>Gives held units back: all of them when <paramref name="keepFraction"/> is 0 (rejected, cancelled,
     /// expired), or the unapproved share on a partial approval. Idempotent per request. Returns units released.</summary>
     Task<decimal> ReleaseRefundHoldAsync(Guid tenantId, Guid refundRequestId, decimal keepFraction, CancellationToken cancellationToken = default);
-
-    /// <summary>Writes off whatever is left of the tenant's included plan quota (never purchased credits).
-    /// Used when a plan change starts a new paid period, so the old period's quota can't be stacked on the
-    /// new one. Returns the units forfeited.</summary>
-    Task<decimal> ForfeitPlanAllocationsAsync(Guid tenantId, string reason, CancellationToken cancellationToken = default);
 
     /// <summary>Writes off every grant past its expiry, across all tenants. Returns grants processed.</summary>
     Task<int> ExpireDueAsync(CancellationToken cancellationToken = default);

@@ -69,12 +69,13 @@ public class StudioMeteringService : IStudioMeteringService
         if (units > 0)
         {
             var spent = await _ledger.ConsumeAsync(
-                new ConsumeRequest(request.TenantId, rule.QuotaType, units, operationKey, "StudioActivity", activity.Id.ToString(), rule.Label),
+                new ConsumeRequest(request.TenantId, QuotaType.Credits, units, operationKey, "StudioActivity", activity.Id.ToString(), rule.Label,
+                    Scenario: rule.QuotaType == QuotaType.VideoRenders ? CreditScenario.ContentStudioVideoRender : CreditScenario.ContentStudioGeneration),
                 cancellationToken);
 
             if (!spent.Sufficient)
             {
-                var label = QuotaAlertService.Label(rule.QuotaType);
+                var label = "credits";
                 activity.Status = StudioActivityStatus.Blocked;
                 activity.Units = 0;
                 activity.BalanceAfter = spent.BalanceAfter;
@@ -86,13 +87,14 @@ public class StudioMeteringService : IStudioMeteringService
                 return new StudioChargeResult(false, activity.Id, false, $"You don't have enough {label} left for this. Buy credits to continue.");
             }
 
-            activity.Units = units;
+            // Recorded in credits - what really left the wallet (a render costs more than a script step) - not in the studio units the step was sized in.
+            activity.Units = spent.CreditsSpent ?? units;
             activity.BalanceAfter = spent.BalanceAfter;
         }
         else
         {
             activity.BalanceAfter = (await _ledger.GetBalancesAsync(request.TenantId, cancellationToken))
-                .Single(b => b.QuotaType == rule.QuotaType).Balance;
+                .Single(b => b.QuotaType == QuotaType.Credits).Balance;
         }
 
         activity.Status = StudioActivityStatus.Charged;
@@ -128,7 +130,7 @@ public class StudioMeteringService : IStudioMeteringService
         if (activity.Units > 0)
         {
             activity.BalanceAfter = (await _ledger.GetBalancesAsync(activity.TenantId, cancellationToken))
-                .Single(b => b.QuotaType == activity.QuotaType).Balance;
+                .Single(b => b.QuotaType == QuotaType.Credits).Balance;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -167,7 +169,7 @@ public class StudioMeteringService : IStudioMeteringService
     public async Task<StudioOverviewDto> GetOverviewAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         var balances = (await _ledger.GetBalancesAsync(tenantId, cancellationToken))
-            .Where(b => StudioChargeCatalog.QuotaTypes.Contains(b.QuotaType))
+            .Where(b => b.QuotaType == QuotaType.Credits)
             .ToList();
 
         var since = _dateTime.UtcNow.AddDays(-OverviewDays);

@@ -47,7 +47,7 @@ public sealed class LeadFollowUpTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        var gate = new QuotaGate(_ledger, new FixedOptions<WhatsAppPricingOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
+        var gate = CreditTestDoubles.Gate(_ledger);
 
         var conversations = DispatchProxy.Create<IConversationService, Stub>();
         ((Stub)(object)conversations).Handler = (m, _) => m.Name == nameof(IConversationService.GetOrCreateActiveConversationIdAsync)
@@ -84,7 +84,7 @@ public sealed class LeadFollowUpTests : IDisposable
     private Task Fund(decimal units) => _ledger.AdjustAsync(_tenant.Id, QuotaType.WhatsAppMessages, units, "test funding", Guid.NewGuid());
 
     private async Task<decimal> BalanceAsync() =>
-        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.WhatsAppMessages).Balance;
+        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
     /// <summary>The test db does not stamp CreatedAt the way the real interceptor does; "what happened since it was
     /// scheduled" depends on it, so set it as production would.</summary>

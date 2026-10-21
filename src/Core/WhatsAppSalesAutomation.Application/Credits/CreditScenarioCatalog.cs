@@ -4,8 +4,9 @@ using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Credits;
 
-/// <summary>One credit scenario as the Credit Payers screen describes it. <paramref name="UnitsConfigurable"/> is true when the platform sets
-/// the cost of one action (product knowledge); otherwise the code that performs the action sizes the spend itself.</summary>
+/// <summary>One credit scenario as the Credit costs screen describes it. <paramref name="DefaultUnits"/> is what the action costs in CREDITS until the platform admin
+/// changes it: per unit for a scenario whose code sizes its own spend (a message, a reply, a candidate, a studio step), per action for product knowledge
+/// (<paramref name="UnitsConfigurable"/>). <paramref name="UnitLabel"/> names the unit for the placeholder shown on each feature.</summary>
 public sealed record CreditScenarioInfo(
     CreditScenario Scenario,
     string Title,
@@ -14,10 +15,11 @@ public sealed record CreditScenarioInfo(
     QuotaType QuotaType,
     CreditPayer DefaultPayer,
     bool UnitsConfigurable,
-    decimal DefaultUnits);
+    decimal DefaultUnits,
+    string UnitLabel);
 
-/// <summary>Every scenario the application spends credits for, with the defaults that apply until the platform admin changes them. The
-/// defaults keep today's behaviour: existing spends are charged to the tenant, and product knowledge - which charges no credit today - stays free.</summary>
+/// <summary>Every scenario the application spends credits for, with the defaults that apply until the platform admin changes them. Every scenario
+/// is paid by the tenant's one credit wallet unless the platform admin chooses to cover it.</summary>
 public static class CreditScenarioCatalog
 {
     public const string ProductKnowledgeReference = "ProductKnowledge";
@@ -26,25 +28,25 @@ public static class CreditScenarioCatalog
     {
         new(CreditScenario.CustomerChatReply, "Customer chat reply", "Customer chat",
             "The AI answering a customer in WhatsApp. One AI conversation per customer message.",
-            QuotaType.AiConversations, CreditPayer.Tenant, false, 1m),
+            QuotaType.Credits, CreditPayer.Tenant, false, 1m, "reply"),
         new(CreditScenario.WhatsAppTemplateSend, "WhatsApp template send", "Messaging",
             "A billable template message sent by an agent, a campaign or a lead follow-up. Free-form replies inside the 24-hour window cost nothing.",
-            QuotaType.WhatsAppMessages, CreditPayer.Tenant, false, 1m),
+            QuotaType.Credits, CreditPayer.Tenant, false, 1m, "message"),
         new(CreditScenario.LeadDiscovery, "Lead discovery", "Lead discovery",
             "Each candidate business a discovery run evaluates - new, duplicate or rejected alike.",
-            QuotaType.LeadCandidates, CreditPayer.Tenant, false, 1m),
+            QuotaType.Credits, CreditPayer.Tenant, false, 1m, "candidate"),
         new(CreditScenario.ContentStudioGeneration, "Content Studio generation", "Content Studio",
             "Topic ideas, a script, a scene breakdown, a voice-over or a generated illustration.",
-            QuotaType.ContentGenerations, CreditPayer.Tenant, false, 1m),
+            QuotaType.Credits, CreditPayer.Tenant, false, 1m, "step"),
         new(CreditScenario.ContentStudioVideoRender, "Content Studio video render", "Content Studio",
             "Rendering a finished video.",
-            QuotaType.VideoRenders, CreditPayer.Tenant, false, 1m),
+            QuotaType.Credits, CreditPayer.Tenant, false, 10m, "video"),
         new(CreditScenario.ProductKnowledgeReading, "Product knowledge: reading sources", "Product knowledge",
-            "Reading uploaded documents, scans and websites and building the product knowledge from them. Free today.",
-            QuotaType.AiConversations, CreditPayer.Platform, true, 0m),
+            "Reading uploaded documents, scans and websites and building the product knowledge from them.",
+            QuotaType.Credits, CreditPayer.Tenant, true, 5m, "action"),
         new(CreditScenario.ProductKnowledgeAnswering, "Product knowledge: drafting and answering", "Product knowledge",
-            "Drafting answers, checking for conflicts and missing information, and answering questions from the sources. Free today.",
-            QuotaType.AiConversations, CreditPayer.Platform, true, 0m),
+            "Drafting answers, checking for conflicts and missing information, and answering questions from the sources.",
+            QuotaType.Credits, CreditPayer.Tenant, true, 1m, "action"),
     };
 
     public static CreditScenarioInfo For(CreditScenario scenario) => All.Single(i => i.Scenario == scenario);
@@ -61,7 +63,7 @@ public static class CreditScenarioCatalog
             "Message" => CreditScenario.WhatsAppTemplateSend,
             "AiTransaction" or "AiInteraction" => CreditScenario.CustomerChatReply,
             "LeadDiscoveryRun" => CreditScenario.LeadDiscovery,
-            "StudioActivity" => request.QuotaType == QuotaType.VideoRenders ? CreditScenario.ContentStudioVideoRender : CreditScenario.ContentStudioGeneration,
+            "StudioActivity" => CreditScenario.ContentStudioGeneration, // a video render names its own scenario (see StudioMeteringService)
             _ => null
         };
     }

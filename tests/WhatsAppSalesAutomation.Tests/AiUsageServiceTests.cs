@@ -92,11 +92,11 @@ public sealed class AiUsageServiceTests : IDisposable
 
     private Task GrantAsync(decimal units, QuotaGrantOrigin origin = QuotaGrantOrigin.CreditPurchase) =>
         origin == QuotaGrantOrigin.Trial
-            ? _ledger.GrantTrialQuotaAsync(_tenant, new Dictionary<QuotaType, decimal> { [QuotaType.AiConversations] = units }, Now.AddDays(10))
-            : _ledger.GrantCreditsAsync(_tenant, new CreditPack { QuotaType = QuotaType.AiConversations, Name = "p", Units = units, PriceCents = 100 }, Guid.NewGuid(), Now);
+            ? _ledger.GrantPlanCreditsAsync(_tenant, units, "trial", "Trial plan starter credits", QuotaGrantOrigin.Trial)
+            : _ledger.GrantCreditsAsync(_tenant, new CreditPack { QuotaType = QuotaType.Credits, Name = "p", Units = units, PriceCents = 100 }, Guid.NewGuid(), Now);
 
     private async Task<decimal> BalanceAsync() =>
-        (await _ledger.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == QuotaType.AiConversations).Balance;
+        (await _ledger.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
     [Fact]
     public async Task Paid_tenant_with_credit_is_charged_one_and_audited()

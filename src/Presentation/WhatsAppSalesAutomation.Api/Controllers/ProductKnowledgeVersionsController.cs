@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -12,6 +14,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// one, and restoring an old one makes a new version that copies it.
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.ProductKnowledge)]
 [Route("api/v1/product-knowledge/versions")]
 [Authorize(Roles = AppRoles.Admin)]
 public class ProductKnowledgeVersionsController : ControllerBase

@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -27,6 +28,7 @@ public class BillingService : IBillingService
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantJobProvisioner _jobProvisioner;
     private readonly IQuotaLedgerService _quota;
+    private readonly ICreditAllocationService _credits;
     private readonly IPricingService _pricing;
     /// <summary>Optional so a caller that only exercises pricing/plans need not supply one; DI always does.</summary>
     private readonly ITenantNotifier? _notifier;
@@ -38,8 +40,10 @@ public class BillingService : IBillingService
         ITenantJobProvisioner jobProvisioner,
         IQuotaLedgerService quota,
         IPricingService pricing,
+        ICreditAllocationService credits,
         ITenantNotifier? notifier = null)
     {
+        _credits = credits;
         _notifier = notifier;
         _pricing = pricing;
         _quota = quota;
@@ -77,9 +81,9 @@ public class BillingService : IBillingService
 
         var planIds = plans.Select(p => p.Id).ToList();
         var pricesByPlan = await CatalogPricing.LoadPlanPricesAsync(_context, planIds, cancellationToken);
-        var quotasByPlan = (await _context.PlanQuotas.Where(q => planIds.Contains(q.PlanId)).ToListAsync(cancellationToken))
-            .GroupBy(q => q.PlanId)
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<IncludedQuotaDto>)g.OrderBy(q => q.QuotaType).Select(q => new IncludedQuotaDto(q.QuotaType, q.IncludedUnits)).ToList());
+        var featuresByPlan = (await _context.PlanFeatures.Where(f => planIds.Contains(f.PlanId)).ToListAsync(cancellationToken))
+            .GroupBy(f => f.PlanId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<PlatformFeature>)g.Select(f => f.Feature).OrderBy(f => f).ToList());
 
         // A plan with no price set for this country is not sold there - it is left out, never shown at a converted price.
         var result = new List<PlanDto>();
@@ -92,7 +96,8 @@ public class BillingService : IBillingService
             result.Add(new PlanDto(
                 p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth, p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize,
                 quote.SubtotalUsdCents, quote.CurrencyCode, quote.CurrencySymbol, quote.Subtotal,
-                quotasByPlan.GetValueOrDefault(p.Id) ?? Array.Empty<IncludedQuotaDto>(),
+                p.StarterCredits, p.MonthlyCredits,
+                featuresByPlan.GetValueOrDefault(p.Id) ?? Array.Empty<PlatformFeature>(),
                 quote.TaxLines, quote.Tax, quote.Total));
         }
 
@@ -150,26 +155,25 @@ public class BillingService : IBillingService
         var now = _dateTime.UtcNow;
         subscription.PlanId = plan.Id;
         subscription.Status = SubscriptionStatus.Active;
-        subscription.CurrentPeriodStartUtc = now;
-        subscription.CurrentPeriodEndUtc = now.AddMonths(1);
+        subscription.CurrentPeriodStartUtc = null;
+        subscription.CurrentPeriodEndUtc = null;
 
         tenant.Status = TenantStatus.Active;
+        tenant.TrialEndsAtUtc = null;
 
         var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
         var planPrice = (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken))
             .GetValueOrDefault(plan.Id)?.GetValueOrDefault(region.CountryCode);
         var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode)
             ?? throw new ConflictException("This plan isn't available in your country.");
-        var payment = PaymentFactory.For(tenantId, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id,
-            periodStartUtc: now, periodEndUtc: now.AddMonths(1));
+        var payment = PaymentFactory.For(tenantId, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id);
         _context.Payments.Add(payment);
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        // A new paid period replaces the old one: whatever is left of the previous period's included quota
-        // is forfeited so two periods' allowances can never stack. Purchased credits are untouched.
-        await _quota.ForfeitPlanAllocationsAsync(tenantId, "Replaced by a new plan period", cancellationToken);
-        await _quota.AllocatePlanQuotaAsync(tenantId, plan.Id, now, now.AddMonths(1), payment.Id, cancellationToken);
+        // The plan never expires, so there is no period to replace: the plan's credits simply arrive in the wallet (once for the starter credits,
+        // and this month's). What the tenant already has is untouched.
+        await _credits.AssignPlanAsync(tenantId, plan.Id, payment.Id, cancellationToken);
 
         // Subscribing is the one non-operator path that moves a tenant's status, so it re-syncs its
         // background jobs like the Platform Admin Console's own actions do: a tenant that was suspended

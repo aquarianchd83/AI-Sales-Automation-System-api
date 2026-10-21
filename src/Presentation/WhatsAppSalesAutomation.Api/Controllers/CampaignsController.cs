@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Campaigns;
@@ -9,6 +11,7 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 [ApiController]
+[RequiresFeature(PlatformFeature.WhatsAppMessaging)]
 [Route("api/v1/campaigns")]
 [Authorize]
 public class CampaignsController : ControllerBase
@@ -139,6 +142,7 @@ public class CampaignsController : ControllerBase
 /// CRUD policy.
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.WhatsAppMessaging)]
 [Route("api/v1/campaigns/ops")]
 [Authorize(Roles = AppRoles.Admin)]
 public class CampaignOpsController : ControllerBase

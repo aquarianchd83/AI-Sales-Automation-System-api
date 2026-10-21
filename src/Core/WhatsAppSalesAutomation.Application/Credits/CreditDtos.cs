@@ -14,6 +14,7 @@ public record CreditScenarioDto(
     CreditPayer Payer,
     CreditPayer DefaultPayer,
     bool UnitsConfigurable,
+    // What one unit costs in credits (for product knowledge, one action): the platform's Credit costs setting for the scenario.
     decimal? UnitsPerAction,
     decimal PlatformBalance,
     int ActionsLast30Days,
@@ -21,7 +22,8 @@ public record CreditScenarioDto(
     decimal UnitsChargedToTenantsLast30Days,
     int FallbackCountLast30Days,
     decimal? ProviderCostLast30DaysUsd,
-    DateTime? ChangedAtUtc);
+    DateTime? ChangedAtUtc,
+    string UnitLabel = "");
 
 public record UpdateCreditPayerRequest(CreditPayer Payer, decimal? UnitsPerAction = null);
 

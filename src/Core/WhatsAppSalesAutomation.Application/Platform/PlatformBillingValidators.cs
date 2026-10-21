@@ -25,7 +25,9 @@ public class CreatePlanRequestValidator : AbstractValidator<CreatePlanRequest>
         RuleFor(x => x.MaxKnowledgeBaseArticles).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxLeadDiscoveryBatchSize).GreaterThanOrEqualTo(0);
         RuleFor(x => x.PriceMonthlyCents).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.IncludedQuotas).SetValidator(new PlanQuotaListValidator()!);
+        RuleFor(x => x.StarterCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits);
+        RuleFor(x => x.MonthlyCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits);
+        RuleForEach(x => x.Features).IsInEnum();
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
     }
 }
@@ -41,7 +43,9 @@ public class UpdatePlanRequestValidator : AbstractValidator<UpdatePlanRequest>
         RuleFor(x => x.MaxKnowledgeBaseArticles).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxLeadDiscoveryBatchSize).GreaterThanOrEqualTo(0);
         RuleFor(x => x.PriceMonthlyCents).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.IncludedQuotas).SetValidator(new PlanQuotaListValidator()!);
+        RuleFor(x => x.StarterCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits).When(x => x.StarterCredits is not null);
+        RuleFor(x => x.MonthlyCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits).When(x => x.MonthlyCredits is not null);
+        RuleForEach(x => x.Features).IsInEnum();
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
     }
 }

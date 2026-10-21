@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -29,6 +30,7 @@ public class BillingController : ControllerBase
     private readonly ITenantBillingNoticeService _notices;
     private readonly ICurrentUserService _currentUser;
     private readonly ICountryAvailability _countries;
+    private readonly ICreditWalletService _wallet;
 
     public BillingController(
         IBillingService billingService,
@@ -38,8 +40,10 @@ public class BillingController : ControllerBase
         IRefundService refunds,
         ITenantBillingNoticeService notices,
         ICurrentUserService currentUser,
-        ICountryAvailability countries)
+        ICountryAvailability countries,
+        ICreditWalletService wallet)
     {
+        _wallet = wallet;
         _countries = countries;
         _quota = quota;
         _aiUsage = aiUsage;
@@ -98,7 +102,32 @@ public class BillingController : ControllerBase
     /// <summary>Every action above requires SuperAdmin/Admin, which - unlike PlatformSuperAdmin, whose
     /// role set never includes either - guarantees a real tenant is in scope; this just gives that
     /// guarantee a non-nullable type to hand IBillingService.</summary>
-    /// <summary>The tenant's prepaid balance per quota type, with the live grants behind each.</summary>
+    /// <summary>What the signed-in user's plan includes and what each action costs - for hiding what is not in the plan and for the credit placeholder each feature shows. Any tenant user.</summary>
+    [HttpGet("entitlements")]
+    [Authorize]
+    public async Task<ActionResult<EntitlementsDto>> GetEntitlements(CancellationToken cancellationToken)
+        => Ok(await _wallet.GetEntitlementsAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>The single wallet: balance, plan, and for every feature its cost, what it spent this month and the tenant's own monthly cap.</summary>
+    [HttpGet("wallet")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<WalletSummaryDto>> GetWallet(CancellationToken cancellationToken)
+        => Ok(await _wallet.GetSummaryAsync(RequireTenantId(), cancellationToken));
+
+    /// <summary>Sets, or with a null limit removes, the tenant's monthly credit cap for one feature.</summary>
+    [HttpPut("wallet/caps")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<WalletSummaryDto>> SetFeatureCap([FromBody] SetFeatureCapRequest request, CancellationToken cancellationToken)
+        => Ok(await _wallet.SetCapAsync(RequireTenantId(), request, cancellationToken));
+
+    /// <summary>One feature's own ledger - every spend and give-back for it, newest first.</summary>
+    [HttpGet("wallet/ledger")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetFeatureLedger(
+        [FromQuery] PlatformFeature feature, [FromQuery] PagedRequest paging, CancellationToken cancellationToken)
+        => Ok(await _wallet.GetFeatureLedgerAsync(RequireTenantId(), feature, paging, cancellationToken));
+
+    /// <summary>The tenant's credit balance, with the live grants behind it.</summary>
     [HttpGet("quota")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<IReadOnlyList<QuotaBalanceDto>>> GetQuota(CancellationToken cancellationToken)

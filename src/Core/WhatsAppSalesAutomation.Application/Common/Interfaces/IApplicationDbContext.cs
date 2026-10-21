@@ -141,7 +141,9 @@ public interface IApplicationDbContext
 
     DbSet<Payment> Payments { get; }
 
-    DbSet<PlanQuota> PlanQuotas { get; }
+    DbSet<PlanFeature> PlanFeatures { get; }
+
+    DbSet<TenantFeatureCap> TenantFeatureCaps { get; }
 
     DbSet<CreditPack> CreditPacks { get; }
 

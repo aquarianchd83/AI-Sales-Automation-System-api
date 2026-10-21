@@ -147,6 +147,10 @@ public static class DependencyInjection
         services.AddScoped<ICreditRouter, CreditRouter>();
         services.AddScoped<IQuotaLedgerService, CreditRoutingLedger>();
         services.AddScoped<ICreditPayerService, CreditPayerService>();
+        services.AddScoped<ICreditCostService, CreditCostService>();
+        services.AddScoped<IFeatureAccessService, FeatureAccessService>();
+        services.AddScoped<ICreditWalletService, CreditWalletService>();
+        services.AddScoped<ICreditAllocationService, CreditAllocationService>();
         services.AddScoped<IQuotaGate, QuotaGate>();
         services.AddScoped<IAiUsageService, AiUsageService>();
         services.Configure<RefundPolicyOptions>(configuration.GetSection("Billing:Refunds"));
@@ -156,8 +160,6 @@ public static class DependencyInjection
         services.AddScoped<ITenantNotifier, TenantNotifier>();
         services.AddScoped<IQuotaAlertService, QuotaAlertService>();
         services.AddScoped<ITenantBillingNoticeService, TenantBillingNoticeService>();
-        services.AddScoped<ISubscriptionRenewalService, SubscriptionRenewalService>();
-        services.AddScoped<IPlanExpiryNoticeService, PlanExpiryNoticeService>();
         services.AddScoped<ICountryAvailability, CountryAvailability>();
         services.AddScoped<IWhatsAppSpendService, WhatsAppSpendService>();
         services.AddScoped<ICurrentUserPricingService, CurrentUserPricingService>();

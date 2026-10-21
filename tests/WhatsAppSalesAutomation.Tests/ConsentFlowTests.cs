@@ -57,7 +57,7 @@ public sealed class ConsentFlowTests : IDisposable
         _db.Database.EnsureCreated();
 
         var ledger = new QuotaLedgerService(_db, _clock);
-        var gate = new QuotaGate(ledger, new FixedOptions<WhatsAppPricingOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
+        var gate = CreditTestDoubles.Gate(ledger);
 
         var conversations = DispatchProxy.Create<IConversationService, Stub>();
         ((Stub)(object)conversations).Handler = (m, _) => m.Name == nameof(IConversationService.GetOrCreateActiveConversationIdAsync)

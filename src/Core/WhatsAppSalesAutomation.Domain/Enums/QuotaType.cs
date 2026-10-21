@@ -21,5 +21,9 @@ public enum QuotaType
     ContentGenerations = 3,
 
     /// <summary>One finished video rendered by the hosted render service, which bills per rendered video.</summary>
-    VideoRenders = 4
+    VideoRenders = 4,
+
+    /// <summary>The single credit wallet every feature spends from. The five types above are retired: new money only ever lands here, and
+    /// only this type is shown or spent. They stay in the enum so old ledger rows still read.</summary>
+    Credits = 5
 }

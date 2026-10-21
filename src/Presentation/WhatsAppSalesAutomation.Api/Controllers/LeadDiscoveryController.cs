@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -10,6 +12,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// leads the lead-discovery job has found. Runs happen on the job's schedule; a PlatformSuperAdmin can also
 /// start one from the Platform Admin Console's job list.</summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.LeadDiscovery)]
 [Route("api/v1/lead-discovery")]
 [Authorize]
 public class LeadDiscoveryController : ControllerBase

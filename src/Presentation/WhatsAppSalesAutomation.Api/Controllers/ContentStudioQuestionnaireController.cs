@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -15,6 +17,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// platform has the studio switched on for the tenant (see StudioGate), and works on the calling tenant only.
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.ContentStudio)]
 [Route("api/v1/content-studio")]
 [Authorize(Roles = StudioRoles.Contributors)]
 public class ContentStudioQuestionnaireController : ControllerBase

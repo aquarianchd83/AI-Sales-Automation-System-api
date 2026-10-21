@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -43,7 +44,7 @@ public sealed class CountryPricingTests : IDisposable
 
         var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
         // India's GST at 18%, the platform registered in Maharashtra.
-        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, ledger, TestPricing.Default());
+        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, ledger, TestPricing.Default(), new CreditAllocationService(_db, ledger, _clock));
 
         _db.Tenants.AddRange(_mumbai, _delhi, _britain, _elsewhere);
         _db.SaveChanges();
@@ -56,7 +57,7 @@ public sealed class CountryPricingTests : IDisposable
     }
 
     private static CreatePlanRequest Plan(string code, params CountryPriceInput[] prices) =>
-        new(code, "Pro", 5, 1000, 5, 20, 0, 50, null, prices);
+        new(code, "Pro", 5, 1000, 5, 20, 0, 50, 0m, 0m, null, prices);
 
     private Task<PlatformPlanDto> ProPlan() =>
         _catalog.CreatePlanAsync(Plan("pro", new CountryPriceInput("IN", 999m), new CountryPriceInput("GB", 40m)));
