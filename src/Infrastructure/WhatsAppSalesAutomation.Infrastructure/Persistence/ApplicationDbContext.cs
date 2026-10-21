@@ -162,6 +162,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<QuotaWallet> QuotaWallets => Set<QuotaWallet>();
 
+    public DbSet<CreditScenarioSetting> CreditScenarioSettings => Set<CreditScenarioSetting>();
+
+    public DbSet<PlatformCreditWallet> PlatformCreditWallets => Set<PlatformCreditWallet>();
+
+    public DbSet<PlatformCreditEntry> PlatformCreditEntries => Set<PlatformCreditEntry>();
+
+    public DbSet<CreditUsage> CreditUsages => Set<CreditUsage>();
+
     public DbSet<RefundRequest> RefundRequests => Set<RefundRequest>();
 
     public DbSet<TenantNotification> TenantNotifications => Set<TenantNotification>();

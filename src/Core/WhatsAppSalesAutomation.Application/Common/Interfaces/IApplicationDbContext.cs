@@ -155,6 +155,14 @@ public interface IApplicationDbContext
 
     DbSet<QuotaWallet> QuotaWallets { get; }
 
+    DbSet<CreditScenarioSetting> CreditScenarioSettings { get; }
+
+    DbSet<PlatformCreditWallet> PlatformCreditWallets { get; }
+
+    DbSet<PlatformCreditEntry> PlatformCreditEntries { get; }
+
+    DbSet<CreditUsage> CreditUsages { get; }
+
     DbSet<RefundRequest> RefundRequests { get; }
 
     DbSet<TenantNotification> TenantNotifications { get; }

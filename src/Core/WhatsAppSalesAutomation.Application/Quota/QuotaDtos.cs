@@ -31,7 +31,9 @@ public record QuotaLedgerQuery : Common.Models.PagedRequest
 /// <summary>A request to spend units. <see cref="OperationKey"/> must be unique per real-world event
 /// (a message id, an AI interaction id, a run id): retrying the same key never charges twice.
 /// <see cref="AllowPartial"/> spends whatever is available instead of refusing when the balance is
-/// short - for work that can shrink (a discovery run with a smaller batch), never for a single send.</summary>
+/// short - for work that can shrink (a discovery run with a smaller batch), never for a single send.
+/// <see cref="Scenario"/> names which credit scenario the spend is, so the platform's payer setting for it applies; left null, it is worked out
+/// from <see cref="ReferenceType"/> (see <c>CreditScenarioCatalog.Classify</c>).</summary>
 public record ConsumeRequest(
     Guid TenantId,
     QuotaType QuotaType,
@@ -40,7 +42,8 @@ public record ConsumeRequest(
     string ReferenceType,
     string ReferenceId,
     string? Note = null,
-    bool AllowPartial = false);
+    bool AllowPartial = false,
+    CreditScenario? Scenario = null);
 
 /// <summary>How much of what one payment bought is still unspent - what refund eligibility is judged on.
 /// <see cref="UnitsRemaining"/> is zero for a grant that has expired or is already held.</summary>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -23,11 +24,13 @@ public sealed class AiTaskRunner : IAiTaskRunner
     private readonly IAiExecutionLog _log;
     private readonly IAiTaskPolicyProvider _policy;
     private readonly ILogger<AiTaskRunner> _logger;
+    private readonly ICreditRouter? _credits;
 
     public AiTaskRunner(
         IAiFeatureRouting routing, IPlatformAiConfigProvider credentials, IAiCompletionClient client, IAiExecutionLog log,
-        IAiTaskPolicyProvider policy, ILogger<AiTaskRunner> logger)
+        IAiTaskPolicyProvider policy, ILogger<AiTaskRunner> logger, ICreditRouter? credits = null)
     {
+        _credits = credits;
         _routing = routing;
         _credentials = credentials;
         _client = client;
@@ -165,6 +168,7 @@ public sealed class AiTaskRunner : IAiTaskRunner
 
                 if (ok)
                 {
+                    await ChargeCreditsAsync(request, correlation, ct);
                     return new AiTaskResult(true, text, AiExecutionMode.Live, provider, call.Model, failedProvider is not null, null, null, correlation, attempts,
                         call.InputTokens, call.OutputTokens, cost);
                 }
@@ -188,6 +192,17 @@ public sealed class AiTaskRunner : IAiTaskRunner
         return new AiTaskResult(
             false, null, AiExecutionMode.Live, attempts.LastOrDefault()?.Provider ?? route.Provider, null, attempts.Count > 1, lastCode ?? AiErrorCodes.NoProvider,
             lastMessage ?? "No AI provider could run this task.", correlation, attempts, null, null, null);
+    }
+
+    /// <summary>A live call that worked is charged to the scenario's payer, once per task run (a retry or fallback that failed first is not
+    /// charged). The simulator is free. A free scenario - the default - charges nothing, and a charge that cannot be made never fails the task:
+    /// the provider has already done the work.</summary>
+    private async Task ChargeCreditsAsync(AiTaskRequest request, Guid correlation, CancellationToken ct)
+    {
+        if (_credits is null || request.TenantId is not { } tenantId || CreditScenarioCatalog.ForAiTask(request.Task) is not { } scenario)
+            return;
+
+        await _credits.ChargeActionAsync(tenantId, scenario, $"pk:{correlation:N}", request.Task, ct);
     }
 
     private static (string Code, string Message)? SkipReason(AiTaskRequest request, AiTaskPolicy policy, AiCredentials credentials, string provider)

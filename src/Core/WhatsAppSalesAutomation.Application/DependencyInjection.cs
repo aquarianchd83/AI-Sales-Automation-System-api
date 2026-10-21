@@ -23,6 +23,7 @@ using WhatsAppSalesAutomation.Application.Media;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Application.MessageTemplates;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Settings;
 using WhatsAppSalesAutomation.Application.Packages;
@@ -140,7 +141,12 @@ public static class DependencyInjection
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IPlanLimitsService, PlanLimitsService>();
         services.Configure<TrialQuotaOptions>(configuration.GetSection("Billing:Trial"));
-        services.AddScoped<IQuotaLedgerService, QuotaLedgerService>();
+        // The tenant ledger itself, and in front of it the router that lets the platform pay for a scenario. Everything else asks for
+        // IQuotaLedgerService and gets the routing one.
+        services.AddScoped<QuotaLedgerService>();
+        services.AddScoped<ICreditRouter, CreditRouter>();
+        services.AddScoped<IQuotaLedgerService, CreditRoutingLedger>();
+        services.AddScoped<ICreditPayerService, CreditPayerService>();
         services.AddScoped<IQuotaGate, QuotaGate>();
         services.AddScoped<IAiUsageService, AiUsageService>();
         services.Configure<RefundPolicyOptions>(configuration.GetSection("Billing:Refunds"));
