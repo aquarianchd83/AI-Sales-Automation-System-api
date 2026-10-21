@@ -218,6 +218,8 @@ public static class DependencyInjection
         services.AddScoped<IPlatformJobService, PlatformJobService>();
         services.AddScoped<IPlatformNotifier, PlatformNotifier>();
         services.AddScoped<IPlatformNotificationService, PlatformNotificationService>();
+        services.AddScoped<IPlatformTicketService, PlatformTicketService>();
+        services.AddScoped<IPlatformSetupAlerts, PlatformSetupAlerts>();
         services.AddScoped<ITenantJobProvisioner, TenantJobProvisioner>();
 
         return services;

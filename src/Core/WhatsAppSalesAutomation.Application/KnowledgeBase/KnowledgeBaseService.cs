@@ -544,9 +544,23 @@ public class KnowledgeBaseService : IKnowledgeBaseService
 
         var aiOptions = await _tenantConfig.GetAiOptionsAsync(cancellationToken);
 
+        // A chunk's own Embedding column holds one provider's vector (whichever was active when it was indexed), while the query is embedded by the provider active
+        // NOW. When they differ (e.g. indexed as Simulated, since switched to OpenAI) the vectors have different sizes and every score is 0 - so use the chunk's
+        // vector from the active provider, kept in the per-provider table, and only fall back to the column.
+        var provider = _embeddings.ProviderName;
+        var chunkIds = candidates.Select(x => x.Chunk.Id).ToList();
+        var activeVectors = chunkIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await _context.KnowledgeBaseChunkEmbeddings.AsNoTracking()
+                    .Where(e => chunkIds.Contains(e.ChunkId) && e.Provider == provider)
+                    .Select(e => new { e.ChunkId, e.Embedding })
+                    .ToListAsync(cancellationToken))
+                .GroupBy(e => e.ChunkId).ToDictionary(g => g.Key, g => g.First().Embedding);
+
         return candidates
             .Select(x => new RetrievedChunk(
-                x.Chunk.Id, x.Chunk.ArticleId, x.Chunk.ChunkText, CosineSimilarity(queryEmbedding, DeserializeEmbedding(x.Chunk.Embedding!)),
+                x.Chunk.Id, x.Chunk.ArticleId, x.Chunk.ChunkText,
+                CosineSimilarity(queryEmbedding, DeserializeEmbedding(activeVectors.GetValueOrDefault(x.Chunk.Id) ?? x.Chunk.Embedding!)),
                 x.ItemId, x.VersionId, x.IsMaterialClaim))
             .Where(r => r.RelevanceScore >= aiOptions.MinRelevanceScore)
             .OrderByDescending(r => r.RelevanceScore)

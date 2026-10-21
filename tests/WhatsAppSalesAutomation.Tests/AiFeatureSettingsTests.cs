@@ -328,6 +328,20 @@ public class AiFeatureSettingsTests
     }
 
     [Fact]
+    public async Task On_the_simulator_the_tool_shown_for_picking_reports_whether_its_key_is_saved()
+    {
+        // Both are on the Simulator, so the page offers the first tool (ChatGPT) to pick; its key IS saved, so picking it must not say "No ChatGPT key is saved yet".
+        var dto = await Service(new MemoryStore(), new FakeCredentials()).GetAsync();
+
+        Assert.Equal(("Simulator", "OpenAI", true), (dto.Conversation.Mode, dto.Conversation.Provider, dto.Conversation.ProviderHasKey));
+        Assert.Equal(("Simulator", "OpenAI", true), (dto.Conversation.EmbeddingMode, dto.Conversation.EmbeddingProvider, dto.Conversation.EmbeddingProviderHasKey));
+
+        var noKey = await Service(new MemoryStore(), new FakeCredentials { OpenAiKey = null }).GetAsync();
+        Assert.False(noKey.Conversation.ProviderHasKey);
+        Assert.False(noKey.Conversation.EmbeddingProviderHasKey);
+    }
+
+    [Fact]
     public async Task Conversation_is_saved_where_the_engine_reads_it()
     {
         var store = new MemoryStore();

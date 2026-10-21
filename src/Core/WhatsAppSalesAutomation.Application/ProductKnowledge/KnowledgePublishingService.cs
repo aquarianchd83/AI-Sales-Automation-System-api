@@ -25,8 +25,9 @@ public record PublishPreviewDto(int Ready, IReadOnlyList<HeldBackDto> HeldBack, 
 
 /// <param name="ChatUsesPublishedKnowledge">The platform administrator's per-tenant switch: ON, chat answers only from the published version; OFF, from the knowledge base articles as before.</param>
 /// <param name="ServingVersionNumber">The version whose chunks chat can read now (the latest that went Live), or null if none has.</param>
+/// <param name="PlatformAiSimulated">True while the platform AI (chat replies or knowledge reading) is set to the Simulator, so a version that is "live for chat" is only connected to the simulator, not a real AI.</param>
 public record KnowledgeVersionsOverviewDto(
-    PublishPreviewDto Preview, IReadOnlyList<KnowledgeVersionDto> Versions, bool ChatUsesPublishedKnowledge = false, int? ServingVersionNumber = null);
+    PublishPreviewDto Preview, IReadOnlyList<KnowledgeVersionDto> Versions, bool ChatUsesPublishedKnowledge = false, int? ServingVersionNumber = null, bool PlatformAiSimulated = false);
 
 public record KnowledgeItemDto(
     Guid Id, string Category, string Question, string Summary, string? Detail, string Kind, string Confidence, bool IsMaterialClaim, DateTime ApprovedAt, DateTime? ReviewDueAt,
@@ -48,7 +49,7 @@ public interface IKnowledgePublishingService
     /// <summary>Publishes a new version that copies an earlier one. Nothing is erased or rewritten: the versions in between stay on record.</summary>
     Task<KnowledgeVersionDto> RestoreAsync(Guid tenantId, Guid versionId, PublishRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Builds the chat index of the current version again (after a failure). The version itself is not changed.</summary>
+    /// <summary>Builds the chat index of the current version again - after a failure, or after the platform changed its embedding provider (the version shows "getting ready for chat" while it runs). The version itself is not changed.</summary>
     Task<KnowledgeVersionDto> ReindexAsync(Guid tenantId, Guid versionId, CancellationToken cancellationToken = default);
 }
 
@@ -66,9 +67,11 @@ public sealed class KnowledgePublishingService : IKnowledgePublishingService
     private readonly ICurrentUserService _user;
     private readonly IKnowledgeServingIndexer? _indexer;
     private readonly IProductKnowledgeServing? _serving;
+    private readonly IPlatformAiConfigProvider? _platformAi;
 
-    public KnowledgePublishingService(IApplicationDbContext db, ICurrentUserService user, IKnowledgeServingIndexer? indexer = null, IProductKnowledgeServing? serving = null)
+    public KnowledgePublishingService(IApplicationDbContext db, ICurrentUserService user, IKnowledgeServingIndexer? indexer = null, IProductKnowledgeServing? serving = null, IPlatformAiConfigProvider? platformAi = null)
     {
+        _platformAi = platformAi;
         _db = db;
         _user = user;
         _indexer = indexer;
@@ -80,6 +83,16 @@ public sealed class KnowledgePublishingService : IKnowledgePublishingService
     private sealed record Evaluation(List<Candidate> Ready, List<HeldBackDto> HeldBack, int NotYetApproved);
 
     // ----- reading ---------------------------------------------------------------------------------------------------------------
+
+    private bool PlatformAiIsSimulated()
+    {
+        if (_platformAi is null)
+            return false;
+        var ai = _platformAi.Get();
+        return IsSimulator(ai.Provider) || IsSimulator(ai.EmbeddingProvider);
+    }
+
+    private static bool IsSimulator(string? provider) => string.IsNullOrWhiteSpace(provider) || string.Equals(provider, "Simulated", StringComparison.OrdinalIgnoreCase);
 
     public async Task<KnowledgeVersionsOverviewDto> GetAsync(Guid tenantId, CancellationToken ct = default)
     {
@@ -97,7 +110,7 @@ public sealed class KnowledgePublishingService : IKnowledgePublishingService
         var preview = new PublishPreviewDto(evaluation.Ready.Count, evaluation.HeldBack, evaluation.NotYetApproved, nothingNew, current is null ? null : ToDto(current));
         var serving = versions.FirstOrDefault(v => v.ServingStatus == KnowledgeServingStatus.Live);
         var chatOn = _serving is not null && await _serving.IsEnabledForTenantAsync(tenantId, ct);
-        return new KnowledgeVersionsOverviewDto(preview, versions.Select(ToDto).ToList(), chatOn, serving?.Number);
+        return new KnowledgeVersionsOverviewDto(preview, versions.Select(ToDto).ToList(), chatOn, serving?.Number, PlatformAiIsSimulated());
     }
 
     public async Task<KnowledgeVersionDetailDto> GetVersionAsync(Guid tenantId, Guid versionId, CancellationToken ct = default)
@@ -188,8 +201,6 @@ public sealed class KnowledgePublishingService : IKnowledgePublishingService
         var version = await FindAsync(tenantId, versionId, ct);
         if (version.Status != KnowledgeVersionStatus.Current)
             throw new ConflictException("Only the current published version can be indexed for chat.");
-        if (version.ServingStatus == KnowledgeServingStatus.Live)
-            throw new ConflictException("This version is already live for chat.");
         if (version.ServingStatus == KnowledgeServingStatus.Indexing && (version.UpdatedAt ?? version.CreatedAt) > DateTime.UtcNow.AddMinutes(-StaleIndexingMinutes))
             throw new ConflictException("This version is being indexed right now. Check again in a moment.");
 
