@@ -37,4 +37,10 @@ public class Plan : BaseEntity
     /// Subscriptions referencing it keep working (PlanLimitsService still reads its limits), same
     /// "soft retire, don't break history" reasoning as MessageTemplate.IsActive.</summary>
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Credits granted once when a tenant is put on this plan, kept until spent (the plan never expires). The Trial plan's starter balance.</summary>
+    public decimal StarterCredits { get; set; }
+
+    /// <summary>Credits added to the wallet every month while the tenant is on this plan; zero means none. Unspent credits carry over.</summary>
+    public decimal MonthlyCredits { get; set; }
 }

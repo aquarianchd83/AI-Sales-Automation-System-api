@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -13,6 +15,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// tenant only; a PlatformSuperAdmin has no tenant in scope and is refused by the role gate.
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.ContentStudio)]
 [Route("api/v1/content-studio")]
 [Authorize(Roles = AppRoles.Admin)]
 public class ContentStudioController : ControllerBase

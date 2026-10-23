@@ -69,11 +69,13 @@ public class CreditPayerService : ICreditPayerService
             return new CreditScenarioDto(
                 info.Scenario, info.Title, info.Area, info.Description, info.QuotaType,
                 row?.Payer ?? info.DefaultPayer, info.DefaultPayer, info.UnitsConfigurable,
-                info.UnitsConfigurable ? row?.UnitsPerAction ?? info.DefaultUnits : null,
+                // What one unit (one action, for product knowledge) costs in credits: the platform's Credit costs setting, or the default.
+                info.UnitsConfigurable ? row?.UnitsPerAction ?? info.DefaultUnits : row?.CreditsPerUnit ?? info.DefaultUnits,
                 balances.GetValueOrDefault(info.QuotaType),
                 u?.Actions ?? 0, u?.Platform ?? 0m, u?.Tenant ?? 0m, u?.Fallbacks ?? 0,
                 costByScenario.TryGetValue(info.Scenario, out var cost) ? Math.Round(cost, 4) : null,
-                row?.UpdatedAt ?? row?.CreatedAt);
+                row?.UpdatedAt ?? row?.CreatedAt,
+                info.UnitLabel);
         }).ToList();
     }
 
@@ -96,6 +98,8 @@ public class CreditPayerService : ICreditPayerService
         row.Payer = request.Payer;
         if (info.UnitsConfigurable)
             row.UnitsPerAction = request.UnitsPerAction ?? row.UnitsPerAction ?? info.DefaultUnits;
+        else if (request.UnitsPerAction is { } creditsPerUnit)
+            row.CreditsPerUnit = creditsPerUnit;
         row.UpdatedByUserId = actorUserId;
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -105,7 +109,7 @@ public class CreditPayerService : ICreditPayerService
     public async Task<IReadOnlyList<PlatformCreditWalletDto>> GetWalletsAsync(CancellationToken cancellationToken = default)
     {
         var balances = await _context.PlatformCreditWallets.AsNoTracking().ToDictionaryAsync(w => w.QuotaType, w => w.Balance, cancellationToken);
-        return Enum.GetValues<QuotaType>().Select(type => new PlatformCreditWalletDto(type, balances.GetValueOrDefault(type))).ToList();
+        return new[] { QuotaType.Credits }.Select(type => new PlatformCreditWalletDto(type, balances.GetValueOrDefault(type))).ToList();
     }
 
     public async Task<IReadOnlyList<PlatformCreditWalletDto>> AdjustWalletAsync(AdjustPlatformWalletRequest request, Guid actorUserId, CancellationToken cancellationToken = default)

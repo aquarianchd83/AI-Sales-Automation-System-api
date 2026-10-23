@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
-using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -14,20 +14,21 @@ using Xunit;
 
 namespace WhatsAppSalesAutomation.Tests;
 
-/// <summary>The money flows that put quota in a tenant's hands: choosing a plan, an operator overriding it, and
-/// buying credits. Each is checked end to end against the real ledger.</summary>
+/// <summary>The flows that put credits in a tenant's wallet, against the real ledger: going onto Trial or Premium (by paying or by an operator), the monthly
+/// credits, and buying a pack. Plans never expire, so none of these involves a billing period.</summary>
 public sealed class PlanAndCreditFlowTests : IDisposable
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
-    private readonly TestClock _clock = new();
+    private readonly TestClock _clock = new() { UtcNow = new DateTime(2026, 10, 21, 9, 0, 0, DateTimeKind.Utc) };
     private readonly SqliteApplicationDbContext _db;
     private readonly QuotaLedgerService _ledger;
+    private readonly CreditAllocationService _credits;
     private readonly BillingService _billing;
     private readonly PlatformTenantService _tenants;
-    private readonly Tenant _tenant = new() { Name = "Confianza", Slug = "confianza", CountryCode = "IN", Status = TenantStatus.Active };
-    private readonly Plan _starter = new() { Code = "starter", Name = "Starter", PriceMonthlyCents = 3900 };
-    private readonly Plan _growth = new() { Code = "growth", Name = "Growth", PriceMonthlyCents = 9900 };
-    private readonly CreditPack _pack = new() { QuotaType = QuotaType.WhatsAppMessages, Name = "1,000 WhatsApp messages", Units = 1000, PriceCents = 2000 };
+    private readonly Tenant _tenant = new() { Name = "Confianza", Slug = "confianza", CountryCode = "IN", Status = TenantStatus.Trial };
+    private readonly Plan _trial = new() { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Trial", StarterCredits = 50m, IsActive = true };
+    private readonly Plan _premium = new() { Code = PlatformFeatureCatalog.PremiumPlanCode, Name = "Premium", PriceMonthlyCents = 2900, MonthlyCredits = 100m, IsActive = true };
+    private readonly CreditPack _pack = new() { QuotaType = QuotaType.Credits, Name = "1,000 credits", Units = 1000, PriceCents = 2000 };
 
     public PlanAndCreditFlowTests()
     {
@@ -37,22 +38,23 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
+        _credits = new CreditAllocationService(_db, _ledger, _clock);
         var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
-        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax());
+        _billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax(), _credits);
 
         var audit = Fake.Of<IPlatformAuditService>((m, _) => m.Name == nameof(IPlatformAuditService.LogAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
         // Only what OverridePlanAsync touches is real; the rest of the service is not exercised here.
-        _tenants = new PlatformTenantService(_db, null!, null!, null!, _clock, null!, null!, null!, null!, null!, audit, null!, _ledger, null!, null!);
+        _tenants = new PlatformTenantService(_db, null!, null!, null!, _clock, null!, null!, null!, null!, null!, audit, null!, _credits, null!, null!);
 
         _db.Tenants.Add(_tenant);
-        _db.Plans.AddRange(_starter, _growth);
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = _starter.Id, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = 500 });
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = _starter.Id, QuotaType = QuotaType.AiConversations, IncludedUnits = 500 });
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = _growth.Id, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = 3000 });
+        _db.Plans.AddRange(_trial, _premium);
+        foreach (var feature in PlatformFeatureCatalog.TrialFeatures)
+            _db.PlanFeatures.Add(new PlanFeature { PlanId = _trial.Id, Feature = feature });
+        foreach (var feature in PlatformFeatureCatalog.PremiumFeatures)
+            _db.PlanFeatures.Add(new PlanFeature { PlanId = _premium.Id, Feature = feature });
         _db.CreditPacks.Add(_pack);
         // Prices are per country; the test tenant is in India (the USD cents above x 83).
-        _db.PlanPrices.Add(new PlanPrice { PlanId = _starter.Id, CountryCode = "IN", Amount = 3237m });
-        _db.PlanPrices.Add(new PlanPrice { PlanId = _growth.Id, CountryCode = "IN", Amount = 8217m });
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _premium.Id, CountryCode = "IN", Amount = 2407m });
         _db.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = _pack.Id, CountryCode = "IN", Amount = 1660m });
         _db.SaveChanges();
     }
@@ -63,53 +65,109 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         _connection.Dispose();
     }
 
-    private async Task<decimal> BalanceAsync(QuotaType type = QuotaType.WhatsAppMessages) =>
-        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == type).Balance;
+    private async Task<decimal> BalanceAsync() =>
+        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
-    // ---- Choosing a plan
+    private Task<Subscription> SubscriptionAsync() => _db.Subscriptions.IgnoreQueryFilters().SingleAsync();
+
+    // ---- The Trial plan
 
     [Fact]
-    public async Task Choosing_a_plan_charges_it_and_hands_over_its_included_quota()
+    public async Task A_new_tenant_on_the_trial_plan_gets_its_starter_credits_once_and_they_stay()
     {
-        var subscription = await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+
+        Assert.Equal(50m, await BalanceAsync());
+        Assert.Equal(_trial.Id, (await SubscriptionAsync()).PlanId);
+
+        _clock.UtcNow = _clock.UtcNow.AddYears(3);
+        Assert.Equal(50m, await BalanceAsync()); // the plan never expires, so neither do these
+    }
+
+    [Fact]
+    public async Task The_trial_plan_gets_no_monthly_credits()
+    {
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+
+        Assert.Equal(0, await _credits.AllocateMonthlyAsync());
+        Assert.Equal(50m, await BalanceAsync());
+    }
+
+    // ---- Choosing Premium
+
+    [Fact]
+    public async Task Choosing_premium_charges_it_and_gives_this_months_credits_with_no_billing_period()
+    {
+        var subscription = await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
 
         Assert.Equal("Active", subscription.Status);
-        Assert.Equal(500m, await BalanceAsync());
-        Assert.Equal(500m, await BalanceAsync(QuotaType.AiConversations));
-        Assert.Equal(0m, await BalanceAsync(QuotaType.LeadCandidates));
+        Assert.Null(subscription.CurrentPeriodEndUtc);
+        Assert.Equal(100m, await BalanceAsync());
+        Assert.Equal(TenantStatus.Active, (await _db.Tenants.IgnoreQueryFilters().SingleAsync()).Status);
 
         var payment = await _db.Payments.IgnoreQueryFilters().SingleAsync();
         Assert.Equal(PaymentKind.Subscription, payment.Kind);
-        Assert.Equal(3900, payment.AmountCents);
+        Assert.Equal(2900, payment.AmountCents);
     }
 
     [Fact]
-    public async Task Switching_plan_replaces_the_old_included_quota_and_keeps_bought_credits()
+    public async Task Going_from_trial_to_premium_keeps_the_starter_credits_and_adds_the_months()
     {
-        await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
-        await _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
-        Assert.Equal(1500m, await BalanceAsync());
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
 
-        await _billing.ChoosePlanAsync(_tenant.Id, _growth.Id);
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
 
-        Assert.Equal(4000m, await BalanceAsync()); // 3,000 from Growth + the 1,000 credits, not 500 + 3,000 + 1,000
-        Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations)); // Growth defines no AI quota here
+        Assert.Equal(150m, await BalanceAsync()); // 50 starter + 100 for the month
     }
+
+    [Fact]
+    public async Task Premium_gets_new_credits_each_month_once_and_unspent_ones_carry_over()
+    {
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
+        await _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.Credits, 30m, "spend", "Message", "spend"));
+        Assert.Equal(70m, await BalanceAsync());
+
+        Assert.Equal(0, await _credits.AllocateMonthlyAsync()); // the same month again: nothing
+        _clock.UtcNow = _clock.UtcNow.AddMonths(1);
+        Assert.Equal(1, await _credits.AllocateMonthlyAsync());
+        Assert.Equal(0, await _credits.AllocateMonthlyAsync());
+
+        Assert.Equal(170m, await BalanceAsync()); // 70 carried over + 100 new
+    }
+
+    [Fact]
+    public async Task Premium_includes_every_feature_and_trial_only_the_minimum()
+    {
+        var access = new FeatureAccessService(_db);
+
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+        Assert.True(await access.HasAsync(_tenant.Id, PlatformFeature.WhatsAppMessaging));
+        Assert.False(await access.HasAsync(_tenant.Id, PlatformFeature.ContentStudio));
+        await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireAsync(_tenant.Id, PlatformFeature.LeadDiscovery));
+
+        await _credits.AssignPlanAsync(_tenant.Id, _premium.Id);
+        var premiumAccess = new FeatureAccessService(_db);
+        foreach (var feature in Enum.GetValues<PlatformFeature>())
+            Assert.True(await premiumAccess.HasAsync(_tenant.Id, feature));
+    }
+
+    // ---- Buying credits
 
     [Fact]
     public async Task Buying_credits_tells_the_tenant_they_were_added()
     {
         var notifier = new CapturingNotifier();
         var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => m.Name == nameof(ITenantJobProvisioner.SyncTenantAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
-        var billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax(), notifier);
-        await billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
+        var billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax(), _credits, notifier);
+        await billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
 
         var payment = await billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
 
         var sent = Assert.Single(notifier.Requests);
         Assert.Equal(TenantNotificationKind.CreditsAdded, sent.Kind);
         Assert.Equal(_tenant.Id, sent.TenantId);
-        Assert.Equal(QuotaType.WhatsAppMessages, sent.QuotaType);
+        Assert.Equal(QuotaType.Credits, sent.QuotaType);
         Assert.Equal(payment.Id.ToString("N"), sent.EpisodeKey);
         Assert.Contains("1,000", sent.Title);
     }
@@ -125,8 +183,6 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         }
     }
 
-    // ---- Buying credits
-
     [Fact]
     public async Task Credits_cannot_be_bought_without_a_plan()
     {
@@ -139,14 +195,14 @@ public sealed class PlanAndCreditFlowTests : IDisposable
     [Fact]
     public async Task Credits_cannot_be_bought_while_suspended_or_after_the_subscription_is_cancelled()
     {
-        await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
 
         _tenant.Status = TenantStatus.Suspended;
         await _db.SaveChangesAsync();
         await Assert.ThrowsAsync<ConflictException>(() => _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id));
 
         _tenant.Status = TenantStatus.Active;
-        (await _db.Subscriptions.IgnoreQueryFilters().SingleAsync()).Status = SubscriptionStatus.Canceled;
+        (await SubscriptionAsync()).Status = SubscriptionStatus.Canceled;
         await _db.SaveChangesAsync();
         await Assert.ThrowsAsync<ConflictException>(() => _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id));
     }
@@ -154,7 +210,7 @@ public sealed class PlanAndCreditFlowTests : IDisposable
     [Fact]
     public async Task A_purchase_records_the_payment_in_the_tenants_currency_and_adds_credits_for_twelve_months()
     {
-        await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
         _clock.UtcNow = _clock.UtcNow.AddDays(3);
 
         var payment = await _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
@@ -162,18 +218,17 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         Assert.Equal("CreditPack", payment.Kind);
         Assert.Equal("INR", payment.CurrencyCode);
         Assert.Equal(1660m, payment.LocalAmount);
-        Assert.Equal(1500m, await BalanceAsync());
+        Assert.Equal(1100m, await BalanceAsync()); // the month's 100 + the pack's 1,000
 
-        var credits = (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.WhatsAppMessages)
-            .Grants.Single(g => g.Origin == QuotaGrantOrigin.CreditPurchase);
+        var credits = (await _ledger.GetBalancesAsync(_tenant.Id)).Single().Grants.Single(g => g.Origin == QuotaGrantOrigin.CreditPurchase);
         Assert.Equal(_clock.UtcNow.AddMonths(12), credits.ExpiresAtUtc);
     }
 
     [Fact]
-    public async Task Credits_can_be_bought_after_the_included_quota_is_used_up()
+    public async Task Credits_can_be_bought_after_the_plans_credits_are_used_up()
     {
-        await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
-        await _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.WhatsAppMessages, 500, "all", "Message", "all"));
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
+        await _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.Credits, 100, "all", "Message", "all"));
         Assert.Equal(0m, await BalanceAsync());
 
         await _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
@@ -187,61 +242,35 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         _tenants.OverridePlanAsync(_tenant.Id, new OverrideTenantPlanRequest(plan.Id), Guid.NewGuid(), "ops@example.com");
 
     [Fact]
-    public async Task An_override_gives_the_tenant_the_plans_quota_not_just_the_plan()
+    public async Task An_override_puts_the_tenant_on_the_plan_and_gives_its_credits_with_no_period_and_no_payment()
     {
-        await OverrideAsync(_starter);
+        await OverrideAsync(_premium);
 
-        var subscription = await _db.Subscriptions.IgnoreQueryFilters().SingleAsync();
-        Assert.Equal(_starter.Id, subscription.PlanId);
-        Assert.Equal(_clock.UtcNow, subscription.CurrentPeriodStartUtc);
-        Assert.Equal(_clock.UtcNow.AddMonths(1), subscription.CurrentPeriodEndUtc);
-        Assert.Equal(500m, await BalanceAsync());
-        Assert.Equal(500m, await BalanceAsync(QuotaType.AiConversations));
-
-        var grant = await _db.QuotaGrants.IgnoreQueryFilters().FirstAsync(g => g.QuotaType == QuotaType.WhatsAppMessages);
-        Assert.Equal(subscription.CurrentPeriodEndUtc, grant.ExpiresAtUtc);
-        Assert.Null(grant.PaymentId); // nothing was paid - the operator chose it
+        var subscription = await SubscriptionAsync();
+        Assert.Equal(_premium.Id, subscription.PlanId);
+        Assert.Null(subscription.CurrentPeriodEndUtc);
+        Assert.Equal(100m, await BalanceAsync());
+        Assert.Null((await _db.QuotaGrants.IgnoreQueryFilters().SingleAsync()).PaymentId); // nothing was paid - the operator chose it
     }
 
     [Fact]
-    public async Task Overriding_to_another_plan_swaps_the_quota_without_restarting_the_running_period()
+    public async Task Overriding_back_to_trial_takes_nothing_away_and_does_not_repeat_the_starter_credits()
     {
-        await _billing.ChoosePlanAsync(_tenant.Id, _starter.Id);
-        var periodEnd = (await _db.Subscriptions.IgnoreQueryFilters().SingleAsync()).CurrentPeriodEndUtc;
-        await _billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id);
-        _clock.UtcNow = _clock.UtcNow.AddDays(5);
+        await OverrideAsync(_trial);
+        await OverrideAsync(_premium);
+        await OverrideAsync(_trial);
 
-        await OverrideAsync(_growth);
-
-        var subscription = await _db.Subscriptions.IgnoreQueryFilters().SingleAsync();
-        Assert.Equal(_growth.Id, subscription.PlanId);
-        Assert.Equal(periodEnd, subscription.CurrentPeriodEndUtc);
-        Assert.Equal(4000m, await BalanceAsync()); // Growth's 3,000 + the bought 1,000; Starter's 500 forfeited
+        Assert.Equal(_trial.Id, (await SubscriptionAsync()).PlanId);
+        Assert.Equal(150m, await BalanceAsync()); // 50 starter (once) + 100 for the month, nothing forfeited
     }
 
     [Fact]
     public async Task Overriding_to_the_plan_the_tenant_already_has_changes_nothing()
     {
-        await OverrideAsync(_starter);
-        await OverrideAsync(_starter);
+        await OverrideAsync(_premium);
+        await OverrideAsync(_premium);
 
-        Assert.Equal(500m, await BalanceAsync());
-        Assert.Equal(2, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.EntryType == QuotaEntryType.Allocation));
-    }
-
-    [Fact]
-    public async Task An_override_on_a_lapsed_period_starts_a_fresh_one_so_the_quota_is_actually_usable()
-    {
-        _db.Subscriptions.Add(new Subscription
-        {
-            TenantId = _tenant.Id, Status = SubscriptionStatus.Active,
-            CurrentPeriodStartUtc = _clock.UtcNow.AddMonths(-2), CurrentPeriodEndUtc = _clock.UtcNow.AddMonths(-1)
-        });
-        await _db.SaveChangesAsync();
-
-        await OverrideAsync(_starter);
-
-        Assert.Equal(500m, await BalanceAsync());
-        Assert.Equal(_clock.UtcNow.AddMonths(1), (await _db.Subscriptions.IgnoreQueryFilters().SingleAsync()).CurrentPeriodEndUtc);
+        Assert.Equal(100m, await BalanceAsync());
+        Assert.Equal(1, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.EntryType == QuotaEntryType.Allocation));
     }
 }

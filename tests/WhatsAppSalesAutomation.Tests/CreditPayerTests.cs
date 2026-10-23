@@ -6,6 +6,8 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 using Xunit;
@@ -32,7 +34,19 @@ public sealed class CreditPayerTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new FakeTenantContext(), new FakeCurrentUser());
         _db.Database.EnsureCreated();
         _tenantLedger = new QuotaLedgerService(_db, _clock);
-        _router = new CreditRouter(_db, _tenantLedger, _clock, NullLogger<CreditRouter>.Instance);
+        var costs = new CreditCostService(_db);
+        var access = new FeatureAccessService(_db);
+        var wallet = new CreditWalletService(_db, _tenantLedger, access, costs, _clock);
+        _router = new CreditRouter(_db, _tenantLedger, _clock, NullLogger<CreditRouter>.Instance, costs, access, wallet);
+
+        // The tenant is on a plan with every feature, so what is under test is who pays, not what the plan allows.
+        var plan = new Plan { Code = "premium", Name = "Premium", IsActive = true };
+        _db.Plans.Add(plan);
+        foreach (var feature in PlatformFeatureCatalog.PremiumFeatures)
+            _db.PlanFeatures.Add(new PlanFeature { PlanId = plan.Id, Feature = feature });
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "T", Slug = "t" });
+        _db.Subscriptions.Add(new Subscription { TenantId = _tenant, PlanId = plan.Id, Status = SubscriptionStatus.Active });
+        _db.SaveChanges();
         _service = new CreditPayerService(_db, _clock, _tenantLedger);
     }
 
@@ -42,22 +56,22 @@ public sealed class CreditPayerTests : IDisposable
         _connection.Dispose();
     }
 
-    private Task GiveTenantAsync(decimal units, QuotaType type = QuotaType.AiConversations) =>
+    private Task GiveTenantAsync(decimal units, QuotaType type = QuotaType.Credits) =>
         _tenantLedger.AdjustAsync(_tenant, type, units, "seed", _admin);
 
-    private Task FundPlatformAsync(decimal units, QuotaType type = QuotaType.AiConversations) =>
+    private Task FundPlatformAsync(decimal units, QuotaType type = QuotaType.Credits) =>
         _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(type, units, "top up"), _admin);
 
     private Task PayerAsync(CreditScenario scenario, CreditPayer payer, decimal? units = null) =>
         _service.SetPayerAsync(scenario, new UpdateCreditPayerRequest(payer, units), _admin);
 
     private Task<ConsumeResult> ChatReplyAsync(string key, decimal units = 1m) =>
-        _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.AiConversations, units, key, "AiTransaction", key));
+        _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, units, key, "AiTransaction", key));
 
-    private async Task<decimal> TenantBalanceAsync(QuotaType type = QuotaType.AiConversations) =>
+    private async Task<decimal> TenantBalanceAsync(QuotaType type = QuotaType.Credits) =>
         (await _tenantLedger.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == type).Balance;
 
-    private async Task<decimal> PlatformBalanceAsync(QuotaType type = QuotaType.AiConversations) =>
+    private async Task<decimal> PlatformBalanceAsync(QuotaType type = QuotaType.Credits) =>
         (await _service.GetWalletsAsync()).Single(w => w.QuotaType == type).Balance;
 
     [Fact]
@@ -169,7 +183,7 @@ public sealed class CreditPayerTests : IDisposable
     {
         await GiveTenantAsync(10);
 
-        var result = await _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.AiConversations, 2m, "x-1", "SomethingElse", "x-1"));
+        var result = await _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, 2m, "x-1", "SomethingElse", "x-1"));
 
         Assert.True(result.Sufficient);
         Assert.Equal(8m, await TenantBalanceAsync());
@@ -179,13 +193,13 @@ public sealed class CreditPayerTests : IDisposable
     [Fact]
     public async Task The_ledger_the_app_sees_routes_through_the_payer_setting()
     {
-        await FundPlatformAsync(3, QuotaType.WhatsAppMessages);
+        await FundPlatformAsync(3, QuotaType.Credits);
         await PayerAsync(CreditScenario.WhatsAppTemplateSend, CreditPayer.Platform);
         IQuotaLedgerService ledger = new CreditRoutingLedger(_tenantLedger, _router);
 
-        await ledger.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.WhatsAppMessages, 1m, "wa-1", "Message", "wa-1"));
+        await ledger.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, 1m, "wa-1", "Message", "wa-1"));
 
-        Assert.Equal(2m, await PlatformBalanceAsync(QuotaType.WhatsAppMessages));
+        Assert.Equal(2m, await PlatformBalanceAsync(QuotaType.Credits));
         Assert.Equal(CreditScenario.WhatsAppTemplateSend, (await _db.CreditUsages.SingleAsync()).Scenario);
     }
 
@@ -221,14 +235,15 @@ public sealed class CreditPayerTests : IDisposable
     }
 
     [Fact]
-    public async Task Product_knowledge_is_free_until_credits_per_action_are_set()
+    public async Task Product_knowledge_costs_its_default_credits_per_action_from_the_tenants_wallet()
     {
         await GiveTenantAsync(10);
 
         await _router.ChargeActionAsync(_tenant, CreditScenario.ProductKnowledgeReading, "pk:1", "DocumentAnalysis");
 
-        Assert.Equal(10m, await TenantBalanceAsync());
-        Assert.Empty(await _db.CreditUsages.ToListAsync());
+        Assert.Equal(10m - CreditScenarioCatalog.For(CreditScenario.ProductKnowledgeReading).DefaultUnits, await TenantBalanceAsync());
+        var usage = await _db.CreditUsages.SingleAsync();
+        Assert.Equal(PlatformFeature.ProductKnowledge, PlatformFeatureCatalog.FeatureOf(usage.Scenario));
     }
 
     [Fact]
@@ -280,13 +295,13 @@ public sealed class CreditPayerTests : IDisposable
     }
 
     [Fact]
-    public async Task Units_per_action_only_apply_to_scenarios_that_let_the_platform_set_them()
+    public async Task Every_scenario_has_a_price_in_credits_the_platform_can_change()
     {
         var chat = await _service.SetPayerAsync(CreditScenario.CustomerChatReply, new UpdateCreditPayerRequest(CreditPayer.Platform, 9m), _admin);
         var knowledge = await _service.SetPayerAsync(CreditScenario.ProductKnowledgeReading, new UpdateCreditPayerRequest(CreditPayer.Tenant, 3m), _admin);
 
-        Assert.Null(chat.UnitsPerAction);
-        Assert.Equal(3m, knowledge.UnitsPerAction);
+        Assert.Equal(9m, chat.UnitsPerAction); // per reply
+        Assert.Equal(3m, knowledge.UnitsPerAction); // per action
         await Assert.ThrowsAsync<ValidationException>(() =>
             _service.SetPayerAsync(CreditScenario.ProductKnowledgeReading, new UpdateCreditPayerRequest(CreditPayer.Tenant, -1m), _admin));
     }
@@ -297,11 +312,11 @@ public sealed class CreditPayerTests : IDisposable
         await FundPlatformAsync(5);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.AiConversations, -6m, "oops"), _admin));
+            _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.Credits, -6m, "oops"), _admin));
         await Assert.ThrowsAsync<ValidationException>(() =>
-            _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.AiConversations, 5m, " "), _admin));
+            _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.Credits, 5m, " "), _admin));
 
-        await _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.AiConversations, -2m, "correction"), _admin);
+        await _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.Credits, -2m, "correction"), _admin);
         Assert.Equal(3m, await PlatformBalanceAsync());
     }
 
@@ -335,8 +350,8 @@ public sealed class CreditPayerTests : IDisposable
 
         // Both accounts run dry, so the next knowledge action is done but nobody can be charged for it.
         await PayerAsync(CreditScenario.ProductKnowledgeAnswering, CreditPayer.Platform, 1m);
-        await _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.AiConversations, -4m, "drain"), _admin);
-        await _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.AiConversations, 1m, "other-1", "SomethingElse", "other-1"));
+        await _service.AdjustWalletAsync(new AdjustPlatformWalletRequest(QuotaType.Credits, -4m, "drain"), _admin);
+        await _router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, 1m, "other-1", "SomethingElse", "other-1"));
         await _router.ChargeActionAsync(_tenant, CreditScenario.ProductKnowledgeAnswering, "pk:9", "KnowledgeDraft");
         Assert.Equal(CreditUsageStatus.Unpaid, (await _db.CreditUsages.SingleAsync(u => u.OperationKey == "pk:9")).Status);
 

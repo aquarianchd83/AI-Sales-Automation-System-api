@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Quota;
@@ -8,35 +9,32 @@ public class QuotaGate : IQuotaGate
 {
     private readonly IQuotaLedgerService _ledger;
     private readonly WhatsAppPricingOptions _pricing;
-    private readonly TrialQuotaOptions _trial;
+    private readonly ICreditAllocationService _credits;
+    private readonly ICreditWalletService _wallet;
 
-    public QuotaGate(IQuotaLedgerService ledger, IOptionsSnapshot<WhatsAppPricingOptions> pricing, IOptionsSnapshot<TrialQuotaOptions> trial)
+    public QuotaGate(IQuotaLedgerService ledger, IOptionsSnapshot<WhatsAppPricingOptions> pricing, ICreditAllocationService credits, ICreditWalletService wallet)
     {
         _ledger = ledger;
         _pricing = pricing.Value;
-        _trial = trial.Value;
+        _credits = credits;
+        _wallet = wallet;
     }
 
-    public Task GrantTrialAsync(Guid tenantId, DateTime trialEndsAtUtc, CancellationToken cancellationToken = default) =>
-        _ledger.GrantTrialQuotaAsync(tenantId, new Dictionary<QuotaType, decimal>
-        {
-            [QuotaType.WhatsAppMessages] = _trial.WhatsAppMessages,
-            [QuotaType.AiConversations] = _trial.AiConversations,
-            [QuotaType.LeadCandidates] = _trial.LeadCandidates
-        }, trialEndsAtUtc, cancellationToken);
+    public Task AssignTrialPlanAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+        _credits.AssignTrialPlanAsync(tenantId, cancellationToken);
 
     public async Task<bool> TryConsumeWhatsAppTemplateAsync(Guid tenantId, TemplateCategory category, string operationKey, string referenceId, CancellationToken cancellationToken = default)
     {
         var weight = WhatsAppQuotaWeights.For(_pricing, category);
         var result = await _ledger.ConsumeAsync(
-            new ConsumeRequest(tenantId, QuotaType.WhatsAppMessages, weight, operationKey, "Message", referenceId, category.ToString()), cancellationToken);
+            new ConsumeRequest(tenantId, QuotaType.Credits, weight, operationKey, "Message", referenceId, category.ToString()), cancellationToken);
         return result.Sufficient;
     }
 
     public async Task<bool> TryConsumeAiConversationAsync(Guid tenantId, string operationKey, string referenceId, CancellationToken cancellationToken = default)
     {
         var result = await _ledger.ConsumeAsync(
-            new ConsumeRequest(tenantId, QuotaType.AiConversations, 1m, operationKey, "AiInteraction", referenceId), cancellationToken);
+            new ConsumeRequest(tenantId, QuotaType.Credits, 1m, operationKey, "AiInteraction", referenceId), cancellationToken);
         return result.Sufficient;
     }
 
@@ -46,13 +44,29 @@ public class QuotaGate : IQuotaGate
             return 0m;
 
         var result = await _ledger.ConsumeAsync(
-            new ConsumeRequest(tenantId, QuotaType.LeadCandidates, candidates, operationKey, "LeadDiscoveryRun", referenceId, note, AllowPartial: true), cancellationToken);
+            new ConsumeRequest(tenantId, QuotaType.Credits, candidates, operationKey, "LeadDiscoveryRun", referenceId, note, AllowPartial: true), cancellationToken);
         return result.Consumed;
     }
 
     public Task ReleaseAsync(Guid tenantId, string operationKey, CancellationToken cancellationToken = default) =>
         _ledger.ReverseConsumptionAsync(tenantId, operationKey, cancellationToken);
 
-    public async Task<decimal> GetAvailableAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default) =>
-        (await _ledger.GetBalancesAsync(tenantId, cancellationToken)).Single(b => b.QuotaType == quotaType).Balance;
+    /// <summary>How many units of the action behind the (older, per-feature) <paramref name="quotaType"/> the tenant could still afford - see
+    /// <see cref="ICreditWalletService.GetAffordableUnitsAsync"/>. Asking for <see cref="QuotaType.Credits"/> is the plain balance.</summary>
+    public async Task<decimal> GetAvailableAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default)
+    {
+        CreditScenario? scenario = quotaType switch
+        {
+            QuotaType.WhatsAppMessages => CreditScenario.WhatsAppTemplateSend,
+            QuotaType.AiConversations => CreditScenario.CustomerChatReply,
+            QuotaType.LeadCandidates => CreditScenario.LeadDiscovery,
+            QuotaType.ContentGenerations => CreditScenario.ContentStudioGeneration,
+            QuotaType.VideoRenders => CreditScenario.ContentStudioVideoRender,
+            _ => null
+        };
+
+        return scenario is { } known
+            ? await _wallet.GetAffordableUnitsAsync(tenantId, known, cancellationToken)
+            : (await _ledger.GetBalancesAsync(tenantId, cancellationToken)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
+    }
 }

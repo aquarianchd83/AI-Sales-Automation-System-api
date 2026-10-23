@@ -148,7 +148,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Payment> Payments => Set<Payment>();
 
-    public DbSet<PlanQuota> PlanQuotas => Set<PlanQuota>();
+    public DbSet<PlanFeature> PlanFeatures => Set<PlanFeature>();
+
+    public DbSet<TenantFeatureCap> TenantFeatureCaps => Set<TenantFeatureCap>();
 
     public DbSet<CreditPack> CreditPacks => Set<CreditPack>();
 

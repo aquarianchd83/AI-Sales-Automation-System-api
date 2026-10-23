@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -12,6 +14,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// call is for the caller's own tenant, and another tenant's question or run is "not found".
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.ProductKnowledge)]
 [Route("api/v1/product-knowledge")]
 [Authorize(Roles = AppRoles.Admin)]
 public class ProductKnowledgeAnswersController : ControllerBase

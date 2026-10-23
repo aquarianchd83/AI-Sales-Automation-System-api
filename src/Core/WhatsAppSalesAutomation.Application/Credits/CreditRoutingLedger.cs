@@ -27,17 +27,14 @@ public class CreditRoutingLedger : IQuotaLedgerService
     public Task<bool> ReverseConsumptionAsync(Guid tenantId, string operationKey, CancellationToken cancellationToken = default) =>
         _router.ReverseAsync(tenantId, operationKey, cancellationToken);
 
+    public Task<bool> GrantPlanCreditsAsync(Guid tenantId, decimal units, string operationKey, string note, QuotaGrantOrigin origin, Guid? paymentId = null, CancellationToken cancellationToken = default) =>
+        _inner.GrantPlanCreditsAsync(tenantId, units, operationKey, note, origin, paymentId, cancellationToken);
+
     public Task<IReadOnlyList<QuotaBalanceDto>> GetBalancesAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
         _inner.GetBalancesAsync(tenantId, cancellationToken);
 
-    public Task AllocatePlanQuotaAsync(Guid tenantId, Guid planId, DateTime periodStartUtc, DateTime periodEndUtc, Guid? paymentId, CancellationToken cancellationToken = default) =>
-        _inner.AllocatePlanQuotaAsync(tenantId, planId, periodStartUtc, periodEndUtc, paymentId, cancellationToken);
-
     public Task GrantCreditsAsync(Guid tenantId, CreditPack pack, Guid paymentId, DateTime purchasedAtUtc, CancellationToken cancellationToken = default) =>
         _inner.GrantCreditsAsync(tenantId, pack, paymentId, purchasedAtUtc, cancellationToken);
-
-    public Task GrantTrialQuotaAsync(Guid tenantId, IReadOnlyDictionary<QuotaType, decimal> units, DateTime expiresAtUtc, CancellationToken cancellationToken = default) =>
-        _inner.GrantTrialQuotaAsync(tenantId, units, expiresAtUtc, cancellationToken);
 
     public Task AdjustAsync(Guid tenantId, QuotaType quotaType, decimal unitsDelta, string reason, Guid actorUserId, int validForDays = 365, CancellationToken cancellationToken = default) =>
         _inner.AdjustAsync(tenantId, quotaType, unitsDelta, reason, actorUserId, validForDays, cancellationToken);
@@ -53,9 +50,6 @@ public class CreditRoutingLedger : IQuotaLedgerService
 
     public Task<decimal> ReleaseRefundHoldAsync(Guid tenantId, Guid refundRequestId, decimal keepFraction, CancellationToken cancellationToken = default) =>
         _inner.ReleaseRefundHoldAsync(tenantId, refundRequestId, keepFraction, cancellationToken);
-
-    public Task<decimal> ForfeitPlanAllocationsAsync(Guid tenantId, string reason, CancellationToken cancellationToken = default) =>
-        _inner.ForfeitPlanAllocationsAsync(tenantId, reason, cancellationToken);
 
     public Task<int> ExpireDueAsync(CancellationToken cancellationToken = default) =>
         _inner.ExpireDueAsync(cancellationToken);

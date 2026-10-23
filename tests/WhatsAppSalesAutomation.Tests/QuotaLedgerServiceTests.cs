@@ -10,6 +10,8 @@ using Xunit;
 
 namespace WhatsAppSalesAutomation.Tests;
 
+/// <summary>The ledger underneath the single credit wallet: grants, spends (each tagged with its feature), give-backs, expiry of purchased credits, and the
+/// invariant that the ledger always sums to what is left in the grants.</summary>
 public sealed class QuotaLedgerServiceTests : IDisposable
 {
     private static readonly DateTime Start = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -19,7 +21,6 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     private readonly SqliteApplicationDbContext _db;
     private readonly QuotaLedgerService _service;
     private readonly Guid _tenant = Guid.NewGuid();
-    private readonly Guid _plan = Guid.NewGuid();
 
     public QuotaLedgerServiceTests()
     {
@@ -28,11 +29,6 @@ public sealed class QuotaLedgerServiceTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new FakeTenantContext(), new FakeCurrentUser());
         _db.Database.EnsureCreated();
         _service = new QuotaLedgerService(_db, _clock);
-
-        _db.Plans.Add(new Plan { Id = _plan, Code = "starter", Name = "Starter", PriceMonthlyCents = 3900 });
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = _plan, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = 1000 });
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = _plan, QuotaType = QuotaType.AiConversations, IncludedUnits = 500 });
-        _db.SaveChanges();
     }
 
     public void Dispose()
@@ -41,56 +37,89 @@ public sealed class QuotaLedgerServiceTests : IDisposable
         _connection.Dispose();
     }
 
-    private Task AllocateAsync(DateTime? periodStart = null) =>
-        _service.AllocatePlanQuotaAsync(_tenant, _plan, periodStart ?? Start, (periodStart ?? Start).AddMonths(1), Guid.NewGuid());
+    /// <summary>1,000 plan credits, the way a plan puts them in the wallet.</summary>
+    private Task<bool> GrantPlanAsync(decimal units = 1000m, string key = "monthly:202609") =>
+        _service.GrantPlanCreditsAsync(_tenant, units, key, "Premium plan credits", QuotaGrantOrigin.PlanAllocation);
 
-    private Task<ConsumeResult> SpendAsync(decimal units, string key, QuotaType type = QuotaType.WhatsAppMessages, bool partial = false) =>
-        _service.ConsumeAsync(new ConsumeRequest(_tenant, type, units, key, "Message", key, AllowPartial: partial));
+    private Task<ConsumeResult> SpendAsync(decimal units, string key, bool partial = false, PlatformFeature? feature = PlatformFeature.WhatsAppMessaging) =>
+        _service.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, units, key, "Message", key, AllowPartial: partial, Feature: feature));
 
-    private async Task<decimal> BalanceAsync(QuotaType type = QuotaType.WhatsAppMessages) =>
-        (await _service.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == type).Balance;
+    private async Task<decimal> BalanceAsync() => (await _service.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
-    private static CreditPack Pack(QuotaType type) =>
-        new() { QuotaType = type, Name = "pack", Units = 1000, PriceCents = 2000 };
+    private static CreditPack Pack(decimal credits = 1000m) => new() { QuotaType = QuotaType.Credits, Name = "pack", Units = credits, PriceCents = 2000 };
 
     // The invariant the whole design rests on: what the ledger sums to is exactly what is left in the grants.
-    private async Task AssertLedgerMatchesGrantsAsync(QuotaType type = QuotaType.WhatsAppMessages)
+    private async Task AssertLedgerMatchesGrantsAsync()
     {
-        var ledger = (await _db.QuotaLedgerEntries.IgnoreQueryFilters().Where(e => e.TenantId == _tenant && e.QuotaType == type).ToListAsync()).Sum(e => e.UnitsDelta);
-        var grants = (await _db.QuotaGrants.IgnoreQueryFilters().Where(g => g.TenantId == _tenant && g.QuotaType == type).ToListAsync()).Sum(g => g.UnitsRemaining);
+        var ledger = (await _db.QuotaLedgerEntries.IgnoreQueryFilters().Where(e => e.TenantId == _tenant).ToListAsync()).Sum(e => e.UnitsDelta);
+        var grants = (await _db.QuotaGrants.IgnoreQueryFilters().Where(g => g.TenantId == _tenant).ToListAsync()).Sum(g => g.UnitsRemaining);
         Assert.Equal(grants, ledger);
     }
 
     [Fact]
-    public async Task Allocation_grants_every_plan_quota_and_is_idempotent()
+    public async Task There_is_one_wallet_and_it_starts_empty()
     {
-        await AllocateAsync();
-        await AllocateAsync();
-
         var balances = await _service.GetBalancesAsync(_tenant);
-        Assert.Equal(1000m, balances.Single(b => b.QuotaType == QuotaType.WhatsAppMessages).Balance);
-        Assert.Equal(500m, balances.Single(b => b.QuotaType == QuotaType.AiConversations).Balance);
-        Assert.Equal(0m, balances.Single(b => b.QuotaType == QuotaType.LeadCandidates).Balance);
+
+        var wallet = Assert.Single(balances);
+        Assert.Equal((QuotaType.Credits, 0m), (wallet.QuotaType, wallet.Balance));
+    }
+
+    [Fact]
+    public async Task Plan_credits_are_granted_once_per_operation_key()
+    {
+        Assert.True(await GrantPlanAsync());
+        Assert.False(await GrantPlanAsync()); // the same month again: nothing happens
+        Assert.True(await GrantPlanAsync(100m, "monthly:202610")); // the next month is a new grant
+
+        Assert.Equal(1100m, await BalanceAsync());
         Assert.Equal(2, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync());
         await AssertLedgerMatchesGrantsAsync();
     }
 
     [Fact]
-    public async Task Consumption_reduces_balance_and_records_running_balance()
+    public async Task Plan_credits_never_expire()
     {
-        await AllocateAsync();
+        await GrantPlanAsync();
+
+        _clock.UtcNow = Start.AddYears(10);
+
+        Assert.Equal(1000m, await BalanceAsync());
+        Assert.Equal(0, await _service.ExpireDueAsync());
+    }
+
+    [Fact]
+    public async Task Consumption_reduces_balance_and_records_running_balance_and_feature()
+    {
+        await GrantPlanAsync();
         var result = await SpendAsync(300, "m1");
 
         Assert.True(result.Sufficient);
         Assert.Equal(700m, result.BalanceAfter);
         Assert.Equal(700m, await BalanceAsync());
+        var entry = await _db.QuotaLedgerEntries.IgnoreQueryFilters().SingleAsync(e => e.EntryType == QuotaEntryType.Consumption);
+        Assert.Equal(PlatformFeature.WhatsAppMessaging, entry.Feature);
         await AssertLedgerMatchesGrantsAsync();
+    }
+
+    [Fact]
+    public async Task Each_feature_has_its_own_ledger()
+    {
+        await GrantPlanAsync();
+        await SpendAsync(300, "m1", feature: PlatformFeature.WhatsAppMessaging);
+        await SpendAsync(50, "a1", feature: PlatformFeature.AiConversations);
+
+        var messaging = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { Feature = PlatformFeature.WhatsAppMessaging, PageSize = 50 });
+        var ai = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { Feature = PlatformFeature.AiConversations, PageSize = 50 });
+
+        Assert.Equal(-300m, Assert.Single(messaging.Items).UnitsDelta);
+        Assert.Equal(-50m, Assert.Single(ai.Items).UnitsDelta);
     }
 
     [Fact]
     public async Task Same_operation_key_never_charges_twice()
     {
-        await AllocateAsync();
+        await GrantPlanAsync();
         await SpendAsync(300, "m1");
         var again = await SpendAsync(300, "m1");
 
@@ -99,17 +128,17 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Included_quota_is_spent_before_purchased_credits_and_a_spend_can_span_both()
+    public async Task Credits_that_expire_are_spent_before_plan_credits_and_a_spend_can_span_both()
     {
-        await AllocateAsync();
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.WhatsAppMessages), Guid.NewGuid(), _clock.UtcNow);
+        await GrantPlanAsync();
+        await _service.GrantCreditsAsync(_tenant, Pack(), Guid.NewGuid(), _clock.UtcNow);
 
         await SpendAsync(1200, "big");
 
-        var live = (await _service.GetBalancesAsync(_tenant)).Single(b => b.QuotaType == QuotaType.WhatsAppMessages);
+        var live = (await _service.GetBalancesAsync(_tenant)).Single();
         Assert.Equal(800m, live.Balance);
         var only = Assert.Single(live.Grants);
-        Assert.Equal(QuotaGrantOrigin.CreditPurchase, only.Origin);
+        Assert.Equal(QuotaGrantOrigin.PlanAllocation, only.Origin); // the purchased ones, which lapse, went first
         Assert.Equal(2, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.EntryType == QuotaEntryType.Consumption));
         await AssertLedgerMatchesGrantsAsync();
     }
@@ -117,7 +146,7 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     [Fact]
     public async Task A_short_balance_refuses_the_spend_unless_partial_is_allowed()
     {
-        await AllocateAsync();
+        await GrantPlanAsync();
 
         var refused = await SpendAsync(1500, "too-big");
         Assert.False(refused.Sufficient);
@@ -132,9 +161,9 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Reversal_returns_the_units_once()
+    public async Task Reversal_returns_the_units_once_to_the_same_feature()
     {
-        await AllocateAsync();
+        await GrantPlanAsync();
         await SpendAsync(300, "m1");
 
         Assert.True(await _service.ReverseConsumptionAsync(_tenant, "m1"));
@@ -142,111 +171,76 @@ public sealed class QuotaLedgerServiceTests : IDisposable
 
         Assert.Equal(1000m, await BalanceAsync());
         Assert.False(await _service.ReverseConsumptionAsync(_tenant, "never-spent"));
+        var giveBack = await _db.QuotaLedgerEntries.IgnoreQueryFilters().SingleAsync(e => e.EntryType == QuotaEntryType.ConsumptionReversal);
+        Assert.Equal(PlatformFeature.WhatsAppMessaging, giveBack.Feature);
         await AssertLedgerMatchesGrantsAsync();
     }
 
     [Fact]
-    public async Task Unused_plan_quota_expires_at_period_end_and_credits_do_not()
+    public async Task Purchased_credits_are_valid_for_twelve_months()
     {
-        await AllocateAsync();
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.WhatsAppMessages), Guid.NewGuid(), _clock.UtcNow);
-        await SpendAsync(400, "m1");
-
-        _clock.UtcNow = Start.AddMonths(1).AddDays(1);
-        Assert.Equal(1000m, await BalanceAsync());
-
-        var processed = await _service.ExpireDueAsync();
-        Assert.True(processed >= 1);
-        Assert.Equal(1000m, await BalanceAsync());
-        var expiry = await _db.QuotaLedgerEntries.IgnoreQueryFilters().SingleAsync(e => e.EntryType == QuotaEntryType.Expiry && e.QuotaType == QuotaType.WhatsAppMessages);
-        Assert.Equal(-600m, expiry.UnitsDelta);
-        Assert.Equal(0, await _service.ExpireDueAsync());
-        await AssertLedgerMatchesGrantsAsync();
-    }
-
-    [Fact]
-    public async Task Credits_are_valid_for_twelve_months()
-    {
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.AiConversations), Guid.NewGuid(), _clock.UtcNow);
+        await _service.GrantCreditsAsync(_tenant, Pack(), Guid.NewGuid(), _clock.UtcNow);
 
         var grant = await _db.QuotaGrants.IgnoreQueryFilters().SingleAsync();
         Assert.Equal(_clock.UtcNow.AddMonths(12), grant.ExpiresAtUtc);
 
         _clock.UtcNow = _clock.UtcNow.AddMonths(11);
-        Assert.Equal(1000m, await BalanceAsync(QuotaType.AiConversations));
+        Assert.Equal(1000m, await BalanceAsync());
         _clock.UtcNow = _clock.UtcNow.AddMonths(2);
-        Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations));
+        Assert.Equal(0m, await BalanceAsync());
+
+        Assert.True(await _service.ExpireDueAsync() >= 1);
+        var expiry = await _db.QuotaLedgerEntries.IgnoreQueryFilters().SingleAsync(e => e.EntryType == QuotaEntryType.Expiry);
+        Assert.Equal(-1000m, expiry.UnitsDelta);
+        await AssertLedgerMatchesGrantsAsync();
     }
 
     [Fact]
     public async Task Buying_the_same_payment_twice_grants_once()
     {
         var payment = Guid.NewGuid();
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.AiConversations), payment, _clock.UtcNow);
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.AiConversations), payment, _clock.UtcNow);
+        await _service.GrantCreditsAsync(_tenant, Pack(), payment, _clock.UtcNow);
+        await _service.GrantCreditsAsync(_tenant, Pack(), payment, _clock.UtcNow);
 
-        Assert.Equal(1000m, await BalanceAsync(QuotaType.AiConversations));
+        Assert.Equal(1000m, await BalanceAsync());
     }
 
     [Fact]
     public async Task Adjustments_need_a_reason_and_cannot_remove_more_than_exists()
     {
-        await AllocateAsync();
+        await GrantPlanAsync();
         var admin = Guid.NewGuid();
 
-        await _service.AdjustAsync(_tenant, QuotaType.WhatsAppMessages, 50, "goodwill", admin);
+        await _service.AdjustAsync(_tenant, QuotaType.Credits, 50, "goodwill", admin);
         Assert.Equal(1050m, await BalanceAsync());
-        await _service.AdjustAsync(_tenant, QuotaType.WhatsAppMessages, -100, "correction", admin);
+        await _service.AdjustAsync(_tenant, QuotaType.Credits, -100, "correction", admin);
         Assert.Equal(950m, await BalanceAsync());
 
-        await Assert.ThrowsAsync<ConflictException>(() => _service.AdjustAsync(_tenant, QuotaType.WhatsAppMessages, -5000, "too much", admin));
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.AdjustAsync(_tenant, QuotaType.WhatsAppMessages, 10, " ", admin));
+        await Assert.ThrowsAsync<ConflictException>(() => _service.AdjustAsync(_tenant, QuotaType.Credits, -5000, "too much", admin));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.AdjustAsync(_tenant, QuotaType.Credits, 10, " ", admin));
         await AssertLedgerMatchesGrantsAsync();
     }
 
     [Fact]
-    public async Task Trial_quota_is_granted_once_and_lapses_with_the_trial()
+    public async Task An_adjustment_of_an_older_quota_type_adjusts_the_one_wallet()
     {
-        var trialEnds = _clock.UtcNow.AddDays(14);
-        var units = new Dictionary<QuotaType, decimal> { [QuotaType.WhatsAppMessages] = 50, [QuotaType.LeadCandidates] = 10 };
+        await _service.AdjustAsync(_tenant, QuotaType.WhatsAppMessages, 40, "goodwill", Guid.NewGuid());
 
-        await _service.GrantTrialQuotaAsync(_tenant, units, trialEnds);
-        await _service.GrantTrialQuotaAsync(_tenant, units, trialEnds);
-
-        Assert.Equal(50m, await BalanceAsync());
-        Assert.Equal(10m, await BalanceAsync(QuotaType.LeadCandidates));
-        Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations));
-
-        _clock.UtcNow = trialEnds.AddHours(1);
-        Assert.Equal(0m, await BalanceAsync());
-    }
-
-    [Fact]
-    public async Task Choosing_a_plan_forfeits_the_old_periods_included_quota_but_keeps_credits()
-    {
-        await AllocateAsync();
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.WhatsAppMessages), Guid.NewGuid(), _clock.UtcNow);
-
-        var forfeited = await _service.ForfeitPlanAllocationsAsync(_tenant, "Replaced by a new plan period");
-
-        Assert.Equal(1500m, forfeited); // 1000 WhatsApp + 500 AI included units
-        Assert.Equal(1000m, await BalanceAsync());
-        Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations));
-        await AssertLedgerMatchesGrantsAsync();
+        Assert.Equal(40m, await BalanceAsync());
     }
 
     [Fact]
     public async Task Clawback_only_removes_what_is_still_unspent()
     {
         var payment = Guid.NewGuid();
-        await _service.GrantCreditsAsync(_tenant, Pack(QuotaType.AiConversations), payment, _clock.UtcNow);
-        await SpendAsync(300, "a1", QuotaType.AiConversations);
+        await _service.GrantCreditsAsync(_tenant, Pack(), payment, _clock.UtcNow);
+        await SpendAsync(300, "a1", feature: PlatformFeature.AiConversations);
 
         var taken = await _service.ClawBackCreditsAsync(_tenant, payment, 1000, "refund", null);
 
         Assert.Equal(700m, taken);
-        Assert.Equal(0m, await BalanceAsync(QuotaType.AiConversations));
-        await AssertLedgerMatchesGrantsAsync(QuotaType.AiConversations);
+        Assert.Equal(0m, await BalanceAsync());
+        await AssertLedgerMatchesGrantsAsync();
     }
 
     private sealed class FakeClock : IDateTimeProvider

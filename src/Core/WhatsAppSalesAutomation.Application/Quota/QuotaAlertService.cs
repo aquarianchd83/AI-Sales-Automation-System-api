@@ -113,6 +113,8 @@ public class QuotaAlertService : IQuotaAlertService
 
     public async Task<bool> NotifyIfExhaustedAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default)
     {
+        // Callers still name the feature's old quota type; the one wallet they all spend from is what ran out.
+        quotaType = QuotaType.Credits;
         var now = _dateTime.UtcNow;
         var live = await _context.QuotaGrants.IgnoreQueryFilters()
             .Where(g => g.TenantId == tenantId && g.QuotaType == quotaType && g.ExpiredProcessedAtUtc == null && g.ExpiresAtUtc > now)
@@ -150,7 +152,7 @@ public class QuotaAlertService : IQuotaAlertService
         {
             TenantNotificationKind.QuotaExhausted => (
                 $"You've used all your {label}",
-                $"Your {label} are used up, so anything that needs them is paused. Buy credits or wait for your plan to renew to carry on."),
+                $"Your {label} are used up, so anything that needs them is paused. Buy credits to carry on - Premium also adds new credits every month."),
             TenantNotificationKind.QuotaLow5 => (
                 $"Your {label} are almost gone",
                 $"Only {Number(remaining)} of {Number(capacity)} {label} are left (under 5%). Buy credits now to avoid an interruption."),
@@ -162,11 +164,13 @@ public class QuotaAlertService : IQuotaAlertService
 
     public static string Label(QuotaType type) => type switch
     {
+        // One wallet pays for everything now; the older per-feature types only exist in old ledger rows.
         QuotaType.WhatsAppMessages => "WhatsApp messages",
         QuotaType.AiConversations => "AI conversations",
         QuotaType.ContentGenerations => "content generations",
         QuotaType.VideoRenders => "video renders",
-        _ => "lead candidates"
+        QuotaType.LeadCandidates => "lead candidates",
+        _ => "credits"
     };
 
     private static string Number(decimal value) => value.ToString("#,##0.##");

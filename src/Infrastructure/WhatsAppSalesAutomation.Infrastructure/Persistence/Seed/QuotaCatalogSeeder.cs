@@ -1,58 +1,43 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Seed;
 
 /// <summary>
-/// Starter quotas per plan and the credit-pack catalog. Insert-only and idempotent, like
-/// <see cref="PlanSeeder"/>: a plan that already has any quota row, and a catalog that already has any
-/// pack, is left exactly as a platform admin edited it. The numbers are placeholders sized to stay under
-/// each plan's price at the configured Meta and Claude rates - review them against real margins.
+/// The credit packs a tenant can buy to top up its single wallet. Insert-only and idempotent, like <see cref="PlanSeeder"/>: once a credit pack
+/// exists it is left as a platform admin edited it. Packs from before the single wallet (per-feature units) are retired, not deleted, so old payments
+/// still point at them. The prices are placeholders - review them against real margins.
 /// </summary>
 public static class QuotaCatalogSeeder
 {
-    // Included per billing period: WhatsApp (weighted units), AI conversations, lead candidates.
-    private static readonly (string PlanCode, decimal WhatsApp, decimal Ai, decimal Leads)[] PlanQuotas =
+    private static readonly (string Name, decimal Credits, decimal PriceUsd)[] Packs =
     {
-        ("starter", 500m, 500m, 50m),
-        ("growth", 3_000m, 5_000m, 500m),
-        ("scale", 15_000m, 30_000m, 3_000m)
-    };
-
-    private static readonly (QuotaType Type, string Name, decimal Units, int PriceCents)[] Packs =
-    {
-        (QuotaType.WhatsAppMessages, "1,000 WhatsApp messages", 1_000m, 2_000),
-        (QuotaType.WhatsAppMessages, "5,000 WhatsApp messages", 5_000m, 8_500),
-        (QuotaType.AiConversations, "1,000 AI conversations", 1_000m, 800),
-        (QuotaType.AiConversations, "5,000 AI conversations", 5_000m, 3_500),
-        (QuotaType.LeadCandidates, "100 lead candidates", 100m, 600),
-        (QuotaType.LeadCandidates, "500 lead candidates", 500m, 2_500)
+        ("100 credits", 100m, 3m),
+        ("500 credits", 500m, 12m),
+        ("2,000 credits", 2_000m, 40m)
     };
 
     public static async Task SeedAsync(IServiceProvider services)
     {
         var db = services.GetRequiredService<ApplicationDbContext>();
 
-        var plansWithQuotas = await db.PlanQuotas.Select(q => q.PlanId).Distinct().ToListAsync();
-        var plans = await db.Plans.ToListAsync();
+        foreach (var legacy in await db.CreditPacks.Where(p => p.QuotaType != QuotaType.Credits && p.IsActive).ToListAsync())
+            legacy.IsActive = false;
 
-        foreach (var spec in PlanQuotas)
+        if (!await db.CreditPacks.AnyAsync(p => p.QuotaType == QuotaType.Credits))
         {
-            var plan = plans.FirstOrDefault(p => string.Equals(p.Code, spec.PlanCode, StringComparison.OrdinalIgnoreCase));
-            if (plan is null || plansWithQuotas.Contains(plan.Id))
-                continue;
+            foreach (var (name, credits, priceUsd) in Packs)
+            {
+                var pack = new CreditPack { QuotaType = QuotaType.Credits, Name = name, Units = credits, PriceCents = (int)(priceUsd * 100) };
+                db.CreditPacks.Add(pack);
 
-            db.PlanQuotas.Add(new PlanQuota { PlanId = plan.Id, QuotaType = QuotaType.WhatsAppMessages, IncludedUnits = spec.WhatsApp });
-            db.PlanQuotas.Add(new PlanQuota { PlanId = plan.Id, QuotaType = QuotaType.AiConversations, IncludedUnits = spec.Ai });
-            db.PlanQuotas.Add(new PlanQuota { PlanId = plan.Id, QuotaType = QuotaType.LeadCandidates, IncludedUnits = spec.Leads });
-        }
-
-        if (!await db.CreditPacks.AnyAsync())
-        {
-            foreach (var pack in Packs)
-                db.CreditPacks.Add(new CreditPack { QuotaType = pack.Type, Name = pack.Name, Units = pack.Units, PriceCents = pack.PriceCents });
+                // A pack with no price in a country is not sold there, so each starts with one in every country the platform prices for.
+                foreach (var region in RegionalPricingCatalog.All)
+                    db.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = pack.Id, CountryCode = region.CountryCode, Amount = Math.Round(priceUsd * region.RateToUsd, 0, MidpointRounding.AwayFromZero) });
+            }
         }
 
         await db.SaveChangesAsync();

@@ -52,7 +52,7 @@ public sealed class RefundServiceTests : IDisposable
     /// <summary>A bought pack: 1,000 AI conversations for $20 (INR 1,660), with the grant behind it.</summary>
     private async Task<Payment> BuyPackAsync(DateTime? paidAt = null, bool withTax = false)
     {
-        var pack = new CreditPack { QuotaType = QuotaType.AiConversations, Name = "1,000 AI conversations", Units = 1000, PriceCents = 2000 };
+        var pack = new CreditPack { QuotaType = QuotaType.Credits, Name = "1,000 AI conversations", Units = 1000, PriceCents = 2000 };
         var payment = new Payment
         {
             TenantId = _tenant.Id, Kind = PaymentKind.CreditPack, CreditPackId = pack.Id, PlanName = pack.Name,
@@ -76,10 +76,10 @@ public sealed class RefundServiceTests : IDisposable
     }
 
     private Task SpendAsync(decimal units, string key) =>
-        _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.AiConversations, units, key, "AiInteraction", key));
+        _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, QuotaType.Credits, units, key, "AiInteraction", key));
 
     private async Task<decimal> BalanceAsync() =>
-        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.AiConversations).Balance;
+        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
     [Fact]
     public async Task With_the_switch_off_a_tenant_can_neither_check_nor_request_a_refund()
@@ -249,7 +249,6 @@ public sealed class RefundServiceTests : IDisposable
     {
         var plan = new Plan { Code = "starter", Name = "Starter", PriceMonthlyCents = 3900 };
         _db.Plans.Add(plan);
-        _db.PlanQuotas.Add(new PlanQuota { PlanId = plan.Id, QuotaType = QuotaType.AiConversations, IncludedUnits = 500 });
         var payment = new Payment
         {
             TenantId = _tenant.Id, Kind = PaymentKind.Subscription, PlanId = plan.Id, PlanName = "Starter",
@@ -259,7 +258,7 @@ public sealed class RefundServiceTests : IDisposable
         _db.Payments.Add(payment);
         _db.Subscriptions.Add(new Subscription { TenantId = _tenant.Id, PlanId = plan.Id, Status = SubscriptionStatus.Active, CurrentPeriodStartUtc = payment.PaidAtUtc, CurrentPeriodEndUtc = payment.PaidAtUtc.AddMonths(1) });
         await _db.SaveChangesAsync();
-        await _ledger.AllocatePlanQuotaAsync(_tenant.Id, plan.Id, payment.PaidAtUtc, payment.PaidAtUtc.AddMonths(1), payment.Id);
+        await _ledger.GrantPlanCreditsAsync(_tenant.Id, 500m, "monthly:" + payment.PaidAtUtc.ToString("yyyyMM"), "Plan credits", QuotaGrantOrigin.PlanAllocation, payment.Id);
 
         await SpendAsync(100, "heavy");
         var heavy = await _refunds.GetEligibilityAsync(_tenant.Id, payment.Id);

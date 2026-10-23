@@ -65,7 +65,7 @@ public class AiUsageService : IAiUsageService
         var transactionId = Guid.NewGuid();
         var operationKey = $"ai:{transactionId}";
         var consumed = await _ledger.ConsumeAsync(
-            new ConsumeRequest(tenantId, QuotaType.AiConversations, UnitsPerOperation, operationKey, "AiTransaction", transactionId.ToString(), operation),
+            new ConsumeRequest(tenantId, QuotaType.Credits, UnitsPerOperation, operationKey, "AiTransaction", transactionId.ToString(), operation),
             cancellationToken);
 
         if (!consumed.Sufficient)
@@ -90,8 +90,8 @@ public class AiUsageService : IAiUsageService
                 Model = ModelFor(config),
                 OperationKey = operationKey,
                 ReferenceId = referenceId,
-                CreditsBefore = consumed.BalanceAfter + consumed.Consumed,
-                CreditsConsumed = consumed.Consumed,
+                CreditsBefore = consumed.BalanceAfter + (consumed.CreditsSpent ?? consumed.Consumed),
+                CreditsConsumed = consumed.CreditsSpent ?? consumed.Consumed,
                 CreditsAfter = consumed.BalanceAfter,
                 RequestedAtUtc = now
             });

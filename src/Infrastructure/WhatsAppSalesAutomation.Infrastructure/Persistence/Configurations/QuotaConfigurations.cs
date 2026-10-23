@@ -4,15 +4,26 @@ using WhatsAppSalesAutomation.Domain.Entities.Billing;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
 
-public class PlanQuotaConfiguration : IEntityTypeConfiguration<PlanQuota>
+public class PlanFeatureConfiguration : IEntityTypeConfiguration<PlanFeature>
 {
-    public void Configure(EntityTypeBuilder<PlanQuota> builder)
+    public void Configure(EntityTypeBuilder<PlanFeature> builder)
     {
-        builder.ToTable("PlanQuotas");
+        builder.ToTable("PlanFeatures");
         builder.HasKey(p => p.Id);
-        builder.Property(p => p.QuotaType).HasConversion<string>().HasMaxLength(30);
-        builder.Property(p => p.IncludedUnits).HasColumnType("decimal(18,4)");
-        builder.HasIndex(p => new { p.PlanId, p.QuotaType }).IsUnique();
+        builder.Property(p => p.Feature).HasConversion<string>().HasMaxLength(30);
+        builder.HasIndex(p => new { p.PlanId, p.Feature }).IsUnique();
+    }
+}
+
+public class TenantFeatureCapConfiguration : IEntityTypeConfiguration<TenantFeatureCap>
+{
+    public void Configure(EntityTypeBuilder<TenantFeatureCap> builder)
+    {
+        builder.ToTable("TenantFeatureCaps");
+        builder.HasKey(c => c.Id);
+        builder.Property(c => c.Feature).HasConversion<string>().HasMaxLength(30);
+        builder.Property(c => c.MonthlyLimit).HasColumnType("decimal(18,4)");
+        builder.HasIndex(c => new { c.TenantId, c.Feature }).IsUnique();
     }
 }
 
@@ -58,8 +69,11 @@ public class QuotaLedgerEntryConfiguration : IEntityTypeConfiguration<QuotaLedge
         builder.Property(e => e.ReferenceType).HasMaxLength(50);
         builder.Property(e => e.ReferenceId).HasMaxLength(100);
         builder.Property(e => e.Note).HasMaxLength(500);
+        builder.Property(e => e.Feature).HasConversion<string>().HasMaxLength(30);
 
         builder.HasIndex(e => new { e.TenantId, e.QuotaType, e.OccurredAtUtc });
+        // What a feature spent this month: the per-feature ledger and the cap check read this.
+        builder.HasIndex(e => new { e.TenantId, e.Feature, e.OccurredAtUtc });
         // Not unique: one operation can write several rows (a spend across two grants). Idempotency is
         // checked in the service, and the wallet's concurrency token stops two racing retries.
         builder.HasIndex(e => new { e.TenantId, e.OperationKey });
@@ -153,6 +167,7 @@ public class CreditScenarioSettingConfiguration : IEntityTypeConfiguration<Credi
         builder.Property(s => s.Scenario).HasConversion<string>().HasMaxLength(40);
         builder.Property(s => s.Payer).HasConversion<string>().HasMaxLength(20);
         builder.Property(s => s.UnitsPerAction).HasColumnType("decimal(18,4)");
+        builder.Property(s => s.CreditsPerUnit).HasColumnType("decimal(18,4)");
         builder.HasIndex(s => s.Scenario).IsUnique();
     }
 }

@@ -17,6 +17,9 @@ public class QuotaLedgerService : IQuotaLedgerService
 {
     public const int CreditValidityMonths = 12;
 
+    /// <summary>Plan credits never expire (the plan never does), so their grant runs to a date nobody reaches.</summary>
+    public static readonly DateTime NeverExpires = new(2999, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
     private const int MaxAttempts = 5;
 
     private readonly IApplicationDbContext _context;
@@ -36,7 +39,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             .OrderBy(g => g.ExpiresAtUtc).ThenBy(g => g.Origin)
             .ToListAsync(cancellationToken);
 
-        return Enum.GetValues<QuotaType>()
+        return new[] { QuotaType.Credits }
             .Select(type =>
             {
                 var ofType = live.Where(g => g.QuotaType == type).ToList();
@@ -48,48 +51,19 @@ public class QuotaLedgerService : IQuotaLedgerService
             .ToList();
     }
 
-    public Task AllocatePlanQuotaAsync(Guid tenantId, Guid planId, DateTime periodStartUtc, DateTime periodEndUtc, Guid? paymentId, CancellationToken cancellationToken = default) =>
+    public Task<bool> GrantPlanCreditsAsync(Guid tenantId, decimal units, string operationKey, string note, QuotaGrantOrigin origin, Guid? paymentId = null, CancellationToken cancellationToken = default) =>
         WithRetryAsync(async () =>
         {
+            if (units <= 0 || await HasEntryAsync(tenantId, operationKey, QuotaEntryType.Allocation, cancellationToken))
+                return false;
+
             var now = _dateTime.UtcNow;
-            var quotas = await _context.PlanQuotas.Where(q => q.PlanId == planId).ToListAsync(cancellationToken);
-
-            foreach (var quota in quotas)
-            {
-                // The plan is part of the key: two different plans allocated in the same second must both land.
-                var operationKey = $"alloc:{planId:N}:{periodStartUtc:yyyyMMddTHHmmss}:{quota.QuotaType}";
-                if (await HasEntryAsync(tenantId, operationKey, QuotaEntryType.Allocation, cancellationToken))
-                    continue;
-
-                var book = await OpenAsync(tenantId, quota.QuotaType, now, cancellationToken);
-                var grant = NewGrant(tenantId, quota.QuotaType, QuotaGrantOrigin.PlanAllocation, quota.IncludedUnits, now, periodEndUtc, paymentId);
-                _context.QuotaGrants.Add(grant);
-                book.Grants.Add(grant);
-                Post(book, QuotaEntryType.Allocation, quota.IncludedUnits, grant.Id, operationKey, "Payment", paymentId?.ToString(), null, null, now);
-                book.Wallet.Balance = book.Running;
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-            return true;
-        }, cancellationToken);
-
-    public Task GrantTrialQuotaAsync(Guid tenantId, IReadOnlyDictionary<QuotaType, decimal> units, DateTime expiresAtUtc, CancellationToken cancellationToken = default) =>
-        WithRetryAsync(async () =>
-        {
-            var now = _dateTime.UtcNow;
-            foreach (var (type, amount) in units)
-            {
-                var operationKey = $"trial:{type}";
-                if (amount <= 0 || await HasEntryAsync(tenantId, operationKey, QuotaEntryType.Allocation, cancellationToken))
-                    continue;
-
-                var book = await OpenAsync(tenantId, type, now, cancellationToken);
-                var grant = NewGrant(tenantId, type, QuotaGrantOrigin.Trial, amount, now, expiresAtUtc, null);
-                _context.QuotaGrants.Add(grant);
-                book.Grants.Add(grant);
-                Post(book, QuotaEntryType.Allocation, amount, grant.Id, operationKey, "Trial", null, "Free trial allocation", null, now);
-                book.Wallet.Balance = book.Running;
-            }
+            var book = await OpenAsync(tenantId, QuotaType.Credits, now, cancellationToken);
+            var grant = NewGrant(tenantId, QuotaType.Credits, origin, units, now, NeverExpires, paymentId);
+            _context.QuotaGrants.Add(grant);
+            book.Grants.Add(grant);
+            Post(book, QuotaEntryType.Allocation, units, grant.Id, operationKey, paymentId is null ? "Plan" : "Payment", paymentId?.ToString(), note, null, now);
+            book.Wallet.Balance = book.Running;
 
             await _context.SaveChangesAsync(cancellationToken);
             return true;
@@ -103,8 +77,8 @@ public class QuotaLedgerService : IQuotaLedgerService
                 return true;
 
             var now = _dateTime.UtcNow;
-            var book = await OpenAsync(tenantId, pack.QuotaType, now, cancellationToken);
-            var grant = NewGrant(tenantId, pack.QuotaType, QuotaGrantOrigin.CreditPurchase, pack.Units, purchasedAtUtc, purchasedAtUtc.AddMonths(CreditValidityMonths), paymentId);
+            var book = await OpenAsync(tenantId, QuotaType.Credits, now, cancellationToken);
+            var grant = NewGrant(tenantId, QuotaType.Credits, QuotaGrantOrigin.CreditPurchase, pack.Units, purchasedAtUtc, purchasedAtUtc.AddMonths(CreditValidityMonths), paymentId);
             _context.QuotaGrants.Add(grant);
             book.Grants.Add(grant);
             Post(book, QuotaEntryType.Purchase, pack.Units, grant.Id, operationKey, "Payment", paymentId.ToString(), pack.Name, null, now);
@@ -136,7 +110,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             var take = request.AllowPartial ? Math.Min(request.Units, available) : (available >= request.Units ? request.Units : 0m);
 
             if (take > 0)
-                Draw(book, take, QuotaEntryType.Consumption, request.OperationKey, request.ReferenceType, request.ReferenceId, request.Note, null, now);
+                Draw(book, take, QuotaEntryType.Consumption, request.OperationKey, request.ReferenceType, request.ReferenceId, request.Note, null, now, request.Feature);
 
             book.Wallet.Balance = book.Running;
             await _context.SaveChangesAsync(cancellationToken);
@@ -169,7 +143,7 @@ public class QuotaLedgerService : IQuotaLedgerService
 
                 var back = -entry.UnitsDelta;
                 grant.UnitsRemaining += back;
-                Post(book, QuotaEntryType.ConsumptionReversal, back, grant.Id, reversalKey, entry.ReferenceType, entry.ReferenceId, "Reversal of " + operationKey, null, now);
+                Post(book, QuotaEntryType.ConsumptionReversal, back, grant.Id, reversalKey, entry.ReferenceType, entry.ReferenceId, "Reversal of " + operationKey, null, now, entry.Feature);
             }
 
             book.Wallet.Balance = book.Running;
@@ -179,6 +153,8 @@ public class QuotaLedgerService : IQuotaLedgerService
 
     public Task AdjustAsync(Guid tenantId, QuotaType quotaType, decimal unitsDelta, string reason, Guid actorUserId, int validForDays = 365, CancellationToken cancellationToken = default)
     {
+        // There is one wallet: an adjustment of any older quota type adjusts it.
+        quotaType = QuotaType.Credits;
         if (unitsDelta == 0)
             throw new ArgumentOutOfRangeException(nameof(unitsDelta), "An adjustment must change something.");
         if (string.IsNullOrWhiteSpace(reason))
@@ -333,36 +309,6 @@ public class QuotaLedgerService : IQuotaLedgerService
             return released;
         }, cancellationToken);
 
-    public Task<decimal> ForfeitPlanAllocationsAsync(Guid tenantId, string reason, CancellationToken cancellationToken = default) =>
-        WithRetryAsync(async () =>
-        {
-            var now = _dateTime.UtcNow;
-            var forfeited = 0m;
-
-            foreach (var type in Enum.GetValues<QuotaType>())
-            {
-                var book = await OpenAsync(tenantId, type, now, cancellationToken);
-                foreach (var grant in book.Grants.Where(g => g.Origin == QuotaGrantOrigin.PlanAllocation).ToList())
-                {
-                    if (grant.UnitsRemaining > 0)
-                    {
-                        var lost = grant.UnitsRemaining;
-                        grant.UnitsRemaining = 0;
-                        forfeited += lost;
-                        Post(book, QuotaEntryType.Expiry, -lost, grant.Id, $"forfeit:{grant.Id}", null, null, reason, null, now);
-                    }
-
-                    grant.ExpiredProcessedAtUtc = now;
-                    book.Grants.Remove(grant);
-                }
-
-                book.Wallet.Balance = book.Running;
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-            return forfeited;
-        }, cancellationToken);
-
     public async Task<int> ExpireDueAsync(CancellationToken cancellationToken = default)
     {
         var now = _dateTime.UtcNow;
@@ -393,6 +339,8 @@ public class QuotaLedgerService : IQuotaLedgerService
         var entries = _context.QuotaLedgerEntries.IgnoreQueryFilters().Where(e => e.TenantId == tenantId);
         if (query.QuotaType is { } type)
             entries = entries.Where(e => e.QuotaType == type);
+        if (query.Feature is { } feature)
+            entries = entries.Where(e => e.Feature == feature);
 
         var total = await entries.CountAsync(cancellationToken);
         var items = await entries
@@ -400,7 +348,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(e => new QuotaLedgerEntryDto(
-                e.Id, e.QuotaType, e.EntryType, e.UnitsDelta, e.BalanceAfter, e.GrantId, e.ReferenceType, e.ReferenceId, e.Note, e.OccurredAtUtc))
+                e.Id, e.QuotaType, e.Feature, e.EntryType, e.UnitsDelta, e.BalanceAfter, e.GrantId, e.ReferenceType, e.ReferenceId, e.Note, e.OccurredAtUtc))
             .ToListAsync(cancellationToken);
 
         return new PagedResult<QuotaLedgerEntryDto>(items, total, query.Page, query.PageSize);
@@ -456,7 +404,7 @@ public class QuotaLedgerService : IQuotaLedgerService
 
     /// <summary>Takes <paramref name="units"/> from the live grants, soonest-expiring first (included plan
     /// quota before purchased credits on a tie), one ledger entry per grant touched.</summary>
-    private void Draw(Book book, decimal units, QuotaEntryType entryType, string operationKey, string? referenceType, string? referenceId, string? note, Guid? actor, DateTime now)
+    private void Draw(Book book, decimal units, QuotaEntryType entryType, string operationKey, string? referenceType, string? referenceId, string? note, Guid? actor, DateTime now, PlatformFeature? feature = null)
     {
         var left = units;
         foreach (var grant in book.Live(now).ToList())
@@ -467,11 +415,11 @@ public class QuotaLedgerService : IQuotaLedgerService
             var take = Math.Min(grant.UnitsRemaining, left);
             grant.UnitsRemaining -= take;
             left -= take;
-            Post(book, entryType, -take, grant.Id, operationKey, referenceType, referenceId, note, actor, now);
+            Post(book, entryType, -take, grant.Id, operationKey, referenceType, referenceId, note, actor, now, feature);
         }
     }
 
-    private void Post(Book book, QuotaEntryType type, decimal delta, Guid? grantId, string operationKey, string? referenceType, string? referenceId, string? note, Guid? actor, DateTime now)
+    private void Post(Book book, QuotaEntryType type, decimal delta, Guid? grantId, string operationKey, string? referenceType, string? referenceId, string? note, Guid? actor, DateTime now, PlatformFeature? feature = null)
     {
         book.Running += delta;
         _context.QuotaLedgerEntries.Add(new QuotaLedgerEntry
@@ -487,6 +435,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             ReferenceId = referenceId,
             Note = note,
             ActorUserId = actor,
+            Feature = feature,
             OccurredAtUtc = now
         });
     }

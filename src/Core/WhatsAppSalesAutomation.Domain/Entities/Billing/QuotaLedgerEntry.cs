@@ -41,5 +41,10 @@ public class QuotaLedgerEntry : BaseEntity, ITenantOwned
     /// <summary>The platform admin behind a manual entry - null for system entries.</summary>
     public Guid? ActorUserId { get; set; }
 
+    /// <summary>The feature a spend was for (or the feature whose spend a reversal gives back). Null for entries that are not about a feature - an
+    /// allocation, a purchase, an expiry. This is the per-feature ledger.</summary>
+    public PlatformFeature? Feature { get; set; }
+
+
     public DateTime OccurredAtUtc { get; set; }
 }

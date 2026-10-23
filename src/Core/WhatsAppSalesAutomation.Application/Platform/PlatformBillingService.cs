@@ -44,9 +44,9 @@ public class PlatformBillingService : IPlatformBillingService
             .ToListAsync(cancellationToken);
 
         var planIds = plans.Select(p => p.Id).ToList();
-        var quotasByPlan = await LoadQuotasAsync(planIds, cancellationToken);
+        var featuresByPlan = await LoadFeaturesAsync(planIds, cancellationToken);
         var pricesByPlan = await CatalogPricing.LoadPlanPricesAsync(_context, planIds, cancellationToken);
-        return plans.Select(p => ToDto(p, pricing, quotasByPlan.GetValueOrDefault(p.Id), pricesByPlan.GetValueOrDefault(p.Id))).ToList();
+        return plans.Select(p => ToDto(p, pricing, featuresByPlan.GetValueOrDefault(p.Id), pricesByPlan.GetValueOrDefault(p.Id))).ToList();
     }
 
     public async Task<PagedResult<PlatformSubscriptionListItemDto>> GetSubscriptionsAsync(PlatformSubscriptionQuery query, CancellationToken cancellationToken = default)
@@ -94,22 +94,16 @@ public class PlatformBillingService : IPlatformBillingService
             MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles,
             MaxLeadDiscoveryBatchSize = request.MaxLeadDiscoveryBatchSize ?? Plan.DefaultLeadDiscoveryBatchSize,
             PriceMonthlyCents = request.PriceMonthlyCents,
+            StarterCredits = request.StarterCredits,
+            MonthlyCredits = request.MonthlyCredits,
             IsActive = true
         };
         _context.Plans.Add(plan);
 
-        // A plan with no quota rows would sell tenants a subscription with nothing to use, so the quotas are
-        // saved with the plan in the same call rather than left for a second step someone might forget.
-        var quotas = new List<PlanQuota>();
-        foreach (var input in request.IncludedQuotas ?? Array.Empty<PlanQuotaInput>())
-        {
-            if (input.Units <= 0)
-                continue;
-
-            var row = new PlanQuota { PlanId = plan.Id, QuotaType = input.QuotaType, IncludedUnits = input.Units };
-            quotas.Add(row);
-            _context.PlanQuotas.Add(row);
-        }
+        // The plan's features are saved with it, so it is never sold with nothing to use.
+        var features = (request.Features ?? Array.Empty<PlatformFeature>()).Distinct().ToList();
+        foreach (var feature in features)
+            _context.PlanFeatures.Add(new PlanFeature { PlanId = plan.Id, Feature = feature });
 
         var prices = new CountryPrices();
         foreach (var input in request.CountryPrices ?? Array.Empty<CountryPriceInput>())
@@ -125,7 +119,7 @@ public class PlatformBillingService : IPlatformBillingService
         plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features.Select(f => new PlanFeature { PlanId = plan.Id, Feature = f }), prices);
     }
 
     public async Task<PlatformPlanDto> UpdatePlanAsync(Guid id, UpdatePlanRequest request, CancellationToken cancellationToken = default)
@@ -145,36 +139,28 @@ public class PlatformBillingService : IPlatformBillingService
             plan.MaxLeadDiscoveryBatchSize = maxLeadDiscoveryBatchSize;
         plan.PriceMonthlyCents = request.PriceMonthlyCents;
         plan.IsActive = request.IsActive;
+        if (request.StarterCredits is { } starter)
+            plan.StarterCredits = starter;
+        if (request.MonthlyCredits is { } monthly)
+            plan.MonthlyCredits = monthly;
 
-        var quotas = await _context.PlanQuotas.Where(q => q.PlanId == id).ToListAsync(cancellationToken);
+        var features = (await _context.PlanFeatures.Where(f => f.PlanId == id).ToListAsync(cancellationToken)).ToList();
 
-        // Null leaves the quotas alone; a list is the complete new set. Only future allocations change - what a
-        // tenant on this plan already received this period stays exactly as granted.
-        if (request.IncludedQuotas is { } wanted)
+        // Null leaves the features alone; a list is the complete new set. A tenant on the plan sees the change straight away.
+        if (request.Features is { } wanted)
         {
-            foreach (var type in Enum.GetValues<QuotaType>())
+            var wantedSet = wanted.ToHashSet();
+            foreach (var row in features.Where(f => !wantedSet.Contains(f.Feature)).ToList())
             {
-                var units = wanted.FirstOrDefault(q => q.QuotaType == type)?.Units ?? 0m;
-                var existing = quotas.FirstOrDefault(q => q.QuotaType == type);
+                _context.PlanFeatures.Remove(row);
+                features.Remove(row);
+            }
 
-                if (units <= 0)
-                {
-                    if (existing is not null)
-                    {
-                        _context.PlanQuotas.Remove(existing);
-                        quotas.Remove(existing);
-                    }
-                }
-                else if (existing is not null)
-                {
-                    existing.IncludedUnits = units;
-                }
-                else
-                {
-                    var row = new PlanQuota { PlanId = id, QuotaType = type, IncludedUnits = units };
-                    _context.PlanQuotas.Add(row);
-                    quotas.Add(row);
-                }
+            foreach (var feature in wantedSet.Where(w => features.All(f => f.Feature != w)))
+            {
+                var row = new PlanFeature { PlanId = id, Feature = feature };
+                _context.PlanFeatures.Add(row);
+                features.Add(row);
             }
         }
 
@@ -213,7 +199,7 @@ public class PlatformBillingService : IPlatformBillingService
         plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken), quotas, prices);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features, prices);
     }
 
     public async Task DeactivatePlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -246,7 +232,7 @@ public class PlatformBillingService : IPlatformBillingService
 
         var pack = new CreditPack
         {
-            QuotaType = request.QuotaType,
+            QuotaType = QuotaType.Credits, // there is one wallet: every pack is credits
             Name = request.Name.Trim(),
             Units = request.Units,
             PriceCents = request.PriceCents,
@@ -333,9 +319,9 @@ public class PlatformBillingService : IPlatformBillingService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<Dictionary<Guid, List<PlanQuota>>> LoadQuotasAsync(IReadOnlyCollection<Guid> planIds, CancellationToken cancellationToken) =>
-        (await _context.PlanQuotas.Where(q => planIds.Contains(q.PlanId)).ToListAsync(cancellationToken))
-            .GroupBy(q => q.PlanId)
+    private async Task<Dictionary<Guid, List<PlanFeature>>> LoadFeaturesAsync(IReadOnlyCollection<Guid> planIds, CancellationToken cancellationToken) =>
+        (await _context.PlanFeatures.Where(f => planIds.Contains(f.PlanId)).ToListAsync(cancellationToken))
+            .GroupBy(f => f.PlanId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
     /// <summary>The USD-cents figure older code still reads (list ordering, the legacy Payment column) - taken from India's
@@ -358,7 +344,7 @@ public class PlatformBillingService : IPlatformBillingService
             .Select(x => new CountryPriceDto(x.Pricing!.CountryCode, x.Pricing.CountryName, x.Pricing.CurrencyCode, x.Pricing.CurrencySymbol, x.Value))
             .ToList();
 
-    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing, IEnumerable<PlanQuota>? quotas, CountryPrices? prices) => new(
+    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing, IEnumerable<PlanFeature>? features, CountryPrices? prices) => new(
         p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
         p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive,
         pricing.CurrencyCode,
@@ -366,7 +352,9 @@ public class PlatformBillingService : IPlatformBillingService
         // The operator's own country's price: an explicit one if set, else the base converted. Two decimals - a
         // plan price is a real amount someone pays, not a fraction-of-a-cent estimate.
         prices?.GetValueOrDefault(pricing.CountryCode) ?? 0m,
-        (quotas ?? Array.Empty<PlanQuota>()).OrderBy(q => q.QuotaType).Select(q => new IncludedQuotaDto(q.QuotaType, q.IncludedUnits)).ToList(),
+        p.StarterCredits,
+        p.MonthlyCredits,
+        (features ?? Array.Empty<PlanFeature>()).Select(f => f.Feature).OrderBy(f => f).ToList(),
         ToCountryPriceDtos(prices));
 
     private static PlatformCreditPackDto ToDto(CreditPack p, RegionalPricing pricing, CountryPrices? prices) => new(

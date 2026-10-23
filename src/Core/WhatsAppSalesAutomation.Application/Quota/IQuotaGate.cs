@@ -26,7 +26,7 @@ public interface IQuotaGate
 
     /// <summary>Gives a brand-new tenant its free trial quota (Billing:Trial), expiring when the trial does.
     /// Idempotent.</summary>
-    Task GrantTrialAsync(Guid tenantId, DateTime trialEndsAtUtc, CancellationToken cancellationToken = default);
+    Task AssignTrialPlanAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     Task<decimal> GetAvailableAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default);
 }

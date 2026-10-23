@@ -19,14 +19,14 @@ public record PlanDto(
     string CurrencyCode,
     string CurrencySymbol,
     decimal LocalPriceAmount,
-    IReadOnlyList<IncludedQuotaDto> IncludedQuotas,
+    // Credits the plan puts in the wallet: once when a tenant goes onto it, and every month after. The plan never expires.
+    decimal StarterCredits,
+    decimal MonthlyCredits,
+    IReadOnlyList<Domain.Enums.PlatformFeature> Features,
     // Tax added on top of LocalPriceAmount for the tenant this is quoted to, and what they would pay in all.
     IReadOnlyList<TaxLineDto> TaxLines,
     decimal TaxLocal,
     decimal TotalLocal);
-
-/// <summary>Units of one quota type a plan includes each billing period.</summary>
-public record IncludedQuotaDto(Domain.Enums.QuotaType QuotaType, decimal Units);
 
 /// <summary>One purchasable credit pack, priced in the calling tenant's own currency (PriceCents stays base USD).</summary>
 public record CreditPackDto(

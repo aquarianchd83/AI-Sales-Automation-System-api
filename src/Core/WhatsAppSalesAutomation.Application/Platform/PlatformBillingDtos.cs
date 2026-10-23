@@ -25,9 +25,12 @@ public record PlatformPlanDto(
     string CurrencyCode,
     string CurrencySymbol,
     decimal PriceMonthlyLocal,
-    // What the plan includes each billing period, per prepaid quota type. A type the plan doesn't include is
-    // simply absent. Changing these affects the NEXT allocation a tenant on the plan receives, never one already given.
-    IReadOnlyList<IncludedQuotaDto> IncludedQuotas,
+    // Credits put in a tenant's wallet once when it goes onto the plan, and every month after. Unspent credits carry over and the plan never
+    // expires. Changing these affects what is granted NEXT, never what a tenant already received.
+    decimal StarterCredits,
+    decimal MonthlyCredits,
+    // The features a tenant on the plan can use. A feature not listed is hidden in the app and refused by the API.
+    IReadOnlyList<PlatformFeature> Features,
     // Explicit prices set per country, each in that country's own currency. A country not listed here is quoted
     // the base USD price converted at the catalog rate.
     IReadOnlyList<CountryPriceDto> CountryPrices);
@@ -70,7 +73,9 @@ public record CreatePlanRequest(
     int MaxKnowledgeBaseArticles,
     int PriceMonthlyCents,
     int? MaxLeadDiscoveryBatchSize = null,
-    IReadOnlyList<PlanQuotaInput>? IncludedQuotas = null,
+    decimal StarterCredits = 0m,
+    decimal MonthlyCredits = 0m,
+    IReadOnlyList<PlatformFeature>? Features = null,
     IReadOnlyList<CountryPriceInput>? CountryPrices = null);
 
 /// <summary>Body of PUT one plan. <see cref="IsActive"/> is how a plan is both retired ("Delete" in
@@ -84,8 +89,10 @@ public record UpdatePlanRequest(
     int PriceMonthlyCents,
     bool IsActive,
     int? MaxLeadDiscoveryBatchSize = null,
-    // Null leaves the plan's quotas as they are; a list is the complete new set.
-    IReadOnlyList<PlanQuotaInput>? IncludedQuotas = null,
+    decimal? StarterCredits = null,
+    decimal? MonthlyCredits = null,
+    // Null leaves the plan's features as they are; a list is the complete new set.
+    IReadOnlyList<PlatformFeature>? Features = null,
     // Null leaves the plan's country prices as they are; a list is the complete new set.
     IReadOnlyList<CountryPriceInput>? CountryPrices = null);
 

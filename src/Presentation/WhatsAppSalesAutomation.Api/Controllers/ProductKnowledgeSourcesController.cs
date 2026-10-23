@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -12,6 +14,7 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 /// "not found". Files are never given out as storage links - they come back through these endpoints, after the tenant check.
 /// </summary>
 [ApiController]
+[RequiresFeature(PlatformFeature.ProductKnowledge)]
 [Route("api/v1/product-knowledge/sources")]
 [Authorize(Roles = AppRoles.Admin)]
 public class ProductKnowledgeSourcesController : ControllerBase

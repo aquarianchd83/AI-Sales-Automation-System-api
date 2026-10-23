@@ -14,6 +14,7 @@ public record QuotaBalanceDto(QuotaType QuotaType, decimal Balance, decimal Capa
 public record QuotaLedgerEntryDto(
     Guid Id,
     QuotaType QuotaType,
+    PlatformFeature? Feature,
     QuotaEntryType EntryType,
     decimal UnitsDelta,
     decimal BalanceAfter,
@@ -26,6 +27,9 @@ public record QuotaLedgerEntryDto(
 public record QuotaLedgerQuery : Common.Models.PagedRequest
 {
     public QuotaType? QuotaType { get; init; }
+
+    /// <summary>Only this feature's entries: the per-feature ledger.</summary>
+    public PlatformFeature? Feature { get; init; }
 }
 
 /// <summary>A request to spend units. <see cref="OperationKey"/> must be unique per real-world event
@@ -43,7 +47,9 @@ public record ConsumeRequest(
     string ReferenceId,
     string? Note = null,
     bool AllowPartial = false,
-    CreditScenario? Scenario = null);
+    CreditScenario? Scenario = null,
+    PlatformFeature? Feature = null,
+    bool UnitsAreCredits = false);
 
 /// <summary>How much of what one payment bought is still unspent - what refund eligibility is judged on.
 /// <see cref="UnitsRemaining"/> is zero for a grant that has expired or is already held.</summary>
@@ -52,4 +58,6 @@ public record PaymentGrantUsage(QuotaType QuotaType, QuotaGrantOrigin Origin, de
 /// <summary><see cref="Consumed"/> is what was actually taken - less than the request only for
 /// AllowPartial, and zero when nothing was available. <see cref="Sufficient"/> is false whenever the
 /// request could not be met in full.</summary>
-public record ConsumeResult(decimal Requested, decimal Consumed, decimal BalanceAfter, bool Sufficient, bool AlreadyApplied);
+/// <param name="CreditsSpent">The credits that really left the wallet. <paramref name="Consumed"/> is in the units the caller asked in (replies, messages, candidates);
+/// they differ when an action costs more than one credit. Null from the plain ledger, which only knows credits.</param>
+public record ConsumeResult(decimal Requested, decimal Consumed, decimal BalanceAfter, bool Sufficient, bool AlreadyApplied, decimal? CreditsSpent = null);

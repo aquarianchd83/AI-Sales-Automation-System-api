@@ -1,24 +1,21 @@
 using Microsoft.Extensions.Logging;
-using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Billing.Refunds;
+using WhatsAppSalesAutomation.Application.Credits;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
-/// <summary>Hourly: warn tenants whose plan period is about to end, renew subscriptions whose period has ended, then expire lapsed quota. Platform-global
-/// (it walks every tenant), so it is a plain recurring job rather than one of the per-tenant schedules.
-/// Never throws - the next hour starts from a clean slate, and a permanently failing job is just noise.</summary>
+/// <summary>Hourly: give every tenant on a plan with monthly credits this month's credits (a month is granted once, so running often is harmless) and close
+/// refund requests nobody answered. Plans never expire, so there is nothing to renew or warn about. Platform-global (it walks every tenant), so it is a
+/// plain recurring job rather than one of the per-tenant schedules. Never throws - the next hour starts from a clean slate.</summary>
 public class SubscriptionMaintenanceJob
 {
-    private readonly ISubscriptionRenewalService _renewal;
+    private readonly ICreditAllocationService _credits;
     private readonly IRefundService _refunds;
-    private readonly IPlanExpiryNoticeService _expiryNotices;
     private readonly ILogger<SubscriptionMaintenanceJob> _logger;
 
-    public SubscriptionMaintenanceJob(
-        ISubscriptionRenewalService renewal, IRefundService refunds, IPlanExpiryNoticeService expiryNotices, ILogger<SubscriptionMaintenanceJob> logger)
+    public SubscriptionMaintenanceJob(ICreditAllocationService credits, IRefundService refunds, ILogger<SubscriptionMaintenanceJob> logger)
     {
-        _expiryNotices = expiryNotices;
-        _renewal = renewal;
+        _credits = credits;
         _refunds = refunds;
         _logger = logger;
     }
@@ -27,13 +24,10 @@ public class SubscriptionMaintenanceJob
     {
         try
         {
-            // Before renewing: a period that ends this hour is still warned about, rather than renewed silently.
-            var notices = await _expiryNotices.RunAsync();
-            var (renewed, expired) = await _renewal.RunAsync();
+            var granted = await _credits.AllocateMonthlyAsync();
             var closedRefunds = await _refunds.ExpireStaleAsync();
             _logger.LogInformation(
-                "Subscription maintenance: {Notices} plan-expiry notices, {Renewed} renewed, {Expired} quota grants expired, {Refunds} unanswered refund requests closed",
-                notices, renewed, expired, closedRefunds);
+                "Subscription maintenance: {Granted} tenants given this month's plan credits, {Refunds} unanswered refund requests closed", granted, closedRefunds);
         }
         catch (Exception ex)
         {

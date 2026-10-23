@@ -92,21 +92,20 @@ public sealed class ContentStudioTests : IDisposable
     }
 
     private Task GrantAsync(Guid tenant, QuotaType type, decimal units) =>
-        _ledger.GrantCreditsAsync(tenant, new CreditPack { QuotaType = type, Name = "p", Units = units, PriceCents = 100 }, Guid.NewGuid(), Now);
+        _ledger.GrantCreditsAsync(tenant, new CreditPack { QuotaType = QuotaType.Credits, Name = "p", Units = units, PriceCents = 100 }, Guid.NewGuid(), Now);
 
     private async Task<decimal> BalanceAsync(Guid tenant, QuotaType type) =>
-        (await _ledger.GetBalancesAsync(tenant)).Single(b => b.QuotaType == type).Balance;
+        (await _ledger.GetBalancesAsync(tenant)).Single(b => b.QuotaType == QuotaType.Credits).Balance; // one wallet: the type only says what the credits were for
 
     private static StudioChargeRequest Charge(Guid tenant, string key, StudioActivityKind kind = StudioActivityKind.Script, decimal? units = null) =>
         new(tenant, kind, key, $"Test {kind}", units, "ContentProject", "p1", "OpenAI");
 
     [Fact]
-    public async Task Balances_include_the_studio_quota_types()
+    public async Task The_balance_is_the_one_credit_wallet()
     {
         var types = (await _ledger.GetBalancesAsync(_tenant)).Select(b => b.QuotaType).ToList();
 
-        Assert.Contains(QuotaType.ContentGenerations, types);
-        Assert.Contains(QuotaType.VideoRenders, types);
+        Assert.Equal(new[] { QuotaType.Credits }, types);
     }
 
     [Fact]
@@ -128,15 +127,17 @@ public sealed class ContentStudioTests : IDisposable
     }
 
     [Fact]
-    public async Task A_video_render_draws_from_the_render_quota_not_the_generation_quota()
+    public async Task A_video_render_and_a_generation_draw_from_the_same_wallet_and_are_told_apart_by_their_kind()
     {
-        await GrantAsync(_tenant, QuotaType.ContentGenerations, 10);
-        await GrantAsync(_tenant, QuotaType.VideoRenders, 3);
+        await GrantAsync(_tenant, QuotaType.Credits, 13);
 
         await _metering.ChargeAsync(Charge(_tenant, "render-1", StudioActivityKind.VideoRender));
+        await _metering.ChargeAsync(Charge(_tenant, "gen-1"));
 
-        Assert.Equal(10m, await BalanceAsync(_tenant, QuotaType.ContentGenerations));
-        Assert.Equal(2m, await BalanceAsync(_tenant, QuotaType.VideoRenders));
+        Assert.Equal(11m, await BalanceAsync(_tenant, QuotaType.Credits));
+        var kinds = (await _db.StudioActivities.IgnoreQueryFilters().ToListAsync()).ToDictionary(a => a.OperationKey, a => a.QuotaType);
+        Assert.Equal(QuotaType.VideoRenders, kinds[StudioMeteringService.OperationKeyFor("render-1")]);
+        Assert.Equal(QuotaType.ContentGenerations, kinds[StudioMeteringService.OperationKeyFor("gen-1")]);
     }
 
     [Fact]
@@ -248,7 +249,7 @@ public sealed class ContentStudioTests : IDisposable
         Assert.Equal(1m, gen.Net);
         Assert.Equal(1, gen.Blocked);
         Assert.True(overview.Enabled);
-        Assert.Equal(2, overview.Balances.Count);
+        Assert.Equal(QuotaType.Credits, Assert.Single(overview.Balances).QuotaType);
     }
 
     [Fact]

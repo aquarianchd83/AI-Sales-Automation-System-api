@@ -20,33 +20,66 @@ public class CreditRouter : ICreditRouter
     private readonly QuotaLedgerService _tenantLedger;
     private readonly IDateTimeProvider _dateTime;
     private readonly ILogger<CreditRouter> _logger;
+    private readonly ICreditCostService _costs;
+    private readonly IFeatureAccessService _access;
+    private readonly ICreditWalletService _wallet;
 
-    public CreditRouter(IApplicationDbContext context, QuotaLedgerService tenantLedger, IDateTimeProvider dateTime, ILogger<CreditRouter> logger)
+    public CreditRouter(
+        IApplicationDbContext context, QuotaLedgerService tenantLedger, IDateTimeProvider dateTime, ILogger<CreditRouter> logger,
+        ICreditCostService costs, IFeatureAccessService access, ICreditWalletService wallet)
     {
+        _costs = costs;
+        _access = access;
+        _wallet = wallet;
         _context = context;
         _tenantLedger = tenantLedger;
         _dateTime = dateTime;
         _logger = logger;
     }
 
-    public async Task<ConsumeResult> ConsumeAsync(ConsumeRequest request, CancellationToken cancellationToken = default)
+    public async Task<ConsumeResult> ConsumeAsync(ConsumeRequest original, CancellationToken cancellationToken = default)
     {
-        if (CreditScenarioCatalog.Classify(request) is not { } scenario)
-            return await _tenantLedger.ConsumeAsync(request, cancellationToken);
+        // One wallet pays for everything: the spend is turned into credits (units the caller sized x what the platform charges per unit), tagged with
+        // its feature for that feature's ledger, and checked against the plan and the tenant's own monthly cap before any credit moves.
+        var scenario = CreditScenarioCatalog.Classify(original);
+        var feature = original.Feature ?? (scenario is { } s ? PlatformFeatureCatalog.FeatureOf(s) : (PlatformFeature?)null);
+        var perUnit = scenario is null || original.UnitsAreCredits ? 1m : await _costs.GetCreditsPerUnitAsync(scenario.Value, cancellationToken);
+        var credits = original.Units * perUnit;
+        var request = original with { QuotaType = QuotaType.Credits, Units = credits, Feature = feature, UnitsAreCredits = true };
+
+        ConsumeResult InCallerUnits(ConsumeResult r) =>
+            new(original.Units, Math.Round(r.Consumed / perUnit, 4), r.BalanceAfter, r.Consumed >= credits, r.AlreadyApplied, r.Consumed);
+
+        if (scenario is not { } known)
+            return InCallerUnits(await _tenantLedger.ConsumeAsync(request, cancellationToken));
 
         var existing = await FindUsageAsync(request.TenantId, request.OperationKey, cancellationToken);
         if (existing is not null)
-            return await AlreadySpentAsync(existing, request, cancellationToken);
+            return InCallerUnits(await AlreadySpentAsync(existing, request, cancellationToken));
 
-        var setting = await GetSettingAsync(scenario, cancellationToken);
-        var description = request.Note ?? CreditScenarioCatalog.For(scenario).Title;
+        if (feature is { } f)
+        {
+            // Not in the plan, or over the tenant's cap for the month: nothing is spent. A spend that can be partial (lead candidates) takes what the cap allows.
+            if (!await _access.HasAsync(request.TenantId, f, cancellationToken))
+                return await RefusedAsync(original, cancellationToken);
+
+            if (await _wallet.GetCapRemainingAsync(request.TenantId, f, cancellationToken) is { } remaining && remaining < credits)
+            {
+                if (!request.AllowPartial || remaining <= 0)
+                    return await RefusedAsync(original, cancellationToken);
+                request = request with { Units = remaining };
+            }
+        }
+
+        var setting = await GetSettingAsync(known, cancellationToken);
+        var description = request.Note ?? CreditScenarioCatalog.For(known).Title;
         var fellBack = false;
 
         if (setting.Payer == CreditPayer.Platform)
         {
-            var spent = await TrySpendFromPlatformAsync(request, scenario, description, cancellationToken);
+            var spent = await TrySpendFromPlatformAsync(request, known, description, cancellationToken);
             if (spent is not null)
-                return spent;
+                return InCallerUnits(spent);
 
             // The platform wallet cannot cover it. The customer still gets answered; the tenant pays, and the record says why.
             fellBack = true;
@@ -58,7 +91,7 @@ public class CreditRouter : ICreditRouter
             await RecordAsync(new CreditUsage
             {
                 TenantId = request.TenantId,
-                Scenario = scenario,
+                Scenario = known,
                 QuotaType = request.QuotaType,
                 Units = result.Consumed,
                 ConfiguredPayer = setting.Payer,
@@ -73,7 +106,14 @@ public class CreditRouter : ICreditRouter
             }, cancellationToken);
         }
 
-        return result;
+        return InCallerUnits(result);
+    }
+
+    /// <summary>Nothing taken: the feature is not in the plan, or its monthly cap is used up. Reads as "not enough" to every caller, which already knows what to do then.</summary>
+    private async Task<ConsumeResult> RefusedAsync(ConsumeRequest original, CancellationToken cancellationToken)
+    {
+        var balance = (await _tenantLedger.GetBalancesAsync(original.TenantId, cancellationToken)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
+        return new ConsumeResult(original.Units, 0m, balance, false, false);
     }
 
     public async Task<bool> ReverseAsync(Guid tenantId, string operationKey, CancellationToken cancellationToken = default)
@@ -139,7 +179,7 @@ public class CreditRouter : ICreditRouter
                 return;
 
             var result = await ConsumeAsync(
-                new ConsumeRequest(tenantId, info.QuotaType, units, operationKey, CreditScenarioCatalog.ProductKnowledgeReference, operationKey, description, Scenario: scenario),
+                new ConsumeRequest(tenantId, info.QuotaType, units, operationKey, CreditScenarioCatalog.ProductKnowledgeReference, operationKey, description, Scenario: scenario, UnitsAreCredits: true),
                 cancellationToken);
 
             if (!result.Sufficient)

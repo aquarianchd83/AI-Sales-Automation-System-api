@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -7,6 +9,7 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 [ApiController]
+[RequiresFeature(PlatformFeature.WhatsAppMessaging)]
 [Route("api/v1/message-templates")]
 [Authorize]
 public class MessageTemplatesController : ControllerBase

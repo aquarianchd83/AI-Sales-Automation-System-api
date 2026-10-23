@@ -532,6 +532,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal?>("CreditsPerUnit")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<string>("Payer")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -775,6 +778,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<int>("MaxUsers")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("MonthlyCredits")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -782,6 +788,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<int>("PriceMonthlyCents")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("StarterCredits")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -792,6 +801,34 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Plans", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.PlanFeature", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Feature")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "Feature")
+                        .IsUnique();
+
+                    b.ToTable("PlanFeatures", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.PlanPrice", b =>
@@ -823,37 +860,6 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("PlanPrices", (string)null);
-                });
-
-            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.PlanQuota", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<decimal>("IncludedUnits")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("PlanId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("QuotaType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PlanId", "QuotaType")
-                        .IsUnique();
-
-                    b.ToTable("PlanQuotas", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.PlatformCreditEntry", b =>
@@ -1015,6 +1021,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<string>("Feature")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<Guid?>("GrantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1055,6 +1065,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "OperationKey");
+
+                    b.HasIndex("TenantId", "Feature", "OccurredAtUtc");
 
                     b.HasIndex("TenantId", "QuotaType", "OccurredAtUtc");
 
@@ -1206,6 +1218,37 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Subscriptions", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.TenantFeatureCap", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Feature")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<decimal>("MonthlyLimit")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Feature")
+                        .IsUnique();
+
+                    b.ToTable("TenantFeatureCaps", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.TenantNotification", b =>

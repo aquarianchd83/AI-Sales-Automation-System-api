@@ -42,7 +42,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _db.Database.EnsureCreated();
 
         _ledger = new QuotaLedgerService(_db, _clock);
-        var gate = new QuotaGate(_ledger, new FixedOptions<WhatsAppPricingOptions>(new()), new FixedOptions<TrialQuotaOptions>(new()));
+        var gate = CreditTestDoubles.Gate(_ledger);
 
         var conversations = DispatchProxy.Create<IConversationService, Stub>();
         ((Stub)(object)conversations).Handler = (m, _) => m.Name == nameof(IConversationService.GetOrCreateActiveConversationIdAsync)
@@ -148,7 +148,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
         _ledger.AdjustAsync(_tenant.Id, QuotaType.WhatsAppMessages, units, "test funding", Guid.NewGuid());
 
     private async Task<decimal> BalanceAsync() =>
-        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.WhatsAppMessages).Balance;
+        (await _ledger.GetBalancesAsync(_tenant.Id)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
 
     [Fact]
     public async Task With_no_quota_nothing_is_sent_and_nothing_is_queued()

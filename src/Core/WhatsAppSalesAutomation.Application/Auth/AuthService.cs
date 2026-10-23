@@ -100,7 +100,7 @@ public class AuthService : IAuthService
             Name = request.CompanyName,
             Slug = slug,
             Status = TenantStatus.Trial,
-            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
+            // The Trial plan never expires, so there is no trial end date.
             CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
             StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null,
             // Unlike CountryCode (no universal default makes sense there), every tenant gets an
@@ -142,9 +142,8 @@ public class AuthService : IAuthService
         // campaign can send within the minute rather than waiting for the daily reconcile pass.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
-        // A trial tenant has no plan and so no included quota - without this it could not send a message before
-        // paying. The grant expires with the trial.
-        await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
+        // A new tenant starts on the Trial plan: the minimum set of features and its starter credits, which never expire.
+        await _quota.AssignTrialPlanAsync(tenant.Id, cancellationToken);
 
         // Gives the new tenant a working AI sales agent from its first message: without a qualification
         // schema the agent has nothing to ask about, and without scoring rules every lead reads Cold.
@@ -158,7 +157,7 @@ public class AuthService : IAuthService
             PlatformNotificationKind.TenantSignedUp, PlatformNotificationSeverity.Info, $"signup-{tenant.Id:N}",
             $"New signup: {tenant.Name}",
             $"{tenant.Name} ({tenant.Slug}) signed up{(tenant.CountryCode is null ? string.Empty : $" from {tenant.CountryCode}")}. " +
-            $"Admin: {user.FullName} <{user.Email}>. Their trial ends {tenant.TrialEndsAtUtc:d MMM yyyy}.",
+            $"Admin: {user.FullName} <{user.Email}>. They start on the Trial plan.",
             tenant.Id), cancellationToken);
 
         await _recovery.SendVerificationEmailAsync(user.Id, cancellationToken);

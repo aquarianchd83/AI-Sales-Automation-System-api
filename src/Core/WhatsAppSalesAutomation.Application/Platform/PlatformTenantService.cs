@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -29,7 +30,7 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IValidator<UpdateTenantCountryRequest> _updateCountryValidator;
     private readonly IPlatformAuditService _auditService;
     private readonly IQuotaGate _quota;
-    private readonly IQuotaLedgerService _ledger;
+    private readonly ICreditAllocationService _credits;
 
     private readonly IAiSpendEstimator _aiSpend;
     private readonly ICountryAvailability _countries;
@@ -47,14 +48,14 @@ public class PlatformTenantService : IPlatformTenantService
         IValidator<UpdateTenantCountryRequest> updateCountryValidator,
         IPlatformAuditService auditService,
         IQuotaGate quota,
-        IQuotaLedgerService ledger,
+        ICreditAllocationService credits,
         IAiSpendEstimator aiSpend,
         ICountryAvailability countries)
     {
         _countries = countries;
         _aiSpend = aiSpend;
         _quota = quota;
-        _ledger = ledger;
+        _credits = credits;
         _context = context;
         _userManager = userManager;
         _whatsAppConfigProvider = whatsAppConfigProvider;
@@ -189,7 +190,7 @@ public class PlatformTenantService : IPlatformTenantService
             Name = request.CompanyName.Trim(),
             Slug = slug,
             Status = TenantStatus.Trial,
-            TrialEndsAtUtc = _dateTime.UtcNow.AddDays(14),
+            // The Trial plan never expires, so there is no trial end date.
             CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim().ToUpperInvariant(),
             StateCode = IndianStates.AppliesTo(request.CountryCode) && !string.IsNullOrWhiteSpace(request.StateCode) ? request.StateCode.Trim().ToUpperInvariant() : null,
             // Same default as self-serve signup - see AuthService.SignUpAsync.
@@ -224,7 +225,7 @@ public class PlatformTenantService : IPlatformTenantService
         // Same reasoning as self-serve signup (see AuthService.SignUpAsync) - the tenant's background
         // jobs exist and are registered from the moment it does.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
-        await _quota.GrantTrialAsync(tenant.Id, tenant.TrialEndsAtUtc!.Value, cancellationToken);
+        await _quota.AssignTrialPlanAsync(tenant.Id, cancellationToken);
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantCreated, tenant.Id, user.Id,
@@ -307,38 +308,11 @@ public class PlatformTenantService : IPlatformTenantService
         var plan = await _context.Plans.FirstOrDefaultAsync(p => p.Id == request.PlanId, cancellationToken)
             ?? throw new NotFoundException(nameof(Plan), request.PlanId);
 
-        var subscription = await _context.Subscriptions.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
-        var previousPlanId = subscription?.PlanId;
+        var previousPlanId = await _context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.TenantId == tenantId).Select(s => s.PlanId).FirstOrDefaultAsync(cancellationToken);
 
-        if (subscription is null)
-        {
-            subscription = new Subscription { TenantId = tenantId, Status = SubscriptionStatus.Active };
-            _context.Subscriptions.Add(subscription);
-        }
-
-        subscription.PlanId = plan.Id;
-
-        // Self-serve checkout (BillingService.ChoosePlanAsync) stamps the billing period; an override
-        // used to leave it null, giving the tenant a paid plan but no period. Stamped when missing or already
-        // lapsed - and only then: switching plans mid-period must not restart a period that is still running.
-        var now = _dateTime.UtcNow;
-        if (subscription.CurrentPeriodStartUtc is null || subscription.CurrentPeriodEndUtc is not { } periodEnd || periodEnd <= now)
-        {
-            subscription.CurrentPeriodStartUtc = now;
-            subscription.CurrentPeriodEndUtc = now.AddMonths(1);
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        // A plan is only worth having if it brings its quota: self-serve checkout and the hourly renewal both
-        // allocate it, so an operator's override must too, or the tenant would hold a plan and be unable to send
-        // anything until its next renewal. A new plan replaces the old one's leftovers (credits are kept); the
-        // grant runs to the end of the period the tenant is already in. No payment backs it - the operator chose it.
-        if (previousPlanId != plan.Id)
-        {
-            await _ledger.ForfeitPlanAllocationsAsync(tenantId, "Plan changed by an operator", cancellationToken);
-            await _ledger.AllocatePlanQuotaAsync(tenantId, plan.Id, now, subscription.CurrentPeriodEndUtc!.Value, null, cancellationToken);
-        }
+        // The plan never expires: no billing period. Going onto a plan grants its starter credits (once) and this month's credits; nothing is taken away.
+        await _credits.AssignPlanAsync(tenantId, plan.Id, null, cancellationToken);
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantPlanOverridden, tenantId,

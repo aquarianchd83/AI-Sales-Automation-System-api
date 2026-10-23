@@ -50,10 +50,10 @@ public sealed class QuotaAlertTests : IDisposable
         _connection.Dispose();
     }
 
-    private Task GrantAsync(decimal units, QuotaType type = QuotaType.WhatsAppMessages) =>
+    private Task GrantAsync(decimal units, QuotaType type = QuotaType.Credits) =>
         _ledger.AdjustAsync(_tenant.Id, type, units, "test funding", Guid.NewGuid());
 
-    private Task SpendAsync(decimal units, string key, QuotaType type = QuotaType.WhatsAppMessages) =>
+    private Task SpendAsync(decimal units, string key, QuotaType type = QuotaType.Credits) =>
         _ledger.ConsumeAsync(new ConsumeRequest(_tenant.Id, type, units, key, "Message", key));
 
     private Task<List<TenantNotification>> NotificationsAsync() =>
@@ -157,7 +157,7 @@ public sealed class QuotaAlertTests : IDisposable
     [Fact]
     public async Task Purchased_credits_about_to_expire_are_flagged_but_far_off_ones_are_not()
     {
-        var pack = new CreditPack { QuotaType = QuotaType.WhatsAppMessages, Name = "1,000", Units = 1000, PriceCents = 2000 };
+        var pack = new CreditPack { QuotaType = QuotaType.Credits, Name = "1,000", Units = 1000, PriceCents = 2000 };
         await _ledger.GrantCreditsAsync(_tenant.Id, pack, Guid.NewGuid(), _clock.UtcNow);
         Assert.Equal(0, await _alerts.EvaluateAsync());
 
@@ -184,38 +184,38 @@ public sealed class QuotaAlertTests : IDisposable
     [Fact]
     public async Task NotifyIfExhaustedAsync_raises_nothing_while_quota_remains()
     {
-        await GrantAsync(1000, QuotaType.LeadCandidates);
-        await SpendAsync(500, "m1", QuotaType.LeadCandidates);
+        await GrantAsync(1000, QuotaType.Credits);
+        await SpendAsync(500, "m1", QuotaType.Credits);
 
-        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.Credits));
         Assert.Empty(await NotificationsAsync());
     }
 
     [Fact]
-    public async Task NotifyIfExhaustedAsync_alerts_immediately_when_lead_candidates_run_out()
+    public async Task NotifyIfExhaustedAsync_alerts_immediately_when_the_credits_run_out()
     {
-        await GrantAsync(1000, QuotaType.LeadCandidates);
-        await SpendAsync(1000, "m1", QuotaType.LeadCandidates);
+        await GrantAsync(1000, QuotaType.Credits);
+        await SpendAsync(1000, "m1", QuotaType.Credits);
 
-        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.Credits));
 
         var alert = Assert.Single(await NotificationsAsync());
         Assert.Equal(TenantNotificationKind.QuotaExhausted, alert.Kind);
-        Assert.Equal(QuotaType.LeadCandidates, alert.QuotaType);
+        Assert.Equal(QuotaType.Credits, alert.QuotaType);
         Assert.Equal(DeliveryStatus.Sent, alert.EmailStatus);
-        Assert.Contains("lead candidates", alert.Title);
+        Assert.Contains("credits", alert.Title);
     }
 
     [Fact]
     public async Task NotifyIfExhaustedAsync_and_the_sweep_share_the_same_episode_so_neither_double_notifies()
     {
-        await GrantAsync(1000, QuotaType.LeadCandidates);
-        await SpendAsync(1000, "m1", QuotaType.LeadCandidates);
+        await GrantAsync(1000, QuotaType.Credits);
+        await SpendAsync(1000, "m1", QuotaType.Credits);
 
-        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        Assert.True(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.Credits));
         // The scheduled sweep runs later and finds the same exhaustion already alerted this episode.
         Assert.Equal(0, await _alerts.EvaluateAsync());
-        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.LeadCandidates));
+        Assert.False(await _alerts.NotifyIfExhaustedAsync(_tenant.Id, QuotaType.Credits));
 
         Assert.Single(await NotificationsAsync());
     }
