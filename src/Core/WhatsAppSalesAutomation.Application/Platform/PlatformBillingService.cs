@@ -108,7 +108,7 @@ public class PlatformBillingService : IPlatformBillingService
         var prices = new CountryPrices();
         foreach (var input in request.CountryPrices ?? Array.Empty<CountryPriceInput>())
         {
-            if (input.Amount <= 0)
+            if (input.Amount < 0)
                 continue;
 
             var code = input.CountryCode.ToUpperInvariant();
@@ -170,7 +170,7 @@ public class PlatformBillingService : IPlatformBillingService
             foreach (var row in existingPrices.ToList())
             {
                 var wantedPrice = wantedPrices.FirstOrDefault(w => string.Equals(w.CountryCode, row.CountryCode, StringComparison.OrdinalIgnoreCase));
-                if (wantedPrice is null || wantedPrice.Amount <= 0)
+                if (wantedPrice is null || wantedPrice.Amount < 0)
                 {
                     _context.PlanPrices.Remove(row);
                     existingPrices.Remove(row);
@@ -181,7 +181,7 @@ public class PlatformBillingService : IPlatformBillingService
                 }
             }
 
-            foreach (var input in wantedPrices.Where(w => w.Amount > 0))
+            foreach (var input in wantedPrices.Where(w => w.Amount >= 0))
             {
                 if (existingPrices.Any(p => string.Equals(p.CountryCode, input.CountryCode, StringComparison.OrdinalIgnoreCase)))
                     continue;

@@ -37,7 +37,9 @@ public record PriceQuote(
 public interface IPricingService
 {
     /// <summary>Null when <paramref name="subtotal"/> is null or not positive - nothing is priced for this country.</summary>
-    PriceQuote? Quote(decimal? subtotal, string? countryCode, string? stateCode);
+    /// <param name="allowFree">A price of exactly 0 is a real, free offer (a plan the operator priced at 0 on purpose) and quotes as free. Without it, 0 means
+    /// "not sold" - what a credit pack priced 0 has always meant.</param>
+    PriceQuote? Quote(decimal? subtotal, string? countryCode, string? stateCode, bool allowFree = false);
 
     /// <summary>Tax lines for a subtotal - also used to size a refund's share of the tax.</summary>
     IReadOnlyList<TaxLineDto> TaxOn(decimal subtotal, string countryCode, string? stateCode);
@@ -54,9 +56,9 @@ public class PricingService : IPricingService
         _fx = fx.Value;
     }
 
-    public PriceQuote? Quote(decimal? subtotal, string? countryCode, string? stateCode)
+    public PriceQuote? Quote(decimal? subtotal, string? countryCode, string? stateCode, bool allowFree = false)
     {
-        if (subtotal is not { } amount || amount <= 0)
+        if (subtotal is not { } amount || amount < 0 || (amount == 0 && !allowFree))
             return null;
 
         var region = RegionalPricingCatalog.Resolve(countryCode);

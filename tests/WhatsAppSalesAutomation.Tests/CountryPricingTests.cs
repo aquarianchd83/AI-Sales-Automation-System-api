@@ -205,11 +205,26 @@ public sealed class CountryPricingTests : IDisposable
     {
         var plan = await ProPlan();
 
+        // A country left out of the set loses its price: the plan is no longer sold there.
         await _catalog.UpdatePlanAsync(plan.Id, new UpdatePlanRequest("Pro", 5, 1000, 5, 20, 0, true,
-            CountryPrices: new[] { new CountryPriceInput("IN", 0m), new CountryPriceInput("GB", 40m) }));
+            CountryPrices: new[] { new CountryPriceInput("GB", 40m) }));
 
         Assert.Empty(await _billing.GetPlansAsync("IN"));
         Assert.Single(await _billing.GetPlansAsync("GB"));
+    }
+
+    [Fact]
+    public async Task A_price_of_zero_is_a_free_offer_not_a_missing_price()
+    {
+        var plan = await ProPlan();
+
+        await _catalog.UpdatePlanAsync(plan.Id, new UpdatePlanRequest("Pro", 5, 1000, 5, 20, 0, true,
+            CountryPrices: new[] { new CountryPriceInput("IN", 0m), new CountryPriceInput("GB", 40m) }));
+
+        var india = Assert.Single(await _billing.GetPlansAsync("IN"));
+        Assert.Equal(0m, india.LocalPriceAmount);
+        Assert.Equal(0m, india.TotalLocal);
+        Assert.Equal(40m, Assert.Single(await _billing.GetPlansAsync("GB")).LocalPriceAmount);
     }
 
     [Fact]
@@ -239,6 +254,11 @@ public sealed class CountryPricingTests : IDisposable
         // Nothing is priced without a price.
         Assert.Null(vat.Quote(null, "DE", null));
         Assert.Null(vat.Quote(0m, "DE", null));
+        // ...except a plan priced 0 on purpose, which is a free offer with no tax on nothing.
+        var free = vat.Quote(0m, "DE", null, allowFree: true)!;
+        Assert.Equal(0m, free.Total);
+        Assert.Equal(0m, free.Tax);
+        Assert.Null(vat.Quote(-1m, "DE", null, allowFree: true));
         // The rupee rate is the one set by hand.
         Assert.Equal(Math.Round(90m / 0.92m, 6), de.FxRateToInr);
     }

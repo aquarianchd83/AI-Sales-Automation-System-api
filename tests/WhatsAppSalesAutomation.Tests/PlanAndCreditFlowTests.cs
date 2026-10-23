@@ -121,6 +121,43 @@ public sealed class PlanAndCreditFlowTests : IDisposable
         Assert.Equal(150m, await BalanceAsync()); // 50 starter + 100 for the month
     }
 
+    // ---- Going back to a free plan
+
+    [Fact]
+    public async Task A_free_plan_is_sold_only_when_it_is_priced_at_zero_on_purpose()
+    {
+        // No price row for the country: not sold, exactly as before.
+        await Assert.ThrowsAsync<ConflictException>(() => _billing.ChoosePlanAsync(_tenant.Id, _trial.Id));
+        Assert.DoesNotContain(await _billing.GetPlansAsync("IN"), p => p.Id == _trial.Id);
+
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _trial.Id, CountryCode = "IN", Amount = 0m });
+        await _db.SaveChangesAsync();
+
+        Assert.Contains(await _billing.GetPlansAsync("IN"), p => p.Id == _trial.Id && p.LocalPriceAmount == 0m);
+    }
+
+    [Fact]
+    public async Task Downgrading_to_a_free_plan_charges_nothing_and_never_hands_out_the_starter_credits_again()
+    {
+        _db.PlanPrices.Add(new PlanPrice { PlanId = _trial.Id, CountryCode = "IN", Amount = 0m });
+        await _db.SaveChangesAsync();
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
+        Assert.Equal(150m, await BalanceAsync()); // 50 starter + 100 for the month
+
+        var subscription = await _billing.ChoosePlanAsync(_tenant.Id, _trial.Id);
+
+        Assert.Equal(_trial.Id, subscription.PlanId);
+        Assert.Equal(150m, await BalanceAsync()); // what they have is kept, and no second 50
+        var payment = await _db.Payments.IgnoreQueryFilters().SingleAsync(); // Premium's; the free plan recorded none
+        Assert.Equal(PaymentKind.Subscription, payment.Kind);
+        Assert.Equal(_premium.Id, payment.PlanId);
+
+        await _billing.ChoosePlanAsync(_tenant.Id, _premium.Id);
+        await _billing.ChoosePlanAsync(_tenant.Id, _trial.Id);
+        Assert.Equal(150m, await BalanceAsync());
+    }
+
     [Fact]
     public async Task Premium_gets_new_credits_each_month_once_and_unspent_ones_carry_over()
     {

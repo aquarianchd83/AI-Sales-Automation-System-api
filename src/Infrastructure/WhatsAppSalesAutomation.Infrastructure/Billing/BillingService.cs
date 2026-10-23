@@ -89,7 +89,7 @@ public class BillingService : IBillingService
         var result = new List<PlanDto>();
         foreach (var p in plans)
         {
-            var quote = _pricing.Quote(pricesByPlan.GetValueOrDefault(p.Id)?.GetValueOrDefault(region.CountryCode), resolvedCountryCode, stateCode);
+            var quote = _pricing.Quote(CatalogPricing.PriceFor(pricesByPlan.GetValueOrDefault(p.Id), region.CountryCode), resolvedCountryCode, stateCode, allowFree: true);
             if (quote is null)
                 continue;
 
@@ -162,18 +162,25 @@ public class BillingService : IBillingService
         tenant.TrialEndsAtUtc = null;
 
         var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
-        var planPrice = (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken))
-            .GetValueOrDefault(plan.Id)?.GetValueOrDefault(region.CountryCode);
-        var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode)
+        var planPrice = CatalogPricing.PriceFor(
+            (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken)).GetValueOrDefault(plan.Id),
+            region.CountryCode);
+        var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode, allowFree: true)
             ?? throw new ConflictException("This plan isn't available in your country.");
-        var payment = PaymentFactory.For(tenantId, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id);
-        _context.Payments.Add(payment);
+
+        // A free plan charges nothing, so there is no payment to record (and nothing to refund).
+        Payment? payment = null;
+        if (quote.Total > 0)
+        {
+            payment = PaymentFactory.For(tenantId, PaymentKind.Subscription, plan.Name, quote, now, planId: plan.Id);
+            _context.Payments.Add(payment);
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
 
         // The plan never expires, so there is no period to replace: the plan's credits simply arrive in the wallet (once for the starter credits,
         // and this month's). What the tenant already has is untouched.
-        await _credits.AssignPlanAsync(tenantId, plan.Id, payment.Id, cancellationToken);
+        await _credits.AssignPlanAsync(tenantId, plan.Id, payment?.Id, cancellationToken);
 
         // Subscribing is the one non-operator path that moves a tenant's status, so it re-syncs its
         // background jobs like the Platform Admin Console's own actions do: a tenant that was suspended

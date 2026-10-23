@@ -35,6 +35,11 @@ public static class CatalogPricing
         return (baseCents, Local(baseCents, pricing, null));
     }
 
+    /// <summary>The explicit price set for a country, or null when none was set. A set price of 0 is returned as 0 - a free offer - and is
+    /// never confused with no price at all.</summary>
+    public static decimal? PriceFor(CountryPrices? prices, string countryCode) =>
+        prices is not null && prices.TryGetValue(countryCode, out var amount) ? amount : null;
+
     public static async Task<Dictionary<Guid, CountryPrices>> LoadPlanPricesAsync(
         IApplicationDbContext context, IReadOnlyCollection<Guid> planIds, CancellationToken cancellationToken)
     {
