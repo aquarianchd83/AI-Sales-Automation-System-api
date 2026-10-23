@@ -147,6 +147,7 @@ public static class DependencyInjection
         services.AddScoped<ICreditRouter, CreditRouter>();
         services.AddScoped<IQuotaLedgerService, CreditRoutingLedger>();
         services.AddScoped<ICreditPayerService, CreditPayerService>();
+        services.AddScoped<IPlatformWalletService, PlatformWalletService>();
         services.AddScoped<ICreditCostService, CreditCostService>();
         services.AddScoped<IFeatureAccessService, FeatureAccessService>();
         services.AddScoped<ICreditWalletService, CreditWalletService>();

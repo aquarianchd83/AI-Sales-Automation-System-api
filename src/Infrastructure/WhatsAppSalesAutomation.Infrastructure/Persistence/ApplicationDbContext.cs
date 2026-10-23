@@ -170,6 +170,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<PlatformCreditEntry> PlatformCreditEntries => Set<PlatformCreditEntry>();
 
+    public DbSet<PlatformWalletTopUp> PlatformWalletTopUps => Set<PlatformWalletTopUp>();
+
     public DbSet<CreditUsage> CreditUsages => Set<CreditUsage>();
 
     public DbSet<RefundRequest> RefundRequests => Set<RefundRequest>();

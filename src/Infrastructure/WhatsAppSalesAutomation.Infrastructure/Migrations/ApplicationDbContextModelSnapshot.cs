@@ -951,6 +951,39 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("PlatformCreditWallets", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.PlatformWalletTopUp", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AmountInr")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateOnly>("TopUpDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TopUpDate");
+
+                    b.ToTable("PlatformWalletTopUps", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.QuotaGrant", b =>
                 {
                     b.Property<Guid>("Id")

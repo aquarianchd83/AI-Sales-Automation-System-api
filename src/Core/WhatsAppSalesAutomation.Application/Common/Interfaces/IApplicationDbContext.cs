@@ -163,6 +163,8 @@ public interface IApplicationDbContext
 
     DbSet<PlatformCreditEntry> PlatformCreditEntries { get; }
 
+    DbSet<PlatformWalletTopUp> PlatformWalletTopUps { get; }
+
     DbSet<CreditUsage> CreditUsages { get; }
 
     DbSet<RefundRequest> RefundRequests { get; }

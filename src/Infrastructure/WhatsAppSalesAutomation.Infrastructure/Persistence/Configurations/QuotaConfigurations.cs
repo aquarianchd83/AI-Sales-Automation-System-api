@@ -202,6 +202,18 @@ public class PlatformCreditEntryConfiguration : IEntityTypeConfiguration<Platfor
     }
 }
 
+public class PlatformWalletTopUpConfiguration : IEntityTypeConfiguration<PlatformWalletTopUp>
+{
+    public void Configure(EntityTypeBuilder<PlatformWalletTopUp> builder)
+    {
+        builder.ToTable("PlatformWalletTopUps");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.Provider).HasConversion<string>().HasMaxLength(20);
+        builder.Property(t => t.AmountInr).HasColumnType("decimal(18,2)");
+        builder.HasIndex(t => t.TopUpDate);
+    }
+}
+
 public class CreditUsageConfiguration : IEntityTypeConfiguration<CreditUsage>
 {
     public void Configure(EntityTypeBuilder<CreditUsage> builder)
