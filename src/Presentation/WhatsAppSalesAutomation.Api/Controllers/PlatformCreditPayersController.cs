@@ -46,7 +46,7 @@ public class PlatformCreditPayersController : ControllerBase
 
         await _auditService.LogAsync(
             actor, _currentUser.Email ?? string.Empty, PlatformAuditActions.CreditPayerChanged, null,
-            details: $"{updated.Title}: {before?.Payer} -> {updated.Payer}" + (updated.UnitsConfigurable ? $", {updated.UnitsPerAction:0.####} credit(s) per action" : string.Empty),
+            details: $"{updated.Title}: {before?.Payer} -> {updated.Payer}, price {before?.UnitsPerAction:0.####} -> {updated.UnitsPerAction:0.####} credit(s) per {updated.UnitLabel}",
             cancellationToken: cancellationToken);
 
         return Ok(updated);

@@ -99,7 +99,8 @@ public class FeatureAccessService : IFeatureAccessService
 
 // ----- the tenant's wallet, caps and per-feature ledgers ----------------------------------------------------------------------------------
 
-public record FeatureCostDto(CreditScenario Scenario, string Title, string UnitLabel, decimal Credits, bool PerAction);
+/// <param name="Description">What the action is, in the platform's words, so the tenant's credit-costs page can say what a charge is for.</param>
+public record FeatureCostDto(CreditScenario Scenario, string Title, string UnitLabel, decimal Credits, bool PerAction, string Description);
 
 /// <param name="IncludedInPlan">False for a feature the tenant's plan does not include: the app hides it (the summary still lists it so a plan can be compared).</param>
 /// <param name="MonthlyCap">The tenant's own limit on this feature's credits per calendar month, or null for none.</param>
@@ -194,7 +195,7 @@ public class CreditWalletService : ICreditWalletService
             f.Scenarios.Select(s =>
             {
                 var info = CreditScenarioCatalog.For(s);
-                return new FeatureCostDto(s, info.Title, info.UnitLabel, costs[s], info.UnitsConfigurable);
+                return new FeatureCostDto(s, info.Title, info.UnitLabel, costs[s], info.UnitsConfigurable, info.Description);
             }).ToList())).ToList();
 
         return new WalletSummaryDto(balance, plan?.Code, plan?.Name, plan?.MonthlyCredits ?? 0m, monthStart, features);
