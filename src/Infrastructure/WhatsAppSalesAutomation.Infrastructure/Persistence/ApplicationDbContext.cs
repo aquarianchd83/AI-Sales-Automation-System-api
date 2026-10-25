@@ -123,6 +123,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<CustomerHistoryEvent> CustomerHistoryEvents => Set<CustomerHistoryEvent>();
 
     public DbSet<ConsentInvitation> ConsentInvitations => Set<ConsentInvitation>();
+    public DbSet<TenantConsentPage> TenantConsentPages => Set<TenantConsentPage>();
+    public DbSet<ConsentPageVersion> ConsentPageVersions => Set<ConsentPageVersion>();
 
     public DbSet<LeadDiscoveryRun> LeadDiscoveryRuns => Set<LeadDiscoveryRun>();
 

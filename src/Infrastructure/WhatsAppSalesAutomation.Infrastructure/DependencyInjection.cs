@@ -320,6 +320,7 @@ public static class DependencyInjection
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiCompletionClient, WhatsAppSalesAutomation.Infrastructure.Ai.AiCompletionClient>().RemoveAllLoggers();
         services.AddHttpClient();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Verification.SimulatedPhoneVerificationProvider>();
+        services.AddSingleton<WhatsAppSalesAutomation.Application.Consent.ISimulatedSmsOutbox, WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedSmsOutbox>();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>();
         services.AddScoped<IPhoneVerificationProvider, WhatsAppSalesAutomation.Infrastructure.Integrations.RoutingPhoneVerificationProvider>();
         services.AddScoped<IConsentSmsSender, WhatsAppSalesAutomation.Infrastructure.Integrations.RoutingConsentSmsSender>();

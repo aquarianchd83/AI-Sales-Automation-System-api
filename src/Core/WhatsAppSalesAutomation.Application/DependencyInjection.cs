@@ -66,6 +66,11 @@ public static class DependencyInjection
         services.Configure<FxOptions>(configuration.GetSection("Fx"));
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentInvitationService, WhatsAppSalesAutomation.Application.Consent.ConsentInvitationService>();
+        services.Configure<WhatsAppSalesAutomation.Application.Consent.ConsentPageOptions>(configuration.GetSection("ConsentPage"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentPageSettingsService, WhatsAppSalesAutomation.Application.Consent.ConsentPageSettingsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentPageGate, WhatsAppSalesAutomation.Application.Consent.ConsentPageGate>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentWhatsAppStarter, WhatsAppSalesAutomation.Application.Consent.ConsentWhatsAppStarter>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentPageService, WhatsAppSalesAutomation.Application.Consent.ConsentPageService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Onboarding.IOnboardingService, WhatsAppSalesAutomation.Application.Onboarding.OnboardingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Tenancy.IKeywordSuggestionService, WhatsAppSalesAutomation.Application.Tenancy.KeywordSuggestionService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.LeadDiscovery.ILeadDiscoveryKeywordSuggestionService, WhatsAppSalesAutomation.Application.LeadDiscovery.LeadDiscoveryKeywordSuggestionService>();

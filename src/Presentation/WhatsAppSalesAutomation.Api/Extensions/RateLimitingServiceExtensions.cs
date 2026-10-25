@@ -26,6 +26,9 @@ public static class RateLimitingServiceExtensions
     /// <summary>The unauthenticated provider webhooks. Per client IP.</summary>
     public const string WebhookPolicy = "webhook";
 
+    /// <summary>The anonymous consent page a customer opens from an SMS. Per client IP.</summary>
+    public const string ConsentPagePolicy = "consent-page";
+
     /// <summary>Ordinary authenticated API traffic. Per user, falling back to IP.</summary>
     public const string ApiPolicy = "api";
 
@@ -82,12 +85,14 @@ public static class RateLimitingServiceExtensions
                 limiter.AddPolicy(AuthPolicy, _ => RateLimitPartition.GetNoLimiter("disabled"));
                 limiter.AddPolicy(WebhookPolicy, _ => RateLimitPartition.GetNoLimiter("disabled"));
                 limiter.AddPolicy(ApiPolicy, _ => RateLimitPartition.GetNoLimiter("disabled"));
+                limiter.AddPolicy(ConsentPagePolicy, _ => RateLimitPartition.GetNoLimiter("disabled"));
                 return;
             }
 
             limiter.AddPolicy(AuthPolicy, context => PartitionByIp(context, options, options.Auth, AuthPolicy));
             limiter.AddPolicy(WebhookPolicy, context => PartitionByIp(context, options, options.Webhook, WebhookPolicy));
             limiter.AddPolicy(ApiPolicy, context => PartitionByUser(context, options, options.Api, ApiPolicy));
+            limiter.AddPolicy(ConsentPagePolicy, context => PartitionByIp(context, options, options.ConsentPage, ConsentPagePolicy));
 
             limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
                 context => PartitionByUser(context, options, options.Api, "global"));

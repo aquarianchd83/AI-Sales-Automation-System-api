@@ -29,6 +29,10 @@ public class RateLimitOptions
 
     public RateLimitRule Api { get; set; } = new() { PermitLimit = 300, WindowSeconds = 60 };
 
+    /// <summary>The anonymous customer consent page. Per client IP; a person opens a link and answers once, so the budget is small,
+    /// while still leaving room for a household or office behind one address.</summary>
+    public RateLimitRule ConsentPage { get; set; } = new() { PermitLimit = 30, WindowSeconds = 60 };
+
     /// <summary>Client IPs exempt from every bucket - health checkers, an uptime monitor, or the
     /// office egress IP during a load test. Matched against the connection's remote IP after
     /// <c>UseForwardedHeaders</c> has run, so behind the ngrok/reverse-proxy setup described in

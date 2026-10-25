@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -13,15 +15,32 @@ namespace WhatsAppSalesAutomation.Infrastructure.Sms;
 public class SimulatedConsentSmsSender : IConsentSmsSender
 {
     private readonly ILogger<SimulatedConsentSmsSender> _logger;
+    private readonly ISimulatedSmsOutbox? _outbox;
+    private readonly ITenantContext? _tenant;
+    private readonly IDateTimeProvider? _clock;
+    private readonly ConsentPageOptions? _options;
 
-    public SimulatedConsentSmsSender(ILogger<SimulatedConsentSmsSender> logger)
+    /// <param name="outbox">Demo only: when given, and ConsentPage:DemoOutboxEnabled is on, each message is kept so its link can be clicked.</param>
+    public SimulatedConsentSmsSender(
+        ILogger<SimulatedConsentSmsSender> logger,
+        ISimulatedSmsOutbox? outbox = null,
+        ITenantContext? tenant = null,
+        IDateTimeProvider? clock = null,
+        IOptions<ConsentPageOptions>? options = null)
     {
         _logger = logger;
+        _outbox = outbox;
+        _tenant = tenant;
+        _clock = clock;
+        _options = options?.Value;
     }
 
     public Task<ConsentSmsSendResult> SendAsync(ConsentSmsRequest request, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Simulated consent SMS to {To}: {Body} (no SMS was sent)", request.ToPhoneE164, request.Body);
+
+        if (_options?.DemoOutboxEnabled == true && _outbox is not null && _tenant?.TenantId is { } tenantId)
+            _outbox.Add(tenantId, request.ToPhoneE164, request.Body, _clock?.UtcNow ?? DateTime.UtcNow);
 
         if (request.ToPhoneE164.EndsWith("99", StringComparison.Ordinal))
             return Task.FromResult(new ConsentSmsSendResult(false, null, "The number is unreachable (simulated).", Transient: false));
