@@ -120,3 +120,69 @@ public sealed class PublicConsentControllerTests
         Assert.Equal("no-referrer", controller.Response.Headers["Referrer-Policy"].ToString());
     }
 }
+
+/// <summary>The demo SMS outbox: only with the setting on, only for the signed-in tenant, and it hands back the link to click.</summary>
+public sealed class DemoSmsOutboxTests
+{
+    private sealed class Tenant : WhatsAppSalesAutomation.Application.Common.Interfaces.ITenantContext
+    {
+        public Tenant(Guid? id) => TenantId = id;
+        public Guid? TenantId { get; private set; }
+        public bool IsPlatformSuperAdmin => false;
+        public void SetTenant(Guid tenantId) => TenantId = tenantId;
+    }
+
+    private static readonly Guid A = Guid.NewGuid();
+    private static readonly Guid B = Guid.NewGuid();
+
+    private static (DemoSmsOutboxController Controller, WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedSmsOutbox Outbox) Make(bool enabled, Guid? tenant)
+    {
+        var outbox = new WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedSmsOutbox();
+        var controller = new DemoSmsOutboxController(outbox, new Tenant(tenant), Microsoft.Extensions.Options.Options.Create(new ConsentPageOptions { DemoOutboxEnabled = enabled }))
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        return (controller, outbox);
+    }
+
+    [Fact]
+    public void It_is_off_unless_the_setting_is_on()
+    {
+        var (controller, outbox) = Make(enabled: false, A);
+        outbox.Add(A, "+919800000001", "Hi! https://app.example.com/consent/abc", DateTime.UtcNow);
+
+        Assert.IsType<NotFoundResult>(controller.Get().Result);
+    }
+
+    [Fact]
+    public void It_lists_only_the_signed_in_tenants_messages_newest_first_with_the_link_and_its_path()
+    {
+        var (controller, outbox) = Make(enabled: true, A);
+        outbox.Add(A, "+919800000001", "first https://app.example.com/consent/tok1", new DateTime(2026, 10, 25, 1, 0, 0, DateTimeKind.Utc));
+        outbox.Add(A, "+919800000002", "second https://app.example.com/consent/tok2", new DateTime(2026, 10, 25, 2, 0, 0, DateTimeKind.Utc));
+        outbox.Add(B, "+919800000003", "other tenant https://app.example.com/consent/tok3", DateTime.UtcNow);
+
+        var items = Assert.IsAssignableFrom<IReadOnlyList<DemoSmsOutboxController.DemoSmsDto>>(((OkObjectResult)controller.Get().Result!).Value);
+
+        Assert.Equal(new[] { "+919800000002", "+919800000001" }, items.Select(i => i.To));
+        Assert.Equal("https://app.example.com/consent/tok2", items[0].Link);
+        Assert.Equal("/consent/tok2", items[0].Path);
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task The_simulator_keeps_messages_only_when_the_demo_setting_is_on()
+    {
+        var outbox = new WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedSmsOutbox();
+        var log = Microsoft.Extensions.Logging.Abstractions.NullLogger<WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender>.Instance;
+        var request = new WhatsAppSalesAutomation.Application.Common.Interfaces.ConsentSmsRequest("+919800000001", "Hi https://app.example.com/consent/t", "k");
+
+        await new WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender(log, outbox, new Tenant(A), new TestClock(),
+            Microsoft.Extensions.Options.Options.Create(new ConsentPageOptions { DemoOutboxEnabled = false })).SendAsync(request);
+        Assert.Empty(outbox.List(A));
+
+        await new WhatsAppSalesAutomation.Infrastructure.Sms.SimulatedConsentSmsSender(log, outbox, new Tenant(A), new TestClock(),
+            Microsoft.Extensions.Options.Options.Create(new ConsentPageOptions { DemoOutboxEnabled = true })).SendAsync(request);
+        Assert.Single(outbox.List(A));
+    }
+}
