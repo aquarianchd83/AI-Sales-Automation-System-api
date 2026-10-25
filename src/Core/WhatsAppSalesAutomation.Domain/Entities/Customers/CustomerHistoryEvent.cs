@@ -61,6 +61,9 @@ public static class CustomerHistoryEventTypes
     public const string ConversationStarted = "ConversationStarted";
     public const string ConsentRecorded = "ConsentRecorded";
 
+    /// <summary>The customer chose "No, Not Interested" on the consent page. Not a failure; no WhatsApp conversation follows.</summary>
+    public const string ConsentDeclined = "ConsentDeclined";
+
     // The campaign's first message after consent.
     public const string FirstMessageSent = "FirstMessageSent";
     public const string FirstMessageFailed = "FirstMessageFailed";
@@ -79,7 +82,7 @@ public static class CustomerHistoryEventTypes
         SmsSubmitted => 4,
         SmsDelivered or SmsFailed => 5,
         ConversationStarted => 6,
-        ConsentRecorded => 7,
+        ConsentRecorded or ConsentDeclined => 7,
         WaitingForContent => 8,
         ContentAvailable => 9,
         FirstMessageSent or FirstMessageFailed => 10,

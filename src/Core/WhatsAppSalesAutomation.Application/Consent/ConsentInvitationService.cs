@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Messaging;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
@@ -27,6 +28,9 @@ public class ConsentInvitationService : IConsentInvitationService
     private readonly ITenantContext _tenantContext;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ICampaignSendService _campaignSend;
+    private readonly IConsentPageGate _gate;
+    private readonly IConsentWhatsAppStarter _starter;
+    private readonly ConsentPageOptions _options;
     private readonly ILogger<ConsentInvitationService> _logger;
 
     public ConsentInvitationService(
@@ -36,6 +40,9 @@ public class ConsentInvitationService : IConsentInvitationService
         ITenantContext tenantContext,
         ITenantConfigOverrideProvider tenantConfig,
         ICampaignSendService campaignSend,
+        IConsentPageGate gate,
+        IConsentWhatsAppStarter starter,
+        IOptions<ConsentPageOptions> options,
         ILogger<ConsentInvitationService> logger)
     {
         _context = context;
@@ -44,6 +51,9 @@ public class ConsentInvitationService : IConsentInvitationService
         _tenantContext = tenantContext;
         _tenantConfig = tenantConfig;
         _campaignSend = campaignSend;
+        _gate = gate;
+        _starter = starter;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -58,35 +68,32 @@ public class ConsentInvitationService : IConsentInvitationService
             return ConsentInvitationBatchResult.Empty;
 
         var tenantId = _tenantContext.TenantId ?? throw new InvalidOperationException("Consent invitations are sent on behalf of a tenant.");
-        var tenant = await _context.Tenants.AsNoTracking().FirstAsync(t => t.Id == tenantId, cancellationToken);
         var customers = await _context.Customers.Where(c => customerIds.Contains(c.Id)).ToListAsync(cancellationToken);
         var now = _dateTime.UtcNow;
 
+        // Asked once for the whole batch, before any SMS. A page that was valid when discovery started may not be now.
+        var readiness = await _gate.EvaluateAsync(tenantId, cancellationToken);
+
+        // Someone who said "No" to this business is not asked again by a later campaign.
+        var declined = (await _context.ConsentInvitations.AsNoTracking()
+                .Where(i => customerIds.Contains(i.CustomerId) && i.DecisionStatus == ConsentDecisionStatus.NotInterested)
+                .Select(i => i.CustomerId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
         var details = new List<string>();
         int sent = 0, failed = 0, skipped = 0;
-
-        // The destination is the tenant's own WhatsApp number. Without it no invitation can say where to chat.
-        if (!ConsentSmsMessage.TryBuildLink(tenant.WhatsAppNumber, out var link, out var linkFailure))
-        {
-            foreach (var customer in customers)
-            {
-                AddHistory(customer, CustomerHistoryEventTypes.SmsSkipped, null, null, linkFailure, now, campaignId, executionId);
-                details.Add($"{customer.PhoneNumberE164}: {linkFailure}");
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-            return new ConsentInvitationBatchResult(0, 0, customers.Count, details);
-        }
-
-        var body = ConsentSmsMessage.BuildBody(tenant.Name, link);
+        var held = false;
 
         foreach (var customer in customers)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var skipReason = SkipReason(customer);
+            if (skipReason is null && declined.Contains(customer.Id))
+                skipReason = "The customer already declined WhatsApp messages from this business.";
             if (skipReason is null)
-                skipReason = ConsentSmsMessage.Preflight(customer.PhoneNumberE164, body, link);
+                skipReason = ConsentSmsMessage.CheckNumber(customer.PhoneNumberE164);
 
             var key = KeyFor(tenantId, customer.Id, campaignId);
             if (skipReason is null && await _context.ConsentInvitations.AnyAsync(i => i.IdempotencyKey == key, cancellationToken))
@@ -110,9 +117,11 @@ public class ConsentInvitationService : IConsentInvitationService
                 ExecutionId = executionId,
                 IdempotencyKey = key,
                 Status = ConsentInvitationStatus.Pending,
+                DecisionStatus = ConsentDecisionStatus.Pending,
                 ToPhoneE164 = customer.PhoneNumberE164,
-                Body = body,
-                WhatsAppLink = link,
+                // The text and link are made when the message is actually sent, with a fresh token; until then there is nothing to show.
+                Body = string.Empty,
+                WhatsAppLink = string.Empty,
                 CorrelationId = Guid.NewGuid().ToString("N")
             };
 
@@ -141,9 +150,25 @@ public class ConsentInvitationService : IConsentInvitationService
                 continue;
             }
 
-            var outcome = await AttemptAsync(invitation, customer, now, cancellationToken);
-            if (outcome) sent++; else failed++;
+            switch (await AttemptAsync(invitation, customer, readiness, now, cancellationToken))
+            {
+                case AttemptResult.Sent:
+                    sent++;
+                    break;
+                case AttemptResult.Held:
+                    held = true;
+                    skipped++;
+                    details.Add($"{customer.PhoneNumberE164}: Held - {readiness.Reason}");
+                    break;
+                default:
+                    failed++;
+                    break;
+            }
         }
+
+        // The discovery is already paid for and its customers kept; the tenant hears that their messages are waiting for the page.
+        if (held)
+            await _gate.NotifyAsync(tenantId, readiness, cancellationToken);
 
         return new ConsentInvitationBatchResult(sent, failed, skipped, details);
     }
@@ -151,6 +176,32 @@ public class ConsentInvitationService : IConsentInvitationService
     public async Task<int> RetryDueAsync(CancellationToken cancellationToken = default)
     {
         var now = _dateTime.UtcNow;
+        var tried = 0;
+        ConsentPageReadiness? readiness = null;
+
+        // 1. Invitations held because the consent page was not ready. Released only when it is, and without a new discovery: the leads
+        //    are already in the tenant's list and already paid for.
+        var held = await _context.ConsentInvitations
+            .Where(i => i.HeldForConsentPage && i.Status == ConsentInvitationStatus.Pending && i.ConsentRecordedAtUtc == null)
+            .OrderBy(i => i.CreatedAt)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+
+        foreach (var invitation in held)
+        {
+            readiness ??= await _gate.EvaluateAsync(invitation.TenantId, cancellationToken);
+            if (!readiness.IsReady)
+                break;
+
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invitation.CustomerId, cancellationToken);
+            if (!await IsStillWantedAsync(invitation, customer, cancellationToken))
+                continue;
+
+            await AttemptAsync(invitation, customer!, readiness, now, cancellationToken);
+            tried++;
+        }
+
+        // 2. Invitations the SMS provider turned away earlier.
         var due = await _context.ConsentInvitations
             .Where(i => i.Status == ConsentInvitationStatus.Failed && i.NextAttemptAt != null && i.NextAttemptAt <= now
                         && i.ConsentRecordedAtUtc == null && i.AttemptCount < ConsentSmsMessage.MaxAttempts)
@@ -158,33 +209,104 @@ public class ConsentInvitationService : IConsentInvitationService
             .Take(50)
             .ToListAsync(cancellationToken);
 
-        var tried = 0;
         foreach (var invitation in due)
         {
             var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invitation.CustomerId, cancellationToken);
-            if (customer is null || customer.OptInStatus is OptInStatus.OptedOut or OptInStatus.OptedIn)
-            {
-                // Consent has been given, or withdrawn, or the customer is gone: no invitation is wanted any more.
-                invitation.NextAttemptAt = null;
-                invitation.FailureReason = customer is null ? "The customer no longer exists." : $"Not retried: the customer is {customer.OptInStatus}.";
-                await _context.SaveChangesAsync(cancellationToken);
+            if (!await IsStillWantedAsync(invitation, customer, cancellationToken))
                 continue;
-            }
 
-            await AttemptAsync(invitation, customer, now, cancellationToken);
+            readiness ??= await _gate.EvaluateAsync(invitation.TenantId, cancellationToken);
+            await AttemptAsync(invitation, customer!, readiness, now, cancellationToken);
             tried++;
+        }
+
+        // 3. Consents that were granted but whose WhatsApp conversation did not start (provider down, number disconnected). The consent stands.
+        //    The starter either starts it (when no message exists yet), or notes that the campaign pipeline sent - or is retrying - the message
+        //    it already holds. Its claim and the pipeline's idempotency key keep the first message from going out twice.
+        var unstarted = await _context.ConsentInvitations
+            .Where(i => i.DecisionStatus == ConsentDecisionStatus.Granted && i.WhatsAppInitiation == WhatsAppInitiationStatus.Failed)
+            .OrderBy(i => i.DecisionAtUtc)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+
+        foreach (var invitation in unstarted)
+        {
+            if (await _starter.StartAsync(invitation, cancellationToken))
+                tried++;
         }
 
         return tried;
     }
 
-    /// <summary>One call to the provider for one reserved invitation, and what it did to the invitation and the customer's history. True when accepted.</summary>
-    private async Task<bool> AttemptAsync(ConsentInvitation invitation, Customer customer, DateTime now, CancellationToken cancellationToken)
+    /// <summary>False, having closed the invitation, when consent was given or withdrawn, the customer declined, or the customer is gone.</summary>
+    private async Task<bool> IsStillWantedAsync(ConsentInvitation invitation, Customer? customer, CancellationToken cancellationToken)
     {
+        string? reason = null;
+        if (customer is null)
+            reason = "The customer no longer exists.";
+        else if (customer.OptInStatus is OptInStatus.OptedOut or OptInStatus.OptedIn)
+            reason = $"Not retried: the customer is {customer.OptInStatus}.";
+        else if (invitation.DecisionStatus is not (ConsentDecisionStatus.Pending or ConsentDecisionStatus.LinkSent))
+            reason = $"Not retried: the customer's answer is {invitation.DecisionStatus}.";
+
+        if (reason is null)
+            return true;
+
+        invitation.NextAttemptAt = null;
+        invitation.HeldForConsentPage = false;
+        invitation.Status = ConsentInvitationStatus.Failed;
+        invitation.FailureReason = reason;
+        await _context.SaveChangesAsync(cancellationToken);
+        return false;
+    }
+
+    private enum AttemptResult { Sent, Failed, Held }
+
+    /// <summary>
+    /// One try at one reserved invitation. Checks the consent page again first - it can be unpublished between discovery and now - and if it
+    /// is not ready, sends nothing and keeps the invitation held. Otherwise makes a fresh link and sends it.
+    /// </summary>
+    private async Task<AttemptResult> AttemptAsync(
+        ConsentInvitation invitation, Customer customer, ConsentPageReadiness readiness, DateTime now, CancellationToken cancellationToken)
+    {
+        if (!readiness.IsReady)
+        {
+            if (!invitation.HeldForConsentPage)
+            {
+                invitation.HeldForConsentPage = true;
+                AddHistory(customer, CustomerHistoryEventTypes.SmsSkipped, invitation.Status.ToString(), "Held",
+                    $"The consent SMS was not sent: {readiness.Reason} It will be sent once the WhatsApp Consent Page is published. No new discovery is needed.",
+                    now, invitation.CampaignId, invitation.ExecutionId, correlationId: invitation.CorrelationId);
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            return AttemptResult.Held;
+        }
+
+        // A fresh secret for every attempt: the stored copy of the text has the token taken out, so a retry has to make a new one.
+        var token = ConsentLinkToken.Generate();
+        var link = ConsentSmsMessage.BuildLink(_options.PublicBaseUrl!, token);
+        var body = ConsentSmsMessage.BuildBody(customer.FirstName, readiness.Live!.BusinessName, readiness.Live.ProductLabel, link);
+
+        var problem = ConsentSmsMessage.Preflight(invitation.ToPhoneE164, body, link);
+        if (problem is not null)
+        {
+            invitation.AttemptCount++;
+            MarkFailed(invitation, customer, problem, transient: false, now);
+            await _context.SaveChangesAsync(cancellationToken);
+            return AttemptResult.Failed;
+        }
+
+        invitation.HeldForConsentPage = false;
+        invitation.TokenHash = ConsentLinkToken.Hash(token);
+        invitation.TokenExpiresAtUtc = now.AddDays(_options.TokenLifetimeDays);
+        invitation.Body = ConsentSmsMessage.Redact(body, token);
+        invitation.WhatsAppLink = ConsentSmsMessage.Redact(link, token);
+
         ConsentSmsSendResult result;
         try
         {
-            result = await _sms.SendAsync(new ConsentSmsRequest(invitation.ToPhoneE164, invitation.Body, invitation.IdempotencyKey), cancellationToken);
+            result = await _sms.SendAsync(new ConsentSmsRequest(invitation.ToPhoneE164, body, invitation.IdempotencyKey), cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -198,11 +320,12 @@ public class ConsentInvitationService : IConsentInvitationService
         {
             MarkFailed(invitation, customer, result.FailureReason ?? "The SMS provider rejected the message.", result.Transient, now);
             await _context.SaveChangesAsync(cancellationToken);
-            return false;
+            return AttemptResult.Failed;
         }
 
         var previous = invitation.Status.ToString();
         invitation.Status = ConsentInvitationStatus.Submitted;
+        invitation.DecisionStatus = ConsentDecisionStatus.LinkSent;
         invitation.ProviderMessageId = result.ProviderMessageId;
         invitation.SubmittedAtUtc = now;
         invitation.FailureReason = null;
@@ -215,7 +338,7 @@ public class ConsentInvitationService : IConsentInvitationService
             ApplyReceiptTo(invitation, customer, receipt.Status, now, receipt.Reason);
 
         await _context.SaveChangesAsync(cancellationToken);
-        return true;
+        return AttemptResult.Sent;
     }
 
     private void MarkFailed(ConsentInvitation invitation, Customer customer, string reason, bool transient, DateTime now)
@@ -298,7 +421,9 @@ public class ConsentInvitationService : IConsentInvitationService
         // The invitation this message answers: one that was actually sent and has not been answered yet. The customer's reply is what
         // proves it reached them, so Submitted, Delivered and even a Failed-by-receipt one all count.
         var invitation = await _context.ConsentInvitations
-            .Where(i => i.CustomerId == customer.Id && i.SubmittedAtUtc != null && i.ConsentRecordedAtUtc == null)
+            .Where(i => i.CustomerId == customer.Id && i.SubmittedAtUtc != null && i.ConsentRecordedAtUtc == null
+                        // A consent-page invitation is answered on the page. A WhatsApp message from someone who was sent that link is not their answer.
+                        && i.TokenHash == null)
             .OrderByDescending(i => i.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
         if (invitation is null)

@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Ai;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
@@ -28,7 +29,7 @@ namespace WhatsAppSalesAutomation.Tests;
 /// tracking, the customer's own WhatsApp message that records consent, and the campaign's first message that follows - or the wait for
 /// content when it is not ready.
 /// </summary>
-public sealed class ConsentFlowTests : IDisposable
+public sealed partial class ConsentFlowTests : IDisposable
 {
     private static readonly DateTime T0 = new(2026, 10, 15, 6, 0, 0, DateTimeKind.Utc);
 
@@ -36,9 +37,15 @@ public sealed class ConsentFlowTests : IDisposable
     private readonly Clock _clock = new() { UtcNow = T0 };
     private readonly SqliteApplicationDbContext _db;
     private readonly FakeWhatsApp _whatsApp = new();
+    private readonly Ambient _ambient;
+    private readonly DbContextOptions<ApplicationDbContext> _dbOptions;
     private readonly FakeSms _sms = new();
     private readonly CampaignSendService _campaignSend;
     private readonly ConsentInvitationService _consent;
+    private readonly RecordingNotifier _notifier = new();
+    private readonly ConsentPageGate _gate;
+    private readonly ConsentPageService _page;
+    private readonly ConsentPageOptions _pageOptions = new() { PublicBaseUrl = "https://app.example.com" };
     private readonly InboundWebhookProcessor _processor;
     private readonly FakeParser _parser = new();
     private readonly FakeOrchestrator _orchestrator = new();
@@ -52,8 +59,9 @@ public sealed class ConsentFlowTests : IDisposable
     public ConsentFlowTests()
     {
         _connection.Open();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
-        _db = new SqliteApplicationDbContext(options, new Ambient(_tenant.Id), new NoUser()) { StampTenantId = _tenant.Id };
+        _dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        _ambient = new Ambient(_tenant.Id);
+        _db = new SqliteApplicationDbContext(_dbOptions, _ambient, new NoUser()) { StampTenantId = _tenant.Id };
         _db.Database.EnsureCreated();
 
         var ledger = new QuotaLedgerService(_db, _clock);
@@ -70,17 +78,21 @@ public sealed class ConsentFlowTests : IDisposable
             : throw new NotImplementedException(m.Name);
 
         _campaignSend = new CampaignSendService(
-            _db, _whatsApp, _clock, conversations, new Ambient(_tenant.Id), gate, config, new LocalClock(_clock),
+            _db, _whatsApp, _clock, conversations, _ambient, gate, config, new LocalClock(_clock),
             NullLogger<CampaignSendService>.Instance);
 
+        _gate = new ConsentPageGate(_db, _notifier, Options.Create(_pageOptions), NullLogger<ConsentPageGate>.Instance);
+        var starter = new ConsentWhatsAppStarter(_db, _campaignSend, _clock, Options.Create(_pageOptions), NullLogger<ConsentWhatsAppStarter>.Instance);
         _consent = new ConsentInvitationService(
-            _db, _sms, _clock, new Ambient(_tenant.Id), config, _campaignSend, NullLogger<ConsentInvitationService>.Instance);
+            _db, _sms, _clock, _ambient, config, _campaignSend, _gate, starter, Options.Create(_pageOptions),
+            NullLogger<ConsentInvitationService>.Instance);
+        _page = new ConsentPageService(_db, _ambient, _clock, starter, NullLogger<ConsentPageService>.Instance);
 
         var notifications = DispatchProxy.Create<INotificationService, Stub>();
         ((Stub)(object)notifications).Handler = (_, _) => Task.CompletedTask;
 
         _processor = new InboundWebhookProcessor(
-            _db, _clock, _parser, conversations, _orchestrator, notifications, new Ambient(_tenant.Id),
+            _db, _clock, _parser, conversations, _orchestrator, notifications, _ambient,
             NullLogger<InboundWebhookProcessor>.Instance, _consent);
 
         _db.Tenants.Add(_tenant);
@@ -88,6 +100,38 @@ public sealed class ConsentFlowTests : IDisposable
         ledger.AdjustAsync(_tenant.Id, QuotaType.WhatsAppMessages, 20, "test funding", Guid.NewGuid()).GetAwaiter().GetResult();
 
         Seed();
+        PublishPage();
+    }
+
+    /// <summary>The tenant's WhatsApp Consent Page, valid and live as version 1.</summary>
+    private void PublishPage(string name = "Acme Eye Care")
+    {
+        _db.TenantConsentPages.Add(new TenantConsentPage
+        {
+            TenantId = _tenant.Id, BusinessName = name, ProductDescription = "Eye tests and glasses for the whole family.",
+            IsActive = true, PublishedVersion = 1, PublishedAtUtc = T0
+        });
+        _db.ConsentPageVersions.Add(new ConsentPageVersion
+        {
+            TenantId = _tenant.Id, Version = 1, BusinessName = name, ProductLabel = null,
+            ProductDescription = "Eye tests and glasses for the whole family.",
+            ConsentStatement = ConsentPageRules.ResolveStatement(null, name, null), PublishedAtUtc = T0
+        });
+        _db.SaveChanges();
+    }
+
+    /// <summary>An invitation of the earlier kind - an SMS with a wa.me link that the customer answers by messaging the business - as
+    /// already sent before the consent page existed. Still answered by the customer's reply.</summary>
+    private async Task SeedLegacyInvitationAsync()
+    {
+        _db.ConsentInvitations.Add(new ConsentInvitation
+        {
+            TenantId = _tenant.Id, CustomerId = _customer.Id, CampaignId = _campaign.Id, ExecutionId = Guid.NewGuid(),
+            IdempotencyKey = $"{_tenant.Id:N}:{_customer.Id:N}:{_campaign.Id:N}", Status = ConsentInvitationStatus.Delivered,
+            ToPhoneE164 = _customer.PhoneNumberE164, Body = "Hi, Acme Eye Care here. Chat with us on WhatsApp: https://wa.me/919800012345",
+            WhatsAppLink = "https://wa.me/919800012345", SubmittedAtUtc = T0, DeliveredAtUtc = T0, AttemptCount = 1, CorrelationId = "legacy"
+        });
+        await _db.SaveChangesAsync();
     }
 
     public void Dispose()
@@ -140,19 +184,30 @@ public sealed class ConsentFlowTests : IDisposable
     // ------------------------------------------------------------------------------------------------ Phase 5: the SMS
 
     [Fact]
-    public async Task The_invitation_names_the_business_and_points_to_its_whatsapp_number_and_is_not_consent()
+    public async Task The_sms_carries_a_secure_link_to_the_tenants_consent_page_and_is_not_consent()
     {
         var result = await InviteAsync();
 
         Assert.Equal(1, result.Sent);
         var sms = Assert.Single(_sms.Requests);
         Assert.Equal("+919800000001", sms.ToPhoneE164);
-        Assert.Equal("Hi, Acme Eye Care here. Chat with us on WhatsApp: https://wa.me/919800012345", sms.Body);
+
+        // "Hi Sim! Would you like to learn about Acme Eye Care? View the details and choose whether to receive WhatsApp follow-ups: <link>"
+        Assert.StartsWith("Hi Sim! Would you like to learn about Acme Eye Care? View the details and choose whether to receive WhatsApp follow-ups: https://app.example.com/consent/", sms.Body);
+        var token = sms.Body[(sms.Body.LastIndexOf('/') + 1)..];
+        Assert.Equal(43, token.Length);
+        Assert.DoesNotContain("919800000001", sms.Body);   // no personal data in the link
+        Assert.DoesNotContain(_customer.Id.ToString(), sms.Body);
+        Assert.DoesNotContain(_tenant.Id.ToString(), sms.Body);
+        Assert.DoesNotContain("agreed", sms.Body, StringComparison.OrdinalIgnoreCase);   // does not imply consent was given
 
         var invitation = await _db.ConsentInvitations.SingleAsync();
         Assert.Equal(ConsentInvitationStatus.Delivered, invitation.Status);   // the simulator reports delivery in the same call
-        Assert.NotNull(invitation.SubmittedAtUtc);
-        Assert.NotNull(invitation.DeliveredAtUtc);
+        Assert.Equal(ConsentDecisionStatus.LinkSent, invitation.DecisionStatus);
+        Assert.Equal(ConsentLinkToken.Hash(token), invitation.TokenHash);
+        Assert.DoesNotContain(token, invitation.Body);   // only the hash is kept
+        Assert.DoesNotContain(token, invitation.WhatsAppLink);
+        Assert.Equal(T0.AddDays(14), invitation.TokenExpiresAtUtc);
 
         // An SMS, even a delivered one, is not consent.
         var customer = await _db.Customers.SingleAsync();
@@ -174,7 +229,7 @@ public sealed class ConsentFlowTests : IDisposable
     }
 
     [Fact]
-    public async Task Without_a_whatsapp_number_nothing_is_sent_and_the_skip_is_on_the_history()
+    public async Task The_tenants_own_whatsapp_number_is_not_needed_to_send_the_link()
     {
         var tenant = await _db.Tenants.SingleAsync();
         tenant.WhatsAppNumber = null;
@@ -182,10 +237,8 @@ public sealed class ConsentFlowTests : IDisposable
 
         var result = await InviteAsync();
 
-        Assert.Equal(1, result.Skipped);
-        Assert.Empty(_sms.Requests);
-        Assert.Empty(await _db.ConsentInvitations.ToListAsync());
-        Assert.Contains("SmsSkipped", await EventTypesAsync());
+        Assert.Equal(1, result.Sent);
+        Assert.Single(_sms.Requests);
     }
 
     [Theory]
@@ -294,12 +347,12 @@ public sealed class ConsentFlowTests : IDisposable
         Assert.NotNull(invitation.NextAttemptAt);
     }
 
-    // ------------------------------------------------------------------------------------------------ Phase 6: the customer answers
+    // ------------------------------------------------------------------------------------------------ Phase 6: an earlier invitation is answered by the customer's WhatsApp message
 
     [Fact]
     public async Task The_customers_own_whatsapp_message_records_consent_with_evidence_and_the_first_message_goes_out_once()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         var outcome = await ReplyAsync();
 
@@ -325,7 +378,7 @@ public sealed class ConsentFlowTests : IDisposable
 
         var events = await EventTypesAsync();
         Assert.Equal(
-            new[] { "SmsQueued", "SmsSubmitted", "SmsDelivered", "ConversationStarted", "ConsentRecorded", "FirstMessageSent" }, events);
+            new[] { "ConversationStarted", "ConsentRecorded", "FirstMessageSent" }, events);
         var consent = await _db.CustomerHistoryEvents.SingleAsync(e => e.EventType == "ConsentRecorded");
         Assert.Contains("wamid.HI1", consent.Reason);
         Assert.Contains("window", (await _db.CustomerHistoryEvents.SingleAsync(e => e.EventType == "ConversationStarted")).Reason);
@@ -334,7 +387,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task A_second_hi_or_the_same_message_again_does_not_consent_or_send_twice()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
         await ReplyAsync("wamid.HI1");
 
         var again = await ReplyAsync("wamid.HI1");
@@ -373,7 +426,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task A_customer_who_opted_out_is_not_opted_back_in_by_a_reply()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
         _customer.OptInStatus = OptInStatus.OptedOut;
         await _db.SaveChangesAsync();
 
@@ -391,7 +444,7 @@ public sealed class ConsentFlowTests : IDisposable
     {
         _template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
         await _db.SaveChangesAsync();
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         var outcome = await ReplyAsync();
 
@@ -412,7 +465,7 @@ public sealed class ConsentFlowTests : IDisposable
     {
         _template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
         await _db.SaveChangesAsync();
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
         await ReplyAsync();
         Assert.Equal(0, _whatsApp.Calls);
 
@@ -442,7 +495,7 @@ public sealed class ConsentFlowTests : IDisposable
     {
         _campaign.Status = CampaignStatus.Scheduled;
         await _db.SaveChangesAsync();
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         var outcome = await ReplyAsync();
 
@@ -474,7 +527,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task The_campaign_journey_tells_the_whole_story_from_waiting_for_consent_to_the_first_message()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
         await ReplyAsync();
 
         var member = await _db.CampaignCustomers.AsNoTracking().SingleAsync();
@@ -514,7 +567,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task A_hi_through_the_webhook_records_consent_sends_the_first_message_and_the_ai_does_not_also_reply()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         await DeliverAsync("wamid.HI1", "Hi");
 
@@ -535,7 +588,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task The_same_webhook_delivered_twice_consents_and_sends_once()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         await DeliverAsync("wamid.HI1", "Hi");
         await DeliverAsync("wamid.HI1", "Hi");   // Meta redelivers
@@ -548,7 +601,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task A_stop_from_an_invited_customer_opts_them_out_and_is_not_consent()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
 
         await DeliverAsync("wamid.STOP1", "STOP");
 
@@ -562,7 +615,7 @@ public sealed class ConsentFlowTests : IDisposable
     [Fact]
     public async Task A_later_message_after_the_conversation_started_is_an_ordinary_message_for_the_ai()
     {
-        await InviteAsync();
+        await SeedLegacyInvitationAsync();
         await DeliverAsync("wamid.HI1", "Hi");
         Assert.Equal(0, _orchestrator.Calls);
 
@@ -614,11 +667,34 @@ public sealed class ConsentFlowTests : IDisposable
     {
         public int Calls { get; private set; }
 
+        /// <summary>Messages the provider actually accepted.</summary>
+        public int Delivered { get; private set; }
+
+        /// <summary>Runs as the provider is called - lets a test look at what was already saved by then.</summary>
+        public Action? BeforeSend { get; set; }
+
+        public bool FailNext { get; set; }
+        public bool ThrowNext { get; set; }
+
         public Task<WhatsAppSendResult> SendTemplateMessageAsync(
             string toPhoneNumberE164, string templateName, string languageCode, IReadOnlyList<string> parameterValues,
             string? mediaUrl = null, CancellationToken cancellationToken = default)
         {
             Calls++;
+            BeforeSend?.Invoke();
+            if (ThrowNext)
+            {
+                ThrowNext = false;
+                throw new HttpRequestException("WhatsApp provider unreachable");
+            }
+
+            if (FailNext)
+            {
+                FailNext = false;
+                return Task.FromResult(new WhatsAppSendResult(false, null, "provider unavailable"));
+            }
+
+            Delivered++;
             return Task.FromResult(new WhatsAppSendResult(true, $"wamid.out{Calls}", null));
         }
 

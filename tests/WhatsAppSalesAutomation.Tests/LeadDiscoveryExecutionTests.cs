@@ -45,6 +45,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     private readonly List<Guid> _startedCampaigns = new();
     private readonly LeadDiscoveryOptions _discoveryOptions = new() { LockHeartbeatSeconds = 0, MaxRetryAttempts = 3 };
 
+    private int _quotaChecks;
+    private decimal _quotaConsumed;
     private Guid _profileId;
     private Guid _referredCampaignId;
     private Func<Task>? _beforeCampaignCreate;
@@ -1165,7 +1167,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _db.SaveChanges();
     }
 
-    private LeadDiscoveryRunService Service(ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null)
+    private LeadDiscoveryRunService Service(
+        ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null, IConsentPageGate? consentPageGate = null)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new()
         {
@@ -1174,8 +1177,16 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         });
         var quota = Stub<IQuotaGate>.Create(new()
         {
-            ["GetAvailableAsync"] = _ => Task.FromResult(quotaAvailable),
-            ["ConsumeLeadCandidatesAsync"] = args => Task.FromResult((decimal)args![1]!)
+            ["GetAvailableAsync"] = _ =>
+            {
+                _quotaChecks++;
+                return Task.FromResult(quotaAvailable);
+            },
+            ["ConsumeLeadCandidatesAsync"] = args =>
+            {
+                _quotaConsumed += (decimal)args![1]!;
+                return Task.FromResult((decimal)args![1]!);
+            }
         });
         var campaigns = Stub<ICampaignService>.Create(new()
         {
@@ -1190,7 +1201,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent);
+            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
+            consentPageGate);
     }
 
     private SaveFailure FailCustomerSave(string firstName)
@@ -1462,6 +1474,172 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.All(skipped, r => Assert.Equal(LeadDiscoveryVerificationStatus.NotChecked, r.VerificationStatus));
         Assert.Single(submitted);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // WhatsApp Consent Page: validated before anything is searched or charged
+    // ---------------------------------------------------------------------------------------------
+
+    private RecordingNotifier _notices = new();
+
+    private IConsentPageGate RealGate() => new ConsentPageGate(
+        _db, _notices, Options.Create(new ConsentPageOptions { PublicBaseUrl = "https://app.example.com" }), NullLogger<ConsentPageGate>.Instance);
+
+    private void RequireConsentPage() => _db.LeadDiscoveryProfiles.Single().ConsentSmsEnabled = true;
+
+    private void PublishConsentPage(bool active = true)
+    {
+        _db.TenantConsentPages.Add(new TenantConsentPage
+        {
+            TenantId = _tenant, BusinessName = "Acme", ProductDescription = "Eye tests and glasses.", IsActive = active,
+            PublishedVersion = 1, PublishedAtUtc = _clock.UtcNow
+        });
+        _db.ConsentPageVersions.Add(new ConsentPageVersion
+        {
+            TenantId = _tenant, Version = 1, BusinessName = "Acme", ProductDescription = "Eye tests and glasses.",
+            ConsentStatement = ConsentPageRules.ResolveStatement(null, "Acme", null), PublishedAtUtc = _clock.UtcNow
+        });
+        _db.SaveChanges();
+    }
+
+    [Fact]
+    public async Task Without_a_consent_page_discovery_does_not_search_charge_or_start_and_the_tenant_is_told()
+    {
+        RequireConsentPage();
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        var summary = await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        Assert.StartsWith("Skipped:", summary);
+        Assert.Contains("No discovery credits were deducted", summary);
+        Assert.Equal(0, _agent.Calls);                      // the discovery provider was never called
+        Assert.Equal(0, _quotaChecks);                      // the wallet was not even consulted
+        Assert.Equal(0m, _quotaConsumed);                   // and nothing was reserved or deducted
+        Assert.Empty(await _db.Customers.ToListAsync());
+        Assert.Empty(await _db.LeadDiscoveryRuns.ToListAsync());
+        Assert.Empty(_startedCampaigns);
+
+        // The attempt is recorded as a skipped run - not a started, paid one - so the tenant can see why nothing happened.
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(LeadDiscoveryExecutionStatus.Completed, execution.Status);
+        Assert.Contains("consent", execution.Summary, StringComparison.OrdinalIgnoreCase);
+
+        var notice = Assert.Single(_notices.Sent);
+        Assert.Equal(_tenant, notice.TenantId);
+        Assert.Equal(TenantNotificationKind.ConsentPageSetupRequired, notice.Kind);
+        Assert.Equal("WhatsApp Consent Page Setup Required", notice.Title);
+        Assert.Equal(
+            "Your WhatsApp Consent Page configuration is incomplete or unpublished. Please complete and publish your product information and WhatsApp consent statement before starting customer discovery. No discovery credits have been deducted.",
+            notice.Body);
+    }
+
+    [Fact]
+    public async Task The_same_unresolved_problem_does_not_notify_again_but_fixing_and_breaking_it_again_does()
+    {
+        RequireConsentPage();
+        await _db.SaveChangesAsync();
+        var service = Service(consentPageGate: RealGate());
+
+        await service.RunForTenantAsync(_tenant);
+        await service.RunForTenantAsync(_tenant);
+        await service.RunForTenantAsync(_tenant);
+        Assert.Single(_notices.Sent);
+
+        // Published, then switched off: a new situation, a new notice.
+        PublishConsentPage(active: false);
+        await service.RunForTenantAsync(_tenant);
+        Assert.Equal(2, _notices.Sent.Count);
+    }
+
+    [Fact]
+    public async Task A_draft_that_was_never_published_does_not_qualify()
+    {
+        RequireConsentPage();
+        _db.TenantConsentPages.Add(new TenantConsentPage { TenantId = _tenant, BusinessName = "Acme", ProductDescription = "Eye tests and glasses." });
+        await _db.SaveChangesAsync();
+
+        var summary = await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        Assert.StartsWith("Skipped:", summary);
+        Assert.Equal(0, _agent.Calls);
+        Assert.Single(_notices.Sent);
+    }
+
+    [Fact]
+    public async Task A_published_active_page_lets_discovery_run_under_the_normal_billing_rules()
+    {
+        RequireConsentPage();
+        PublishConsentPage();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        var summary = await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        Assert.DoesNotContain("consent page", summary, StringComparison.OrdinalIgnoreCase);
+        Assert.True(_agent.Calls >= 1);
+        Assert.True(_quotaConsumed > 0m);
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Empty(_notices.Sent);
+    }
+
+    [Fact]
+    public async Task A_page_that_is_switched_off_blocks_discovery()
+    {
+        RequireConsentPage();
+        PublishConsentPage(active: false);
+        _agent.Rounds.Add(Candidates("A"));
+
+        var summary = await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        Assert.StartsWith("Skipped:", summary);
+        Assert.Equal(0, _agent.Calls);
+        Assert.Equal(0m, _quotaConsumed);
+    }
+
+    [Fact]
+    public async Task Discovery_that_sends_no_consent_sms_does_not_need_the_page()
+    {
+        _agent.Rounds.Add(Candidates("A"));   // ConsentSmsEnabled is off in the default profile
+
+        await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        Assert.True(_agent.Calls >= 1);
+        Assert.Empty(_notices.Sent);
+    }
+
+    [Fact]
+    public async Task Fixing_the_page_does_not_start_a_discovery_by_itself()
+    {
+        RequireConsentPage();
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A"));
+        await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        PublishConsentPage();   // the tenant completes the setup
+
+        // Nothing runs until a run is started - by the tenant, or by the schedule that already existed.
+        Assert.Equal(0, _agent.Calls);
+        Assert.Empty(await _db.Customers.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_retry_of_an_earlier_execution_waits_for_the_page_too_and_stays_retryable()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+        var first = await SingleExecutionAsync();
+        var callsBefore = _agent.Calls;
+        var consumedBefore = _quotaConsumed;
+
+        RequireConsentPage();
+        await _db.SaveChangesAsync();
+        var summary = await Service(consentPageGate: RealGate()).RetryExecutionAsync(_tenant, first.Id);
+
+        Assert.StartsWith("Skipped:", summary);
+        Assert.Equal(callsBefore, _agent.Calls);
+        Assert.Equal(consumedBefore, _quotaConsumed);
+        Assert.Single(await Executions());   // no new execution was started
+    }
+
 
     private sealed class FakeAgent : ILeadDiscoveryAgent
     {

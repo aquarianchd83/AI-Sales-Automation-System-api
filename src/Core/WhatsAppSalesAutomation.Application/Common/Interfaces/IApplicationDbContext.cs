@@ -121,6 +121,10 @@ public interface IApplicationDbContext
 
     DbSet<ConsentInvitation> ConsentInvitations { get; }
 
+    DbSet<TenantConsentPage> TenantConsentPages { get; }
+
+    DbSet<ConsentPageVersion> ConsentPageVersions { get; }
+
     DbSet<LeadDiscoveryRun> LeadDiscoveryRuns { get; }
 
     DbSet<AutoCampaignEnrollment> AutoCampaignEnrollments { get; }

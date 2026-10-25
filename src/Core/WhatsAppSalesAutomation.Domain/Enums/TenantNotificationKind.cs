@@ -41,5 +41,8 @@ public enum TenantNotificationKind
     // Sending stopped: the number's quality fell to Red and the account is held for review.
     SendingPaused = 19,
     // Sent to the product owner (never a tenant) when a platform setting such as a Simulated AI provider needs fixing.
-    PlatformSetupNeeded = 20
+    PlatformSetupNeeded = 20,
+    // Discovery was not started because the WhatsApp Consent Page is incomplete, unpublished or switched off. Nothing was charged.
+    // The tenant fixes it in WhatsApp Consent Page Settings.
+    ConsentPageSetupRequired = 21
 }

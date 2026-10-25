@@ -72,6 +72,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     private readonly IApplicationInstance _instance;
     private readonly IPhoneVerificationProvider _verification;
     private readonly IConsentInvitationService _consent;
+    private readonly IConsentPageGate? _consentPageGate;
     private readonly ILogger<LeadDiscoveryRunService> _logger;
     private readonly LeadDiscoveryOptions _options;
     private readonly LeadDiscoveryPricingOptions _pricing;
@@ -91,10 +92,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         IOptions<LeadDiscoveryOptions> options,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing,
         IPhoneVerificationProvider verification,
-        IConsentInvitationService consent)
+        IConsentInvitationService consent,
+        IConsentPageGate? consentPageGate = null)
     {
         _verification = verification;
         _consent = consent;
+        _consentPageGate = consentPageGate;
         _context = context;
         _agent = agent;
         _planLimits = planLimits;
@@ -137,6 +140,13 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             }
         }
 
+        // Before anything that searches, spends or resumes spending: the tenant's WhatsApp Consent Page must be ready.
+        if (await ConsentPageBlockAsync(profile, cancellationToken) is { } blocked)
+        {
+            summaries.Add(await RecordSkipAsync(profile, blocked, quotaExhausted: false, cancellationToken));
+            return string.Join(" | ", summaries);
+        }
+
         // Unfinished work first, oldest first - each resumed by its own new execution.
         foreach (var retryId in await FindAutomaticRetryTargetsAsync(profile, cancellationToken))
         {
@@ -164,7 +174,33 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (profile is null)
             return "Skipped: the lead discovery profile no longer exists.";
 
+        // A retry resumes paid work, so it waits for the consent page too. The execution stays retryable; nothing is recorded or charged.
+        if (await ConsentPageBlockAsync(profile, cancellationToken) is { } blocked)
+            return blocked;
+
         return await ExecuteAsync(profile, previous, LeadDiscoveryTriggers.ManualRetry, 0, cancellationToken);
+    }
+
+    /// <summary>
+    /// Why discovery must not start, or null when it may. Discovery that ends in a consent SMS needs a published, active, valid consent page; without
+    /// one the tenant cannot lawfully contact what it finds, so nothing is searched, reserved or charged, and the tenant is told in the app. Checked on
+    /// the server on every path that can spend: a scheduled run, an operator's Run now, and a retry.
+    /// </summary>
+    private async Task<string?> ConsentPageBlockAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
+    {
+        if (_consentPageGate is null || !profile.ConsentSmsEnabled)
+            return null;
+
+        var readiness = await _consentPageGate.EvaluateAsync(profile.TenantId, cancellationToken);
+        if (readiness.IsReady)
+            return null;
+
+        await _consentPageGate.NotifyAsync(profile.TenantId, readiness, cancellationToken);
+        _logger.LogInformation("Lead discovery for tenant {TenantId} not started: {Reason}", profile.TenantId, readiness.Reason);
+
+        return readiness.PlatformProblem
+            ? $"Skipped: {readiness.Reason} Nothing was searched and no discovery credits were deducted."
+            : $"Skipped: {readiness.Reason} Complete and publish it in WhatsApp Consent Page Settings before starting customer discovery. No discovery credits were deducted.";
     }
 
     private Task<LeadDiscoveryProfile?> LoadProfileAsync(Guid tenantId, Guid? profileId, CancellationToken cancellationToken) =>
