@@ -42,7 +42,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "Razorpay", "MetaAds", "ContentStudio"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "Razorpay", "MetaAds", "ContentStudio"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -236,6 +236,9 @@ public static class AppSettingCatalog
         // The WhatsApp number the PLATFORM sends tenant notices from (plan expiring, credits running out). Managed on the Platform Admin
         // Console's WhatsApp page (PlatformWhatsAppSettingsService) and live only in this table. All are live: the sender reads them through
         // IOptionsSnapshot. Separate from the WhatsApp:* block above, which is the shared Meta app (webhooks), not a number to send from.
+        // Which messaging integration the platform offers tenants. Managed on the Platform Admin Console's WhatsApp provider card
+        // (WhatsAppProviderSettingsService); only "Meta" can be activated until the QR bridge adapter ships.
+        new("WhatsAppProvider:Active", "WhatsAppProvider", IsSecret: false, DefaultValue: "Meta", Description: "The active WhatsApp provider: \"Meta\" (Cloud API) or \"QrBridge\".", Options: new[] { "Meta", "QrBridge" }),
         new("PlatformWhatsApp:Enabled", "PlatformWhatsApp", IsSecret: false, Description: "Whether the platform sends tenant notices on WhatsApp. Absent means on."),
         new("PlatformWhatsApp:PhoneNumberId", "PlatformWhatsApp", IsSecret: false, Description: "Meta's id of the platform's WhatsApp number."),
         new("PlatformWhatsApp:WhatsAppBusinessAccountId", "PlatformWhatsApp", IsSecret: false, Description: "The platform's WhatsApp Business Account id (where its templates live)."),

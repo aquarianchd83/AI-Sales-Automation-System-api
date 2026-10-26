@@ -210,6 +210,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeFileService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeFileService>();
         services.AddScoped<IPlatformAiProvidersService, PlatformAiProvidersService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
+        services.AddScoped<IWhatsAppProviderSettingsService, WhatsAppProviderSettingsService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();
         services.AddScoped<IPlatformMediaService, PlatformMediaService>();
