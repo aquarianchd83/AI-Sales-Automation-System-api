@@ -4661,6 +4661,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("NextAttemptAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Meta");
+
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("datetime2");
 
@@ -4701,7 +4708,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
 
-                    b.HasIndex("WhatsAppMessageId")
+                    b.HasIndex("Provider", "WhatsAppMessageId")
                         .IsUnique()
                         .HasFilter("[WhatsAppMessageId] IS NOT NULL");
 

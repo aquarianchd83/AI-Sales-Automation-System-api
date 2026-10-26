@@ -4,6 +4,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
 
@@ -27,7 +28,9 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
         // Filtered rather than plain unique: WhatsAppMessageId is null until the send succeeds, and
         // SQL Server's default unique index treats multiple NULLs as a violation without a WHERE filter.
         builder.Property(m => m.WhatsAppMessageId).HasMaxLength(100);
-        builder.HasIndex(m => m.WhatsAppMessageId).IsUnique().HasFilter("[WhatsAppMessageId] IS NOT NULL");
+        // Unique per provider, not globally: only Meta's ids are globally unique, a bridge's are not guaranteed to be.
+        builder.Property(m => m.Provider).IsRequired().HasMaxLength(20).HasDefaultValue(WhatsAppProviders.Meta);
+        builder.HasIndex(m => new { m.Provider, m.WhatsAppMessageId }).IsUnique().HasFilter("[WhatsAppMessageId] IS NOT NULL");
 
         builder.HasOne<Customer>()
             .WithMany()
