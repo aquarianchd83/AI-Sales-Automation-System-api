@@ -259,6 +259,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StudioAsset> StudioAssets => Set<StudioAsset>();
 
+    public DbSet<RenderJob> RenderJobs => Set<RenderJob>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();

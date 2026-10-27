@@ -60,6 +60,9 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Planner.IContentPlannerService, WhatsAppSalesAutomation.Application.ContentStudio.Planner.ContentPlannerService>();
         services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Assets.StockOptions>(configuration.GetSection("ContentStudio:Stock"));
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Assets.IStudioAssetService, WhatsAppSalesAutomation.Application.ContentStudio.Assets.StudioAssetService>();
+        services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Video.RenderOptions>(configuration.GetSection("ContentStudio:Render"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderService, WhatsAppSalesAutomation.Application.ContentStudio.Video.VideoRenderService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderProcessor, WhatsAppSalesAutomation.Application.ContentStudio.Video.VideoRenderProcessor>();
         services.Configure<LeadDiscoveryOptions>(configuration.GetSection("LeadDiscovery"));
         services.Configure<LeadDiscoveryPricingOptions>(configuration.GetSection("LeadDiscovery:Pricing"));
         services.Configure<WhatsAppPricingOptions>(configuration.GetSection("WhatsApp:Pricing"));

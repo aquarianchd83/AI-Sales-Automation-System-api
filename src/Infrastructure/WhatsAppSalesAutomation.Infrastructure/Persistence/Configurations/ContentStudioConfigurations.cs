@@ -129,3 +129,25 @@ public class StudioAssetConfiguration : IEntityTypeConfiguration<StudioAsset>
         builder.HasIndex(a => new { a.TenantId, a.Checksum }).IsUnique();
     }
 }
+
+public class RenderJobConfiguration : IEntityTypeConfiguration<RenderJob>
+{
+    public void Configure(EntityTypeBuilder<RenderJob> builder)
+    {
+        builder.ToTable("RenderJobs");
+        builder.HasKey(j => j.Id);
+        builder.Property(j => j.Status).HasConversion<string>().HasMaxLength(15);
+        builder.Property(j => j.Stage).HasMaxLength(200);
+        builder.Property(j => j.AspectRatio).IsRequired().HasMaxLength(8);
+        builder.Property(j => j.VoiceGender).IsRequired().HasMaxLength(10);
+        builder.Property(j => j.LanguageCode).IsRequired().HasMaxLength(10);
+        builder.Property(j => j.Renderer).IsRequired().HasMaxLength(30);
+        builder.Property(j => j.ExternalRenderId).HasMaxLength(100);
+        builder.Property(j => j.OutputStorageKey).HasMaxLength(500);
+        builder.Property(j => j.ContentHash).IsRequired().HasMaxLength(64);
+        builder.Property(j => j.Error).HasMaxLength(600);
+        builder.HasIndex(j => new { j.TenantId, j.VersionId, j.CreatedAt });
+        // "What is running now" - the per-tenant and platform-wide limits read this.
+        builder.HasIndex(j => new { j.Status, j.TenantId });
+    }
+}

@@ -31,7 +31,7 @@ public sealed class ContentStudioSettingsCatalogTests
     [Fact]
     public void Every_studio_setting_has_a_default_so_the_console_never_opens_blank()
     {
-        Assert.Equal(6, Studio.Count);
+        Assert.Equal(10, Studio.Count);
         // ReadinessRules is deliberately empty: blank means "use the built-in rules", and the console says so. The stock photo key is a secret with no default.
         Assert.All(Studio.Where(d => d.Key != "ContentStudio:ReadinessRules" && !d.IsSecret), d => Assert.False(string.IsNullOrWhiteSpace(d.DefaultValue), d.Key));
     }

@@ -87,6 +87,15 @@ public static class DependencyInjection
         services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Assets.IStockAssetProvider, WhatsAppSalesAutomation.Infrastructure.ContentStudio.PexelsStockProvider>()
             .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler)
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+        // Making videos: the voice and the video are hosted services; the private files they need are handed over as short-lived single-file links.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.ITenantFileLinks, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.S3TenantDocumentStore>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVoiceSynthesizer, WhatsAppSalesAutomation.Infrastructure.ContentStudio.GoogleTtsVoiceSynthesizer>()
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(60)).RemoveAllLoggers();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderer, WhatsAppSalesAutomation.Infrastructure.ContentStudio.ShotstackVideoRenderer>()
+            .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5)).RemoveAllLoggers();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderQueue, HangfireVideoRenderQueue>();
+        services.AddScoped<VideoRenderJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();

@@ -212,3 +212,24 @@ public enum StudioAssetKind
     /// <summary>A photo from a stock library, copied to the tenant's folder when chosen.</summary>
     Stock = 2
 }
+
+/// <summary>Where a video render stands.</summary>
+public enum RenderJobStatus
+{
+    /// <summary>Accepted and waiting for its turn.</summary>
+    Queued = 0,
+
+    /// <summary>The narration is being spoken and the pieces gathered.</summary>
+    Preparing = 1,
+
+    /// <summary>With the video renderer.</summary>
+    Rendering = 2,
+
+    Succeeded = 3,
+
+    /// <summary>Ended with an error; the charge was returned.</summary>
+    Failed = 4,
+
+    /// <summary>Stopped by the tenant; the charge was returned.</summary>
+    Cancelled = 5
+}
