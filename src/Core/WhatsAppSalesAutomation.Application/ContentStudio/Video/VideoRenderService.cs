@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.ContentStudio.Review;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.ProductKnowledge;
 using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
@@ -66,6 +67,8 @@ public sealed class VideoRenderService : IVideoRenderService
         var scenes = await _db.ContentScenes.AsNoTracking().Where(s => s.TenantId == tenantId && s.VersionId == versionId).ToListAsync(ct);
         if (scenes.Count == 0)
             throw new ConflictException("This script has no scenes.");
+        var assetIds = scenes.Where(s => s.ChosenAssetId != null).Select(s => s.ChosenAssetId!.Value).Distinct().ToList();
+        var assets = (await _db.StudioAssets.AsNoTracking().Where(a => a.TenantId == tenantId && assetIds.Contains(a.Id)).ToListAsync(ct)).ToDictionary(a => a.Id);
         var without = scenes.Count(s => s.ChosenAssetId == null);
         if (without > 0)
             throw new ConflictException($"{without} of {scenes.Count} scenes have no picture yet. Choose a picture for every scene first.");
@@ -90,7 +93,7 @@ public sealed class VideoRenderService : IVideoRenderService
         var job = new RenderJob
         {
             TenantId = tenantId, ProjectId = project.Id, VersionId = versionId, AspectRatio = aspect, VoiceGender = gender, LanguageCode = VoiceLanguages.CodeFor(project.Language),
-            Renderer = simulated ? "Simulator" : _renderer.Name, IsSimulated = simulated, IsAiVoice = !simulated, ContentHash = version.ContentHash,
+            Renderer = simulated ? "Simulator" : _renderer.Name, IsSimulated = simulated, IsAiVoice = !simulated, ContentHash = ContentSnapshot.Compute(scenes, assets),
             FlaggedScenes = scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), Stage = "Waiting for its turn", CreatedBy = _user.UserId
         };
 
@@ -120,20 +123,21 @@ public sealed class VideoRenderService : IVideoRenderService
         }
 
         _queue.EnqueueStart(job.Id, tenantId);
-        return ToDto(job, version.Number);
+        return ToDto(job, version.Number, version.ApprovedHash);
     }
 
     public async Task<IReadOnlyList<RenderJobDto>> ListAsync(Guid tenantId, Guid versionId, CancellationToken ct = default)
     {
         var version = await _db.ContentVersions.AsNoTracking().FirstOrDefaultAsync(v => v.Id == versionId && v.TenantId == tenantId, ct) ?? throw new NotFoundException("ContentVersion", versionId);
         var jobs = await _db.RenderJobs.AsNoTracking().Where(j => j.TenantId == tenantId && j.VersionId == versionId).OrderByDescending(j => j.CreatedAt).Take(20).ToListAsync(ct);
-        return jobs.Select(j => ToDto(j, version.Number)).ToList();
+        return jobs.Select(j => ToDto(j, version.Number, version.ApprovedHash)).ToList();
     }
 
     public async Task<RenderJobDto> GetAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
     {
         var job = await FindAsync(tenantId, jobId, ct, track: false);
-        return ToDto(job, await NumberAsync(tenantId, job.VersionId, ct));
+        var (number, approved) = await VersionAsync(tenantId, job.VersionId, ct);
+        return ToDto(job, number, approved);
     }
 
     public async Task<RenderJobDto> CancelAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
@@ -158,7 +162,8 @@ public sealed class VideoRenderService : IVideoRenderService
 
         job.UpdatedAt = _clock.UtcNow;
         await _db.SaveChangesAsync(ct);
-        return ToDto(job, await NumberAsync(tenantId, job.VersionId, ct));
+        var (number, approved) = await VersionAsync(tenantId, job.VersionId, ct);
+        return ToDto(job, number, approved);
     }
 
     public async Task<VideoFile> OpenVideoAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
@@ -196,12 +201,17 @@ public sealed class VideoRenderService : IVideoRenderService
         return await query.FirstOrDefaultAsync(j => j.Id == jobId && j.TenantId == tenantId, ct) ?? throw new NotFoundException("RenderJob", jobId);
     }
 
-    private async Task<int> NumberAsync(Guid tenantId, Guid versionId, CancellationToken ct) =>
-        await _db.ContentVersions.AsNoTracking().Where(v => v.Id == versionId && v.TenantId == tenantId).Select(v => v.Number).FirstOrDefaultAsync(ct);
+    private async Task<(int Number, string? ApprovedHash)> VersionAsync(Guid tenantId, Guid versionId, CancellationToken ct)
+    {
+        var v = await _db.ContentVersions.AsNoTracking().Where(x => x.Id == versionId && x.TenantId == tenantId).Select(x => new { x.Number, x.ApprovedHash }).FirstOrDefaultAsync(ct);
+        return (v?.Number ?? 0, v?.ApprovedHash);
+    }
 
-    public static RenderJobDto ToDto(RenderJob j, int versionNumber) => new(
+    /// <param name="approvedHash">The fingerprint of the approved script, if the version is approved. A video is "of the approved script" when it was made from content with exactly that fingerprint.</param>
+    public static RenderJobDto ToDto(RenderJob j, int versionNumber, string? approvedHash) => new(
         j.Id, j.VersionId, versionNumber, j.Status.ToString(), j.Progress, j.Stage, j.AspectRatio, j.VoiceGender, j.Renderer, j.IsSimulated, j.IsAiVoice,
-        !string.IsNullOrEmpty(j.OutputStorageKey), j.OutputBytes, j.OutputSeconds, j.Error, j.FlaggedScenes, j.CreatedAt, j.StartedAt, j.FinishedAt);
+        !string.IsNullOrEmpty(j.OutputStorageKey), j.OutputBytes, j.OutputSeconds, j.Error, j.FlaggedScenes, j.CreatedAt, j.StartedAt, j.FinishedAt,
+        !string.IsNullOrEmpty(approvedHash) && j.ContentHash == approvedHash && j.Status == RenderJobStatus.Succeeded && !j.IsSimulated);
 
     private static ValidationException Invalid(string property, string message) => new(new[] { new ValidationFailure(property, message) });
 }

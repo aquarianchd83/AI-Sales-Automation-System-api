@@ -85,6 +85,8 @@ public class ContentVersionConfiguration : IEntityTypeConfiguration<ContentVersi
         builder.Property(v => v.Provider).IsRequired().HasMaxLength(50);
         builder.Property(v => v.Model).HasMaxLength(100);
         builder.Property(v => v.ContentHash).IsRequired().HasMaxLength(64);
+        builder.Property(v => v.ReviewComment).HasMaxLength(1000);
+        builder.Property(v => v.ApprovedHash).HasMaxLength(64);
         // One number per project: two scripts written at the same moment cannot both be version 4.
         builder.HasIndex(v => new { v.TenantId, v.ProjectId, v.Number }).IsUnique();
     }
@@ -149,5 +151,21 @@ public class RenderJobConfiguration : IEntityTypeConfiguration<RenderJob>
         builder.HasIndex(j => new { j.TenantId, j.VersionId, j.CreatedAt });
         // "What is running now" - the per-tenant and platform-wide limits read this.
         builder.HasIndex(j => new { j.Status, j.TenantId });
+    }
+}
+
+public class ContentReviewEventConfiguration : IEntityTypeConfiguration<ContentReviewEvent>
+{
+    public void Configure(EntityTypeBuilder<ContentReviewEvent> builder)
+    {
+        builder.ToTable("ContentReviewEvents");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Action).HasConversion<string>().HasMaxLength(15);
+        builder.Property(e => e.FromStatus).HasConversion<string>().HasMaxLength(15);
+        builder.Property(e => e.ToStatus).HasConversion<string>().HasMaxLength(15);
+        builder.Property(e => e.ActorEmail).HasMaxLength(256);
+        builder.Property(e => e.Comment).HasMaxLength(1000);
+        builder.Property(e => e.SnapshotHash).IsRequired().HasMaxLength(64);
+        builder.HasIndex(e => new { e.TenantId, e.VersionId, e.At });
     }
 }

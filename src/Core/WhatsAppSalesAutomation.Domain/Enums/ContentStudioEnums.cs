@@ -233,3 +233,21 @@ public enum RenderJobStatus
     /// <summary>Stopped by the tenant; the charge was returned.</summary>
     Cancelled = 5
 }
+
+/// <summary>A step in the life of a script, as the review trail records it.</summary>
+public enum ContentReviewAction
+{
+    /// <summary>Sent for approval.</summary>
+    Submitted = 0,
+
+    /// <summary>Taken back by the person who sent it, to change it.</summary>
+    Withdrawn = 1,
+
+    Approved = 2,
+
+    /// <summary>Sent back with a reason.</summary>
+    Rejected = 3,
+
+    /// <summary>A new draft was started from an approved or rejected script.</summary>
+    Revised = 4
+}

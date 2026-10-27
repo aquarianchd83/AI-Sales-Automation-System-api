@@ -109,7 +109,7 @@ public sealed record StartRenderRequest(string? AspectRatio, string? VoiceGender
 
 public sealed record RenderJobDto(
     Guid Id, Guid VersionId, int VersionNumber, string Status, int Progress, string? Stage, string AspectRatio, string VoiceGender, string Renderer, bool IsSimulated, bool IsAiVoice,
-    bool HasVideo, long VideoBytes, double VideoSeconds, string? Error, int FlaggedScenes, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt);
+    bool HasVideo, long VideoBytes, double VideoSeconds, string? Error, int FlaggedScenes, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, bool IsOfApprovedScript);
 
 public sealed record VideoFile(Stream Content, string ContentType, long Length);
 

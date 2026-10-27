@@ -1804,6 +1804,64 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("ContentProjects", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.ContentReviewEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<string>("ActorEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FromStatus")
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToStatus")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "VersionId", "At");
+
+                    b.ToTable("ContentReviewEvents", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.ContentScene", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1927,6 +1985,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("ActivityId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ApprovedHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("ContentHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1965,6 +2027,19 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("ReviewComment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("RevisedFromNumber")
+                        .HasColumnType("int");
+
                     b.Property<string>("ScriptText")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -1973,6 +2048,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(15)
                         .HasColumnType("nvarchar(15)");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("SubmittedBy")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("TargetSeconds")
                         .HasColumnType("int");

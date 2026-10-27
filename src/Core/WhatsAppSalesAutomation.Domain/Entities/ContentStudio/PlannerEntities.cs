@@ -97,6 +97,28 @@ public class ContentVersion : BaseEntity, ITenantOwned
     public string ContentHash { get; set; } = string.Empty;
 
     public Guid? CreatedBy { get; set; }
+
+    /// <summary>When it was last sent for approval, and by whom.</summary>
+    public DateTime? SubmittedAt { get; set; }
+
+    public Guid? SubmittedBy { get; set; }
+
+    /// <summary>When it was approved or rejected, and by whom.</summary>
+    public DateTime? ReviewedAt { get; set; }
+
+    public Guid? ReviewedBy { get; set; }
+
+    /// <summary>The reason it was rejected, or the approver's note.</summary>
+    public string? ReviewComment { get; set; }
+
+    /// <summary>
+    /// SHA-256 of exactly what was approved: every scene's words, timing and the checksum of its picture. Set once, at approval. A video or a
+    /// post is publishable only while the script still hashes to this - what is published is what was approved.
+    /// </summary>
+    public string? ApprovedHash { get; set; }
+
+    /// <summary>Set when this version was started from an earlier one with "revise".</summary>
+    public int? RevisedFromNumber { get; set; }
 }
 
 /// <summary>One scene of a script: what is said, what is shown on screen, how long it runs, and the verified facts it rests on.</summary>

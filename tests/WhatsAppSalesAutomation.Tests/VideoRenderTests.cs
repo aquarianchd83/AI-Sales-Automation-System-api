@@ -289,7 +289,9 @@ public sealed class VideoRenderTests : IDisposable
         Assert.Equal(new[] { StudioActivityKind.VideoRender, StudioActivityKind.VoiceOver }, _metering.Charges.Select(c => c.Kind));
         Assert.Equal(job.Id, Assert.Single(_queue.Started));
         var stored = Job(job.Id);
-        Assert.Equal(("hi-IN", new string('c', 64)), (stored.LanguageCode, stored.ContentHash));
+        var scenes = await _db.ContentScenes.AsNoTracking().Where(s => s.VersionId == version.Id).ToListAsync();
+        var assets = (await _db.StudioAssets.AsNoTracking().ToListAsync()).ToDictionary(a => a.Id);
+        Assert.Equal(("hi-IN", WhatsAppSalesAutomation.Application.ContentStudio.Review.ContentSnapshot.Compute(scenes, assets)), (stored.LanguageCode, stored.ContentHash)); // the words and pictures it was made from
         Assert.NotNull(stored.RenderActivityId);
         Assert.NotNull(stored.VoiceActivityId);
     }
@@ -567,6 +569,28 @@ public sealed class VideoRenderTests : IDisposable
         await Processor().PollAsync(again);
         Assert.Contains("too long", Job(again).Stage);
         Assert.Equal(RenderJobStatus.Failed, Job(again).Status);
+    }
+
+    [Fact]
+    public async Task A_finished_video_counts_as_the_approved_one_only_while_it_was_made_from_exactly_what_was_approved()
+    {
+        var version = await Script();
+        var id = await Started(version);
+        var made = Job(id).ContentHash;
+        await Processor().StartAsync(id);
+        _renderer.Statuses.Enqueue(new RenderStatus(RenderPhase.Done, 100, "https://cdn.shotstack.io/v.mp4", null));
+        await Processor().PollAsync(id);
+        Assert.False((await Service().GetAsync(_a, id)).IsOfApprovedScript); // nothing approved yet
+
+        var stored = await _db.ContentVersions.SingleAsync();
+        stored.ApprovedHash = made;
+        await _db.SaveChangesAsync();
+        Assert.True((await Service().GetAsync(_a, id)).IsOfApprovedScript);
+        Assert.True((await Service().ListAsync(_a, version.Id)).Single().IsOfApprovedScript);
+
+        stored.ApprovedHash = new string('9', 64); // approved content differs from what the video was made of
+        await _db.SaveChangesAsync();
+        Assert.False((await Service().GetAsync(_a, id)).IsOfApprovedScript);
     }
 
     // ----- cancelling ------------------------------------------------------------------------------------------------------------

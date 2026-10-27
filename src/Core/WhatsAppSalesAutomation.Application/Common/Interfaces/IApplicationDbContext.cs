@@ -251,6 +251,8 @@ public interface IApplicationDbContext
 
     DbSet<RenderJob> RenderJobs { get; }
 
+    DbSet<ContentReviewEvent> ContentReviewEvents { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }
