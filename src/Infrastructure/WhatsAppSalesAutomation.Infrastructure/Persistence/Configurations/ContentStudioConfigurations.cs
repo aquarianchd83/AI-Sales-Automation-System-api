@@ -44,3 +44,63 @@ public class TenantStudioSettingsConfiguration : IEntityTypeConfiguration<Tenant
         builder.HasIndex(s => s.TenantId).IsUnique();
     }
 }
+
+public class ContentProjectConfiguration : IEntityTypeConfiguration<ContentProject>
+{
+    public void Configure(EntityTypeBuilder<ContentProject> builder)
+    {
+        builder.ToTable("ContentProjects");
+        builder.HasKey(p => p.Id);
+        builder.Property(p => p.Title).IsRequired().HasMaxLength(200);
+        builder.Property(p => p.Goal).IsRequired().HasMaxLength(1000);
+        builder.Property(p => p.Language).IsRequired().HasMaxLength(40);
+        builder.Property(p => p.Status).HasConversion<string>().HasMaxLength(15);
+        builder.HasIndex(p => new { p.TenantId, p.CreatedAt });
+    }
+}
+
+public class ContentTopicConfiguration : IEntityTypeConfiguration<ContentTopic>
+{
+    public void Configure(EntityTypeBuilder<ContentTopic> builder)
+    {
+        builder.ToTable("ContentTopics");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.Title).IsRequired().HasMaxLength(250);
+        builder.Property(t => t.Rationale).HasMaxLength(1000);
+        builder.Property(t => t.Status).HasConversion<string>().HasMaxLength(15);
+        builder.Property(t => t.Provider).IsRequired().HasMaxLength(50);
+        builder.HasIndex(t => new { t.TenantId, t.ProjectId });
+    }
+}
+
+public class ContentVersionConfiguration : IEntityTypeConfiguration<ContentVersion>
+{
+    public void Configure(EntityTypeBuilder<ContentVersion> builder)
+    {
+        builder.ToTable("ContentVersions");
+        builder.HasKey(v => v.Id);
+        builder.Property(v => v.Status).HasConversion<string>().HasMaxLength(15);
+        builder.Property(v => v.Notes).HasMaxLength(1000);
+        builder.Property(v => v.PromptVersion).IsRequired().HasMaxLength(40);
+        builder.Property(v => v.Provider).IsRequired().HasMaxLength(50);
+        builder.Property(v => v.Model).HasMaxLength(100);
+        builder.Property(v => v.ContentHash).IsRequired().HasMaxLength(64);
+        // One number per project: two scripts written at the same moment cannot both be version 4.
+        builder.HasIndex(v => new { v.TenantId, v.ProjectId, v.Number }).IsUnique();
+    }
+}
+
+public class ContentSceneConfiguration : IEntityTypeConfiguration<ContentScene>
+{
+    public void Configure(EntityTypeBuilder<ContentScene> builder)
+    {
+        builder.ToTable("ContentScenes");
+        builder.HasKey(s => s.Id);
+        builder.Property(s => s.Narration).IsRequired().HasMaxLength(2000);
+        builder.Property(s => s.OnScreenText).HasMaxLength(300);
+        builder.Property(s => s.VisualHint).HasMaxLength(500);
+        builder.Property(s => s.ClaimStatus).HasConversion<string>().HasMaxLength(15);
+        builder.Property(s => s.ClaimNote).HasMaxLength(600);
+        builder.HasIndex(s => new { s.TenantId, s.VersionId, s.Order });
+    }
+}

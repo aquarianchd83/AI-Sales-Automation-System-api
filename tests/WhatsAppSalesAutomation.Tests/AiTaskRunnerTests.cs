@@ -124,6 +124,40 @@ public sealed class AiTaskRunnerTests
 
     // ----- the simulator ---------------------------------------------------------------------------------------------------------------
 
+    [Theory]
+    [InlineData(AiTaskKinds.ContentTopicIdeas, "topics")]
+    [InlineData(AiTaskKinds.ContentScript, "scenes")]
+    public async Task The_content_studio_tasks_follow_the_content_generation_switch_and_the_simulator_never_claims_to_be_live(string task, string property)
+    {
+        _routing.PerFeature[AiFeatures.ContentGeneration] = new AiFeatureChoice(false, "OpenAI");
+
+        var result = await Runner().RunAsync(Request(task));
+
+        Assert.True(result.Success);
+        Assert.True(result.IsSimulated);
+        Assert.Equal(new[] { AiFeatures.ContentGeneration }, _routing.Asked);
+        Assert.Empty(_client.Calls);
+        using var doc = JsonDocument.Parse(result.Text!);
+        var items = doc.RootElement.GetProperty(property).EnumerateArray().ToList();
+        Assert.NotEmpty(items);
+        Assert.All(items, i => Assert.Empty(i.GetProperty("facts").EnumerateArray())); // it cites nothing the tenant said
+        Assert.Contains(SimulatedTaskEngine.Marker, doc.RootElement.ToString());
+    }
+
+    [Fact]
+    public async Task A_content_studio_task_runs_live_against_the_chosen_provider_and_a_task_that_belongs_to_nobody_is_still_refused()
+    {
+        _routing.PerFeature[AiFeatures.ContentGeneration] = new AiFeatureChoice(true, "OpenAI");
+        _client.On("OpenAI", Ok("{\"topics\":[]}"));
+
+        var live = await Runner().RunAsync(Request(AiTaskKinds.ContentTopicIdeas));
+        Assert.Equal((true, AiExecutionMode.Live, "OpenAI"), (live.Success, live.Mode, live.Provider));
+
+        var unknown = await Runner().RunAsync(Request("MakeCoffee"));
+        Assert.False(unknown.Success);
+        Assert.Equal(AiErrorCodes.CapabilityUnsupported, unknown.ErrorCode);
+    }
+
     [Fact]
     public async Task The_simulator_is_used_only_when_chosen_and_its_result_says_so_everywhere()
     {

@@ -249,6 +249,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<KnowledgeGapDecision> KnowledgeGapDecisions => Set<KnowledgeGapDecision>();
 
+    public DbSet<ContentProject> ContentProjects => Set<ContentProject>();
+
+    public DbSet<ContentTopic> ContentTopics => Set<ContentTopic>();
+
+    public DbSet<ContentVersion> ContentVersions => Set<ContentVersion>();
+
+    public DbSet<ContentScene> ContentScenes => Set<ContentScene>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();

@@ -239,6 +239,14 @@ public interface IApplicationDbContext
 
     DbSet<KnowledgeGapDecision> KnowledgeGapDecisions { get; }
 
+    DbSet<ContentProject> ContentProjects { get; }
+
+    DbSet<ContentTopic> ContentTopics { get; }
+
+    DbSet<ContentVersion> ContentVersions { get; }
+
+    DbSet<ContentScene> ContentScenes { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

@@ -153,3 +153,49 @@ public enum AiExecutionStatus
     Succeeded = 0,
     Failed = 1
 }
+
+/// <summary>Where a content project stands.</summary>
+public enum ContentProjectStatus
+{
+    /// <summary>Planning: topics are being chosen.</summary>
+    Draft = 0,
+
+    /// <summary>At least one script has been written.</summary>
+    Scripted = 1,
+
+    Archived = 2
+}
+
+public enum ContentTopicStatus
+{
+    Suggested = 0,
+    Chosen = 1,
+    Rejected = 2
+}
+
+/// <summary>The life of one script. Planning only ever produces Draft; the review phase moves it on.</summary>
+public enum ContentVersionStatus
+{
+    Draft = 0,
+    InReview = 1,
+    Approved = 2,
+    Rejected = 3
+}
+
+/// <summary>Whether a scene's narration is backed by what the tenant has verified.</summary>
+public enum ClaimStatus
+{
+    NotChecked = 0,
+
+    /// <summary>The scene states nothing that needs a fact behind it (a greeting, a call to action, a question).</summary>
+    NoClaim = 1,
+
+    /// <summary>A verified, current fact backs it.</summary>
+    Supported = 2,
+
+    /// <summary>The tenant said something similar but nobody has verified it, or it lacks proof.</summary>
+    Unverified = 3,
+
+    /// <summary>Nothing the tenant has told us backs it.</summary>
+    Unsupported = 4
+}
