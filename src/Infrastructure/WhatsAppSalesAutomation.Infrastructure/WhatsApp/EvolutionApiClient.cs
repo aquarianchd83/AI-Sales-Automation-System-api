@@ -125,22 +125,24 @@ public class EvolutionApiClient : IWhatsAppBridgeClient
             var number = new string(toPhoneNumberE164.Where(char.IsDigit).ToArray());
             using var response = await SendAsync(endpoint, HttpMethod.Post, $"/message/sendText/{Uri.EscapeDataString(instanceName)}", new { number, text }, cancellationToken);
 
+            // A 4xx is a refusal (nothing was sent). A 5xx may have failed after the message went out, so it is not safe to retry blindly.
             if (!response.IsSuccessStatusCode)
-                return WhatsAppSendResult.Failed($"The WhatsApp bridge refused the message ({(int)response.StatusCode}).");
+                return WhatsAppSendResult.Failed($"The WhatsApp bridge refused the message ({(int)response.StatusCode}).") with { Ambiguous = (int)response.StatusCode >= 500 };
 
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             var id = Str(Obj(doc.RootElement, "key"), "id");
             return string.IsNullOrEmpty(id)
-                ? WhatsAppSendResult.Failed("The WhatsApp bridge accepted the message but returned no message id.")
+                ? WhatsAppSendResult.Failed("The WhatsApp bridge accepted the message but returned no message id.") with { Ambiguous = true }
                 : new WhatsAppSendResult(true, id, null, WhatsAppProviders.QrBridge);
         }
         catch (WhatsAppBridgeException ex)
         {
-            return WhatsAppSendResult.Failed(ex.Message);
+            return WhatsAppSendResult.Failed(ex.Message) with { Ambiguous = ex.OutcomeUnknown };
         }
         catch (JsonException)
         {
-            return WhatsAppSendResult.Failed("The WhatsApp bridge returned a reply that could not be read.");
+            // The send was accepted (2xx) but the reply is unreadable: it probably went out.
+            return WhatsAppSendResult.Failed("The WhatsApp bridge returned a reply that could not be read.") with { Ambiguous = true };
         }
     }
 
@@ -157,8 +159,10 @@ public class EvolutionApiClient : IWhatsAppBridgeClient
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            // The message names the host problem, never the request (which carries the key).
-            throw new WhatsAppBridgeException(ex is TaskCanceledException ? "The bridge did not answer in time." : "The bridge could not be reached.");
+            // The message names the host problem, never the request (which carries the key). A refused connection or an unknown host provably never
+            // reached the bridge; a timeout or a connection dropped mid-reply may have been carried out.
+            var neverReached = ex.InnerException is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused or System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NetworkUnreachable };
+            throw new WhatsAppBridgeException(ex is TaskCanceledException ? "The bridge did not answer in time." : "The bridge could not be reached.", outcomeUnknown: !neverReached);
         }
     }
 

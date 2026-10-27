@@ -44,15 +44,17 @@ public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
     private readonly IValidator<UpdateWhatsAppProviderRequest> _validator;
     private readonly IWhatsAppBridgeSettingsService _bridgeSettings;
     private readonly IWhatsAppBridgeClient _bridgeClient;
+    private readonly IInFlightSendCounter _inFlight;
 
     public WhatsAppProviderSettingsService(
         IAppSettingsStore store, IValidator<UpdateWhatsAppProviderRequest> validator,
-        IWhatsAppBridgeSettingsService bridgeSettings, IWhatsAppBridgeClient bridgeClient)
+        IWhatsAppBridgeSettingsService bridgeSettings, IWhatsAppBridgeClient bridgeClient, IInFlightSendCounter inFlight)
     {
         _store = store;
         _validator = validator;
         _bridgeSettings = bridgeSettings;
         _bridgeClient = bridgeClient;
+        _inFlight = inFlight;
     }
 
     public async Task<WhatsAppProviderSettingsDto> GetAsync(CancellationToken cancellationToken = default) =>
@@ -88,7 +90,14 @@ public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
         }
 
         if (next != previous)
+        {
+            // Never switch under a send whose outcome is not known yet: the old provider may already have accepted it and the new one would send it again.
+            var inFlight = await _inFlight.CountAsync(cancellationToken);
+            if (inFlight > 0)
+                throw Fail($"{inFlight} message(s) are being sent right now or their outcome is not known yet. Wait for them to finish (a few minutes), then switch.");
+
             await _store.UpsertAsync(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [ActiveKey] = next }, updatedByUserId, cancellationToken);
+        }
 
         return new WhatsAppProviderChange(previous, ToDto(next, endpoint is not null));
     }

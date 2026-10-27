@@ -10,11 +10,12 @@ public class WhatsAppProviderSettingsTests
 {
     private readonly MemoryStore _store = new();
     private readonly FakeBridge _bridge = new();
+    private readonly FakeInFlight _inFlight = new();
 
     private WhatsAppProviderSettingsService Service()
     {
         var bridgeSettings = new WhatsAppBridgeSettingsService(_store, new UpdateWhatsAppBridgeSettingsRequestValidator(), _bridge);
-        return new WhatsAppProviderSettingsService(_store, new UpdateWhatsAppProviderRequestValidator(), bridgeSettings, _bridge);
+        return new WhatsAppProviderSettingsService(_store, new UpdateWhatsAppProviderRequestValidator(), bridgeSettings, _bridge, _inFlight);
     }
 
     private void ConfigureBridge()
@@ -86,6 +87,41 @@ public class WhatsAppProviderSettingsTests
         Assert.Equal(WhatsAppProviders.Meta, await Service().GetActiveAsync());
     }
 
+    [Fact]
+    public async Task A_switch_is_refused_while_sends_are_in_flight_and_nothing_is_stored()
+    {
+        ConfigureBridge();
+        _inFlight.Count = 2;
+
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service().UpdateAsync(new UpdateWhatsAppProviderRequest(WhatsAppProviders.QrBridge), Guid.NewGuid()));
+
+        Assert.Contains("2 message(s)", ex.Message);
+        Assert.DoesNotContain(WhatsAppProviderSettingsService.ActiveKey, _store.Rows.Keys);
+    }
+
+    [Fact]
+    public async Task In_flight_sends_do_not_block_saving_the_provider_that_is_already_active()
+    {
+        _inFlight.Count = 5;
+
+        var change = await Service().UpdateAsync(new UpdateWhatsAppProviderRequest(WhatsAppProviders.Meta), Guid.NewGuid());
+
+        Assert.Equal(WhatsAppProviders.Meta, change.Settings.Active);
+    }
+
+    [Fact]
+    public async Task Switching_back_to_Meta_is_also_held_while_sends_are_in_flight()
+    {
+        _store.Rows[WhatsAppProviderSettingsService.ActiveKey] = WhatsAppProviders.QrBridge;
+        _inFlight.Count = 1;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Service().UpdateAsync(new UpdateWhatsAppProviderRequest(WhatsAppProviders.Meta), Guid.NewGuid()));
+
+        Assert.Equal(WhatsAppProviders.QrBridge, await Service().GetActiveAsync());
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("Twilio")]
@@ -144,6 +180,12 @@ public class WhatsAppProviderSettingsTests
         var saved = await settings.UpdateAsync(new UpdateWhatsAppBridgeSettingsRequest("http://bridge", "k", "https://api", new[] { pilot, pilot }), Guid.NewGuid());
 
         Assert.Equal(new[] { pilot }, saved.PilotTenantIds);
+    }
+
+    private sealed class FakeInFlight : IInFlightSendCounter
+    {
+        public int Count { get; set; }
+        public Task<int> CountAsync(CancellationToken cancellationToken = default) => Task.FromResult(Count);
     }
 
     private sealed class FakeBridge : IWhatsAppBridgeClient

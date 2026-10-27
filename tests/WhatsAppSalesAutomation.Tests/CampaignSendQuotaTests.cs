@@ -203,6 +203,33 @@ public sealed class CampaignSendQuotaTests : IDisposable
     }
 
     [Fact]
+    public async Task A_send_whose_outcome_is_unknown_is_never_retried_and_keeps_its_spend()
+    {
+        Seed(TemplateCategory.Marketing, customers: 1);
+        await Fund(5);
+        _whatsApp.Succeed = false;
+        _whatsApp.Ambiguous = true;
+        await _sender.ProcessInitialSendsAsync();
+
+        var message = await _db.Messages.SingleAsync();
+        Assert.Equal(MessageStatus.Failed, message.Status);
+        Assert.Null(message.NextAttemptAt);
+        Assert.Contains("Outcome unknown", message.FailureReason);
+        // It may well have been sent, so the spend stands rather than being given back.
+        Assert.Equal(4m, await BalanceAsync());
+
+        // Even once the bridge answers again, nothing re-sends it.
+        _whatsApp.Succeed = true;
+        _whatsApp.Ambiguous = false;
+        _clock.UtcNow = _clock.UtcNow.AddDays(1);
+        var retry = await _sender.RetryFailedSendsAsync();
+
+        Assert.Equal(0, retry.Sent);
+        Assert.Equal(1, _whatsApp.Calls);
+        Assert.Equal(CampaignCustomerStatus.Failed, (await _db.CampaignCustomers.SingleAsync()).Status);
+    }
+
+    [Fact]
     public async Task Retrying_a_failed_send_charges_only_once_it_finally_succeeds()
     {
         Seed(TemplateCategory.Marketing, customers: 1);
@@ -396,6 +423,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
     private sealed class FakeWhatsApp : IWhatsAppService
     {
         public bool Succeed { get; set; } = true;
+        public bool Ambiguous { get; set; }
         public int Calls { get; private set; }
         public List<IReadOnlyList<string>> SentParameters { get; } = new();
         public List<string?> SentMediaUrls { get; } = new();
@@ -407,7 +435,7 @@ public sealed class CampaignSendQuotaTests : IDisposable
             Calls++;
             SentParameters.Add(parameterValues);
             SentMediaUrls.Add(mediaUrl);
-            return Task.FromResult(Succeed ? new WhatsAppSendResult(true, $"wamid.{Calls}", null) : new WhatsAppSendResult(false, null, "rejected"));
+            return Task.FromResult(Succeed ? new WhatsAppSendResult(true, $"wamid.{Calls}", null) : new WhatsAppSendResult(false, null, "rejected", Ambiguous: Ambiguous));
         }
 
         public Task<WhatsAppSendResult> SendTextMessageAsync(string toPhoneNumberE164, string text, CancellationToken cancellationToken = default) => throw new NotImplementedException();

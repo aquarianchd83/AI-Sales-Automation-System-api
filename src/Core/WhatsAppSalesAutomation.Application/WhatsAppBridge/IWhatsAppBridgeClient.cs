@@ -15,7 +15,10 @@ public record BridgeInstance(string InstanceName, string? InstanceToken, string 
 /// <summary>A call to the bridge failed in a way the caller can show an operator (unreachable, rejected key, refused request).</summary>
 public class WhatsAppBridgeException : Exception
 {
-    public WhatsAppBridgeException(string message) : base(message) { }
+    public WhatsAppBridgeException(string message, bool outcomeUnknown = false) : base(message) => OutcomeUnknown = outcomeUnknown;
+
+    /// <summary>The call may have been carried out even though it failed (a timeout, a connection dropped mid-reply). False when it provably never reached the bridge.</summary>
+    public bool OutcomeUnknown { get; }
 }
 
 /// <summary>
