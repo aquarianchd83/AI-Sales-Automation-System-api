@@ -257,6 +257,8 @@ public interface IApplicationDbContext
 
     DbSet<Publication> Publications { get; }
 
+    DbSet<PublicationMetricSnapshot> PublicationMetricSnapshots { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

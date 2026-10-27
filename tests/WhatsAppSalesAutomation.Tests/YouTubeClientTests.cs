@@ -145,6 +145,46 @@ public sealed class YouTubeClientTests
         Assert.Contains("token=secret-refresh", _handler.Bodies.Single());
     }
 
+    // ----- how a video is doing ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Views_likes_and_comments_are_read_for_the_videos_asked_about_and_a_missing_video_is_simply_absent()
+    {
+        _handler.Respond = _ => Json("{\"items\":[{\"id\":\"vid1\",\"statistics\":{\"viewCount\":\"1200\",\"likeCount\":\"35\",\"commentCount\":\"4\"}},{\"id\":\"vid2\",\"statistics\":{\"viewCount\":\"7\"}}]}");
+
+        var stats = await Client().GetVideoStatisticsAsync("acc", new[] { "vid1", "vid2", "vidGone" });
+
+        Assert.Equal(new VideoStatistics(1200, 35, 4), stats["vid1"]);
+        Assert.Equal(new VideoStatistics(7, 0, 0), stats["vid2"]); // a count the owner hides is 0
+        Assert.False(stats.ContainsKey("vidGone"));
+        var request = Assert.Single(_handler.Requests);
+        Assert.Equal("Bearer acc", request.Headers.Authorization!.ToString());
+        Assert.Contains("id=vid1%2Cvid2%2CvidGone", request.RequestUri!.Query);
+        Assert.DoesNotContain("acc", request.RequestUri.ToString());
+    }
+
+    [Fact]
+    public async Task Only_plain_video_ids_are_ever_put_in_the_address_and_at_most_fifty()
+    {
+        _handler.Respond = _ => Json("{\"items\":[]}");
+
+        Assert.Empty(await Client().GetVideoStatisticsAsync("acc", new[] { "../../x", "a b", "", new string('x', 40) }));
+        Assert.Empty(_handler.Requests); // nothing valid to ask about: no request
+
+        await Client().GetVideoStatisticsAsync("acc", Enumerable.Range(0, 80).Select(i => "v" + i).ToList());
+        Assert.Equal(50, Uri.UnescapeDataString(_handler.Requests.Single().RequestUri!.Query.Split("id=")[1]).Split(',').Length);
+    }
+
+    [Fact]
+    public async Task A_refusal_when_asking_how_videos_are_doing_is_classified()
+    {
+        _handler.Respond = _ => Json(GoogleError("quotaExceeded"), HttpStatusCode.Forbidden);
+        Assert.Equal(SocialFailure.Permanent, (await Assert.ThrowsAsync<SocialProviderException>(() => Client().GetVideoStatisticsAsync("acc", new[] { "vid1" }))).Failure);
+
+        _handler.Respond = _ => Json("{}", HttpStatusCode.Unauthorized);
+        Assert.Equal(SocialFailure.NeedsReconnect, (await Assert.ThrowsAsync<SocialProviderException>(() => Client().GetVideoStatisticsAsync("acc", new[] { "vid1" }))).Failure);
+    }
+
     // ----- uploading -------------------------------------------------------------------------------------------------------------
 
     private HttpResponseMessage Session(string location = "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=abc")

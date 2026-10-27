@@ -267,6 +267,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<Publication> Publications => Set<Publication>();
 
+    public DbSet<PublicationMetricSnapshot> PublicationMetricSnapshots => Set<PublicationMetricSnapshot>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();

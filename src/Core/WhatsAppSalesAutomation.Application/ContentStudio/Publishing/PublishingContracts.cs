@@ -57,6 +57,21 @@ public sealed record OAuthTokens(string AccessToken, string? RefreshToken, DateT
 
 public sealed record YouTubeChannel(string Id, string Title);
 
+/// <summary>How a video is doing. A count the owner hides (likes, comments) is reported as 0.</summary>
+public sealed record VideoStatistics(long Views, long Likes, long Comments);
+
+/// <summary>How long finished files and dead sign-ins are kept (Platform &gt; Configuration &gt; ContentStudio). 0 keeps them for ever; the minimum is 7 days.</summary>
+public class StudioRetentionOptions
+{
+    public const int MinimumDays = 7;
+
+    public int VideoDays { get; set; } = 90;
+
+    public int DeadSignInDays { get; set; } = 90;
+
+    public static int? Effective(int days) => days <= 0 ? null : Math.Max(days, MinimumDays);
+}
+
 /// <param name="SyntheticMedia">Tells YouTube the video contains realistic altered or synthetic content (here: a synthetic voice). Always true.</param>
 public sealed record YouTubeUploadRequest(string Title, string Description, string Privacy, bool SyntheticMedia);
 
@@ -77,6 +92,9 @@ public interface IYouTubeClient
     Task<string> UploadAsync(string accessToken, YouTubeUploadRequest request, Stream video, long length, CancellationToken cancellationToken = default);
 
     Task RevokeAsync(string token, CancellationToken cancellationToken = default);
+
+    /// <summary>Views, likes and comments for up to 50 videos in one call (one unit of Google's quota). A video the platform no longer returns is simply absent from the result.</summary>
+    Task<IReadOnlyDictionary<string, VideoStatistics>> GetVideoStatisticsAsync(string accessToken, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default);
 }
 
 public interface IPublicationQueue

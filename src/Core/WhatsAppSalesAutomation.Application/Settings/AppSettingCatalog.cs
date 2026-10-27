@@ -86,6 +86,8 @@ public static class AppSettingCatalog
         new("ContentStudio:Social:GoogleClientId", "ContentStudio", IsSecret: false, Description: "OAuth client id from the platform's Google Cloud project, used to connect tenants' YouTube channels. Without it publishing to YouTube is not available."),
         new("ContentStudio:Social:GoogleClientSecret", "ContentStudio", IsSecret: true, Description: "The OAuth client secret that goes with the client id above."),
         new("ContentStudio:Social:MaxPublishesPerDay", "ContentStudio", IsSecret: false, Description: "Most videos the whole platform sends to YouTube in 24 hours. YouTube's free quota allows about six uploads a day until Google raises it; set this to what the project is allowed.", DefaultValue: "5"),
+        new("ContentStudio:Retention:VideoDays", "ContentStudio", IsSecret: false, Description: "Days a finished video file is kept in the tenant's private storage. After that the file is deleted (the record of the video stays). 0 keeps them for ever; minimum 7. A video still waiting to be published is never deleted.", DefaultValue: "90"),
+        new("ContentStudio:Retention:DeadSignInDays", "ContentStudio", IsSecret: false, Description: "Days an account that needs to be connected again is kept before its saved sign-in is revoked and deleted. 0 keeps them for ever; minimum 7.", DefaultValue: "90"),
 
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),

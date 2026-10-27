@@ -22,6 +22,7 @@ public sealed class YouTubeClient : IYouTubeClient
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string RevokeEndpoint = "https://oauth2.googleapis.com/revoke";
     private const string ChannelEndpoint = "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true";
+    private const string StatisticsEndpoint = "https://www.googleapis.com/youtube/v3/videos?part=statistics&maxResults=50&id=";
     private const string UploadEndpoint = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
     public const string Scopes = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
 
@@ -137,6 +138,36 @@ public sealed class YouTubeClient : IYouTubeClient
         using var doc = await ParseAsync(sent, ct);
         return Text(doc.RootElement, "id") ?? throw new SocialProviderException("YouTube accepted the video but did not say its id. Look at your channel before trying again.", SocialFailure.Ambiguous);
     }
+
+    public async Task<IReadOnlyDictionary<string, VideoStatistics>> GetVideoStatisticsAsync(string accessToken, IReadOnlyList<string> videoIds, CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, VideoStatistics>();
+        var ids = videoIds.Where(id => id.Length is > 0 and <= 20 && id.All(c => char.IsLetterOrDigit(c) || c is '-' or '_')).Distinct().Take(50).ToList();
+        if (ids.Count == 0)
+            return result;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, StatisticsEndpoint + Uri.EscapeDataString(string.Join(",", ids)));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var response = await SendAsync(request, SocialFailure.Transient, ct);
+        if (!response.IsSuccessStatusCode)
+            throw Fail(response.StatusCode, await ErrorOf(response, ct), SocialFailure.Transient);
+
+        using var doc = await ParseAsync(response, ct);
+        if (!doc.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+            return result;
+        foreach (var item in items.EnumerateArray())
+        {
+            var id = Text(item, "id");
+            if (id is null || !item.TryGetProperty("statistics", out var stats))
+                continue;
+            result[id] = new VideoStatistics(Count(stats, "viewCount"), Count(stats, "likeCount"), Count(stats, "commentCount"));
+        }
+
+        return result;
+    }
+
+    private static long Count(JsonElement stats, string name) =>
+        stats.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out var n) ? Math.Max(0, n) : 0;
 
     public async Task RevokeAsync(string token, CancellationToken ct = default)
     {

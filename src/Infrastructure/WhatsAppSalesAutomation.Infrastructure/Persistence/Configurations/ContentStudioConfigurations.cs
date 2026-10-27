@@ -212,3 +212,13 @@ public class PublicationConfiguration : IEntityTypeConfiguration<Publication>
         builder.HasIndex(p => new { p.Status, p.CreatedAt });
     }
 }
+
+public class PublicationMetricSnapshotConfiguration : IEntityTypeConfiguration<PublicationMetricSnapshot>
+{
+    public void Configure(EntityTypeBuilder<PublicationMetricSnapshot> builder)
+    {
+        builder.ToTable("PublicationMetricSnapshots");
+        builder.HasKey(m => m.Id);
+        builder.HasIndex(m => new { m.TenantId, m.PublicationId, m.CapturedAtUtc });
+    }
+}

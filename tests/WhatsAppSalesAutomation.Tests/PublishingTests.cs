@@ -138,6 +138,9 @@ public sealed class PublishingTests : IDisposable
             Revoked.Add(token);
             return RevokeFails is null ? Task.CompletedTask : Task.FromException(RevokeFails);
         }
+
+        public Task<IReadOnlyDictionary<string, VideoStatistics>> GetVideoStatisticsAsync(string accessToken, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private readonly SqliteConnection _connection = new("DataSource=:memory:");

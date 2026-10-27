@@ -154,23 +154,8 @@ public sealed class PublicationProcessor : IPublicationProcessor
     }
 
     /// <summary>The saved access token, renewed first when it is about to run out.</summary>
-    private async Task<string> FreshAccessTokenAsync(SocialConnection connection, CancellationToken ct)
-    {
-        var access = _protector.TryUnprotect(connection.EncryptedAccessToken);
-        if (access is not null && connection.TokenExpiresAtUtc > _clock.UtcNow + PublishingLimits.RefreshBefore)
-            return access;
-
-        var refresh = _protector.TryUnprotect(connection.EncryptedRefreshToken)
-            ?? throw new SocialProviderException("The saved sign-in can no longer be read. Connect your YouTube account again.", SocialFailure.NeedsReconnect);
-        var tokens = await _youtube.RefreshAsync(refresh, ct);
-        connection.EncryptedAccessToken = _protector.Protect(tokens.AccessToken);
-        connection.TokenExpiresAtUtc = tokens.ExpiresAtUtc;
-        if (!string.IsNullOrEmpty(tokens.RefreshToken))
-            connection.EncryptedRefreshToken = _protector.Protect(tokens.RefreshToken);
-        connection.UpdatedAt = _clock.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        return tokens.AccessToken;
-    }
+    private Task<string> FreshAccessTokenAsync(SocialConnection connection, CancellationToken ct) =>
+        SocialTokens.FreshAccessTokenAsync(_db, _protector, _youtube, _clock, connection, ct);
 
     private async Task FailAsync(Publication publication, string message, CancellationToken ct)
     {

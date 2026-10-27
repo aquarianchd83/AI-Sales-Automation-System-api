@@ -2162,6 +2162,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(600)
                         .HasColumnType("nvarchar(600)");
 
+                    b.Property<DateTime?>("MetricsRefreshedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("MissingOnPlatformSinceUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("NextRetryAtUtc")
                         .HasColumnType("datetime2");
 
@@ -2223,6 +2229,43 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("TenantId", "VersionId", "CreatedAt");
 
                     b.ToTable("Publications", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.PublicationMetricSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CapturedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("Comments")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("Likes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("PublicationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("Views")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "PublicationId", "CapturedAtUtc");
+
+                    b.ToTable("PublicationMetricSnapshots", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.QuestionnaireAnswerRevision", b =>

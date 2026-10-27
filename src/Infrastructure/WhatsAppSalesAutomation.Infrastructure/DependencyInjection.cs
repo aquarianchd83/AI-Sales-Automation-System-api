@@ -101,6 +101,8 @@ public static class DependencyInjection
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(30)).RemoveAllLoggers();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IPublicationQueue, HangfirePublicationQueue>();
         services.AddScoped<PublicationJob>();
+        services.AddScoped<PublicationMetricsJob>();
+        services.AddScoped<StudioMaintenanceJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();

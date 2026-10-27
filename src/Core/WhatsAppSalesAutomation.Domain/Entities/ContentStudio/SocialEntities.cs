@@ -96,5 +96,27 @@ public class Publication : BaseEntity, ITenantOwned
 
     public DateTime? PublishedAtUtc { get; set; }
 
+    /// <summary>When the platform was last asked how the post is doing.</summary>
+    public DateTime? MetricsRefreshedAtUtc { get; set; }
+
+    /// <summary>Set when the platform stopped returning the post (deleted, or made unavailable there). Cleared if it comes back.</summary>
+    public DateTime? MissingOnPlatformSinceUtc { get; set; }
+
     public Guid? CreatedBy { get; set; }
+}
+
+/// <summary>How a published post was doing at one moment. Rows are only ever added: the series is the history.</summary>
+public class PublicationMetricSnapshot : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid PublicationId { get; set; }
+
+    public DateTime CapturedAtUtc { get; set; }
+
+    public long Views { get; set; }
+
+    public long Likes { get; set; }
+
+    public long Comments { get; set; }
 }

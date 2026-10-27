@@ -64,6 +64,9 @@ public static class DependencyInjection
         services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.SocialOptions>(configuration.GetSection("ContentStudio:Social"));
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IPublishingService, WhatsAppSalesAutomation.Application.ContentStudio.Publishing.PublishingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IPublicationProcessor, WhatsAppSalesAutomation.Application.ContentStudio.Publishing.PublicationProcessor>();
+        services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.StudioRetentionOptions>(configuration.GetSection("ContentStudio:Retention"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Analytics.IVideoAnalyticsService, WhatsAppSalesAutomation.Application.ContentStudio.Analytics.VideoAnalyticsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Analytics.IStudioMaintenanceService, WhatsAppSalesAutomation.Application.ContentStudio.Analytics.StudioMaintenanceService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Review.IContentReviewService, WhatsAppSalesAutomation.Application.ContentStudio.Review.ContentReviewService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderService, WhatsAppSalesAutomation.Application.ContentStudio.Video.VideoRenderService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderProcessor, WhatsAppSalesAutomation.Application.ContentStudio.Video.VideoRenderProcessor>();
