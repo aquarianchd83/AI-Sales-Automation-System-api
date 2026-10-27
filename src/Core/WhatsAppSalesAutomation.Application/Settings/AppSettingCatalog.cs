@@ -83,6 +83,9 @@ public static class AppSettingCatalog
         new("ContentStudio:Render:ShotstackEnvironment", "ContentStudio", IsSecret: false, Description: "\"stage\" is Shotstack's free sandbox (watermarked videos); \"v1\" is production. The key must match.", DefaultValue: "stage", Options: new[] { "stage", "v1" }),
         new("ContentStudio:Render:GoogleTtsApiKey", "ContentStudio", IsSecret: true, Description: "API key for Google Cloud Text-to-Speech, which speaks the narration. Without it live video making is not available."),
         new("ContentStudio:Render:MaxConcurrent", "ContentStudio", IsSecret: false, Description: "Most videos being made at once across all tenants. A tenant is always limited to one at a time.", DefaultValue: "3"),
+        new("ContentStudio:Social:GoogleClientId", "ContentStudio", IsSecret: false, Description: "OAuth client id from the platform's Google Cloud project, used to connect tenants' YouTube channels. Without it publishing to YouTube is not available."),
+        new("ContentStudio:Social:GoogleClientSecret", "ContentStudio", IsSecret: true, Description: "The OAuth client secret that goes with the client id above."),
+        new("ContentStudio:Social:MaxPublishesPerDay", "ContentStudio", IsSecret: false, Description: "Most videos the whole platform sends to YouTube in 24 hours. YouTube's free quota allows about six uploads a day until Google raises it; set this to what the project is allowed.", DefaultValue: "5"),
 
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),

@@ -253,6 +253,10 @@ public interface IApplicationDbContext
 
     DbSet<ContentReviewEvent> ContentReviewEvents { get; }
 
+    DbSet<SocialConnection> SocialConnections { get; }
+
+    DbSet<Publication> Publications { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

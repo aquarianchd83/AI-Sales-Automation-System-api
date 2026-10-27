@@ -251,3 +251,34 @@ public enum ContentReviewAction
     /// <summary>A new draft was started from an approved or rejected script.</summary>
     Revised = 4
 }
+
+/// <summary>Where a video can be published.</summary>
+public enum SocialPlatform
+{
+    YouTube = 0,
+    Instagram = 1
+}
+
+public enum SocialConnectionStatus
+{
+    Connected = 0,
+
+    /// <summary>The platform no longer accepts the saved sign-in (revoked, expired, password changed): the tenant has to connect again.</summary>
+    NeedsReconnect = 1
+}
+
+public enum PublicationStatus
+{
+    /// <summary>Waiting for its time, or for a retry after a temporary problem.</summary>
+    Scheduled = 0,
+
+    /// <summary>Being sent to the platform right now.</summary>
+    Uploading = 1,
+
+    Published = 2,
+
+    /// <summary>Ended with an error; see the message. Nothing is retried by itself after this.</summary>
+    Failed = 3,
+
+    Cancelled = 4
+}

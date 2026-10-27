@@ -96,6 +96,11 @@ public static class DependencyInjection
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5)).RemoveAllLoggers();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderQueue, HangfireVideoRenderQueue>();
         services.AddScoped<VideoRenderJob>();
+        // Publishing: Google's sign-in and YouTube. The client secret and tokens travel in bodies and headers only, so request logging is off.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IYouTubeClient, WhatsAppSalesAutomation.Infrastructure.ContentStudio.YouTubeClient>()
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(30)).RemoveAllLoggers();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IPublicationQueue, HangfirePublicationQueue>();
+        services.AddScoped<PublicationJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();

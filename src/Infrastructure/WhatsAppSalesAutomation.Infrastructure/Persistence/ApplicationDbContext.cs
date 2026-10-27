@@ -263,6 +263,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<ContentReviewEvent> ContentReviewEvents => Set<ContentReviewEvent>();
 
+    public DbSet<SocialConnection> SocialConnections => Set<SocialConnection>();
+
+    public DbSet<Publication> Publications => Set<Publication>();
+
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();
