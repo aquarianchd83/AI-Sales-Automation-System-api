@@ -4661,6 +4661,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("NextAttemptAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Meta");
+
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("datetime2");
 
@@ -4701,7 +4708,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
 
-                    b.HasIndex("WhatsAppMessageId")
+                    b.HasIndex("Provider", "WhatsAppMessageId")
                         .IsUnique()
                         .HasFilter("[WhatsAppMessageId] IS NOT NULL");
 
@@ -6923,6 +6930,62 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasKey("TenantId", "Key");
 
                     b.ToTable("TenantAppSettingOverrides", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Infrastructure.Tenancy.TenantWhatsAppChannel", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ConnectedPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("InstanceName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("InstanceTokenCipher")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("StatusUpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("WebhookSecretHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("WebhookTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("TenantId");
+
+                    b.HasIndex("InstanceName")
+                        .IsUnique();
+
+                    b.HasIndex("WebhookTokenHash")
+                        .IsUnique();
+
+                    b.ToTable("TenantWhatsAppChannels", (string)null);
                 });
 
             modelBuilder.Entity("WhatsAppSalesAutomation.Infrastructure.Tenancy.TenantWhatsAppConfig", b =>

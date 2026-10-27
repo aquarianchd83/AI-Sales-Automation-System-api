@@ -238,6 +238,12 @@ public static class DependencyInjection
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
             .RemoveAllLoggers();
         services.AddScoped<SimulatedWhatsAppClient>();
+
+        // QR bridge (self-hosted Evolution API). RemoveAllLoggers: every request carries the bridge key and every reply can hold a QR or token.
+        services.Configure<WhatsAppProviderOptions>(configuration.GetSection("WhatsAppProvider"));
+        services.Configure<WhatsAppBridgeOptions>(configuration.GetSection("WhatsAppBridge"));
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppBridgeClient, EvolutionApiClient>().RemoveAllLoggers();
+        services.AddScoped<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppChannelStore, WhatsAppChannelStore>();
         services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
 
         // Facebook / Instagram ad spend for the Revenue report. RemoveAllLoggers is a security requirement, as above: the code
@@ -377,6 +383,7 @@ public static class DependencyInjection
         services.AddScoped<CampaignCompletionJob>();
         services.AddScoped<InboundWebhookProcessingJob>();
         services.AddScoped<WhatsAppTokenRefreshJob>();
+        services.AddScoped<WhatsAppBridgeHealthJob>();
         services.AddScoped<MessageTemplateSyncJob>();
         services.AddScoped<LeadDiscoveryJob>();
         services.AddScoped<LeadFollowUpJob>();

@@ -38,8 +38,12 @@ public class Message : BaseEntity, ITenantOwned
     /// <summary>Snapshot of which template was used, since the template itself can later be edited or retired.</summary>
     public string? TemplateName { get; set; }
 
-    /// <summary>Populated once WhatsApp accepts the send. Unique when present - the inbound-side dedup key (Phase 4).</summary>
+    /// <summary>Populated once WhatsApp accepts the send. Unique per <see cref="Provider"/> when present - the inbound-side dedup key (Phase 4).</summary>
     public string? WhatsAppMessageId { get; set; }
+
+    /// <summary>Which integration owns <see cref="WhatsAppMessageId"/> (see <see cref="WhatsAppProviders"/>). Every row from before
+    /// providers existed is Meta, which is also the default.</summary>
+    public string Provider { get; set; } = WhatsAppProviders.Meta;
 
     /// <summary>Synthetic outbound dedup key: <c>{CampaignCustomerId}:step{StepNumber}</c>. Always unique.</summary>
     public string IdempotencyKey { get; set; } = string.Empty;

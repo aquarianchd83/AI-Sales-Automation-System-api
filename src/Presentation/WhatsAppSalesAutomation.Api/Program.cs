@@ -155,7 +155,11 @@ try
     {
         ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
     });
-    app.UseHttpsRedirection();
+    // Development only: the self-hosted bridge runs in a local container and calls the QR webhook over plain http (it has no way to trust this machine's
+    // self-signed dev certificate), so that one route is exempt from the https redirect. Every other environment, and every other route, still redirects.
+    app.UseWhen(
+        context => !(app.Environment.IsDevelopment() && context.Request.Path.StartsWithSegments("/api/v1/webhooks/whatsapp-bridge")),
+        branch => branch.UseHttpsRedirection());
     app.UseCors(TenantCorsPolicy);
 
     // After UseForwardedHeaders (so the per-IP partitions see the real client, not the tunnel) and

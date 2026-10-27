@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 /// <summary>
@@ -24,7 +26,8 @@ public record WhatsAppWebhookParseResult(
     IReadOnlyList<WhatsAppStatusUpdate> Statuses,
     string? PhoneNumberId = null,
     IReadOnlyList<WhatsAppQualityUpdate>? QualityUpdates = null,
-    string? WabaId = null);
+    string? WabaId = null,
+    string Provider = WhatsAppProviders.Meta);
 
 /// <summary>One <c>phone_number_quality_update</c>. <paramref name="Event"/> is Meta's event name (FLAGGED, UNFLAGGED, DOWNGRADE,
 /// UPGRADE, ONBOARDING); <paramref name="QualityRating"/> is a GREEN/YELLOW/RED value if the payload carried one, else null.

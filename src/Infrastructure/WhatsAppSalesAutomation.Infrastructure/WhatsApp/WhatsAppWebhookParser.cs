@@ -25,6 +25,10 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
     public WhatsAppWebhookParseResult Parse(string rawPayload)
     {
+        // A delivery the QR bridge endpoint already normalized (see EvolutionWebhookNormalizer) is not Meta's shape.
+        if (EvolutionWebhookNormalizer.TryParseCanonical(rawPayload, out var bridgeResult))
+            return bridgeResult;
+
         var messages = new List<InboundWhatsAppMessage>();
         var statuses = new List<WhatsAppStatusUpdate>();
         var quality = new List<WhatsAppQualityUpdate>();

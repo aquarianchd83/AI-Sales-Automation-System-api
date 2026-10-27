@@ -81,6 +81,19 @@ public static class TemplatePlaceholderResolver
         return (resolvedText, parameterValues);
     }
 
+    /// <summary>Rebuilds the sent text from a template's named-token body and the positional values a send carried - for a provider (the QR
+    /// bridge) that has no template concept and needs the finished text. Uses the same first-occurrence order as <see cref="Resolve"/>, so
+    /// value n fills the n-th distinct token; a missing value becomes empty rather than leaving a raw placeholder in a customer's message.</summary>
+    public static string FillPositional(string bodyText, IReadOnlyList<string> values)
+    {
+        var order = ExtractTokens(bodyText);
+        return TokenPattern.Replace(bodyText, match =>
+        {
+            var index = order.ToList().FindIndex(t => string.Equals(t, match.Groups[1].Value, StringComparison.OrdinalIgnoreCase));
+            return index >= 0 && index < values.Count ? values[index] : string.Empty;
+        });
+    }
+
     /// <summary>Fixture values for each KnownTokens entry, used only as the "example" Meta's template
     /// creation/edit API mandates for every numbered placeholder (real customer data is never involved
     /// in registering a template - only in sending one, via Resolve above).</summary>

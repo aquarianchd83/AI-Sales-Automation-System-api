@@ -621,6 +621,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
         {
             message.Status = MessageStatus.Sent;
             message.WhatsAppMessageId = result.WhatsAppMessageId;
+            message.Provider = result.Provider;
             message.SentAt = _dateTime.UtcNow;
             conversation.LastMessageAt = _dateTime.UtcNow;
         }

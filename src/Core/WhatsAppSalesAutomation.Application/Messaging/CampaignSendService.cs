@@ -645,6 +645,7 @@ public class CampaignSendService : ICampaignSendService
         {
             message.Status = MessageStatus.Sent;
             message.WhatsAppMessageId = result.WhatsAppMessageId;
+            message.Provider = result.Provider;
             message.SentAt = now;
             message.FailureReason = null;
             message.NextAttemptAt = null;
@@ -676,6 +677,18 @@ public class CampaignSendService : ICampaignSendService
                 cc.Status = CampaignCustomerStatus.Completed;
                 cc.NextFollowUpDueAt = null;
             }
+        }
+        else if (result.Ambiguous)
+        {
+            // The request may already have been accepted (a timeout, an unreadable reply), so it must NOT be retried: that could message the customer twice.
+            // It is parked for a person to check, the quota spend is kept (it may well have been sent), and the customer is not advanced.
+            message.Status = MessageStatus.Failed;
+            message.FailureReason = $"Outcome unknown - not retried automatically so the customer is not messaged twice. {result.ErrorMessage}";
+            message.NextAttemptAt = null;
+            message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
+            cc.Status = CampaignCustomerStatus.Failed;
+            cc.StoppedReason = $"Step {step.StepNumber}: the send outcome is unknown and needs checking before it is sent again.";
+            cc.NextFollowUpDueAt = null;
         }
         else
         {

@@ -449,6 +449,7 @@ public class LeadFollowUpService : ILeadFollowUpService
         {
             message.Status = MessageStatus.Sent;
             message.WhatsAppMessageId = result.WhatsAppMessageId;
+            message.Provider = result.Provider;
             message.SentAt = now;
 
             var conversation = await _context.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);

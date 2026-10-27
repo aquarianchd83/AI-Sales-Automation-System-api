@@ -26,3 +26,4 @@ src/Presentation/WhatsAppSalesAutomation.Api/App_Data/
 ## Node (future Angular admin panel, if added to this repo)
 node_modules/
 dist/
+deploy/evolution/.env

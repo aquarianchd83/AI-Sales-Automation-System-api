@@ -50,6 +50,8 @@ public class WhatsAppSpendService : IWhatsAppSpendService
                 // free-form session reply, and a queued or failed send all cost nothing.
                 Billable = m.Direction == MessageDirection.Outbound
                            && m.MessageType == MessageType.Template
+                           // A QR-bridge send is not a Meta template send: no Meta category charge applies to it.
+                           && m.Provider != WhatsAppProviders.QrBridge
                            && (m.Status == MessageStatus.Sent || m.Status == MessageStatus.Delivered || m.Status == MessageStatus.Read),
                 m.TemplateName
             })
