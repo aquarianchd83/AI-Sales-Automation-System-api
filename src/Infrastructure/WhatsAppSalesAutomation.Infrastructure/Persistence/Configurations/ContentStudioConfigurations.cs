@@ -104,3 +104,28 @@ public class ContentSceneConfiguration : IEntityTypeConfiguration<ContentScene>
         builder.HasIndex(s => new { s.TenantId, s.VersionId, s.Order });
     }
 }
+
+public class StudioAssetConfiguration : IEntityTypeConfiguration<StudioAsset>
+{
+    public void Configure(EntityTypeBuilder<StudioAsset> builder)
+    {
+        builder.ToTable("StudioAssets");
+        builder.HasKey(a => a.Id);
+        builder.Property(a => a.Kind).HasConversion<string>().HasMaxLength(15);
+        builder.Property(a => a.Name).IsRequired().HasMaxLength(200);
+        builder.Property(a => a.Description).HasMaxLength(500);
+        builder.Property(a => a.Tags).HasMaxLength(300);
+        builder.Property(a => a.ContentType).IsRequired().HasMaxLength(60);
+        builder.Property(a => a.StorageKey).IsRequired().HasMaxLength(500);
+        builder.Property(a => a.Checksum).IsRequired().HasMaxLength(64);
+        builder.Property(a => a.Provider).HasMaxLength(40);
+        builder.Property(a => a.ProviderAssetId).HasMaxLength(60);
+        builder.Property(a => a.SourceUrl).HasMaxLength(500);
+        builder.Property(a => a.LicenseName).IsRequired().HasMaxLength(100);
+        builder.Property(a => a.LicenseUrl).HasMaxLength(300);
+        builder.Property(a => a.Attribution).HasMaxLength(300);
+        builder.HasIndex(a => new { a.TenantId, a.CreatedAt });
+        // The same file is kept once per tenant.
+        builder.HasIndex(a => new { a.TenantId, a.Checksum }).IsUnique();
+    }
+}

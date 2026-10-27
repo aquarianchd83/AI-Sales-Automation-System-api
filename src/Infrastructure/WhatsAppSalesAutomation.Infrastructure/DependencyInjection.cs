@@ -83,6 +83,10 @@ public static class DependencyInjection
         services.AddSingleton<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.IHostAddressResolver, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.DnsHostAddressResolver>();
         services.AddHttpClient<WhatsAppSalesAutomation.Application.ProductKnowledge.IWebsiteCrawler, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.WebsiteCrawler>()
             .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler);
+        // Stock photos: the platform's key lives in the settings; the image host is the only place pictures are fetched from, behind the same network guard.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Assets.IStockAssetProvider, WhatsAppSalesAutomation.Infrastructure.ContentStudio.PexelsStockProvider>()
+            .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();

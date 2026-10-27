@@ -367,6 +367,7 @@ public sealed class ContentPlannerServiceTests : IDisposable
         Assert.Equal((1, "Draft", 40, topic.Title, "OpenAI", PlannerPrompts.Version, false), (version.Number, version.Status, version.TargetSeconds, version.TopicTitle, version.Provider, version.PromptVersion, version.IsSimulated));
         Assert.Equal(new[] { "Supported", "Unsupported", "NoClaim" }, version.Scenes.Select(s => s.ClaimStatus));
         Assert.Equal((2, 1), (version.Supported, version.Flagged));
+        Assert.Equal(3, version.ScenesWithoutPicture); // pictures come next
         Assert.Contains("10,000", version.Scenes[1].ClaimNote);
         Assert.Equal(new[] { 1, 2, 3 }, version.Scenes.Select(s => s.Order));
         Assert.Equal(24, version.TotalSeconds);

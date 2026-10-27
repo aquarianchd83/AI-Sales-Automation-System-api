@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.ContentStudio.Assets;
 using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
 using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -370,15 +371,19 @@ public sealed class ContentPlannerService : IContentPlannerService
             ? new List<BusinessFact>()
             : await _db.BusinessFacts.IgnoreQueryFilters().AsNoTracking().Where(f => f.TenantId == tenantId && cited.Contains(f.Id)).ToListAsync(ct);
 
+        var assetIds = scenes.Where(s => s.ChosenAssetId != null).Select(s => s.ChosenAssetId!.Value).Distinct().ToList();
+        var assets = assetIds.Count == 0 ? new List<StudioAsset>() : await _db.StudioAssets.AsNoTracking().Where(a => a.TenantId == tenantId && assetIds.Contains(a.Id)).ToListAsync(ct);
+
         var dtos = scenes.Select(s => new SceneDto(
             s.Id, s.Order, s.Narration, s.OnScreenText, s.DurationSeconds, s.VisualHint, s.ClaimStatus.ToString(), s.ClaimNote, s.EditedByTenant,
-            ReadIds(s.FactIdsJson).Select(id => facts.FirstOrDefault(f => f.Id == id)).Where(f => f is not null).Select(f => new CitedFactDto(f!.Id, f.Category, f.Statement)).ToList())).ToList();
+            ReadIds(s.FactIdsJson).Select(id => facts.FirstOrDefault(f => f.Id == id)).Where(f => f is not null).Select(f => new CitedFactDto(f!.Id, f.Category, f.Statement)).ToList(),
+            assets.FirstOrDefault(a => a.Id == s.ChosenAssetId) is { } asset ? StudioAssetService.ToSummary(asset) : null)).ToList();
 
         return new ScriptVersionDto(
             version.Id, version.ProjectId, version.Number, version.TopicId, topics.FirstOrDefault(t => t.Id == version.TopicId)?.Title, version.Status.ToString(), version.TargetSeconds,
             scenes.Sum(s => s.DurationSeconds), version.Notes, version.Provider, version.Model, version.PromptVersion, version.IsSimulated, version.ActivityId, version.CreatedAt,
             scenes.Count(s => s.ClaimStatus is ClaimStatus.Supported or ClaimStatus.NoClaim),
-            scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), dtos);
+            scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), dtos.Count(d => d.Asset is null), dtos);
     }
 
     private static TopicDto ToDto(ContentTopic t) =>

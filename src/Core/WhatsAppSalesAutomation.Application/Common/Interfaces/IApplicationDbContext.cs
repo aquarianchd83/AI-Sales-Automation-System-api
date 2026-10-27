@@ -247,6 +247,8 @@ public interface IApplicationDbContext
 
     DbSet<ContentScene> ContentScenes { get; }
 
+    DbSet<StudioAsset> StudioAssets { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

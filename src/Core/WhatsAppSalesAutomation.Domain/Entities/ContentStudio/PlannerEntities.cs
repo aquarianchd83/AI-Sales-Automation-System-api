@@ -126,6 +126,9 @@ public class ContentScene : BaseEntity, ITenantOwned
     /// <summary>A sentence saying why, e.g. which fact supports it or what is missing.</summary>
     public string? ClaimNote { get; set; }
 
+    /// <summary>The picture chosen for this scene (a <see cref="StudioAsset"/> of the same tenant), or null while none is.</summary>
+    public Guid? ChosenAssetId { get; set; }
+
     /// <summary>True when the tenant changed what the AI wrote.</summary>
     public bool EditedByTenant { get; set; }
 }

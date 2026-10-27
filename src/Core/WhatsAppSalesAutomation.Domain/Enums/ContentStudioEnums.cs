@@ -199,3 +199,16 @@ public enum ClaimStatus
     /// <summary>Nothing the tenant has told us backs it.</summary>
     Unsupported = 4
 }
+
+/// <summary>What kind of picture an asset is. Always shown to the tenant and carried into the finished video's record.</summary>
+public enum StudioAssetKind
+{
+    /// <summary>A picture or photo the tenant uploaded.</summary>
+    Upload = 0,
+
+    /// <summary>A screenshot of the tenant's own app or site, uploaded by the tenant (the studio never takes screenshots itself).</summary>
+    Screenshot = 1,
+
+    /// <summary>A photo from a stock library, copied to the tenant's folder when chosen.</summary>
+    Stock = 2
+}

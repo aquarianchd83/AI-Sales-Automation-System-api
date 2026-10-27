@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Application.ContentStudio.Assets;
+
 namespace WhatsAppSalesAutomation.Application.ContentStudio.Planner;
 
 public record CreateProjectRequest(string Title, string Goal, string? Language);
@@ -23,16 +25,17 @@ public record CitedFactDto(Guid Id, string Category, string Statement);
 
 public record SceneDto(
     Guid Id, int Order, string Narration, string? OnScreenText, int DurationSeconds, string? VisualHint,
-    string ClaimStatus, string? ClaimNote, bool EditedByTenant, IReadOnlyList<CitedFactDto> Facts);
+    string ClaimStatus, string? ClaimNote, bool EditedByTenant, IReadOnlyList<CitedFactDto> Facts, AssetSummaryDto? Asset);
 
 public record ScriptVersionSummaryDto(Guid Id, int Number, string? TopicTitle, string Status, bool IsSimulated, int SceneCount, int TotalSeconds, DateTime CreatedAt);
 
 /// <param name="Supported">Scenes backed by a verified fact.</param>
 /// <param name="Flagged">Scenes with a claim no verified fact backs - the ones the tenant must look at.</param>
+/// <param name="ScenesWithoutPicture">Scenes that have no picture chosen yet.</param>
 public record ScriptVersionDto(
     Guid Id, Guid ProjectId, int Number, Guid? TopicId, string? TopicTitle, string Status, int TargetSeconds, int TotalSeconds, string? Notes,
     string Provider, string? Model, string PromptVersion, bool IsSimulated, Guid? ActivityId, DateTime CreatedAt,
-    int Supported, int Flagged, IReadOnlyList<SceneDto> Scenes);
+    int Supported, int Flagged, int ScenesWithoutPicture, IReadOnlyList<SceneDto> Scenes);
 
 /// <param name="UsableFacts">How many verified, current facts the writer has to work from. Nothing can be written without any.</param>
 public record ProjectDetailDto(
