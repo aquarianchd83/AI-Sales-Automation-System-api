@@ -16,6 +16,9 @@ public interface IWhatsAppChannelStore
 {
     Task<WhatsAppChannelRecord?> GetAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
+    /// <summary>Every tenant that has a channel - for the health pass, which has no tenant in scope.</summary>
+    Task<IReadOnlyList<Guid>> ListTenantIdsAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Finds the channel a webhook claims to belong to, only when BOTH the path token and the header secret match their stored hashes.
     /// This is how a webhook's tenant is established: never from anything in the payload.</summary>
     Task<WhatsAppChannelRecord?> FindByWebhookAsync(string channelToken, string secret, CancellationToken cancellationToken = default);

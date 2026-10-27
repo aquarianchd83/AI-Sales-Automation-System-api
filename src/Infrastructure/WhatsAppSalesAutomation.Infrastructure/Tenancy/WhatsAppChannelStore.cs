@@ -33,6 +33,9 @@ public class WhatsAppChannelStore : IWhatsAppChannelStore
         return row is null ? null : ToRecord(row);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListTenantIdsAsync(CancellationToken cancellationToken = default) =>
+        await _context.TenantWhatsAppChannels.IgnoreQueryFilters().AsNoTracking().Select(c => c.TenantId).ToListAsync(cancellationToken);
+
     public async Task<WhatsAppChannelRecord?> FindByWebhookAsync(string channelToken, string secret, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(channelToken) || string.IsNullOrWhiteSpace(secret))

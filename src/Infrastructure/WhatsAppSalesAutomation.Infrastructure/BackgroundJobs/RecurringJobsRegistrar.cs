@@ -34,6 +34,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<SubscriptionMaintenanceJob>(
             "subscription-maintenance", job => job.RunAsync(), "5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Every 5 minutes: re-reads each tenant's QR connection from the bridge itself, so a missed connection event (a webhook that never arrived) cannot leave a
+        // channel showing Connected - which would let sends go out - after the bridge has dropped it. Read-only on the bridge, idempotent, and a no-op when no tenant has a channel.
+        recurringJobs.AddOrUpdate<WhatsAppBridgeHealthJob>(
+            "whatsapp-bridge-health", job => job.RunAsync(), "*/5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 15 minutes: low-balance, used-up and credits-expiring alerts. Frequent so a tenant that has just
         // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
         recurringJobs.AddOrUpdate<QuotaAlertJob>(

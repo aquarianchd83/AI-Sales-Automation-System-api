@@ -436,6 +436,8 @@ public class WhatsAppChannelServiceTests
         public Task<WhatsAppChannelRecord?> GetAsync(Guid tenantId, CancellationToken ct = default) =>
             Task.FromResult(_rows.TryGetValue(tenantId, out var r) ? r : null);
 
+        public Task<IReadOnlyList<Guid>> ListTenantIdsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Guid>>(_rows.Keys.ToList());
+
         public Task<WhatsAppChannelRecord?> FindByWebhookAsync(string token, string secret, CancellationToken ct = default) => throw new NotImplementedException();
 
         public Task<WhatsAppChannelWebhookCredentials> UpsertAsync(Guid tenantId, string name, string instanceToken, string status, CancellationToken ct = default)
@@ -730,6 +732,7 @@ public sealed class WhatsAppServiceFactoryBridgeTests : IDisposable
     {
         public WhatsAppChannelRecord? Record { get; set; }
         public Task<WhatsAppChannelRecord?> GetAsync(Guid tenantId, CancellationToken ct = default) => Task.FromResult(Record);
+        public Task<IReadOnlyList<Guid>> ListTenantIdsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<WhatsAppChannelRecord?> FindByWebhookAsync(string t, string s, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<WhatsAppChannelWebhookCredentials> UpsertAsync(Guid t, string n, string i, string s, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateStatusAsync(Guid t, string s, string? p, string? e, CancellationToken ct = default) => throw new NotImplementedException();
