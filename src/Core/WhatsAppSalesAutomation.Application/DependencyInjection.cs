@@ -211,6 +211,8 @@ public static class DependencyInjection
         services.AddScoped<IPlatformAiProvidersService, PlatformAiProvidersService>();
         services.AddScoped<IPlatformWhatsAppSettingsService, PlatformWhatsAppSettingsService>();
         services.AddScoped<IWhatsAppProviderSettingsService, WhatsAppProviderSettingsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppBridgeSettingsService, WhatsAppSalesAutomation.Application.WhatsAppBridge.WhatsAppBridgeSettingsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppChannelService, WhatsAppSalesAutomation.Application.WhatsAppBridge.WhatsAppChannelService>();
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();
         services.AddScoped<IPlatformMediaService, PlatformMediaService>();

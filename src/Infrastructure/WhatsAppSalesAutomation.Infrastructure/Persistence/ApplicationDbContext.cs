@@ -266,6 +266,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // other tenant-owned entity despite not appearing on the interface.
     public DbSet<TenantWhatsAppConfig> TenantWhatsAppConfigs => Set<TenantWhatsAppConfig>();
 
+    // Deliberately not on IApplicationDbContext - reached only through IWhatsAppChannelStore; ITenantOwned, so the reflective filter pass covers it.
+    public DbSet<TenantWhatsAppChannel> TenantWhatsAppChannels => Set<TenantWhatsAppChannel>();
+
     // Deliberately not on IApplicationDbContext - reached only through ITenantConfigOverrideProvider,
     // same reasoning as TenantWhatsAppConfigs above.
     public DbSet<TenantAppSettingOverride> TenantAppSettingOverrides => Set<TenantAppSettingOverride>();

@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+
 namespace WhatsAppSalesAutomation.Application.Common.Interfaces;
 
 /// <summary>
@@ -60,7 +62,9 @@ public interface IWhatsAppService
     Task<WhatsAppTemplateSubmitResult> UpdateMessageTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default);
 }
 
-public record WhatsAppSendResult(bool Success, string? WhatsAppMessageId, string? ErrorMessage)
+/// <param name="Provider">Which integration accepted the send (see <c>WhatsAppProviders</c>); callers copy it onto the stored message, because
+/// <paramref name="WhatsAppMessageId"/> is only unique within one provider.</param>
+public record WhatsAppSendResult(bool Success, string? WhatsAppMessageId, string? ErrorMessage, string Provider = WhatsAppProviders.Meta)
 {
     public static WhatsAppSendResult Succeeded(string whatsAppMessageId) => new(true, whatsAppMessageId, null);
 

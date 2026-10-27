@@ -645,6 +645,7 @@ public class CampaignSendService : ICampaignSendService
         {
             message.Status = MessageStatus.Sent;
             message.WhatsAppMessageId = result.WhatsAppMessageId;
+            message.Provider = result.Provider;
             message.SentAt = now;
             message.FailureReason = null;
             message.NextAttemptAt = null;

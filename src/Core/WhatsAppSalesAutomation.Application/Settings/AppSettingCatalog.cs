@@ -42,7 +42,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "Razorpay", "MetaAds", "ContentStudio"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -238,6 +238,11 @@ public static class AppSettingCatalog
         // IOptionsSnapshot. Separate from the WhatsApp:* block above, which is the shared Meta app (webhooks), not a number to send from.
         // Which messaging integration the platform offers tenants. Managed on the Platform Admin Console's WhatsApp provider card
         // (WhatsAppProviderSettingsService); only "Meta" can be activated until the QR bridge adapter ships.
+        // The self-hosted QR bridge (Evolution API). Managed on the Platform Admin Console; the key is encrypted at rest. All live (IOptionsSnapshot).
+        new("WhatsAppBridge:BaseUrl", "WhatsAppBridge", IsSecret: false, Description: "Address of the self-hosted bridge, e.g. https://bridge.example.com."),
+        new("WhatsAppBridge:ApiKey", "WhatsAppBridge", IsSecret: true, Description: "The bridge's global API key."),
+        new("WhatsAppBridge:WebhookBaseUrl", "WhatsAppBridge", IsSecret: false, Description: "Public address of THIS API that the bridge calls back on."),
+        new("WhatsAppBridge:PilotTenantIds", "WhatsAppBridge", IsSecret: false, IsList: true, Description: "While set, only these tenants use the bridge when it is the active provider; others stay on Meta. Empty: every tenant."),
         new("WhatsAppProvider:Active", "WhatsAppProvider", IsSecret: false, DefaultValue: "Meta", Description: "The active WhatsApp provider: \"Meta\" (Cloud API) or \"QrBridge\".", Options: new[] { "Meta", "QrBridge" }),
         new("PlatformWhatsApp:Enabled", "PlatformWhatsApp", IsSecret: false, Description: "Whether the platform sends tenant notices on WhatsApp. Absent means on."),
         new("PlatformWhatsApp:PhoneNumberId", "PlatformWhatsApp", IsSecret: false, Description: "Meta's id of the platform's WhatsApp number."),

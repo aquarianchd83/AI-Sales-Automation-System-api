@@ -299,6 +299,7 @@ public class ConversationService : IConversationService
         {
             message.Status = MessageStatus.Sent;
             message.WhatsAppMessageId = result.WhatsAppMessageId;
+            message.Provider = result.Provider;
             message.SentAt = _dateTime.UtcNow;
         }
         else

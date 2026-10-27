@@ -102,13 +102,13 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
 
             foreach (var status in parsed.Statuses)
             {
-                var outcome = await ApplyStatusUpdateAsync(status, cancellationToken);
+                var outcome = await ApplyStatusUpdateAsync(status, parsed.Provider, cancellationToken);
                 processedAnything |= outcome == StatusApplyOutcome.Applied;
                 anyMessageNotFound |= outcome == StatusApplyOutcome.MessageNotFound;
             }
 
             foreach (var message in parsed.Messages)
-                processedAnything |= await ProcessInboundMessageAsync(tenantId, message, cancellationToken);
+                processedAnything |= await ProcessInboundMessageAsync(tenantId, message, parsed.Provider, cancellationToken);
 
             webhookEvent.WhatsAppMessageId ??= parsed.Messages.FirstOrDefault()?.WhatsAppMessageId
                 ?? parsed.Statuses.FirstOrDefault()?.WhatsAppMessageId;
@@ -160,9 +160,10 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
     /// backwards (see CanAdvanceTo) - neither is worth retrying.</summary>
     private enum StatusApplyOutcome { Applied, NoChange, MessageNotFound }
 
-    private async Task<StatusApplyOutcome> ApplyStatusUpdateAsync(WhatsAppStatusUpdate status, CancellationToken cancellationToken)
+    private async Task<StatusApplyOutcome> ApplyStatusUpdateAsync(WhatsAppStatusUpdate status, string provider, CancellationToken cancellationToken)
     {
-        var message = await _context.Messages.FirstOrDefaultAsync(m => m.WhatsAppMessageId == status.WhatsAppMessageId, cancellationToken);
+        // Provider ids are only unique within their provider, so the lookup is scoped by it.
+        var message = await _context.Messages.FirstOrDefaultAsync(m => m.Provider == provider && m.WhatsAppMessageId == status.WhatsAppMessageId, cancellationToken);
         if (message is null)
             return StatusApplyOutcome.MessageNotFound;
 
@@ -214,12 +215,12 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
         };
     }
 
-    private async Task<bool> ProcessInboundMessageAsync(Guid tenantId, InboundWhatsAppMessage inbound, CancellationToken cancellationToken)
+    private async Task<bool> ProcessInboundMessageAsync(Guid tenantId, InboundWhatsAppMessage inbound, string provider, CancellationToken cancellationToken)
     {
-        // Not tenant-scoped: WhatsAppMessageId is Meta's own id for the message, globally unique
-        // regardless of which tenant's WABA received it, so a plain (filtered-to-this-tenant-anyway)
-        // lookup is already correct dedup - no IgnoreQueryFilters needed here.
-        var alreadyRecorded = await _context.Messages.AnyAsync(m => m.WhatsAppMessageId == inbound.WhatsAppMessageId, cancellationToken);
+        // Not tenant-scoped: WhatsAppMessageId is the provider's own id for the message, unique within
+        // that provider regardless of which tenant's number received it, so a plain (filtered-to-this-tenant-anyway)
+        // lookup scoped by provider is already correct dedup - no IgnoreQueryFilters needed here.
+        var alreadyRecorded = await _context.Messages.AnyAsync(m => m.Provider == provider && m.WhatsAppMessageId == inbound.WhatsAppMessageId, cancellationToken);
         if (alreadyRecorded)
             return false;
 
@@ -297,9 +298,11 @@ public class InboundWebhookProcessor : IInboundWebhookProcessor
                 : MessageType.Interactive,
             Text = inbound.TextBody,
             WhatsAppMessageId = inbound.WhatsAppMessageId,
+            Provider = provider,
             // Kept populated for every Message row regardless of direction (see Message.IdempotencyKey),
             // even though WhatsAppMessageId's own unique index already guards inbound dedup on its own.
-            IdempotencyKey = $"inbound:{inbound.WhatsAppMessageId}",
+            // Meta keeps its original key; another provider's is prefixed so two providers' ids can never collide on this globally unique column.
+            IdempotencyKey = provider == WhatsAppProviders.Meta ? $"inbound:{inbound.WhatsAppMessageId}" : $"inbound:{provider}:{inbound.WhatsAppMessageId}",
             // MessageStatus was designed for the outbound send lifecycle (Queued -> ... -> Read) and
             // has no dedicated "received" value for inbound - Delivered is the closest honest fit
             // ("this reached its destination", which for inbound is us), not Read, which for outbound

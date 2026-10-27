@@ -1,14 +1,16 @@
 using FluentValidation;
+using FluentValidation.Results;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.WhatsAppBridge;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
 
-/// <summary>One selectable provider. <paramref name="Available"/> is false while its adapter does not exist yet - it is listed so the
-/// console can show what is coming, but cannot be activated.</summary>
+/// <summary>One selectable provider. <paramref name="Available"/> is false while it cannot be activated (the bridge is not configured yet) -
+/// it is listed so the console can show what is missing, but cannot be chosen.</summary>
 public record WhatsAppProviderOptionDto(string Id, string Name, bool Available, string? UnavailableReason);
 
-/// <param name="Active">The provider every tenant send/receive goes through.</param>
+/// <param name="Active">The provider every tenant's send/receive goes through.</param>
 public record WhatsAppProviderSettingsDto(string Active, IReadOnlyList<WhatsAppProviderOptionDto> Providers);
 
 public record UpdateWhatsAppProviderRequest(string Provider);
@@ -28,26 +30,33 @@ public interface IWhatsAppProviderSettingsService
 public record WhatsAppProviderChange(string Previous, WhatsAppProviderSettingsDto Settings);
 
 /// <summary>
-/// Platform-wide choice of WhatsApp provider, stored in the AppSettings table. This only records the choice - nothing reads it on the send
-/// path yet, so changing it is a no-op until the bridge adapter is wired to <c>WhatsAppServiceFactory</c>.
+/// Platform-wide choice of WhatsApp provider, stored in the AppSettings table. Activating the QR bridge requires its settings to be saved and
+/// the bridge to answer with the saved key: an unreachable or unconfigured bridge can never become the active provider, so the choice
+/// cannot silently leave every send with nothing to deliver it.
 /// </summary>
 public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
 {
     public const string ActiveKey = "WhatsAppProvider:Active";
 
-    private const string BridgeNotReady = "The QR bridge adapter has not been built yet.";
+    private const string BridgeNotConfigured = "Save the bridge address and API key in the bridge settings first.";
 
     private readonly IAppSettingsStore _store;
     private readonly IValidator<UpdateWhatsAppProviderRequest> _validator;
+    private readonly IWhatsAppBridgeSettingsService _bridgeSettings;
+    private readonly IWhatsAppBridgeClient _bridgeClient;
 
-    public WhatsAppProviderSettingsService(IAppSettingsStore store, IValidator<UpdateWhatsAppProviderRequest> validator)
+    public WhatsAppProviderSettingsService(
+        IAppSettingsStore store, IValidator<UpdateWhatsAppProviderRequest> validator,
+        IWhatsAppBridgeSettingsService bridgeSettings, IWhatsAppBridgeClient bridgeClient)
     {
         _store = store;
         _validator = validator;
+        _bridgeSettings = bridgeSettings;
+        _bridgeClient = bridgeClient;
     }
 
     public async Task<WhatsAppProviderSettingsDto> GetAsync(CancellationToken cancellationToken = default) =>
-        ToDto(await GetActiveAsync(cancellationToken));
+        ToDto(await GetActiveAsync(cancellationToken), bridgeConfigured: await _bridgeSettings.GetEndpointAsync(cancellationToken) is not null);
 
     public async Task<string> GetActiveAsync(CancellationToken cancellationToken = default)
     {
@@ -61,25 +70,41 @@ public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
 
         var previous = await GetActiveAsync(cancellationToken);
         var next = Normalize(request.Provider);
+        var endpoint = await _bridgeSettings.GetEndpointAsync(cancellationToken);
+
+        if (next == WhatsAppProviders.QrBridge)
+        {
+            if (endpoint is null)
+                throw Fail(BridgeNotConfigured);
+
+            try
+            {
+                await _bridgeClient.PingAsync(endpoint, cancellationToken);
+            }
+            catch (WhatsAppBridgeException ex)
+            {
+                throw Fail($"The bridge is not reachable with the saved settings: {ex.Message}");
+            }
+        }
 
         if (next != previous)
             await _store.UpsertAsync(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [ActiveKey] = next }, updatedByUserId, cancellationToken);
 
-        return new WhatsAppProviderChange(previous, ToDto(next));
+        return new WhatsAppProviderChange(previous, ToDto(next, endpoint is not null));
     }
 
     /// <summary>Anything unknown or empty means Meta - the only provider that existed before this setting.</summary>
     private static string Normalize(string? value) =>
         string.Equals(value?.Trim(), WhatsAppProviders.QrBridge, StringComparison.OrdinalIgnoreCase) ? WhatsAppProviders.QrBridge : WhatsAppProviders.Meta;
 
-    private static WhatsAppProviderSettingsDto ToDto(string active) => new(active, new[]
+    private static ValidationException Fail(string message) =>
+        new(new[] { new ValidationFailure(nameof(UpdateWhatsAppProviderRequest.Provider), message) });
+
+    private static WhatsAppProviderSettingsDto ToDto(string active, bool bridgeConfigured) => new(active, new[]
     {
         new WhatsAppProviderOptionDto(WhatsAppProviders.Meta, "Meta WhatsApp Cloud API", true, null),
-        new WhatsAppProviderOptionDto(WhatsAppProviders.QrBridge, "QR-Code WhatsApp Bridge", false, BridgeNotReady),
+        new WhatsAppProviderOptionDto(WhatsAppProviders.QrBridge, "QR-Code WhatsApp Bridge", bridgeConfigured, bridgeConfigured ? null : BridgeNotConfigured),
     });
-
-    /// <summary>Whether <paramref name="provider"/> can be switched to today.</summary>
-    internal static bool IsAvailable(string provider) => provider == WhatsAppProviders.Meta;
 }
 
 public class UpdateWhatsAppProviderRequestValidator : AbstractValidator<UpdateWhatsAppProviderRequest>
@@ -89,9 +114,6 @@ public class UpdateWhatsAppProviderRequestValidator : AbstractValidator<UpdateWh
         RuleFor(x => x.Provider)
             .NotEmpty()
             .Must(p => p is WhatsAppProviders.Meta or WhatsAppProviders.QrBridge)
-            .WithMessage("Choose \"Meta\" or \"QrBridge\".")
-            // Reject, never half-activate: a provider with no adapter would leave every send with nothing to deliver it.
-            .Must(p => p != WhatsAppProviders.QrBridge || WhatsAppProviderSettingsService.IsAvailable(p))
-            .WithMessage("The QR-Code WhatsApp Bridge is not available yet.");
+            .WithMessage("Choose \"Meta\" or \"QrBridge\".");
     }
 }
