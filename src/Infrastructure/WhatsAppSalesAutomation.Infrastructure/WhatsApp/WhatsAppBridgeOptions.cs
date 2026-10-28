@@ -6,6 +6,9 @@ public class WhatsAppProviderOptions
 {
     /// <summary>"Meta" (default) or "QrBridge".</summary>
     public string Active { get; set; } = "Meta";
+
+    /// <summary>Per-tenant choices as "tenantId=Provider"; a tenant listed here ignores <see cref="Active"/>.</summary>
+    public List<string> TenantOverrides { get; set; } = new();
 }
 
 /// <summary>Bound from the "WhatsAppBridge" config section (see <c>WhatsAppBridgeSettingsService</c>).</summary>

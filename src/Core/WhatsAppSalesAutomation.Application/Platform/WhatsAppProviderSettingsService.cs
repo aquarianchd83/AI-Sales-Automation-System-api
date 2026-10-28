@@ -25,9 +25,22 @@ public interface IWhatsAppProviderSettingsService
     /// <summary>Validates, then stores the new active provider. A failure leaves the previous one in force. <see cref="WhatsAppProviderChange.Previous"/>
     /// is what the audit log records alongside the new value.</summary>
     Task<WhatsAppProviderChange> UpdateAsync(UpdateWhatsAppProviderRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
+
+    Task<TenantWhatsAppProviderDto> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Sets (or clears, with a null provider) one tenant's own choice. QR needs a configured, reachable bridge, like the global switch.</summary>
+    Task<TenantWhatsAppProviderDto> SetForTenantAsync(Guid tenantId, UpdateTenantWhatsAppProviderRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default);
 }
 
 public record WhatsAppProviderChange(string Previous, WhatsAppProviderSettingsDto Settings);
+
+/// <param name="Override">The tenant's own choice, or null when it follows the platform default.</param>
+/// <param name="Effective">What the tenant really goes through right now.</param>
+/// <param name="PlatformDefault">The platform-wide active provider.</param>
+public record TenantWhatsAppProviderDto(string? Override, string Effective, string PlatformDefault);
+
+/// <param name="Provider">"Meta", "QrBridge", or null to follow the platform default.</param>
+public record UpdateTenantWhatsAppProviderRequest(string? Provider);
 
 /// <summary>
 /// Platform-wide choice of WhatsApp provider, stored in the AppSettings table. Activating the QR bridge requires its settings to be saved and
@@ -37,6 +50,7 @@ public record WhatsAppProviderChange(string Previous, WhatsAppProviderSettingsDt
 public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
 {
     public const string ActiveKey = "WhatsAppProvider:Active";
+    public const string TenantOverridesKey = "WhatsAppProvider:TenantOverrides";
 
     private const string BridgeNotConfigured = "Save the bridge address and API key in the bridge settings first.";
 
@@ -100,6 +114,63 @@ public class WhatsAppProviderSettingsService : IWhatsAppProviderSettingsService
         }
 
         return new WhatsAppProviderChange(previous, ToDto(next, endpoint is not null));
+    }
+
+    public async Task<TenantWhatsAppProviderDto> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var stored = await _store.GetAllAsync(cancellationToken);
+        return ToTenantDto(stored, tenantId);
+    }
+
+    public async Task<TenantWhatsAppProviderDto> SetForTenantAsync(
+        Guid tenantId, UpdateTenantWhatsAppProviderRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        if (request.Provider is not null && request.Provider.Trim() is not (WhatsAppProviders.Meta or WhatsAppProviders.QrBridge))
+            throw Fail("Choose \"Meta\", \"QrBridge\", or leave it empty to follow the platform default.");
+
+        var stored = await _store.GetAllAsync(cancellationToken);
+        var current = ToTenantDto(stored, tenantId);
+        var wanted = request.Provider is null ? null : Normalize(request.Provider);
+
+        if (wanted == WhatsAppProviders.QrBridge)
+        {
+            var endpoint = await _bridgeSettings.GetEndpointAsync(cancellationToken) ?? throw Fail(BridgeNotConfigured);
+            try
+            {
+                await _bridgeClient.PingAsync(endpoint, cancellationToken);
+            }
+            catch (WhatsAppBridgeException ex)
+            {
+                throw Fail($"The bridge is not reachable with the saved settings: {ex.Message}");
+            }
+        }
+
+        var effectiveAfter = wanted ?? current.PlatformDefault;
+        if (wanted != current.Override && effectiveAfter != current.Effective)
+        {
+            var inFlight = await _inFlight.CountAsync(cancellationToken);
+            if (inFlight > 0)
+                throw Fail($"{inFlight} message(s) are being sent right now or their outcome is not known yet. Wait for them to finish (a few minutes), then switch.");
+        }
+
+        var overrides = WhatsAppProviderRouting.With(ReadOverrides(stored), tenantId, wanted);
+        await _store.UpsertAsync(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [TenantOverridesKey] = string.Join(",", overrides) }, updatedByUserId, cancellationToken);
+        return ToTenantDto(new Dictionary<string, string?>(stored, StringComparer.OrdinalIgnoreCase) { [TenantOverridesKey] = string.Join(",", overrides) }, tenantId);
+    }
+
+    private static IEnumerable<string> ReadOverrides(IReadOnlyDictionary<string, string?> stored) =>
+        (stored.TryGetValue(TenantOverridesKey, out var raw) ? raw ?? string.Empty : string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static TenantWhatsAppProviderDto ToTenantDto(IReadOnlyDictionary<string, string?> stored, Guid tenantId)
+    {
+        var platformDefault = Normalize(stored.TryGetValue(ActiveKey, out var active) ? active : null);
+        var overrides = ReadOverrides(stored).ToList();
+        var own = WhatsAppProviderRouting.OverrideFor(overrides, tenantId);
+        var pilots = (stored.TryGetValue(WhatsAppBridgeSettingsService.PilotTenantIdsKey, out var raw) ? raw ?? string.Empty : string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(v => Guid.TryParse(v, out var id) ? id : (Guid?)null).Where(id => id.HasValue).Select(id => id!.Value).ToList();
+        return new TenantWhatsAppProviderDto(own, WhatsAppProviderRouting.Resolve(platformDefault, overrides, pilots, tenantId), platformDefault);
     }
 
     /// <summary>Anything unknown or empty means Meta - the only provider that existed before this setting.</summary>

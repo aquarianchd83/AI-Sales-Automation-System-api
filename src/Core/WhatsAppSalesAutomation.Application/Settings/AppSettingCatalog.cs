@@ -244,6 +244,7 @@ public static class AppSettingCatalog
         new("WhatsAppBridge:WebhookBaseUrl", "WhatsAppBridge", IsSecret: false, Description: "Public address of THIS API that the bridge calls back on."),
         new("WhatsAppBridge:PilotTenantIds", "WhatsAppBridge", IsSecret: false, IsList: true, Description: "While set, only these tenants use the bridge when it is the active provider; others stay on Meta. Empty: every tenant."),
         new("WhatsAppProvider:Active", "WhatsAppProvider", IsSecret: false, DefaultValue: "Meta", Description: "The active WhatsApp provider: \"Meta\" (Cloud API) or \"QrBridge\".", Options: new[] { "Meta", "QrBridge" }),
+        new("WhatsAppProvider:TenantOverrides", "WhatsAppProvider", IsSecret: false, IsList: true, Description: "Per-tenant provider choices as tenantId=Provider (Meta or QrBridge). A tenant listed here ignores the active provider."),
         new("PlatformWhatsApp:Enabled", "PlatformWhatsApp", IsSecret: false, Description: "Whether the platform sends tenant notices on WhatsApp. Absent means on."),
         new("PlatformWhatsApp:PhoneNumberId", "PlatformWhatsApp", IsSecret: false, Description: "Meta's id of the platform's WhatsApp number."),
         new("PlatformWhatsApp:WhatsAppBusinessAccountId", "PlatformWhatsApp", IsSecret: false, Description: "The platform's WhatsApp Business Account id (where its templates live)."),
