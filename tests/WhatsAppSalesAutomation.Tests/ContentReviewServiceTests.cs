@@ -362,6 +362,42 @@ public sealed class ContentReviewServiceTests : IDisposable
         Assert.Equal(64, baseline.Length);
     }
 
+    [Fact]
+    public void The_fingerprint_also_covers_the_camera_the_mood_and_the_transition()
+    {
+        var asset = new StudioAsset { Checksum = "aaa" };
+        var assets = new Dictionary<Guid, StudioAsset> { [asset.Id] = asset };
+        ContentScene Scene(string camera, string mood, string transition) => new() { Order = 1, Narration = "One.", OnScreenText = "t", DurationSeconds = 8, ChosenAssetId = asset.Id, CameraMove = camera, Mood = mood, Transition = transition };
+
+        var baseline = ContentSnapshot.Compute(new[] { Scene("ZoomIn", "Natural", "None") }, assets);
+
+        Assert.NotEqual(baseline, ContentSnapshot.Compute(new[] { Scene("Still", "Natural", "None") }, assets));
+        Assert.NotEqual(baseline, ContentSnapshot.Compute(new[] { Scene("ZoomIn", "Warm", "None") }, assets));
+        Assert.NotEqual(baseline, ContentSnapshot.Compute(new[] { Scene("ZoomIn", "Natural", "Fade") }, assets));
+        Assert.Equal(baseline, ContentSnapshot.Compute(new[] { Scene("ZoomIn", "Natural", "None") }, assets));
+    }
+
+    [Fact]
+    public async Task A_revision_keeps_the_style_and_every_scenes_shot_camera_mood_and_transition()
+    {
+        var version = await Draft();
+        (await _db.ContentVersions.SingleAsync()).Style = "Cinematic";
+        var scene = await _db.ContentScenes.OrderBy(s => s.Order).FirstAsync();
+        scene.ShotType = "Close-up";
+        scene.CameraMove = "PanLeft";
+        scene.Mood = "Dramatic";
+        scene.Transition = "Wipe";
+        await _db.SaveChangesAsync();
+        await Service().SubmitAsync(_a, version.Id, new ReviewActionRequest(null));
+        await Service().RejectAsync(_a, version.Id, new RejectRequest("Again."));
+
+        var newId = await Service().ReviseAsync(_a, version.Id);
+
+        Assert.Equal("Cinematic", Fresh(newId).Style);
+        var copy = await _db.ContentScenes.AsNoTracking().Where(s => s.VersionId == newId).OrderBy(s => s.Order).FirstAsync();
+        Assert.Equal(("Close-up", "PanLeft", "Dramatic", "Wipe"), (copy.ShotType, copy.CameraMove, copy.Mood, copy.Transition));
+    }
+
     // ----- revising --------------------------------------------------------------------------------------------------------------
 
     [Fact]

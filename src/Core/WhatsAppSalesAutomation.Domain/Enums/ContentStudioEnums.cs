@@ -282,3 +282,10 @@ public enum PublicationStatus
 
     Cancelled = 4
 }
+
+public enum RenderClipStatus
+{
+    Rendering = 0,
+    Done = 1,
+    Failed = 2
+}

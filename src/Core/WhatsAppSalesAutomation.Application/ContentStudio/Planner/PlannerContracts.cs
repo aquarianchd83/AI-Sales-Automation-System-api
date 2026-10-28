@@ -12,9 +12,13 @@ public record GenerateTopicsRequest(int? Count);
 public record UpdateTopicRequest(string? Title, string? Status);
 
 /// <param name="TopicId">The topic to write about; the chosen one when null.</param>
-public record GenerateScriptRequest(Guid? TopicId, int? TargetSeconds, string? Notes);
+/// <param name="Style">"Standard" or "Cinematic".</param>
+/// <param name="SceneCount">Exactly this many scenes (1-10), each about TargetSeconds / SceneCount long; null lets the writer decide.</param>
+public record GenerateScriptRequest(Guid? TopicId, int? TargetSeconds, string? Notes, string? Style = null, int? SceneCount = null);
 
-public record UpdateSceneRequest(string Narration, string? OnScreenText, int DurationSeconds, string? VisualHint);
+/// <param name="ShotType">Null leaves it as it is.</param>
+/// <param name="CameraMove">Null leaves it as it is; otherwise ZoomIn, ZoomOut, PanLeft, PanRight or Still.</param>
+public record UpdateSceneRequest(string Narration, string? OnScreenText, int DurationSeconds, string? VisualHint, string? ShotType = null, string? CameraMove = null, string? Mood = null, string? Transition = null);
 
 public record ProjectSummaryDto(Guid Id, string Title, string Goal, string Language, string Status, int TopicCount, int VersionCount, string? ChosenTopic, DateTime CreatedAt, DateTime? UpdatedAt);
 
@@ -25,7 +29,8 @@ public record CitedFactDto(Guid Id, string Category, string Statement);
 
 public record SceneDto(
     Guid Id, int Order, string Narration, string? OnScreenText, int DurationSeconds, string? VisualHint,
-    string ClaimStatus, string? ClaimNote, bool EditedByTenant, IReadOnlyList<CitedFactDto> Facts, AssetSummaryDto? Asset);
+    string ClaimStatus, string? ClaimNote, bool EditedByTenant, IReadOnlyList<CitedFactDto> Facts, AssetSummaryDto? Asset,
+    string? ShotType, string CameraMove, string Mood, string Transition);
 
 public record ScriptVersionSummaryDto(Guid Id, int Number, string? TopicTitle, string Status, bool IsSimulated, int SceneCount, int TotalSeconds, DateTime CreatedAt);
 
@@ -35,7 +40,7 @@ public record ScriptVersionSummaryDto(Guid Id, int Number, string? TopicTitle, s
 public record ScriptVersionDto(
     Guid Id, Guid ProjectId, int Number, Guid? TopicId, string? TopicTitle, string Status, int TargetSeconds, int TotalSeconds, string? Notes,
     string Provider, string? Model, string PromptVersion, bool IsSimulated, Guid? ActivityId, DateTime CreatedAt,
-    int Supported, int Flagged, int ScenesWithoutPicture, IReadOnlyList<SceneDto> Scenes);
+    int Supported, int Flagged, int ScenesWithoutPicture, IReadOnlyList<SceneDto> Scenes, string Style = "Standard");
 
 /// <param name="UsableFacts">How many verified, current facts the writer has to work from. Nothing can be written without any.</param>
 public record ProjectDetailDto(

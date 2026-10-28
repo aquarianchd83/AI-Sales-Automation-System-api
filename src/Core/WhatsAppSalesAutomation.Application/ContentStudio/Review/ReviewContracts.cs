@@ -17,7 +17,8 @@ public static class ContentSnapshot
         foreach (var scene in scenes.OrderBy(s => s.Order))
         {
             var checksum = scene.ChosenAssetId is { } id && assets.TryGetValue(id, out var asset) ? asset.Checksum : "none";
-            text.Append(scene.Order).Append('\u001f').Append(scene.Narration).Append('\u001f').Append(scene.OnScreenText).Append('\u001f').Append(scene.DurationSeconds).Append('\u001f').Append(checksum).Append('\n');
+            text.Append(scene.Order).Append('\u001f').Append(scene.Narration).Append('\u001f').Append(scene.OnScreenText).Append('\u001f').Append(scene.DurationSeconds).Append('\u001f').Append(checksum)
+                .Append('\u001f').Append(scene.CameraMove).Append('\u001f').Append(scene.Mood).Append('\u001f').Append(scene.Transition).Append('\n');
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();

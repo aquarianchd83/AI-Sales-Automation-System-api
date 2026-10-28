@@ -91,6 +91,12 @@ public sealed class StudioMaintenanceService : IStudioMaintenanceService
             foreach (var key in ReadKeys(job.AudioKeysJson))
                 await DeleteQuietlyAsync(key);
             job.AudioKeysJson = "[]";
+            foreach (var clip in await _db.RenderClips.Where(c => c.JobId == job.Id && c.OutputStorageKey != null).ToListAsync(ct))
+            {
+                await DeleteQuietlyAsync(clip.OutputStorageKey!);
+                clip.OutputStorageKey = null;
+            }
+
             job.Status = RenderJobStatus.Failed;
             job.Stage = "Stopped: it took far too long";
             job.Error = "The video stopped making progress and was ended. Nothing was charged - try again.";

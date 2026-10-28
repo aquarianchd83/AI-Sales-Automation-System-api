@@ -24,6 +24,12 @@ public class RenderJob : BaseEntity, ITenantOwned
     /// <summary>A short sentence about what is happening now, for the tenant.</summary>
     public string? Stage { get; set; }
 
+    /// <summary>"Single" (one render of the whole script) or "Clips" (each scene is rendered as its own clip, then the clips are joined).</summary>
+    public string Mode { get; set; } = "Single";
+
+    /// <summary>How many clips a "Clips" render makes (one per scene); 0 for "Single".</summary>
+    public int ClipCount { get; set; }
+
     /// <summary>"16:9", "9:16" or "1:1".</summary>
     public string AspectRatio { get; set; } = "16:9";
 
@@ -77,4 +83,28 @@ public class RenderJob : BaseEntity, ITenantOwned
     public DateTime? FinishedAt { get; set; }
 
     public Guid? CreatedBy { get; set; }
+}
+
+/// <summary>One scene of a "Clips" render, made as a separate short video before the clips are joined. The clip files are intermediate: they are deleted when the render ends, however it ends.</summary>
+public class RenderClip : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid JobId { get; set; }
+
+    public Guid SceneId { get; set; }
+
+    public int Order { get; set; }
+
+    public RenderClipStatus Status { get; set; } = RenderClipStatus.Rendering;
+
+    public string? ExternalRenderId { get; set; }
+
+    /// <summary>The finished clip in the tenant's private folder, until the clips are joined.</summary>
+    public string? OutputStorageKey { get; set; }
+
+    /// <summary>How long the clip runs (the scene's planned length or the voice, whichever is longer).</summary>
+    public double Seconds { get; set; }
+
+    public string? Error { get; set; }
 }

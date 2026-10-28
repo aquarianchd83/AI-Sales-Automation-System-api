@@ -126,6 +126,11 @@ public sealed class VideoRenderTests : IDisposable
         public string Name => "Shotstack";
         public bool IsConfigured => true;
         public RenderPlan? Submitted { get; private set; }
+        public List<RenderPlan> Plans { get; } = new();
+        public List<MergePlan> Merges { get; } = new();
+        public Func<string, object>? StatusFor { get; set; }
+        public Exception? FailMerge { get; set; }
+        private int _renders;
         public Queue<object> Statuses { get; } = new();
         public Exception? FailSubmit { get; set; }
         public Exception? FailDownload { get; set; }
@@ -136,12 +141,21 @@ public sealed class VideoRenderTests : IDisposable
             if (FailSubmit is not null)
                 throw FailSubmit;
             Submitted = plan;
-            return Task.FromResult("render-1");
+            Plans.Add(plan);
+            return Task.FromResult($"render-{++_renders}");
+        }
+
+        public Task<string> SubmitMergeAsync(MergePlan plan, CancellationToken cancellationToken = default)
+        {
+            if (FailMerge is not null)
+                throw FailMerge;
+            Merges.Add(plan);
+            return Task.FromResult($"merge-{++_renders}");
         }
 
         public Task<RenderStatus> GetStatusAsync(string externalId, CancellationToken cancellationToken = default)
         {
-            var next = Statuses.Count > 1 ? Statuses.Dequeue() : Statuses.Peek();
+            var next = StatusFor is not null ? StatusFor(externalId) : Statuses.Count > 1 ? Statuses.Dequeue() : Statuses.Peek();
             if (next is Exception ex)
                 throw ex;
             return Task.FromResult((RenderStatus)next);
@@ -591,6 +605,238 @@ public sealed class VideoRenderTests : IDisposable
         stored.ApprovedHash = new string('9', 64); // approved content differs from what the video was made of
         await _db.SaveChangesAsync();
         Assert.False((await Service().GetAsync(_a, id)).IsOfApprovedScript);
+    }
+
+    // ----- separate clips, then joined ---------------------------------------------------------------------------------------------
+
+    private async Task<Guid> StartedClips(ContentVersion version) =>
+        (await Service().StartAsync(_a, version.Id, new StartRenderRequest("16:9", null, "Clips"))).Id;
+
+    private static RenderStatus Done(string name) => new(RenderPhase.Done, 100, $"https://cdn.shotstack.io/{name}.mp4", null);
+
+    private string[] ClipFiles() => _store.Files.Keys.Where(k => k.Contains("/clip-")).ToArray();
+
+    [Fact]
+    public async Task Separate_clips_are_charged_one_render_unit_per_clip_and_the_join_is_part_of_the_price()
+    {
+        var version = await Script();
+
+        var job = await Service().StartAsync(_a, version.Id, new StartRenderRequest(null, null, "Clips"));
+
+        Assert.Equal(("Clips", 2), (job.Mode, _db.RenderJobs.AsNoTracking().Single().ClipCount));
+        var render = _metering.Charges.Single(c => c.Kind == StudioActivityKind.VideoRender);
+        Assert.Equal(2m, render.Units);
+        Assert.Contains("2 clips", render.Description);
+        Assert.Null(_metering.Charges.Single(c => c.Kind == StudioActivityKind.VoiceOver).Units); // one voice-over, whatever the mode
+        Assert.Empty(job.Clips ?? Array.Empty<RenderClipDto>()); // none are made yet
+    }
+
+    [Fact]
+    public async Task Separate_clips_need_between_two_and_ten_scenes_and_one_video_has_no_such_limit()
+    {
+        var version = await Script();
+        var scenes = await _db.ContentScenes.OrderBy(s => s.Order).ToListAsync();
+        _db.ContentScenes.Remove(scenes[1]);
+        await _db.SaveChangesAsync();
+        Assert.Contains("between 2 and 10 scenes", (await Assert.ThrowsAsync<ConflictException>(() => Service().StartAsync(_a, version.Id, new StartRenderRequest(null, null, "Clips")))).Message);
+        Assert.Empty(_metering.Charges);
+
+        var single = await Service().StartAsync(_a, version.Id, new StartRenderRequest(null, null, null)); // the same one-scene script as one video
+        Assert.Equal("Single", single.Mode);
+    }
+
+    [Fact]
+    public async Task The_first_step_of_a_clips_render_makes_one_render_per_scene_each_alone_with_the_transition_left_for_the_join()
+    {
+        var version = await Script();
+        var scenes = await _db.ContentScenes.OrderBy(s => s.Order).ToListAsync();
+        scenes[0].CameraMove = "PanLeft";
+        scenes[0].Mood = "Warm";
+        scenes[0].Transition = "Fade";
+        await _db.SaveChangesAsync();
+        _voice.Seconds = 7.3;
+        var id = await StartedClips(version);
+
+        await Processor().StartAsync(id);
+
+        Assert.Equal(2, _renderer.Plans.Count);
+        Assert.All(_renderer.Plans, p => Assert.Single(p.Scenes));
+        Assert.All(_renderer.Plans, p => Assert.Equal(0, p.Scenes[0].StartSeconds)); // each clip starts at its own zero
+        var first = _renderer.Plans[0].Scenes[0];
+        Assert.Equal(("PanLeft", "Warm", "None", 7.7), (first.CameraMove, first.Mood, first.Transition, first.LengthSeconds)); // camera and mood stay with the clip; the transition is the join's
+        var clips = await _db.RenderClips.AsNoTracking().OrderBy(c => c.Order).ToListAsync();
+        Assert.Equal(new[] { "render-1", "render-2" }, clips.Select(c => c.ExternalRenderId));
+        Assert.All(clips, c => Assert.Equal(RenderClipStatus.Rendering, c.Status));
+        var job = Job(id);
+        Assert.Equal((RenderJobStatus.Rendering, null, 45), (job.Status, job.ExternalRenderId, job.Progress)); // no join yet
+        Assert.Contains("Making 2 clips", job.Stage);
+        Assert.Single(_queue.Polls);
+    }
+
+    [Fact]
+    public async Task Clips_are_collected_as_they_finish_and_nothing_is_joined_until_all_are_ready()
+    {
+        var version = await Script();
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = rid => rid == "render-1" ? Done("clip1") : new RenderStatus(RenderPhase.Working, 40, null, null);
+
+        await Processor().PollAsync(id);
+
+        var job = Job(id);
+        Assert.Contains("1 of 2 ready", job.Stage);
+        Assert.InRange(job.Progress, 46, 79);
+        Assert.Empty(_renderer.Merges);
+        var clip = Assert.Single(ClipFiles());
+        Assert.Contains($"private/{_a:N}/product-knowledge/studio/renders/{id:N}/clip-1.mp4", clip);
+        Assert.Equal(new[] { RenderClipStatus.Done, RenderClipStatus.Rendering }, (await _db.RenderClips.AsNoTracking().OrderBy(c => c.Order).ToListAsync()).Select(c => c.Status));
+        Assert.Equal(2, _queue.Polls.Count);
+    }
+
+    [Fact]
+    public async Task When_every_clip_is_ready_they_are_joined_end_to_end_with_each_scenes_transition_and_short_lived_links()
+    {
+        var version = await Script();
+        var scenes = await _db.ContentScenes.OrderBy(s => s.Order).ToListAsync();
+        scenes[1].Transition = "Wipe";
+        await _db.SaveChangesAsync();
+        _voice.Seconds = 9.0;
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = rid => Done(rid);
+
+        await Processor().PollAsync(id);
+
+        var merge = Assert.Single(_renderer.Merges);
+        Assert.Equal(new[] { 0.0, 9.4 }, merge.Clips.Select(c => c.StartSeconds));
+        Assert.Equal(new[] { 9.4, 9.4 }, merge.Clips.Select(c => c.LengthSeconds));
+        Assert.Equal(new[] { "None", "Wipe" }, merge.Clips.Select(c => c.Transition));
+        Assert.All(merge.Clips, c => Assert.StartsWith("https://signed.example/", c.VideoUrl));
+        Assert.All(_links.Made.Where(k => k.Contains("/clip-")), k => Assert.Contains($"private/{_a:N}/", k));
+        var job = Job(id);
+        Assert.Equal((RenderJobStatus.Rendering, "merge-3", 18.8, 82), (job.Status, job.ExternalRenderId, job.OutputSeconds, job.Progress));
+        Assert.Equal("Joining the clips", job.Stage);
+    }
+
+    [Fact]
+    public async Task A_finished_join_becomes_the_video_the_clips_are_deleted_and_both_charges_are_completed()
+    {
+        var version = await Script();
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = rid => Done(rid);
+        await Processor().PollAsync(id); // clips ready, join submitted
+        Assert.Equal(2, ClipFiles().Length);
+
+        await Processor().PollAsync(id); // join done
+
+        var job = Job(id);
+        Assert.Equal((RenderJobStatus.Succeeded, 100, 5L), (job.Status, job.Progress, job.OutputBytes));
+        Assert.Contains($"studio/renders/{id:N}.mp4", job.OutputStorageKey);
+        Assert.Empty(ClipFiles()); // the intermediate clips are gone
+        Assert.DoesNotContain(_store.Files.Keys, k => k.Contains("/studio/audio/"));
+        Assert.Equal(2, _metering.Completed.Count);
+        Assert.Empty(_metering.Refunded);
+        var dto = await Service().GetAsync(_a, id);
+        Assert.Equal(("Clips", true), (dto.Mode, dto.HasVideo));
+        Assert.Equal(new[] { "Done", "Done" }, dto.Clips!.Select(c => c.Status));
+        Assert.Equal(new long[] { 5 }, new[] { (await Service().OpenVideoAsync(_a, id)).Length });
+    }
+
+    [Fact]
+    public async Task One_clip_failing_ends_the_job_with_the_reason_removes_the_other_clips_and_returns_the_charges_without_joining()
+    {
+        var version = await Script();
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = rid => rid == "render-1" ? Done("clip1") : new RenderStatus(RenderPhase.Failed, 0, null, "Invalid image");
+
+        await Processor().PollAsync(id);
+
+        var job = Job(id);
+        Assert.Equal(RenderJobStatus.Failed, job.Status);
+        Assert.Contains("Clip 2 of 2 could not be made", job.Error);
+        Assert.Contains("Invalid image", job.Error);
+        Assert.Contains("Nothing was charged", job.Error);
+        Assert.Empty(_renderer.Merges);
+        Assert.Empty(ClipFiles()); // the one that did finish is deleted too
+        Assert.Equal(2, _metering.Refunded.Count);
+        Assert.Equal(new[] { "Done", "Failed" }, (await Service().GetAsync(_a, id)).Clips!.Select(c => c.Status).OrderBy(x => x == "Done" ? 0 : 1));
+    }
+
+    [Fact]
+    public async Task A_join_that_fails_or_is_refused_ends_the_job_and_leaves_no_clip_files_behind()
+    {
+        var version = await Script();
+        var failed = await StartedClips(version);
+        await Processor().StartAsync(failed);
+        _renderer.StatusFor = rid => rid.StartsWith("merge") ? new RenderStatus(RenderPhase.Failed, 0, null, "Bad clip") : Done(rid);
+        await Processor().PollAsync(failed);
+        await Processor().PollAsync(failed);
+        Assert.Contains("joining them failed: Bad clip", Job(failed).Error);
+        Assert.Empty(ClipFiles());
+
+        var refused = await StartedClips(version);
+        await Processor().StartAsync(refused);
+        _renderer.StatusFor = rid => Done(rid);
+        _renderer.FailMerge = new VideoProviderException("The video service did not accept the clips to join.");
+        await Processor().PollAsync(refused); // collects the clips, then the join is refused: counted as a failed check, tried again
+        Assert.Equal(RenderJobStatus.Rendering, Job(refused).Status);
+        _renderer.FailMerge = null;
+        await Processor().PollAsync(refused);
+        Assert.Equal("Joining the clips", Job(refused).Stage);
+    }
+
+    [Fact]
+    public async Task A_clips_render_cancelled_in_the_middle_is_stopped_at_the_next_check_with_charges_returned_and_clips_removed()
+    {
+        var version = await Script();
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = rid => rid == "render-1" ? Done("clip1") : new RenderStatus(RenderPhase.Working, 10, null, null);
+        await Processor().PollAsync(id); // clip 1 is ready and stored
+
+        await Service().CancelAsync(_a, id);
+        await Processor().PollAsync(id);
+
+        Assert.Equal(RenderJobStatus.Cancelled, Job(id).Status);
+        Assert.Empty(ClipFiles());
+        Assert.Equal(2, _metering.Refunded.Count);
+        Assert.Empty(_renderer.Merges);
+    }
+
+    [Fact]
+    public async Task A_clips_render_whose_renderer_stops_answering_fails_after_a_few_tries()
+    {
+        var version = await Script();
+        var id = await StartedClips(version);
+        await Processor().StartAsync(id);
+        _renderer.StatusFor = _ => new HttpRequestException("down");
+
+        for (var i = 1; i < RenderLimits.MaxPollFailures; i++)
+        {
+            await Processor().PollAsync(id);
+            Assert.Equal(RenderJobStatus.Rendering, Job(id).Status);
+        }
+
+        await Processor().PollAsync(id);
+        Assert.Equal(RenderJobStatus.Failed, Job(id).Status);
+        Assert.Equal(2, _metering.Refunded.Count);
+    }
+
+    [Fact]
+    public async Task In_test_mode_a_clips_render_makes_nothing_and_charges_nothing()
+    {
+        _routing.Live = false;
+        var version = await Script();
+        var id = await StartedClips(version);
+
+        await Processor().StartAsync(id);
+
+        Assert.Equal((RenderJobStatus.Succeeded, true), (Job(id).Status, Job(id).IsSimulated));
+        Assert.Empty(_renderer.Plans);
+        Assert.Empty(_db.RenderClips.AsNoTracking().ToList());
+        Assert.Empty(_metering.Charges);
     }
 
     // ----- cancelling ------------------------------------------------------------------------------------------------------------

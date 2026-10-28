@@ -516,6 +516,131 @@ public sealed class ContentPlannerServiceTests : IDisposable
         Assert.Equal(1, rechecked.Flagged);
     }
 
+    // ----- cinematic scripts and exact scene counts -------------------------------------------------------------------------------
+
+    private static string CinemaScenes(int count, string camera = "zoom in", string mood = "WARM", string transition = "Spin") => JsonSerializer.Serialize(new
+    {
+        scenes = Enumerable.Range(1, count).Select(i => new
+        {
+            narration = i == 1 ? "We are open Monday to Saturday from 9 am to 6 pm." : "Book your visit today.", onScreenText = "Hi", durationSeconds = 4, visualHint = "The clinic",
+            shotType = new string('w', 60), cameraMove = camera, mood, transition, facts = new[] { 1 }
+        })
+    });
+
+    [Fact]
+    public async Task A_script_cannot_be_shorter_than_ten_seconds_and_a_ten_second_script_asks_for_one_or_two_scenes()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Live(Scenes(("We are open Monday to Saturday from 9 am to 6 pm.", new[] { 1 })));
+
+        var detail = await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 3, null));
+
+        Assert.Equal(ContentPlannerService.MinTargetSeconds, detail.CurrentVersion!.TargetSeconds);
+        Assert.Equal(10, ContentPlannerService.MinTargetSeconds);
+        Assert.Contains("about 10 seconds, in 1 to 2 scenes of 4 to 20 seconds each", _ai.Calls.Single().System);
+    }
+
+    [Fact]
+    public async Task A_cinematic_script_of_exactly_three_scenes_is_asked_for_that_way_and_each_scene_is_given_its_share_of_the_time()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Live(CinemaScenes(3));
+
+        var detail = await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 30, null, "cinematic", 3));
+
+        var system = _ai.Calls.Single().System;
+        Assert.Contains("cinematic short", system);
+        Assert.Contains("in exactly 3 scenes of about 10 seconds each", system);
+        Assert.Contains("\"cameraMove\"", system);
+        var version = detail.CurrentVersion!;
+        Assert.Equal(("Cinematic", 30), (version.Style, version.TargetSeconds));
+        Assert.Equal(new[] { 10, 10, 10 }, version.Scenes.Select(s => s.DurationSeconds)); // 30 / 3, whatever the AI wrote
+        Assert.Equal(30, version.TotalSeconds);
+    }
+
+    [Fact]
+    public async Task What_the_ai_chooses_for_the_camera_the_mood_and_the_transition_is_turned_into_the_closed_lists_or_the_plain_default()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Live(CinemaScenes(3));
+
+        var scene = (await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 30, null, "Cinematic", 3))).CurrentVersion!.Scenes[0];
+
+        Assert.Equal(("ZoomIn", "Warm", "None"), (scene.CameraMove, scene.Mood, scene.Transition)); // "zoom in" and "WARM" are recognised; "Spin" is not a transition
+        Assert.Equal(40, scene.ShotType!.Length); // free text is cut, not trusted
+    }
+
+    [Fact]
+    public async Task A_standard_script_has_the_plain_defaults_and_does_not_ask_for_cinema()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Live(Scenes(("We are open Monday to Saturday from 9 am to 6 pm.", new[] { 1 })));
+
+        var version = (await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 45, null, "nonsense"))).CurrentVersion!;
+
+        Assert.Equal("Standard", version.Style); // an unknown style is the standard one
+        var scene = Assert.Single(version.Scenes);
+        Assert.Equal((null, "ZoomIn", "Natural", "None"), (scene.ShotType, scene.CameraMove, scene.Mood, scene.Transition));
+        var system = _ai.Calls.Single().System;
+        Assert.DoesNotContain("cinematic", system);
+        Assert.Contains("in 2 to 10 scenes", system.Replace("in 2 to 10 scenes", "in 2 to 10 scenes"));
+    }
+
+    [Fact]
+    public async Task Too_few_scenes_when_an_exact_number_was_asked_for_is_unusable_and_not_charged_while_too_many_are_cut_to_the_number()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Live(CinemaScenes(2));
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 30, null, "Cinematic", 3)));
+        Assert.Contains("wrote 2 scenes instead of the 3 you asked for", ex.Message);
+        Assert.Single(_metering.Refunded);
+        Assert.Empty(await _db.ContentVersions.ToListAsync());
+
+        _ai.Respond = _ => ScriptedAi.Live(CinemaScenes(5));
+        var cut = (await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 30, null, "Cinematic", 3))).CurrentVersion!;
+        Assert.Equal(3, cut.Scenes.Count);
+    }
+
+    [Fact]
+    public async Task A_test_mode_script_is_not_held_to_the_scene_count_because_it_is_predefined()
+    {
+        var (project, topic) = await ProjectWithChosenTopic();
+        _ai.Respond = _ => ScriptedAi.Simulated(CinemaScenes(2));
+
+        var version = (await Service().GenerateScriptAsync(_a, project.Id, new GenerateScriptRequest(topic.Id, 30, null, "Cinematic", 3))).CurrentVersion!;
+
+        Assert.Equal(2, version.Scenes.Count);
+        Assert.True(version.IsSimulated);
+    }
+
+    [Fact]
+    public async Task The_tenant_can_change_a_scenes_shot_camera_mood_and_transition_and_leaving_them_out_changes_nothing()
+    {
+        var version = await DraftScript();
+        var scene = version.Scenes[0];
+
+        var edited = await Service().UpdateSceneAsync(_a, scene.Id, new UpdateSceneRequest(scene.Narration, scene.OnScreenText, 8, scene.VisualHint, "Close-up", "pan right", "Dramatic", "Fade"));
+        var changed = edited.Scenes[0];
+        Assert.Equal(("Close-up", "PanRight", "Dramatic", "Fade"), (changed.ShotType, changed.CameraMove, changed.Mood, changed.Transition));
+
+        var again = await Service().UpdateSceneAsync(_a, scene.Id, new UpdateSceneRequest(scene.Narration, scene.OnScreenText, 8, scene.VisualHint));
+        Assert.Equal(("Close-up", "PanRight", "Dramatic", "Fade"), (again.Scenes[0].ShotType, again.Scenes[0].CameraMove, again.Scenes[0].Mood, again.Scenes[0].Transition));
+
+        var junk = await Service().UpdateSceneAsync(_a, scene.Id, new UpdateSceneRequest(scene.Narration, scene.OnScreenText, 8, scene.VisualHint, "", "teleport", "Sparkly", "Dissolve"));
+        Assert.Equal((null, "ZoomIn", "Natural", "None"), (junk.Scenes[0].ShotType, junk.Scenes[0].CameraMove, junk.Scenes[0].Mood, junk.Scenes[0].Transition));
+    }
+
+    [Fact]
+    public void The_reply_parser_reads_the_cinema_choices_and_falls_back_for_anything_else()
+    {
+        var parsed = PlannerReply.ParseScenes("{\"scenes\":[{\"narration\":\"One.\",\"shotType\":\"wide\",\"cameraMove\":\"pan-left\",\"mood\":\"cool\",\"transition\":\"WIPE\"},{\"narration\":\"Two.\",\"cameraMove\":5,\"mood\":\"\"}]}", 3);
+
+        Assert.Equal(("wide", "PanLeft", "Cool", "Wipe"), (parsed[0].ShotType, parsed[0].CameraMove, parsed[0].Mood, parsed[0].Transition));
+        Assert.Equal((null, "ZoomIn", "Natural", "None"), (parsed[1].ShotType, parsed[1].CameraMove, parsed[1].Mood, parsed[1].Transition));
+        Assert.Equal("Still", CinemaOptions.Pick("  still ", CinemaOptions.CameraMoves, "ZoomIn"));
+        Assert.Equal("ZoomIn", CinemaOptions.Pick(null, CinemaOptions.CameraMoves, "ZoomIn"));
+    }
+
     // ----- isolation -------------------------------------------------------------------------------------------------------------
 
     [Fact]

@@ -76,6 +76,70 @@ public sealed class VideoProvidersTests
     }
 
     [Fact]
+    public void The_cinema_choices_become_the_effect_the_filter_and_the_transition_of_each_picture()
+    {
+        var plan = new RenderPlan("16:9", new[]
+        {
+            new RenderScene("https://x/i1", "https://x/a1", 0, 8, null, "PanLeft", "Warm", "Fade"),
+            new RenderScene("https://x/i2", "https://x/a2", 8, 8, null, "Still", "Natural", "None"),
+            new RenderScene("https://x/i3", "https://x/a3", 16, 8, null, "ZoomOut", "Dramatic", "Wipe"),
+            new RenderScene("https://x/i4", "https://x/a4", 24, 8, null, "teleport", "Sparkly", "Dissolve"),
+        });
+
+        using var doc = JsonDocument.Parse(ShotstackVideoRenderer.BuildBody(plan));
+        var pictures = doc.RootElement.GetProperty("timeline").GetProperty("tracks")[0].GetProperty("clips").EnumerateArray().ToList();
+
+        Assert.Equal(("slideLeft", "boost", "fade"), (pictures[0].GetProperty("effect").GetString(), pictures[0].GetProperty("filter").GetString(), pictures[0].GetProperty("transition").GetProperty("in").GetString()));
+        Assert.Equal("fade", pictures[0].GetProperty("transition").GetProperty("out").GetString());
+        Assert.False(pictures[1].TryGetProperty("effect", out _)); // Still: no movement
+        Assert.False(pictures[1].TryGetProperty("filter", out _));
+        Assert.False(pictures[1].TryGetProperty("transition", out _));
+        Assert.Equal(("zoomOut", "contrast", "wipeLeft"), (pictures[2].GetProperty("effect").GetString(), pictures[2].GetProperty("filter").GetString(), pictures[2].GetProperty("transition").GetProperty("in").GetString()));
+        Assert.Equal("zoomIn", pictures[3].GetProperty("effect").GetString()); // anything unknown is the plain default
+        Assert.False(pictures[3].TryGetProperty("filter", out _));
+        Assert.False(pictures[3].TryGetProperty("transition", out _));
+    }
+
+    [Fact]
+    public void The_clips_are_laid_end_to_end_on_one_track_with_their_own_sound_and_each_scenes_transition()
+    {
+        var plan = new MergePlan("9:16", new[]
+        {
+            new MergeClip("https://signed.example/c1", 0, 10, "None"),
+            new MergeClip("https://signed.example/c2", 10, 10.4, "Fade"),
+        });
+
+        using var doc = JsonDocument.Parse(ShotstackVideoRenderer.BuildMergeBody(plan));
+        var tracks = doc.RootElement.GetProperty("timeline").GetProperty("tracks");
+        Assert.Equal(1, tracks.GetArrayLength());
+        var clips = tracks[0].GetProperty("clips").EnumerateArray().ToList();
+        Assert.Equal(new[] { "https://signed.example/c1", "https://signed.example/c2" }, clips.Select(c => c.GetProperty("asset").GetProperty("src").GetString()));
+        Assert.All(clips, c => Assert.Equal(("video", 1), (c.GetProperty("asset").GetProperty("type").GetString(), c.GetProperty("asset").GetProperty("volume").GetInt32())));
+        Assert.Equal(new[] { 0.0, 10.0 }, clips.Select(c => c.GetProperty("start").GetDouble()));
+        Assert.Equal(new[] { 10.0, 10.4 }, clips.Select(c => c.GetProperty("length").GetDouble()));
+        Assert.False(clips[0].TryGetProperty("transition", out _));
+        Assert.Equal("fade", clips[1].GetProperty("transition").GetProperty("in").GetString());
+        Assert.Equal("9:16", doc.RootElement.GetProperty("output").GetProperty("aspectRatio").GetString());
+    }
+
+    [Fact]
+    public async Task Joining_clips_is_submitted_like_any_render_and_its_id_returned()
+    {
+        _handler.Respond = _ => Json("{\"response\":{\"id\":\"merge-9\"}}");
+
+        var id = await Renderer().SubmitMergeAsync(new MergePlan("16:9", new[] { new MergeClip("https://signed.example/c1", 0, 10, "None") }));
+
+        Assert.Equal("merge-9", id);
+        var request = Assert.Single(_handler.Requests);
+        Assert.Equal("https://api.shotstack.io/edit/stage/render", request.RequestUri!.ToString());
+        Assert.Equal("shot-secret", request.Headers.GetValues("x-api-key").Single());
+        Assert.Contains("\"type\":\"video\"", _handler.Bodies.Single());
+
+        _handler.Respond = _ => Json("{\"success\":true}");
+        Assert.Contains("did not accept the clips", (await Assert.ThrowsAsync<VideoProviderException>(() => Renderer().SubmitMergeAsync(new MergePlan("16:9", new[] { new MergeClip("https://x/c", 0, 10, "None") })))).Message);
+    }
+
+    [Fact]
     public void A_plan_with_no_words_on_screen_has_no_words_track()
     {
         var plan = new RenderPlan("9:16", new[] { new RenderScene("https://x/i", "https://x/a", 0, 5, "   ") });

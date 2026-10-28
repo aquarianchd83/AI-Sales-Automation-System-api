@@ -30,6 +30,8 @@ public static class RenderLimits
     public const int MaxPollFailures = 5;
     public static readonly TimeSpan LinkLifetime = TimeSpan.FromMinutes(45);
     public static readonly string[] AspectRatios = { "16:9", "9:16", "1:1" };
+    public const int MinClips = 2;
+    public const int MaxClips = 10;
 }
 
 /// <summary>Language names the planner offers -&gt; the voice's language code. Anything else is read in Indian English.</summary>
@@ -59,7 +61,17 @@ public interface IVoiceSynthesizer
 
 /// <param name="ImageUrl">A short-lived address the renderer can fetch the picture from.</param>
 /// <param name="AudioUrl">A short-lived address for the narration.</param>
-public sealed record RenderScene(string ImageUrl, string AudioUrl, double StartSeconds, double LengthSeconds, string? OnScreenText);
+/// <param name="CameraMove">ZoomIn, ZoomOut, PanLeft, PanRight or Still.</param>
+/// <param name="Mood">Natural, Warm, Cool, Dramatic, Bright or Dark.</param>
+/// <param name="Transition">None, Fade or Wipe: how the scene comes in and goes out.</param>
+public sealed record RenderScene(
+    string ImageUrl, string AudioUrl, double StartSeconds, double LengthSeconds, string? OnScreenText, string CameraMove = "ZoomIn", string Mood = "Natural", string Transition = "None");
+
+/// <param name="VideoUrl">A short-lived address for a finished clip.</param>
+public sealed record MergeClip(string VideoUrl, double StartSeconds, double LengthSeconds, string Transition);
+
+/// <summary>Several finished clips joined end to end into one video.</summary>
+public sealed record MergePlan(string AspectRatio, IReadOnlyList<MergeClip> Clips);
 
 public sealed record RenderPlan(string AspectRatio, IReadOnlyList<RenderScene> Scenes);
 
@@ -83,6 +95,9 @@ public interface IVideoRenderer
     /// <returns>The renderer's id for the job.</returns>
     Task<string> SubmitAsync(RenderPlan plan, CancellationToken cancellationToken = default);
 
+    /// <summary>Joins finished clips into one video. Its progress and result are read with <see cref="GetStatusAsync"/> like any other render.</summary>
+    Task<string> SubmitMergeAsync(MergePlan plan, CancellationToken cancellationToken = default);
+
     Task<RenderStatus> GetStatusAsync(string externalId, CancellationToken cancellationToken = default);
 
     /// <summary>Copies the finished video into <paramref name="destination"/>, from the renderer's own host only, and no more than <paramref name="maxBytes"/> of it.</summary>
@@ -105,11 +120,15 @@ public interface IVideoRenderQueue
 
 // ----- what the tenant sees ---------------------------------------------------------------------------------------------------------
 
-public sealed record StartRenderRequest(string? AspectRatio, string? VoiceGender);
+/// <param name="Mode">"Single" (default): one render of the whole script. "Clips": every scene is made as its own clip, then the clips are joined.</param>
+public sealed record StartRenderRequest(string? AspectRatio, string? VoiceGender, string? Mode = null);
+
+public sealed record RenderClipDto(int Order, string Status, double Seconds, string? Error);
 
 public sealed record RenderJobDto(
     Guid Id, Guid VersionId, int VersionNumber, string Status, int Progress, string? Stage, string AspectRatio, string VoiceGender, string Renderer, bool IsSimulated, bool IsAiVoice,
-    bool HasVideo, long VideoBytes, double VideoSeconds, string? Error, int FlaggedScenes, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, bool IsOfApprovedScript);
+    bool HasVideo, long VideoBytes, double VideoSeconds, string? Error, int FlaggedScenes, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, bool IsOfApprovedScript,
+    string Mode = "Single", IReadOnlyList<RenderClipDto>? Clips = null);
 
 public sealed record VideoFile(Stream Content, string ContentType, long Length);
 

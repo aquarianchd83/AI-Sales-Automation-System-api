@@ -80,6 +80,12 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
             if (plan is null)
                 return; // cancelled while preparing; already ended
 
+            if (job.Mode == "Clips")
+            {
+                await SubmitClipsAsync(job, plan, ct);
+                return;
+            }
+
             job.ExternalRenderId = await _renderer.SubmitAsync(plan, ct);
             job.Status = RenderJobStatus.Rendering;
             job.Progress = 45;
@@ -125,7 +131,7 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
             var length = Math.Max(scene.DurationSeconds, Math.Round(clip.Seconds + 0.4, 1));
             planned.Add(new RenderScene(
                 _links.CreateTemporaryReadUrl(job.TenantId, asset.StorageKey, RenderLimits.LinkLifetime), _links.CreateTemporaryReadUrl(job.TenantId, keys[^1], RenderLimits.LinkLifetime),
-                start, length, scene.OnScreenText));
+                start, length, scene.OnScreenText, scene.CameraMove, scene.Mood, scene.Transition));
             start += length;
 
             job.Progress = 5 + (int)(35.0 * (i + 1) / scenes.Count);
@@ -141,7 +147,7 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
     public async Task PollAsync(Guid jobId, CancellationToken ct = default)
     {
         var job = await _db.RenderJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
-        if (job is null || job.Status != RenderJobStatus.Rendering || string.IsNullOrEmpty(job.ExternalRenderId))
+        if (job is null || job.Status != RenderJobStatus.Rendering || (job.Mode != "Clips" && string.IsNullOrEmpty(job.ExternalRenderId)))
             return;
 
         if (job.CancelRequested)
@@ -154,6 +160,12 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
         if (job.StartedAt is { } started && _clock.UtcNow - started > RenderLimits.MaxDuration)
         {
             await EndAsync(job, RenderJobStatus.Failed, "The video took too long and was stopped", "The video service did not finish in time. Nothing was charged - try again.", ct);
+            return;
+        }
+
+        if (job.Mode == "Clips")
+        {
+            await PollClipsAsync(job, ct);
             return;
         }
 
@@ -225,6 +237,139 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
         await EndAsync(job, RenderJobStatus.Succeeded, "Your video is ready", null, ct);
     }
 
+    // ----- "clips" mode: every scene is its own short video, then the clips are joined ---------------------------------------------------
+
+    /// <summary>Starts one render per scene. Each clip is made alone (its transition belongs to the join, not to the clip) and saved as soon as it is submitted, so a failure later still knows which renders were started.</summary>
+    private async Task SubmitClipsAsync(RenderJob job, RenderPlan plan, CancellationToken ct)
+    {
+        var scenes = await _db.ContentScenes.AsNoTracking().Where(s => s.VersionId == job.VersionId).OrderBy(s => s.Order).ToListAsync(ct);
+        for (var i = 0; i < plan.Scenes.Count; i++)
+        {
+            var alone = new RenderPlan(job.AspectRatio, new[] { plan.Scenes[i] with { StartSeconds = 0, Transition = "None" } });
+            var renderId = await _renderer.SubmitAsync(alone, ct);
+            _db.RenderClips.Add(new RenderClip { TenantId = job.TenantId, JobId = job.Id, SceneId = scenes[i].Id, Order = i + 1, ExternalRenderId = renderId, Seconds = plan.Scenes[i].LengthSeconds });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        job.Status = RenderJobStatus.Rendering;
+        job.Progress = 45;
+        job.Stage = $"Making {plan.Scenes.Count} clips";
+        await SaveAsync(job, ct);
+        _queue.SchedulePoll(job.Id, job.TenantId, RenderLimits.PollEvery);
+    }
+
+    private async Task PollClipsAsync(RenderJob job, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(job.ExternalRenderId))
+                await AdvanceClipsAsync(job, ct);
+            else
+                await AdvanceJoinAsync(job, ct);
+            if (job.Status == RenderJobStatus.Rendering)
+                job.PollFailures = 0;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or VideoProviderException)
+        {
+            job.PollFailures++;
+            if (job.PollFailures >= RenderLimits.MaxPollFailures)
+            {
+                await FailAsync(job, ex, ct);
+                return;
+            }
+
+            await SaveAsync(job, ct);
+            _queue.SchedulePoll(job.Id, job.TenantId, RenderLimits.PollEvery);
+        }
+    }
+
+    /// <summary>Collects the clips that are ready; when all are, joins them.</summary>
+    private async Task AdvanceClipsAsync(RenderJob job, CancellationToken ct)
+    {
+        var clips = await _db.RenderClips.Where(c => c.JobId == job.Id).OrderBy(c => c.Order).ToListAsync(ct);
+        foreach (var clip in clips.Where(c => c.Status == RenderClipStatus.Rendering))
+        {
+            var status = await _renderer.GetStatusAsync(clip.ExternalRenderId!, ct);
+            if (status.Phase == RenderPhase.Failed)
+            {
+                clip.Status = RenderClipStatus.Failed;
+                clip.Error = status.Error is { Length: > 0 } reason ? Trim(reason, 300) : null;
+                await FailAsync(job, new VideoProviderException($"Clip {clip.Order} of {clips.Count} could not be made{(clip.Error is null ? "." : ": " + Trim(clip.Error, 200))}"), ct);
+                return;
+            }
+
+            if (status.Phase == RenderPhase.Done)
+            {
+                clip.OutputStorageKey = await DownloadToStoreAsync(job, status.Url, $"studio/renders/{job.Id:N}/clip-{clip.Order}.mp4", ct);
+                clip.Status = RenderClipStatus.Done;
+                await SaveAsync(job, ct);
+            }
+        }
+
+        var done = clips.Count(c => c.Status == RenderClipStatus.Done);
+        if (done < clips.Count)
+        {
+            job.Progress = 45 + (int)(35.0 * done / clips.Count);
+            job.Stage = $"Making the clips ({done} of {clips.Count} ready)";
+            await SaveAsync(job, ct);
+            _queue.SchedulePoll(job.Id, job.TenantId, RenderLimits.PollEvery);
+            return;
+        }
+
+        var scenes = await _db.ContentScenes.AsNoTracking().Where(s => s.VersionId == job.VersionId).ToListAsync(ct);
+        double start = 0;
+        var joined = new List<MergeClip>();
+        foreach (var clip in clips)
+        {
+            var transition = scenes.FirstOrDefault(s => s.Id == clip.SceneId)?.Transition ?? "None";
+            joined.Add(new MergeClip(_links.CreateTemporaryReadUrl(job.TenantId, clip.OutputStorageKey!, RenderLimits.LinkLifetime), start, clip.Seconds, transition));
+            start += clip.Seconds;
+        }
+
+        job.ExternalRenderId = await _renderer.SubmitMergeAsync(new MergePlan(job.AspectRatio, joined), ct);
+        job.OutputSeconds = start;
+        job.Progress = 82;
+        job.Stage = "Joining the clips";
+        await SaveAsync(job, ct);
+        _queue.SchedulePoll(job.Id, job.TenantId, RenderLimits.PollEvery);
+    }
+
+    /// <summary>Follows the join; when it is done the finished video is collected like any other.</summary>
+    private async Task AdvanceJoinAsync(RenderJob job, CancellationToken ct)
+    {
+        var status = await _renderer.GetStatusAsync(job.ExternalRenderId!, ct);
+        switch (status.Phase)
+        {
+            case RenderPhase.Failed:
+                await FailAsync(job, new VideoProviderException(status.Error is { Length: > 0 } e ? $"The clips were made but joining them failed: {Trim(e, 250)}" : "The clips were made but joining them failed."), ct);
+                return;
+
+            case RenderPhase.Done:
+                await CollectAsync(job, status, ct);
+                return;
+
+            default:
+                job.Progress = Math.Clamp(82 + (int)(status.Percent * 0.12), 82, 94);
+                job.Stage = "Joining the clips";
+                await SaveAsync(job, ct);
+                _queue.SchedulePoll(job.Id, job.TenantId, RenderLimits.PollEvery);
+                return;
+        }
+    }
+
+    private async Task<string> DownloadToStoreAsync(RenderJob job, string? url, string relativePath, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(url))
+            throw new VideoProviderException("The video service finished but gave no video.");
+
+        await using var file = new FileStream(Path.Combine(Path.GetTempPath(), $"studio-{Guid.NewGuid():N}.mp4"), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
+        await _renderer.DownloadAsync(url, RenderLimits.MaxVideoBytes, file, ct);
+        if (file.Length == 0)
+            throw new VideoProviderException("The video service returned an empty video.");
+        file.Position = 0;
+        return await _store.SaveAsync(job.TenantId, relativePath, file, "video/mp4", ct);
+    }
+
     // ----- ending a job ------------------------------------------------------------------------------------------------------------
 
     private async Task FailAsync(RenderJob job, Exception ex, CancellationToken ct)
@@ -271,6 +416,13 @@ public sealed class VideoRenderProcessor : IVideoRenderProcessor
         foreach (var key in ReadKeys(job.AudioKeysJson))
             await DeleteQuietlyAsync(key);
         job.AudioKeysJson = "[]";
+
+        // The clips of a "Clips" render are intermediate: gone when the render ends, however it ends.
+        foreach (var clip in await _db.RenderClips.Where(c => c.JobId == job.Id && c.OutputStorageKey != null).ToListAsync(CancellationToken.None))
+        {
+            await DeleteQuietlyAsync(clip.OutputStorageKey!);
+            clip.OutputStorageKey = null;
+        }
 
         foreach (var id in new[] { job.RenderActivityId, job.VoiceActivityId })
         {

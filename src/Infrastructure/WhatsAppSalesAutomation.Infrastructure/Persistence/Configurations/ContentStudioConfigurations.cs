@@ -81,6 +81,7 @@ public class ContentVersionConfiguration : IEntityTypeConfiguration<ContentVersi
         builder.HasKey(v => v.Id);
         builder.Property(v => v.Status).HasConversion<string>().HasMaxLength(15);
         builder.Property(v => v.Notes).HasMaxLength(1000);
+        builder.Property(v => v.Style).IsRequired().HasMaxLength(15);
         builder.Property(v => v.PromptVersion).IsRequired().HasMaxLength(40);
         builder.Property(v => v.Provider).IsRequired().HasMaxLength(50);
         builder.Property(v => v.Model).HasMaxLength(100);
@@ -103,6 +104,10 @@ public class ContentSceneConfiguration : IEntityTypeConfiguration<ContentScene>
         builder.Property(s => s.VisualHint).HasMaxLength(500);
         builder.Property(s => s.ClaimStatus).HasConversion<string>().HasMaxLength(15);
         builder.Property(s => s.ClaimNote).HasMaxLength(600);
+        builder.Property(s => s.ShotType).HasMaxLength(40);
+        builder.Property(s => s.CameraMove).IsRequired().HasMaxLength(15);
+        builder.Property(s => s.Mood).IsRequired().HasMaxLength(15);
+        builder.Property(s => s.Transition).IsRequired().HasMaxLength(15);
         builder.HasIndex(s => new { s.TenantId, s.VersionId, s.Order });
     }
 }
@@ -141,6 +146,7 @@ public class RenderJobConfiguration : IEntityTypeConfiguration<RenderJob>
         builder.Property(j => j.Status).HasConversion<string>().HasMaxLength(15);
         builder.Property(j => j.Stage).HasMaxLength(200);
         builder.Property(j => j.AspectRatio).IsRequired().HasMaxLength(8);
+        builder.Property(j => j.Mode).IsRequired().HasMaxLength(10);
         builder.Property(j => j.VoiceGender).IsRequired().HasMaxLength(10);
         builder.Property(j => j.LanguageCode).IsRequired().HasMaxLength(10);
         builder.Property(j => j.Renderer).IsRequired().HasMaxLength(30);
@@ -220,5 +226,19 @@ public class PublicationMetricSnapshotConfiguration : IEntityTypeConfiguration<P
         builder.ToTable("PublicationMetricSnapshots");
         builder.HasKey(m => m.Id);
         builder.HasIndex(m => new { m.TenantId, m.PublicationId, m.CapturedAtUtc });
+    }
+}
+
+public class RenderClipConfiguration : IEntityTypeConfiguration<RenderClip>
+{
+    public void Configure(EntityTypeBuilder<RenderClip> builder)
+    {
+        builder.ToTable("RenderClips");
+        builder.HasKey(c => c.Id);
+        builder.Property(c => c.Status).HasConversion<string>().HasMaxLength(15);
+        builder.Property(c => c.ExternalRenderId).HasMaxLength(100);
+        builder.Property(c => c.OutputStorageKey).HasMaxLength(500);
+        builder.Property(c => c.Error).HasMaxLength(600);
+        builder.HasIndex(c => new { c.TenantId, c.JobId, c.Order });
     }
 }

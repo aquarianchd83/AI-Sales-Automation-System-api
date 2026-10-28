@@ -73,6 +73,10 @@ public sealed class VideoRenderService : IVideoRenderService
         if (without > 0)
             throw new ConflictException($"{without} of {scenes.Count} scenes have no picture yet. Choose a picture for every scene first.");
 
+        var mode = string.Equals(request?.Mode?.Trim(), "Clips", StringComparison.OrdinalIgnoreCase) ? "Clips" : "Single";
+        if (mode == "Clips" && (scenes.Count < RenderLimits.MinClips || scenes.Count > RenderLimits.MaxClips))
+            throw new ConflictException($"Separate clips need between {RenderLimits.MinClips} and {RenderLimits.MaxClips} scenes; this script has {scenes.Count}. Make it as one video, or change the number of scenes.");
+
         var simulated = !_routing.Resolve(AiFeatures.VideoRenders).UsesThirdParty;
         if (!simulated)
         {
@@ -92,14 +96,15 @@ public sealed class VideoRenderService : IVideoRenderService
 
         var job = new RenderJob
         {
-            TenantId = tenantId, ProjectId = project.Id, VersionId = versionId, AspectRatio = aspect, VoiceGender = gender, LanguageCode = VoiceLanguages.CodeFor(project.Language),
+            TenantId = tenantId, ProjectId = project.Id, VersionId = versionId, AspectRatio = aspect, VoiceGender = gender, Mode = mode, ClipCount = mode == "Clips" ? scenes.Count : 0, LanguageCode = VoiceLanguages.CodeFor(project.Language),
             Renderer = simulated ? "Simulator" : _renderer.Name, IsSimulated = simulated, IsAiVoice = !simulated, ContentHash = ContentSnapshot.Compute(scenes, assets),
             FlaggedScenes = scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), Stage = "Waiting for its turn", CreatedBy = _user.UserId
         };
 
         if (!simulated)
         {
-            job.RenderActivityId = await ChargeAsync(tenantId, StudioActivityKind.VideoRender, job, $"Video for \"{project.Title}\" (version {version.Number})", ct);
+            // One render unit per clip: each clip is a render of its own (the join is part of the same price).
+            job.RenderActivityId = await ChargeAsync(tenantId, StudioActivityKind.VideoRender, job, $"Video for \"{project.Title}\" (version {version.Number}{(mode == "Clips" ? $", {scenes.Count} clips" : string.Empty)})", ct, mode == "Clips" ? scenes.Count : null);
             try
             {
                 job.VoiceActivityId = await ChargeAsync(tenantId, StudioActivityKind.VoiceOver, job, $"Voice-over for \"{project.Title}\"", ct);
@@ -130,14 +135,16 @@ public sealed class VideoRenderService : IVideoRenderService
     {
         var version = await _db.ContentVersions.AsNoTracking().FirstOrDefaultAsync(v => v.Id == versionId && v.TenantId == tenantId, ct) ?? throw new NotFoundException("ContentVersion", versionId);
         var jobs = await _db.RenderJobs.AsNoTracking().Where(j => j.TenantId == tenantId && j.VersionId == versionId).OrderByDescending(j => j.CreatedAt).Take(20).ToListAsync(ct);
-        return jobs.Select(j => ToDto(j, version.Number, version.ApprovedHash)).ToList();
+        var ids = jobs.Select(j => j.Id).ToList();
+        var clips = (await _db.RenderClips.AsNoTracking().Where(c => c.TenantId == tenantId && ids.Contains(c.JobId)).OrderBy(c => c.Order).ToListAsync(ct)).ToLookup(c => c.JobId);
+        return jobs.Select(j => ToDto(j, version.Number, version.ApprovedHash, ClipDtos(clips[j.Id]))).ToList();
     }
 
     public async Task<RenderJobDto> GetAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
     {
         var job = await FindAsync(tenantId, jobId, ct, track: false);
         var (number, approved) = await VersionAsync(tenantId, job.VersionId, ct);
-        return ToDto(job, number, approved);
+        return ToDto(job, number, approved, await ClipsOfAsync(tenantId, job.Id, ct));
     }
 
     public async Task<RenderJobDto> CancelAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
@@ -163,7 +170,7 @@ public sealed class VideoRenderService : IVideoRenderService
         job.UpdatedAt = _clock.UtcNow;
         await _db.SaveChangesAsync(ct);
         var (number, approved) = await VersionAsync(tenantId, job.VersionId, ct);
-        return ToDto(job, number, approved);
+        return ToDto(job, number, approved, await ClipsOfAsync(tenantId, job.Id, ct));
     }
 
     public async Task<VideoFile> OpenVideoAsync(Guid tenantId, Guid jobId, CancellationToken ct = default)
@@ -179,9 +186,9 @@ public sealed class VideoRenderService : IVideoRenderService
 
     // ----- helpers ---------------------------------------------------------------------------------------------------------------
 
-    private async Task<Guid> ChargeAsync(Guid tenantId, StudioActivityKind kind, RenderJob job, string description, CancellationToken ct)
+    private async Task<Guid> ChargeAsync(Guid tenantId, StudioActivityKind kind, RenderJob job, string description, CancellationToken ct, decimal? units = null)
     {
-        var charge = await _metering.ChargeAsync(new StudioChargeRequest(tenantId, kind, $"render:{kind}:{job.Id:N}", description, null, nameof(RenderJob), job.Id.ToString(), job.Renderer, _user.UserId), ct);
+        var charge = await _metering.ChargeAsync(new StudioChargeRequest(tenantId, kind, $"render:{kind}:{job.Id:N}", description, units, nameof(RenderJob), job.Id.ToString(), job.Renderer, _user.UserId), ct);
         if (!charge.Allowed)
             throw new ConflictException(charge.Message ?? "Your studio quota does not cover this right now.");
         return charge.ActivityId;
@@ -207,11 +214,16 @@ public sealed class VideoRenderService : IVideoRenderService
         return (v?.Number ?? 0, v?.ApprovedHash);
     }
 
+    private async Task<IReadOnlyList<RenderClipDto>> ClipsOfAsync(Guid tenantId, Guid jobId, CancellationToken ct) =>
+        ClipDtos(await _db.RenderClips.AsNoTracking().Where(c => c.TenantId == tenantId && c.JobId == jobId).OrderBy(c => c.Order).ToListAsync(ct));
+
+    private static IReadOnlyList<RenderClipDto> ClipDtos(IEnumerable<RenderClip> clips) => clips.Select(c => new RenderClipDto(c.Order, c.Status.ToString(), c.Seconds, c.Error)).ToList();
+
     /// <param name="approvedHash">The fingerprint of the approved script, if the version is approved. A video is "of the approved script" when it was made from content with exactly that fingerprint.</param>
-    public static RenderJobDto ToDto(RenderJob j, int versionNumber, string? approvedHash) => new(
+    public static RenderJobDto ToDto(RenderJob j, int versionNumber, string? approvedHash, IReadOnlyList<RenderClipDto>? clips = null) => new(
         j.Id, j.VersionId, versionNumber, j.Status.ToString(), j.Progress, j.Stage, j.AspectRatio, j.VoiceGender, j.Renderer, j.IsSimulated, j.IsAiVoice,
         !string.IsNullOrEmpty(j.OutputStorageKey), j.OutputBytes, j.OutputSeconds, j.Error, j.FlaggedScenes, j.CreatedAt, j.StartedAt, j.FinishedAt,
-        !string.IsNullOrEmpty(approvedHash) && j.ContentHash == approvedHash && j.Status == RenderJobStatus.Succeeded && !j.IsSimulated);
+        !string.IsNullOrEmpty(approvedHash) && j.ContentHash == approvedHash && j.Status == RenderJobStatus.Succeeded && !j.IsSimulated, j.Mode, clips);
 
     private static ValidationException Invalid(string property, string message) => new(new[] { new ValidationFailure(property, message) });
 }

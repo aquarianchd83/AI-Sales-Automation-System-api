@@ -45,6 +45,18 @@ public sealed class ShotstackVideoRenderer : IVideoRenderer
         throw new VideoProviderException("The video service did not accept the video.");
     }
 
+    public async Task<string> SubmitMergeAsync(MergePlan plan, CancellationToken cancellationToken = default)
+    {
+        using var request = Request(HttpMethod.Post, "render");
+        request.Content = new StringContent(BuildMergeBody(plan), Encoding.UTF8, "application/json");
+        using var response = await SendAsync(request, cancellationToken);
+
+        using var doc = await ParseAsync(response, cancellationToken);
+        if (doc.RootElement.TryGetProperty("response", out var inner) && inner.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(id.GetString()))
+            return id.GetString()!;
+        throw new VideoProviderException("The video service did not accept the clips to join.");
+    }
+
     public async Task<RenderStatus> GetStatusAsync(string externalId, CancellationToken cancellationToken = default)
     {
         if (externalId.Length is 0 or > 100 || !externalId.All(c => char.IsLetterOrDigit(c) || c == '-'))
@@ -109,10 +121,20 @@ public sealed class ShotstackVideoRenderer : IVideoRenderer
     /// <summary>The timeline: pictures on one track, the on-screen words above them, the narration on its own track.</summary>
     public static string BuildBody(RenderPlan plan)
     {
-        var pictures = plan.Scenes.Select(s => new Dictionary<string, object?>
+        var pictures = plan.Scenes.Select(s =>
         {
-            ["asset"] = new { type = "image", src = s.ImageUrl },
-            ["start"] = Number(s.StartSeconds), ["length"] = Number(s.LengthSeconds), ["fit"] = "cover", ["effect"] = "zoomIn",
+            var clip = new Dictionary<string, object?>
+            {
+                ["asset"] = new { type = "image", src = s.ImageUrl },
+                ["start"] = Number(s.StartSeconds), ["length"] = Number(s.LengthSeconds), ["fit"] = "cover",
+            };
+            if (EffectOf(s.CameraMove) is { } effect)
+                clip["effect"] = effect;
+            if (FilterOf(s.Mood) is { } filter)
+                clip["filter"] = filter;
+            if (TransitionOf(s.Transition) is { } transition)
+                clip["transition"] = transition;
+            return clip;
         }).ToList();
         var words = plan.Scenes.Where(s => !string.IsNullOrWhiteSpace(s.OnScreenText)).Select(s => new Dictionary<string, object?>
         {
@@ -137,6 +159,55 @@ public sealed class ShotstackVideoRenderer : IVideoRenderer
             output = new { format = "mp4", resolution = "hd", aspectRatio = plan.AspectRatio },
         }, Json);
     }
+
+    /// <summary>The clips of a "Clips" render laid end to end on one track; each clip's sound (its own voice) comes with it.</summary>
+    public static string BuildMergeBody(MergePlan plan)
+    {
+        var clips = plan.Clips.Select(c =>
+        {
+            var clip = new Dictionary<string, object?>
+            {
+                ["asset"] = new { type = "video", src = c.VideoUrl, volume = 1 },
+                ["start"] = Number(c.StartSeconds), ["length"] = Number(c.LengthSeconds),
+            };
+            if (TransitionOf(c.Transition) is { } transition)
+                clip["transition"] = transition;
+            return clip;
+        }).ToList();
+
+        return JsonSerializer.Serialize(new
+        {
+            timeline = new { background = "#000000", tracks = new object[] { new { clips } } },
+            output = new { format = "mp4", resolution = "hd", aspectRatio = plan.AspectRatio },
+        }, Json);
+    }
+
+    // The cinema choices become what Shotstack understands. Anything else (an older script, an unknown word) falls back to the plain default.
+    private static string? EffectOf(string? move) => (move ?? "ZoomIn").Trim().ToLowerInvariant() switch
+    {
+        "zoomout" => "zoomOut",
+        "panleft" => "slideLeft",
+        "panright" => "slideRight",
+        "still" => null,
+        _ => "zoomIn",
+    };
+
+    private static string? FilterOf(string? mood) => (mood ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        "warm" => "boost",
+        "cool" => "muted",
+        "dramatic" => "contrast",
+        "bright" => "lighten",
+        "dark" => "darken",
+        _ => null,
+    };
+
+    private static object? TransitionOf(string? transition) => (transition ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        "fade" => new { @in = "fade", @out = "fade" },
+        "wipe" => new { @in = "wipeLeft", @out = "wipeLeft" },
+        _ => null,
+    };
 
     private static double Number(double value) => Math.Round(value, 2);
 

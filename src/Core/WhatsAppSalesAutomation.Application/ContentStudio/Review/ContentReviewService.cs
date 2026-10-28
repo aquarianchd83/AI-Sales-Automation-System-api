@@ -171,7 +171,7 @@ public sealed class ContentReviewService : IContentReviewService
         {
             TenantId = tenantId, ProjectId = source.ProjectId, Number = number, TopicId = source.TopicId, Status = ContentVersionStatus.Draft, ScriptText = source.ScriptText,
             TargetSeconds = source.TargetSeconds, Notes = source.Notes, PromptVersion = source.PromptVersion, Provider = source.Provider, Model = source.Model, IsSimulated = source.IsSimulated,
-            ContentHash = source.ContentHash, CreatedBy = _user.UserId, RevisedFromNumber = source.Number
+            ContentHash = source.ContentHash, CreatedBy = _user.UserId, RevisedFromNumber = source.Number, Style = source.Style
         };
         _db.ContentVersions.Add(copy);
         foreach (var scene in scenes)
@@ -179,7 +179,7 @@ public sealed class ContentReviewService : IContentReviewService
             {
                 TenantId = tenantId, VersionId = copy.Id, Order = scene.Order, Narration = scene.Narration, OnScreenText = scene.OnScreenText, DurationSeconds = scene.DurationSeconds,
                 VisualHint = scene.VisualHint, FactIdsJson = scene.FactIdsJson, ClaimStatus = scene.ClaimStatus, ClaimNote = scene.ClaimNote, ChosenAssetId = scene.ChosenAssetId,
-                EditedByTenant = scene.EditedByTenant
+                EditedByTenant = scene.EditedByTenant, ShotType = scene.ShotType, CameraMove = scene.CameraMove, Mood = scene.Mood, Transition = scene.Transition
             });
 
         var project = await _db.ContentProjects.FirstAsync(p => p.Id == source.ProjectId && p.TenantId == tenantId, ct);

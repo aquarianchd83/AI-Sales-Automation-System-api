@@ -24,7 +24,7 @@ public sealed class ContentPlannerService : IContentPlannerService
     public const int DefaultTopicCount = 5;
     public const int MaxTopicCount = 8;
     public const int DefaultTargetSeconds = 45;
-    public const int MinTargetSeconds = 15;
+    public const int MinTargetSeconds = 10;
     public const int MaxTargetSeconds = 180;
     private const int FactsForWriter = 20;
 
@@ -182,22 +182,34 @@ public sealed class ContentPlannerService : IContentPlannerService
 
         var target = Math.Clamp(request?.TargetSeconds ?? DefaultTargetSeconds, MinTargetSeconds, MaxTargetSeconds);
         var notes = Clean(request?.Notes, 1000);
+        var style = CinemaOptions.Pick(request?.Style, CinemaOptions.Styles, CinemaOptions.DefaultStyle);
+        int? sceneCount = request?.SceneCount is { } wanted ? Math.Clamp(wanted, 1, PlannerReply.MaxScenes / 2) : null;
         var grounding = await GroundAsync(tenantId, project.Goal + " " + topic.Title, ct);
 
         var aiRequest = new AiTaskRequest(
-            AiTaskKinds.ContentScript, PlannerPrompts.ScriptSystem(project.Language, target), PlannerPrompts.ScriptUser(project.Goal, topic.Title, topic.Rationale, notes, grounding.PromptBlock), 3000, true, tenantId);
+            AiTaskKinds.ContentScript, PlannerPrompts.ScriptSystem(project.Language, target, sceneCount, style == "Cinematic"), PlannerPrompts.ScriptUser(project.Goal, topic.Title, topic.Rationale, notes, grounding.PromptBlock), 3000, true, tenantId);
 
         var run = await RunChargedAsync(tenantId, StudioActivityKind.Script, $"Script for \"{topic.Title}\"", project.Id, aiRequest, ct);
         var parsed = PlannerReply.ParseScenes(run.Result.Text, grounding.Facts.Count);
         if (parsed.Count == 0)
             throw await UnusableAsync(run, "The AI did not return a script that could be read.", ct);
 
+        // A script asked to have exactly N scenes has exactly N: too few is unusable (and not charged), too many is cut, and each scene is given its share of the time.
+        var perScene = 0;
+        if (sceneCount is { } exact)
+        {
+            if (parsed.Count < exact && !run.Result.IsSimulated)
+                throw await UnusableAsync(run, $"The AI wrote {parsed.Count} scene{(parsed.Count == 1 ? string.Empty : "s")} instead of the {exact} you asked for.", ct);
+            parsed = parsed.Take(exact).ToList();
+            perScene = Math.Clamp((int)Math.Round(target / (double)parsed.Count), PlannerReply.MinSceneSeconds, PlannerReply.MaxSceneSeconds);
+        }
+
         var now = _clock.UtcNow;
         var facts = await LoadFactsAsync(tenantId, ct);
         var number = (await _db.ContentVersions.Where(v => v.TenantId == tenantId && v.ProjectId == projectId).MaxAsync(v => (int?)v.Number, ct) ?? 0) + 1;
         var version = new ContentVersion
         {
-            TenantId = tenantId, ProjectId = projectId, Number = number, TopicId = topic.Id, TargetSeconds = target, Notes = notes, PromptVersion = PlannerPrompts.Version,
+            TenantId = tenantId, ProjectId = projectId, Number = number, TopicId = topic.Id, TargetSeconds = target, Notes = notes, Style = style, PromptVersion = PlannerPrompts.Version,
             Provider = run.Result.Provider, Model = run.Result.Model, IsSimulated = run.Result.IsSimulated, ActivityId = run.ActivityId, CreatedBy = _user.UserId
         };
         _db.ContentVersions.Add(version);
@@ -208,8 +220,9 @@ public sealed class ContentPlannerService : IContentPlannerService
             var outcome = PlannerClaims.Evaluate(scene.Narration, facts, now);
             _db.ContentScenes.Add(new ContentScene
             {
-                TenantId = tenantId, VersionId = version.Id, Order = ++order, Narration = scene.Narration, OnScreenText = scene.OnScreenText, DurationSeconds = scene.DurationSeconds,
-                VisualHint = scene.VisualHint, FactIdsJson = FactIds(scene.FactNumbers, grounding), ClaimStatus = outcome.Status, ClaimNote = outcome.Note
+                TenantId = tenantId, VersionId = version.Id, Order = ++order, Narration = scene.Narration, OnScreenText = scene.OnScreenText, DurationSeconds = perScene > 0 ? perScene : scene.DurationSeconds,
+                VisualHint = scene.VisualHint, FactIdsJson = FactIds(scene.FactNumbers, grounding), ClaimStatus = outcome.Status, ClaimNote = outcome.Note,
+                ShotType = scene.ShotType, CameraMove = scene.CameraMove, Mood = scene.Mood, Transition = scene.Transition
             });
         }
 
@@ -240,6 +253,14 @@ public sealed class ContentPlannerService : IContentPlannerService
         scene.OnScreenText = Clean(request?.OnScreenText, 300);
         scene.VisualHint = Clean(request?.VisualHint, 500);
         scene.DurationSeconds = Math.Clamp(request?.DurationSeconds ?? scene.DurationSeconds, PlannerReply.MinSceneSeconds, PlannerReply.MaxSceneSeconds);
+        if (request?.ShotType is not null)
+            scene.ShotType = CinemaOptions.Shot(request.ShotType);
+        if (request?.CameraMove is not null)
+            scene.CameraMove = CinemaOptions.Pick(request.CameraMove, CinemaOptions.CameraMoves, CinemaOptions.DefaultCamera);
+        if (request?.Mood is not null)
+            scene.Mood = CinemaOptions.Pick(request.Mood, CinemaOptions.Moods, CinemaOptions.DefaultMood);
+        if (request?.Transition is not null)
+            scene.Transition = CinemaOptions.Pick(request.Transition, CinemaOptions.Transitions, CinemaOptions.DefaultTransition);
         scene.EditedByTenant = true;
         scene.UpdatedAt = _clock.UtcNow;
 
@@ -377,13 +398,15 @@ public sealed class ContentPlannerService : IContentPlannerService
         var dtos = scenes.Select(s => new SceneDto(
             s.Id, s.Order, s.Narration, s.OnScreenText, s.DurationSeconds, s.VisualHint, s.ClaimStatus.ToString(), s.ClaimNote, s.EditedByTenant,
             ReadIds(s.FactIdsJson).Select(id => facts.FirstOrDefault(f => f.Id == id)).Where(f => f is not null).Select(f => new CitedFactDto(f!.Id, f.Category, f.Statement)).ToList(),
-            assets.FirstOrDefault(a => a.Id == s.ChosenAssetId) is { } asset ? StudioAssetService.ToSummary(asset) : null)).ToList();
+            assets.FirstOrDefault(a => a.Id == s.ChosenAssetId) is { } asset ? StudioAssetService.ToSummary(asset) : null,
+            s.ShotType, CinemaOptions.Pick(s.CameraMove, CinemaOptions.CameraMoves, CinemaOptions.DefaultCamera), CinemaOptions.Pick(s.Mood, CinemaOptions.Moods, CinemaOptions.DefaultMood),
+            CinemaOptions.Pick(s.Transition, CinemaOptions.Transitions, CinemaOptions.DefaultTransition))).ToList();
 
         return new ScriptVersionDto(
             version.Id, version.ProjectId, version.Number, version.TopicId, topics.FirstOrDefault(t => t.Id == version.TopicId)?.Title, version.Status.ToString(), version.TargetSeconds,
             scenes.Sum(s => s.DurationSeconds), version.Notes, version.Provider, version.Model, version.PromptVersion, version.IsSimulated, version.ActivityId, version.CreatedAt,
             scenes.Count(s => s.ClaimStatus is ClaimStatus.Supported or ClaimStatus.NoClaim),
-            scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), dtos.Count(d => d.Asset is null), dtos);
+            scenes.Count(s => s.ClaimStatus is ClaimStatus.Unverified or ClaimStatus.Unsupported), dtos.Count(d => d.Asset is null), dtos, CinemaOptions.Pick(version.Style, CinemaOptions.Styles, CinemaOptions.DefaultStyle));
     }
 
     private static TopicDto ToDto(ContentTopic t) =>

@@ -80,6 +80,9 @@ public class ContentVersion : BaseEntity, ITenantOwned
     /// <summary>Anything the tenant asked the writer to keep in mind.</summary>
     public string? Notes { get; set; }
 
+    /// <summary>"Standard" or "Cinematic" (single clear shots with camera, mood and transitions chosen for each).</summary>
+    public string Style { get; set; } = "Standard";
+
     /// <summary>Which version of the prompt wrote it, so a later change to the prompt is traceable.</summary>
     public string PromptVersion { get; set; } = string.Empty;
 
@@ -147,6 +150,18 @@ public class ContentScene : BaseEntity, ITenantOwned
 
     /// <summary>A sentence saying why, e.g. which fact supports it or what is missing.</summary>
     public string? ClaimNote { get; set; }
+
+    /// <summary>The kind of shot this scene is meant to be ("Wide", "Close-up"...), written by a cinematic script; it guides the choice of picture and is shown to the tenant.</summary>
+    public string? ShotType { get; set; }
+
+    /// <summary>How the picture moves: ZoomIn, ZoomOut, PanLeft, PanRight or Still. Blank (older scripts) means ZoomIn.</summary>
+    public string CameraMove { get; set; } = "ZoomIn";
+
+    /// <summary>The look of the picture: Natural, Warm, Cool, Dramatic, Bright or Dark. Blank means Natural.</summary>
+    public string Mood { get; set; } = "Natural";
+
+    /// <summary>How the scene comes in and goes out: None, Fade or Wipe. Blank means None.</summary>
+    public string Transition { get; set; } = "None";
 
     /// <summary>The picture chosen for this scene (a <see cref="StudioAsset"/> of the same tenant), or null while none is.</summary>
     public Guid? ChosenAssetId { get; set; }

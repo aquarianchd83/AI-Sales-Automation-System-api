@@ -261,6 +261,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<RenderJob> RenderJobs => Set<RenderJob>();
 
+    public DbSet<RenderClip> RenderClips => Set<RenderClip>();
+
     public DbSet<ContentReviewEvent> ContentReviewEvents => Set<ContentReviewEvent>();
 
     public DbSet<SocialConnection> SocialConnections => Set<SocialConnection>();

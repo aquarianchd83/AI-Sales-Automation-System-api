@@ -498,6 +498,23 @@ public sealed class VideoAnalyticsTests : IDisposable
     }
 
     [Fact]
+    public async Task The_clip_files_of_a_stuck_clips_render_are_deleted_with_it()
+    {
+        var stuck = await Render(RenderJobStatus.Rendering, TimeSpan.FromHours(3));
+        stuck.Mode = "Clips";
+        var key = $"s3:private/{_a:N}/product-knowledge/studio/renders/{stuck.Id:N}/clip-1.mp4";
+        _store.Files[key] = new byte[4];
+        _db.RenderClips.Add(new RenderClip { TenantId = _a, JobId = stuck.Id, SceneId = Guid.NewGuid(), Order = 1, Status = RenderClipStatus.Done, OutputStorageKey = key, ExternalRenderId = "r1", Seconds = 10 });
+        await _db.SaveChangesAsync();
+
+        var result = await Maintenance().RunForTenantAsync(_a);
+
+        Assert.Equal(1, result.StuckRenders);
+        Assert.DoesNotContain(key, _store.Files.Keys);
+        Assert.Null((await _db.RenderClips.AsNoTracking().SingleAsync()).OutputStorageKey);
+    }
+
+    [Fact]
     public async Task A_publication_stuck_mid_upload_is_marked_as_possibly_on_the_channel_and_one_that_never_started_is_sent_again()
     {
         var account = await Account();
