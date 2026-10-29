@@ -42,4 +42,25 @@ public class PlatformWhatsAppProviderController : ControllerBase
 
         return Ok(change.Settings);
     }
+
+    /// <summary>One tenant's own provider choice, what it effectively uses, and the platform default it falls back to.</summary>
+    [HttpGet("tenants/{tenantId:guid}")]
+    public async Task<ActionResult<TenantWhatsAppProviderDto>> GetForTenant(Guid tenantId, CancellationToken cancellationToken)
+        => Ok(await _settings.GetForTenantAsync(tenantId, cancellationToken));
+
+    /// <summary>A null provider clears the tenant's own choice so it follows the platform default again.</summary>
+    [HttpPut("tenants/{tenantId:guid}")]
+    public async Task<ActionResult<TenantWhatsAppProviderDto>> UpdateForTenant(
+        Guid tenantId, [FromBody] UpdateTenantWhatsAppProviderRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _settings.SetForTenantAsync(tenantId, request, _currentUser.UserId, cancellationToken);
+
+        await _auditService.LogAsync(
+            _currentUser.UserId ?? throw new InvalidOperationException("No authenticated user."), _currentUser.Email ?? string.Empty,
+            PlatformAuditActions.WhatsAppProviderChanged,
+            details: $"WhatsApp provider for tenant {tenantId}: {request.Provider ?? "platform default"} (effective {result.Effective})",
+            cancellationToken: cancellationToken);
+
+        return Ok(result);
+    }
 }
