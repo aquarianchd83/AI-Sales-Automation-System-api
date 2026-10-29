@@ -44,7 +44,7 @@ public sealed class PlanAndCreditFlowTests : IDisposable
 
         var audit = Fake.Of<IPlatformAuditService>((m, _) => m.Name == nameof(IPlatformAuditService.LogAsync) ? Task.CompletedTask : throw new NotImplementedException(m.Name));
         // Only what OverridePlanAsync touches is real; the rest of the service is not exercised here.
-        _tenants = new PlatformTenantService(_db, null!, null!, null!, _clock, null!, null!, null!, null!, null!, audit, null!, _credits, null!, null!);
+        _tenants = new PlatformTenantService(_db, null!, null!, null!, _clock, null!, null!, null!, null!, null!, audit, null!, _credits, null!, null!, null!);
 
         _db.Tenants.Add(_tenant);
         _db.Plans.AddRange(_trial, _premium);

@@ -1,5 +1,6 @@
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Tenancy;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
@@ -18,7 +19,7 @@ public class CreatePlatformTenantRequestValidator : AbstractValidator<CreatePlat
             .WithMessage("Slug must be lowercase letters, digits and hyphens only.");
         RuleFor(x => x.AdminFullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.AdminEmail).NotEmpty().EmailAddress();
-        RuleFor(x => x.AdminPassword).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.AdminPassword).MeetsPasswordPolicy();
 
         // An operator picks these from the console's own lists, so an unsupported value is a mistake
         // to reject rather than a best-effort input to fall back from (unlike signup's CountryCode).

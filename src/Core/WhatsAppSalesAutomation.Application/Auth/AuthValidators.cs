@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Billing;
 using FluentValidation;
 using WhatsAppSalesAutomation.Application.Tenancy;
@@ -24,7 +25,7 @@ public class TenantSignUpRequestValidator : AbstractValidator<TenantSignUpReques
             .WithMessage("Slug must be lowercase letters, digits and hyphens only.");
         RuleFor(x => x.FullName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Email).NotEmpty().EmailAddress();
-        RuleFor(x => x.Password).NotEmpty().MinimumLength(8);
+        RuleFor(x => x.Password).MeetsPasswordPolicy();
         RuleFor(x => x.ProductName).MaximumLength(TenantProfileLimits.ProductName);
         // Loose on purpose - an unmatched code just falls back to USD display
         // (RegionalPricingCatalog.Resolve), never an error, so this only guards the shape.
