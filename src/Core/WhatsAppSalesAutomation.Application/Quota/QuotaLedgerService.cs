@@ -341,6 +341,18 @@ public class QuotaLedgerService : IQuotaLedgerService
             entries = entries.Where(e => e.QuotaType == type);
         if (query.Feature is { } feature)
             entries = entries.Where(e => e.Feature == feature);
+        if (query.EntryType is { } entryType)
+            entries = entries.Where(e => e.EntryType == entryType);
+        if (query.From is { } from)
+        {
+            var start = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            entries = entries.Where(e => e.OccurredAtUtc >= start);
+        }
+        if (query.To is { } to)
+        {
+            var endExclusive = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            entries = entries.Where(e => e.OccurredAtUtc < endExclusive);
+        }
 
         var total = await entries.CountAsync(cancellationToken);
         var items = await entries
@@ -352,6 +364,64 @@ public class QuotaLedgerService : IQuotaLedgerService
             .ToListAsync(cancellationToken);
 
         return new PagedResult<QuotaLedgerEntryDto>(items, total, query.Page, query.PageSize);
+    }
+
+    public async Task<QuotaLedgerSummaryDto> GetLedgerSummaryAsync(Guid tenantId, int days, PlatformFeature? feature = null, QuotaEntryType? entryType = null, DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default)
+    {
+        days = Math.Clamp(days, 1, 366);
+
+        // Only four columns, summed here: the ledger is one row per movement, and summing a decimal in the database is
+        // not something every provider the tests run on can do.
+        var rows = await _context.QuotaLedgerEntries.IgnoreQueryFilters().AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .Select(e => new { e.EntryType, e.Feature, e.UnitsDelta, e.OccurredAtUtc })
+            .ToListAsync(cancellationToken);
+
+        // The date range narrows everything the screen shows: the totals, the tiles and the graph.
+        if (from is { } rangeStart)
+        {
+            var start = rangeStart.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            rows = rows.Where(r => r.OccurredAtUtc >= start).ToList();
+        }
+        if (to is { } rangeEnd)
+        {
+            var endExclusive = rangeEnd.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            rows = rows.Where(r => r.OccurredAtUtc < endExclusive).ToList();
+        }
+
+        static bool IsSpend(QuotaEntryType type) => type is QuotaEntryType.Consumption or QuotaEntryType.ConsumptionReversal;
+
+        var byType = rows.GroupBy(r => r.EntryType)
+            .Select(g => new QuotaEntryTotalDto(g.Key, g.Count(), g.Sum(r => r.UnitsDelta)))
+            .OrderBy(t => t.EntryType)
+            .ToList();
+
+        var byFeature = rows.Where(r => r.Feature is not null && IsSpend(r.EntryType))
+            .GroupBy(r => r.Feature!.Value)
+            .Select(g => new QuotaFeatureTotalDto(g.Key, g.Count(), -g.Sum(r => r.UnitsDelta)))
+            .OrderBy(t => t.Feature)
+            .ToList();
+
+        var today = DateOnly.FromDateTime(_dateTime.UtcNow);
+        var last = to ?? today;
+        // With a start date the graph covers exactly the chosen range (at most a year); otherwise the last `days` days.
+        var first = from is { } chosen ? (last.DayNumber - chosen.DayNumber >= 366 ? last.AddDays(-365) : chosen) : last.AddDays(-(days - 1));
+        if (first > last)
+            first = last;
+        days = last.DayNumber - first.DayNumber + 1;
+        var perDay = rows.Where(r => (feature is null || r.Feature == feature) && (entryType is null || r.EntryType == entryType))
+            .Where(r => r.EntryType == QuotaEntryType.Purchase || IsSpend(r.EntryType))
+            .GroupBy(r => DateOnly.FromDateTime(r.OccurredAtUtc))
+            .ToDictionary(g => g.Key, g => (
+                Purchased: g.Where(r => r.EntryType == QuotaEntryType.Purchase).Sum(r => r.UnitsDelta),
+                Used: -g.Where(r => IsSpend(r.EntryType)).Sum(r => r.UnitsDelta)));
+
+        var daily = Enumerable.Range(0, days)
+            .Select(i => first.AddDays(i))
+            .Select(d => perDay.TryGetValue(d, out var v) ? new QuotaDailyPointDto(d, v.Purchased, v.Used) : new QuotaDailyPointDto(d, 0m, 0m))
+            .ToList();
+
+        return new QuotaLedgerSummaryDto(rows.Count, byType, byFeature, daily);
     }
 
     /// <summary>The working set for one tenant and quota type: the wallet, every grant not yet written

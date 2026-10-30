@@ -95,3 +95,9 @@ public record CreatePlatformTenantRequest(
     string? SupportPhone = null,
     IReadOnlyList<string>? DomainKeywords = null,
     string? StateCode = null) : Tenancy.ITenantBusinessDetails;
+
+/// <summary>Permanent removal of a tenant. <see cref="ConfirmSlug"/> must equal the tenant's slug - the API's own guard against
+/// a wrong id or a stray call, on top of the console asking the operator to type it.</summary>
+public record PurgeTenantRequest(string ConfirmSlug);
+
+public record PurgeTenantResultDto(int TablesAffected, int RowsDeleted);

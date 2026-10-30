@@ -74,6 +74,12 @@ public class PlatformTenantsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Irreversible: removes the tenant and all of its users, configuration, jobs and data. The body must repeat the
+    /// tenant's slug. The audit log entry is kept.</summary>
+    [HttpPost("{id:guid}/purge")]
+    public async Task<ActionResult<PurgeTenantResultDto>> Purge(Guid id, [FromBody] PurgeTenantRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.PurgeAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
+
     /// <summary>Issues a short-lived, no-refresh-token access token for this tenant's admin - audited,
     /// time-boxed, per the spec's Impersonate action.</summary>
     [HttpPost("{id:guid}/impersonate")]

@@ -117,6 +117,70 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_ledger_can_be_limited_to_one_kind_of_entry()
+    {
+        await GrantPlanAsync();
+        await SpendAsync(300, "m1");
+
+        var spent = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { EntryType = QuotaEntryType.Consumption, PageSize = 50 });
+        var bought = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { EntryType = QuotaEntryType.Purchase, PageSize = 50 });
+
+        Assert.Equal(-300m, Assert.Single(spent.Items).UnitsDelta);
+        Assert.Empty(bought.Items);
+    }
+
+    [Fact]
+    public async Task The_summary_totals_each_kind_of_entry_each_feature_and_each_day()
+    {
+        await GrantPlanAsync();
+        await SpendAsync(300, "m1", feature: PlatformFeature.WhatsAppMessaging);
+        await SpendAsync(50, "a1", feature: PlatformFeature.AiConversations);
+
+        var summary = await _service.GetLedgerSummaryAsync(_tenant, 7);
+
+        Assert.Equal(-350m, summary.ByEntryType.Single(t => t.EntryType == QuotaEntryType.Consumption).Units);
+        Assert.Equal(300m, summary.ByFeature.Single(f => f.Feature == PlatformFeature.WhatsAppMessaging).UnitsUsed);
+        Assert.Equal(50m, summary.ByFeature.Single(f => f.Feature == PlatformFeature.AiConversations).UnitsUsed);
+        Assert.Equal(7, summary.Daily.Count);
+        Assert.Equal(350m, summary.Daily.Sum(d => d.Used));
+    }
+
+    [Fact]
+    public async Task The_daily_series_can_be_narrowed_to_one_feature_without_changing_the_totals()
+    {
+        await GrantPlanAsync();
+        await SpendAsync(300, "m1", feature: PlatformFeature.WhatsAppMessaging);
+        await SpendAsync(50, "a1", feature: PlatformFeature.AiConversations);
+
+        var summary = await _service.GetLedgerSummaryAsync(_tenant, 7, PlatformFeature.AiConversations);
+
+        Assert.Equal(50m, summary.Daily.Sum(d => d.Used));
+        Assert.Equal(0m, summary.Daily.Sum(d => d.Purchased));
+        Assert.Equal(300m, summary.ByFeature.Single(f => f.Feature == PlatformFeature.WhatsAppMessaging).UnitsUsed);
+    }
+
+    [Fact]
+    public async Task The_ledger_and_the_summary_can_be_limited_to_a_range_of_days()
+    {
+        await GrantPlanAsync();
+        await SpendAsync(300, "m1");
+        var spentOn = DateOnly.FromDateTime(_clock.UtcNow);
+
+        var inside = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { From = spentOn, To = spentOn, EntryType = QuotaEntryType.Consumption, PageSize = 50 });
+        var before = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { To = spentOn.AddDays(-1), EntryType = QuotaEntryType.Consumption, PageSize = 50 });
+        var summary = await _service.GetLedgerSummaryAsync(_tenant, 30, from: spentOn, to: spentOn);
+        var elsewhere = await _service.GetLedgerSummaryAsync(_tenant, 30, from: spentOn.AddDays(-10), to: spentOn.AddDays(-5));
+
+        Assert.Equal(-300m, Assert.Single(inside.Items).UnitsDelta);
+        Assert.Empty(before.Items);
+        Assert.Single(summary.Daily);
+        Assert.Equal(300m, summary.Daily.Sum(d => d.Used));
+        Assert.Equal(6, elsewhere.Daily.Count);
+        Assert.Equal(0m, elsewhere.Daily.Sum(d => d.Used));
+        Assert.Empty(elsewhere.ByFeature);
+    }
+
+    [Fact]
     public async Task Same_operation_key_never_charges_twice()
     {
         await GrantPlanAsync();

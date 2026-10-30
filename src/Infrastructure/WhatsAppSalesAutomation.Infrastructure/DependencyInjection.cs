@@ -254,6 +254,7 @@ public static class DependencyInjection
         services.AddSingleton<WhatsAppSalesAutomation.Application.Common.Interfaces.ISecretProtector, WhatsAppSalesAutomation.Infrastructure.SocialAds.SecretProtector>();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.BackgroundJobs.SocialAdSyncJob>();
 
+        services.AddScoped<ITenantDataPurger, TenantDataPurger>();
         services.AddScoped<ITenantWhatsAppConfigProvider, TenantWhatsAppConfigProvider>();
         services.AddScoped<ITenantConfigOverrideProvider, TenantConfigOverrideProvider>();
         services.AddScoped<ITenantTimeZoneProvider, TenantTimeZoneProvider>();

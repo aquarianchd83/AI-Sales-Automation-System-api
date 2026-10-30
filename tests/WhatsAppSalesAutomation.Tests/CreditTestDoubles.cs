@@ -42,5 +42,7 @@ internal static class CreditTestDoubles
             throw new NotSupportedException();
 
         public Task<decimal?> GetCapRemainingAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default) => Task.FromResult<decimal?>(null);
+
+        public Task<QuotaShortfall?> GetShortfallAsync(Guid tenantId, CreditScenario scenario, CancellationToken cancellationToken = default) => Task.FromResult<QuotaShortfall?>(null);
     }
 }

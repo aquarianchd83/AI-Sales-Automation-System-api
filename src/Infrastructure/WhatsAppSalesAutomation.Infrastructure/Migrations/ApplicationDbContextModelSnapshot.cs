@@ -3585,6 +3585,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<bool>("QuotaExhausted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("QuotaStopReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid?>("ReferredCampaignId")
                         .HasColumnType("uniqueidentifier");
 

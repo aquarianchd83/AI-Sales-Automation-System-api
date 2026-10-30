@@ -14,6 +14,7 @@ public static class PlatformAuditActions
     public const string TenantSendingResumed = "TenantSendingResumed";
     public const string TenantReactivated = "TenantReactivated";
     public const string TenantDeleted = "TenantDeleted";
+    public const string TenantPurged = "TenantPurged";
     public const string TenantImpersonated = "TenantImpersonated";
     public const string TenantPlanOverridden = "TenantPlanOverridden";
     public const string TenantTimezoneUpdated = "TenantTimezoneUpdated";

@@ -42,6 +42,11 @@ public class PlatformTenantQuotaController : ControllerBase
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetLedger(Guid tenantId, [FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
         => Ok(await _quota.GetLedgerAsync(tenantId, query, cancellationToken));
 
+    /// <summary>Totals over the whole credit history and a daily series for charting.</summary>
+    [HttpGet("ledger/summary")]
+    public async Task<ActionResult<QuotaLedgerSummaryDto>> GetLedgerSummary(Guid tenantId, [FromQuery] int days = 30, [FromQuery] WhatsAppSalesAutomation.Domain.Enums.PlatformFeature? feature = null, [FromQuery] WhatsAppSalesAutomation.Domain.Enums.QuotaEntryType? entryType = null, [FromQuery] DateOnly? from = null, [FromQuery] DateOnly? to = null, CancellationToken cancellationToken = default)
+        => Ok(await _quota.GetLedgerSummaryAsync(tenantId, days, feature, entryType, from, to, cancellationToken));
+
     [HttpGet("ai-usage")]
     public async Task<ActionResult<PagedResult<AiTransactionDto>>> GetAiUsage(Guid tenantId, [FromQuery] AiTransactionQuery query, CancellationToken cancellationToken)
         => Ok(await _aiUsage.GetHistoryAsync(tenantId, query, cancellationToken));

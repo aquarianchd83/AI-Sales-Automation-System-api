@@ -131,7 +131,12 @@ public class AuthService : IAuthService
 
         var result = await _userManager.CreateAsync(user, request.Password);
         if (!result.Succeeded)
+        {
+            // The tenant row is already saved; without this every failed attempt left an orphan tenant (no users, no owner).
+            _context.Tenants.Remove(tenant);
+            await _context.SaveChangesAsync(cancellationToken);
             throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.Password), e.Description)));
+        }
 
         await _userManager.AddToRoleAsync(user, AppRoles.Admin);
 

@@ -52,4 +52,7 @@ public interface IQuotaLedgerService
     Task<int> ExpireDueAsync(CancellationToken cancellationToken = default);
 
     Task<PagedResult<QuotaLedgerEntryDto>> GetLedgerAsync(Guid tenantId, QuotaLedgerQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>Totals over the tenant's whole ledger (never filtered) plus a day-by-day series, optionally narrowed to one feature or kind of entry, for the last <paramref name="days"/> days (UTC), so a screen can chart it.</summary>
+    Task<QuotaLedgerSummaryDto> GetLedgerSummaryAsync(Guid tenantId, int days, PlatformFeature? feature = null, QuotaEntryType? entryType = null, DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default);
 }

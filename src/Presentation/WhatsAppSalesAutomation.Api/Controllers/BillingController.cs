@@ -139,6 +139,15 @@ public class BillingController : ControllerBase
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetQuotaLedger([FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
         => Ok(await _quota.GetLedgerAsync(RequireTenantId(), query, cancellationToken));
 
+    /// <summary>The tenant's credit history at a glance: totals per kind of entry and per feature over the chosen days, and a
+    /// daily series for a graph, optionally narrowed to one feature or kind of entry.</summary>
+    [HttpGet("quota/ledger/summary")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<QuotaLedgerSummaryDto>> GetQuotaLedgerSummary(
+        [FromQuery] int days = 30, [FromQuery] PlatformFeature? feature = null, [FromQuery] QuotaEntryType? entryType = null,
+        [FromQuery] DateOnly? from = null, [FromQuery] DateOnly? to = null, CancellationToken cancellationToken = default)
+        => Ok(await _quota.GetLedgerSummaryAsync(RequireTenantId(), days, feature, entryType, from, to, cancellationToken));
+
     /// <summary>The tenant's AI usage history, newest first - each request with the credits before, spent and after, whether
     /// it ran, failed (and was refunded) or was refused, and why. Provider and model are shown for the record only: the
     /// tenant has no say in them.</summary>
