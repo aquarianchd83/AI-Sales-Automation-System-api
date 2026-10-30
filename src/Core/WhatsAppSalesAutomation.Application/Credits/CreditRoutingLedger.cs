@@ -56,4 +56,7 @@ public class CreditRoutingLedger : IQuotaLedgerService
 
     public Task<PagedResult<QuotaLedgerEntryDto>> GetLedgerAsync(Guid tenantId, QuotaLedgerQuery query, CancellationToken cancellationToken = default) =>
         _inner.GetLedgerAsync(tenantId, query, cancellationToken);
+
+    public Task<QuotaLedgerSummaryDto> GetLedgerSummaryAsync(Guid tenantId, int days, PlatformFeature? feature = null, QuotaEntryType? entryType = null, DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default) =>
+        _inner.GetLedgerSummaryAsync(tenantId, days, feature, entryType, from, to, cancellationToken);
 }

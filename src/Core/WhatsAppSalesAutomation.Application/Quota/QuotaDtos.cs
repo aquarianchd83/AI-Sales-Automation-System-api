@@ -24,12 +24,37 @@ public record QuotaLedgerEntryDto(
     string? Note,
     DateTime OccurredAtUtc);
 
+/// <summary>How many entries of one kind a tenant has, and the units they moved (signed: units in are positive, units out negative).</summary>
+public record QuotaEntryTotalDto(QuotaEntryType EntryType, int Count, decimal Units);
+
+/// <summary>What one feature has spent: consumption net of give-backs, as a positive number.</summary>
+public record QuotaFeatureTotalDto(PlatformFeature Feature, int Count, decimal UnitsUsed);
+
+/// <summary>One calendar day (UTC) of credits bought and credits used, both positive.</summary>
+public record QuotaDailyPointDto(DateOnly Date, decimal Purchased, decimal Used);
+
+/// <summary>The whole credit history at a glance: totals per kind of entry, spend per feature, and a daily series for a chart.</summary>
+public record QuotaLedgerSummaryDto(
+    int TotalEntries,
+    IReadOnlyList<QuotaEntryTotalDto> ByEntryType,
+    IReadOnlyList<QuotaFeatureTotalDto> ByFeature,
+    IReadOnlyList<QuotaDailyPointDto> Daily);
+
 public record QuotaLedgerQuery : Common.Models.PagedRequest
 {
     public QuotaType? QuotaType { get; init; }
 
     /// <summary>Only this feature's entries: the per-feature ledger.</summary>
     public PlatformFeature? Feature { get; init; }
+
+    /// <summary>Only entries of this kind - e.g. Purchase for the credits a tenant bought, Consumption for what it spent.</summary>
+    public QuotaEntryType? EntryType { get; init; }
+
+    /// <summary>First day to include (UTC, the whole day). Left out: from the beginning.</summary>
+    public DateOnly? From { get; init; }
+
+    /// <summary>Last day to include (UTC, the whole day). Left out: up to now.</summary>
+    public DateOnly? To { get; init; }
 }
 
 /// <summary>A request to spend units. <see cref="OperationKey"/> must be unique per real-world event
