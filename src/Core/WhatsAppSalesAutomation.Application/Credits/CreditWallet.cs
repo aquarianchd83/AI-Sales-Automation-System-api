@@ -147,6 +147,9 @@ public interface ICreditWalletService
 
     /// <summary>What the feature may still spend this month under the tenant's cap, or null when it has none.</summary>
     Task<decimal?> GetCapRemainingAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
+    /// <summary>Why the tenant cannot afford one unit of the scenario's action - not in its plan, not enough credits, or the feature's monthly cap used up - or null when it can.</summary>
+    Task<QuotaShortfall?> GetShortfallAsync(Guid tenantId, CreditScenario scenario, CancellationToken cancellationToken = default);
 }
 
 public class CreditWalletService : ICreditWalletService
@@ -240,6 +243,43 @@ public class CreditWalletService : ICreditWalletService
         var perUnit = await _costs.GetCreditsPerUnitAsync(scenario, ct);
         return perUnit <= 0 ? spendable : Math.Floor(spendable / perUnit);
     }
+
+    public async Task<QuotaShortfall?> GetShortfallAsync(Guid tenantId, CreditScenario scenario, CancellationToken ct = default)
+    {
+        var feature = PlatformFeatureCatalog.FeatureOf(scenario);
+        var name = FeatureName(feature);
+
+        if (!await _access.HasAsync(tenantId, feature, ct))
+            return new QuotaShortfall(QuotaShortfallKind.NotInPlan, $"{name} is not included in your plan. Upgrade your plan to use it.");
+
+        var perUnit = Math.Max(0m, await _costs.GetCreditsPerUnitAsync(scenario, ct));
+        var balance = (await _ledger.GetBalancesAsync(tenantId, ct)).Single(b => b.QuotaType == QuotaType.Credits).Balance;
+        if (balance < Math.Max(perUnit, 0.0001m))
+            return new QuotaShortfall(QuotaShortfallKind.InsufficientCredits, $"Your wallet has {balance:0.##} credits, which is not enough for {name}. Buy credits to continue.");
+
+        if (await GetCapRemainingAsync(tenantId, feature, ct) is { } remaining && remaining < Math.Max(perUnit, 0.0001m))
+        {
+            var cap = await _context.TenantFeatureCaps.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.TenantId == tenantId && c.Feature == feature).Select(c => c.MonthlyLimit).FirstAsync(ct);
+            var resets = MonthStart(_dateTime.UtcNow).AddMonths(1);
+            return new QuotaShortfall(
+                QuotaShortfallKind.MonthlyLimitReached,
+                $"{name} has used its monthly limit of {cap:0.##} credits. Your wallet still has {balance:0.##} credits. " +
+                $"The limit resets on {resets:d MMM yyyy}; to continue sooner, raise it in Wallet.");
+        }
+
+        return null;
+    }
+
+    private static string FeatureName(PlatformFeature feature) => feature switch
+    {
+        PlatformFeature.WhatsAppMessaging => "WhatsApp messaging",
+        PlatformFeature.AiConversations => "AI conversations",
+        PlatformFeature.LeadDiscovery => "Lead discovery",
+        PlatformFeature.ContentStudio => "Content Studio",
+        PlatformFeature.ProductKnowledge => "Product knowledge",
+        _ => feature.ToString()
+    };
 
     public async Task<decimal?> GetCapRemainingAsync(Guid tenantId, PlatformFeature feature, CancellationToken ct = default)
     {

@@ -217,6 +217,47 @@ public sealed class CreditWalletTests : IDisposable
         Assert.Equal(0m, await _wallet.GetAffordableUnitsAsync(trialTenant, CreditScenario.LeadDiscovery)); // not in its (trial) plan
     }
 
+    [Fact]
+    public async Task A_used_up_monthly_limit_is_reported_as_that_and_not_as_missing_credits()
+    {
+        await OnPlanAsync(_premium);
+        await SetCostAsync(CreditScenario.LeadDiscovery, 1m);
+        await _wallet.SetCapAsync(_tenant, new SetFeatureCapRequest(PlatformFeature.LeadDiscovery, 4m));
+        await DiscoverAsync("lead-1", 4m, partial: false);
+
+        var shortfall = await _wallet.GetShortfallAsync(_tenant, CreditScenario.LeadDiscovery);
+
+        Assert.Equal(0m, await _wallet.GetAffordableUnitsAsync(_tenant, CreditScenario.LeadDiscovery));
+        Assert.True(await BalanceAsync() > 0m); // the wallet is not the problem
+        Assert.NotNull(shortfall);
+        Assert.Equal(QuotaShortfallKind.MonthlyLimitReached, shortfall!.Kind);
+        Assert.Contains("monthly limit of 4", shortfall.Message);
+        Assert.Contains("still has", shortfall.Message);
+    }
+
+    [Fact]
+    public async Task An_empty_wallet_is_reported_as_missing_credits_and_a_plan_without_the_feature_as_that()
+    {
+        await OnPlanAsync(_premium);
+        await SetCostAsync(CreditScenario.LeadDiscovery, 1000m); // more than the wallet holds
+
+        Assert.Equal(QuotaShortfallKind.InsufficientCredits, (await _wallet.GetShortfallAsync(_tenant, CreditScenario.LeadDiscovery))!.Kind);
+
+        var trialTenant = Guid.NewGuid();
+        _db.Tenants.Add(new Tenant { Id = trialTenant, Name = "Other", Slug = "other" });
+        await _db.SaveChangesAsync();
+        Assert.Equal(QuotaShortfallKind.NotInPlan, (await _wallet.GetShortfallAsync(trialTenant, CreditScenario.LeadDiscovery))!.Kind);
+    }
+
+    [Fact]
+    public async Task Nothing_is_reported_when_the_tenant_can_afford_it()
+    {
+        await OnPlanAsync(_premium);
+        await SetCostAsync(CreditScenario.LeadDiscovery, 1m);
+
+        Assert.Null(await _wallet.GetShortfallAsync(_tenant, CreditScenario.LeadDiscovery));
+    }
+
     // ---- setting a cap
 
     [Fact]

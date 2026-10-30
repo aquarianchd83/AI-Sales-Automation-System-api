@@ -236,6 +236,44 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_used_up_monthly_limit_is_recorded_as_that_with_the_reason_and_is_not_reported_as_out_of_credits()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var notified = false;
+        var quotaAlerts = Stub<IQuotaAlertService>.Create(new()
+        {
+            ["NotifyIfExhaustedAsync"] = _ =>
+            {
+                notified = true;
+                return Task.FromResult(true);
+            }
+        });
+        var limit = new QuotaShortfall(QuotaShortfallKind.MonthlyLimitReached, "Lead discovery has used its monthly limit of 25 credits. Your wallet still has 813 credits.");
+
+        await Service(quotaAvailable: 0, quotaAlerts: quotaAlerts, shortfall: limit).RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.False(execution.QuotaExhausted); // not "out of credits"
+        Assert.Equal(limit.Message, execution.QuotaStopReason);
+        Assert.Contains("monthly limit of 25 credits", execution.ErrorMessage);
+        Assert.Equal(0, _agent.Calls);
+        Assert.False(notified); // no "you are out of credits" notice to a tenant whose wallet is full
+    }
+
+    [Fact]
+    public async Task Running_out_of_credits_still_says_so_and_keeps_its_reason()
+    {
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var out_ = new QuotaShortfall(QuotaShortfallKind.InsufficientCredits, "Your wallet has 0 credits, which is not enough for Lead discovery. Buy credits to continue.");
+
+        await Service(quotaAvailable: 0, shortfall: out_).RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.True(execution.QuotaExhausted);
+        Assert.Equal(out_.Message, execution.QuotaStopReason);
+    }
+
+    [Fact]
     public async Task A_profile_without_keywords_is_still_recorded_in_history()
     {
         var profile = _db.LeadDiscoveryProfiles.Single();
@@ -1168,7 +1206,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     private LeadDiscoveryRunService Service(
-        ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null, IConsentPageGate? consentPageGate = null)
+        ILeadDiscoveryLockStore? lockStore = null, decimal quotaAvailable = 1000m, IQuotaAlertService? quotaAlerts = null, IConsentPageGate? consentPageGate = null, QuotaShortfall? shortfall = null)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new()
         {
@@ -1182,6 +1220,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
                 _quotaChecks++;
                 return Task.FromResult(quotaAvailable);
             },
+            ["GetShortfallAsync"] = _ => Task.FromResult(shortfall),
             ["ConsumeLeadCandidatesAsync"] = args =>
             {
                 _quotaConsumed += (decimal)args![1]!;

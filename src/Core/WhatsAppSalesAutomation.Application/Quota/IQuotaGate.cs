@@ -29,4 +29,7 @@ public interface IQuotaGate
     Task AssignTrialPlanAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
     Task<decimal> GetAvailableAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default);
+
+    /// <summary>Why <see cref="GetAvailableAsync"/> came back as nothing for this kind of quota - out of credits, the feature's monthly limit used up, or not in the plan - or null when something is affordable.</summary>
+    Task<QuotaShortfall?> GetShortfallAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default);
 }
