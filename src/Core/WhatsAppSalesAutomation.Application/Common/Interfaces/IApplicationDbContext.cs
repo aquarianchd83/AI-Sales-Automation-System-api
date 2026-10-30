@@ -239,6 +239,28 @@ public interface IApplicationDbContext
 
     DbSet<KnowledgeGapDecision> KnowledgeGapDecisions { get; }
 
+    DbSet<ContentProject> ContentProjects { get; }
+
+    DbSet<ContentTopic> ContentTopics { get; }
+
+    DbSet<ContentVersion> ContentVersions { get; }
+
+    DbSet<ContentScene> ContentScenes { get; }
+
+    DbSet<StudioAsset> StudioAssets { get; }
+
+    DbSet<RenderJob> RenderJobs { get; }
+
+    DbSet<RenderClip> RenderClips { get; }
+
+    DbSet<ContentReviewEvent> ContentReviewEvents { get; }
+
+    DbSet<SocialConnection> SocialConnections { get; }
+
+    DbSet<Publication> Publications { get; }
+
+    DbSet<PublicationMetricSnapshot> PublicationMetricSnapshots { get; }
+
     DbSet<Flowchart> Flowcharts { get; }
 
     DbSet<FaqEntry> FaqEntries { get; }

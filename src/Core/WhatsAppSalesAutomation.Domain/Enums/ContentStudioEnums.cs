@@ -153,3 +153,139 @@ public enum AiExecutionStatus
     Succeeded = 0,
     Failed = 1
 }
+
+/// <summary>Where a content project stands.</summary>
+public enum ContentProjectStatus
+{
+    /// <summary>Planning: topics are being chosen.</summary>
+    Draft = 0,
+
+    /// <summary>At least one script has been written.</summary>
+    Scripted = 1,
+
+    Archived = 2
+}
+
+public enum ContentTopicStatus
+{
+    Suggested = 0,
+    Chosen = 1,
+    Rejected = 2
+}
+
+/// <summary>The life of one script. Planning only ever produces Draft; the review phase moves it on.</summary>
+public enum ContentVersionStatus
+{
+    Draft = 0,
+    InReview = 1,
+    Approved = 2,
+    Rejected = 3
+}
+
+/// <summary>Whether a scene's narration is backed by what the tenant has verified.</summary>
+public enum ClaimStatus
+{
+    NotChecked = 0,
+
+    /// <summary>The scene states nothing that needs a fact behind it (a greeting, a call to action, a question).</summary>
+    NoClaim = 1,
+
+    /// <summary>A verified, current fact backs it.</summary>
+    Supported = 2,
+
+    /// <summary>The tenant said something similar but nobody has verified it, or it lacks proof.</summary>
+    Unverified = 3,
+
+    /// <summary>Nothing the tenant has told us backs it.</summary>
+    Unsupported = 4
+}
+
+/// <summary>What kind of picture an asset is. Always shown to the tenant and carried into the finished video's record.</summary>
+public enum StudioAssetKind
+{
+    /// <summary>A picture or photo the tenant uploaded.</summary>
+    Upload = 0,
+
+    /// <summary>A screenshot of the tenant's own app or site, uploaded by the tenant (the studio never takes screenshots itself).</summary>
+    Screenshot = 1,
+
+    /// <summary>A photo from a stock library, copied to the tenant's folder when chosen.</summary>
+    Stock = 2
+}
+
+/// <summary>Where a video render stands.</summary>
+public enum RenderJobStatus
+{
+    /// <summary>Accepted and waiting for its turn.</summary>
+    Queued = 0,
+
+    /// <summary>The narration is being spoken and the pieces gathered.</summary>
+    Preparing = 1,
+
+    /// <summary>With the video renderer.</summary>
+    Rendering = 2,
+
+    Succeeded = 3,
+
+    /// <summary>Ended with an error; the charge was returned.</summary>
+    Failed = 4,
+
+    /// <summary>Stopped by the tenant; the charge was returned.</summary>
+    Cancelled = 5
+}
+
+/// <summary>A step in the life of a script, as the review trail records it.</summary>
+public enum ContentReviewAction
+{
+    /// <summary>Sent for approval.</summary>
+    Submitted = 0,
+
+    /// <summary>Taken back by the person who sent it, to change it.</summary>
+    Withdrawn = 1,
+
+    Approved = 2,
+
+    /// <summary>Sent back with a reason.</summary>
+    Rejected = 3,
+
+    /// <summary>A new draft was started from an approved or rejected script.</summary>
+    Revised = 4
+}
+
+/// <summary>Where a video can be published.</summary>
+public enum SocialPlatform
+{
+    YouTube = 0,
+    Instagram = 1
+}
+
+public enum SocialConnectionStatus
+{
+    Connected = 0,
+
+    /// <summary>The platform no longer accepts the saved sign-in (revoked, expired, password changed): the tenant has to connect again.</summary>
+    NeedsReconnect = 1
+}
+
+public enum PublicationStatus
+{
+    /// <summary>Waiting for its time, or for a retry after a temporary problem.</summary>
+    Scheduled = 0,
+
+    /// <summary>Being sent to the platform right now.</summary>
+    Uploading = 1,
+
+    Published = 2,
+
+    /// <summary>Ended with an error; see the message. Nothing is retried by itself after this.</summary>
+    Failed = 3,
+
+    Cancelled = 4
+}
+
+public enum RenderClipStatus
+{
+    Rendering = 0,
+    Done = 1,
+    Failed = 2
+}
