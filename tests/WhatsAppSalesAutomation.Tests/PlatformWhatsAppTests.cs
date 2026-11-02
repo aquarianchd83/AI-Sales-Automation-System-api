@@ -227,6 +227,124 @@ public sealed class PlatformWhatsAppTests : IDisposable
         Assert.Equal(DeliveryStatus.Sent, (await _db.TenantNotifications.IgnoreQueryFilters().SingleAsync(n => n.EpisodeKey == "e2")).WhatsAppStatus);
     }
 
+    // ── A booking notice: the support phone, and plain text when the template is not available ──
+
+    private async Task<(TenantNotifier Notifier, Tenant Tenant)> BookingSetupAsync(string? supportPhone = "+91 98765 43210", bool whatsApp = true)
+    {
+        await SeedAsync();
+        var tenant = new Tenant
+        {
+            Name = "Acme", Slug = "acme", Status = TenantStatus.Active, BillingAlertEmail = "b@acme.test", BillingAlertPhoneE164 = "+919000000000",
+            BillingAlertWhatsAppEnabled = whatsApp, SupportPhone = supportPhone
+        };
+        _db.Tenants.Add(tenant);
+        await _db.SaveChangesAsync();
+        var notifier = new TenantNotifier(
+            _db, null!, new FakeEmail(), _sender, new FakeNotificationBroadcaster(), new FixedOptions<BillingAlertOptions>(new()),
+            NullLogger<TenantNotifier>.Instance, new PlatformNoticeTemplates(_db, _storage));
+        return (notifier, tenant);
+    }
+
+    private static TenantNotificationRequest Booking(Guid tenantId, string episode = "b1", bool support = true, bool plainText = true) => new(
+        tenantId, TenantNotificationKind.NextStepBooked, null, episode, "A customer booked a demo", "Asha (+919000000001): Demo Mon 2 Nov 4 PM IST.",
+        AlsoWhatsApp: true, ToSupportPhone: support, PlainTextFallback: plainText);
+
+    private Task<WhatsAppSalesAutomation.Domain.Entities.Billing.TenantNotification> NoticeAsync(string episode) =>
+        _db.TenantNotifications.IgnoreQueryFilters().SingleAsync(n => n.EpisodeKey == episode);
+
+    [Fact]
+    public async Task A_booking_notice_goes_as_plain_text_to_the_support_phone_when_its_template_is_not_approved_yet()
+    {
+        var (notifier, tenant) = await BookingSetupAsync();
+
+        await notifier.NotifyAsync(Booking(tenant.Id));
+
+        // The template is still Pending, so the same words go as a plain message - to the support phone, normalized, not the billing alert number.
+        Assert.Empty(_sender.Sent);
+        var text = Assert.Single(_sender.Texts);
+        Assert.Equal("+919876543210", text.To);
+        Assert.Contains("A customer booked a demo", text.Text);
+        Assert.Contains("Asha (+919000000001): Demo Mon 2 Nov 4 PM IST.", text.Text);
+        var notice = await NoticeAsync("b1");
+        Assert.Equal(DeliveryStatus.Sent, notice.WhatsAppStatus);
+        Assert.Contains("plain text", notice.DeliveryNote);
+    }
+
+    [Fact]
+    public async Task Once_the_template_is_approved_the_template_is_sent_and_no_plain_text()
+    {
+        var (notifier, tenant) = await BookingSetupAsync();
+        (await TemplateAsync(TenantNotificationKind.NextStepBooked)).WhatsAppTemplateStatus = WhatsAppTemplateStatus.Approved;
+        await _db.SaveChangesAsync();
+
+        await notifier.NotifyAsync(Booking(tenant.Id));
+
+        Assert.Empty(_sender.Texts);
+        Assert.Equal("+919876543210", Assert.Single(_sender.Sent).To);
+        Assert.Equal("tenant_alert_next_step_booked", _sender.Templates.Single().Template);
+    }
+
+    [Fact]
+    public async Task A_notice_that_does_not_allow_plain_text_is_still_skipped_when_its_template_is_missing()
+    {
+        var (notifier, tenant) = await BookingSetupAsync();
+
+        await notifier.NotifyAsync(Booking(tenant.Id, plainText: false));
+
+        Assert.Empty(_sender.Texts);
+        Assert.Empty(_sender.Sent);
+        Assert.Equal(DeliveryStatus.Skipped, (await NoticeAsync("b1")).WhatsAppStatus);
+    }
+
+    [Fact]
+    public async Task A_plain_text_that_whatsapp_refuses_is_recorded_as_failed_with_the_reason()
+    {
+        var (notifier, tenant) = await BookingSetupAsync();
+        _sender.TextFails = true; // the person has not messaged the platform number in the last 24 hours
+
+        await notifier.NotifyAsync(Booking(tenant.Id));
+
+        var notice = await NoticeAsync("b1");
+        Assert.Equal(DeliveryStatus.Failed, notice.WhatsAppStatus);
+        Assert.Contains("131047", notice.DeliveryNote);
+        // The in-app notice exists whatever happened on WhatsApp.
+        Assert.NotNull(notice);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not a number")]
+    public async Task Without_a_usable_support_phone_the_billing_alert_number_is_used(string? supportPhone)
+    {
+        var (notifier, tenant) = await BookingSetupAsync(supportPhone);
+
+        await notifier.NotifyAsync(Booking(tenant.Id));
+
+        Assert.Equal("+919000000000", Assert.Single(_sender.Texts).To);
+    }
+
+    [Fact]
+    public async Task The_support_phone_is_used_only_by_a_notice_that_asks_for_it()
+    {
+        var (notifier, tenant) = await BookingSetupAsync();
+
+        await notifier.NotifyAsync(Booking(tenant.Id, support: false));
+
+        Assert.Equal("+919000000000", Assert.Single(_sender.Texts).To);
+    }
+
+    [Fact]
+    public async Task A_tenant_that_switched_whatsapp_alerts_off_is_not_sent_plain_text_either()
+    {
+        var (notifier, tenant) = await BookingSetupAsync(whatsApp: false);
+
+        await notifier.NotifyAsync(Booking(tenant.Id));
+
+        Assert.Empty(_sender.Texts);
+        Assert.Empty(_sender.Sent);
+        Assert.Equal(DeliveryStatus.Skipped, (await NoticeAsync("b1")).WhatsAppStatus);
+    }
+
     // ── Editing, restoring and syncing ───────────────────────────────────────────────────
 
     [Fact]

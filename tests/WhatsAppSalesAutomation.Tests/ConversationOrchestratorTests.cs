@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using WhatsAppSalesAutomation.Application.Ai;
+using WhatsAppSalesAutomation.Application.Bookings;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Conversations;
@@ -9,6 +10,7 @@ using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Leads.FollowUps;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -43,6 +45,18 @@ public sealed class ConversationOrchestratorTests : IDisposable
     private bool _serve;
     private readonly List<RetrievedChunk> _retrieved = new();
     private readonly List<(Guid LeadId, string? Reason, int? Months)> _suggested = new();
+    private readonly CapturingTenantNotifier _tenantNotices = new();
+
+    private sealed class CapturingTenantNotifier : ITenantNotifier
+    {
+        public List<TenantNotificationRequest> Sent { get; } = new();
+
+        public Task<bool> NotifyAsync(TenantNotificationRequest request, CancellationToken cancellationToken = default)
+        {
+            Sent.Add(request);
+            return Task.FromResult(true);
+        }
+    }
 
     public ConversationOrchestratorTests()
     {
@@ -122,7 +136,8 @@ public sealed class ConversationOrchestratorTests : IDisposable
             whatsApp, notifications, config, aiUsage,
             new QualificationPlanner(_db, config, NullLogger<QualificationPlanner>.Instance),
             scoring, new AiReplyValidator(), new CrmContextBuilder(_db), followUps,
-            NullLogger<ConversationOrchestrator>.Instance, new ServingSwitch(() => _serve));
+            NullLogger<ConversationOrchestrator>.Instance, new ServingSwitch(() => _serve),
+            new BookingRecorder(_db, _tenantNotices, NullLogger<BookingRecorder>.Instance));
     }
 
     private async Task<Guid> ReceiveAsync(string text, ConversationMode mode)
@@ -153,6 +168,116 @@ public sealed class ConversationOrchestratorTests : IDisposable
         Reply(text, intent: "Interested") with { CannotProceedNow = true, CannotProceedReason = reason, FollowUpInMonths = months, OptOutRequested = optOut };
 
     // ── Interested but cannot go ahead ───────────────────────────────────────────────────────
+
+    // ── A booked demo, visit or appointment ──────────────────────────────────────────────────
+
+    private static AiReplyResult Booked(string text, string? summary = "Demo on Mon 2 Nov at 4:00 PM IST; wants all topics covered.") =>
+        Reply(text, intent: "Interested") with { NextStepBooked = true, NextStepSummary = summary };
+
+    [Fact]
+    public async Task A_confirmed_booking_is_sent_to_the_customer_and_the_tenant_is_told_in_the_app_and_on_whatsapp()
+    {
+        _ai.Replies.Enqueue(Booked("Your demo is scheduled for 4:00 PM on Mon 2 Nov (IST). Our team will be in touch."));
+
+        await ReceiveAsync("timezone: +5:30, all topics", ConversationMode.AI);
+
+        Assert.Equal(new[] { "Your demo is scheduled for 4:00 PM on Mon 2 Nov (IST). Our team will be in touch." }, _sent);
+        var notice = Assert.Single(_tenantNotices.Sent);
+        Assert.Equal(_tenant, notice.TenantId);
+        Assert.Equal(TenantNotificationKind.NextStepBooked, notice.Kind);
+        Assert.True(notice.AlsoWhatsApp);
+        // WhatsApp goes to the support phone on the tenant's profile, and as plain text when the notice's template is not available.
+        Assert.True(notice.ToSupportPhone);
+        Assert.True(notice.PlainTextFallback);
+        // Who and what, so the tenant can act on it without opening the chat.
+        Assert.Contains("Asha (+919000000001)", notice.Body);
+        Assert.Contains("Demo on Mon 2 Nov at 4:00 PM IST", notice.Body);
+
+        // And it is on the tenant's list, as a customer's booking, linked to the conversation.
+        var booking = await _db.NextStepBookings.SingleAsync();
+        Assert.Equal("Demo on Mon 2 Nov at 4:00 PM IST; wants all topics covered.", booking.Summary);
+        Assert.Equal(_conversationId, booking.ConversationId);
+        Assert.Equal(_customerId, booking.CustomerId);
+        Assert.False(booking.IsTest);
+        Assert.Equal("Booking", booking.Kind); // this tenant has not chosen a next step, so there is no more specific word
+    }
+
+    [Fact]
+    public async Task The_booking_is_called_what_the_business_calls_its_next_step()
+    {
+        var tenant = new WhatsAppSalesAutomation.Domain.Entities.Tenancy.Tenant { Id = _tenant, Name = "Clinic", Slug = "clinic", AiConversationGoal = ConversationGoal.Demo };
+        _db.Tenants.Add(tenant);
+        await _db.SaveChangesAsync();
+        _ai.Replies.Enqueue(Booked("Scheduled."));
+
+        await ReceiveAsync("all topics", ConversationMode.AI);
+
+        Assert.Equal("Demo", (await _db.NextStepBookings.SingleAsync()).Kind);
+        Assert.Contains("booked a demo", _tenantNotices.Sent.Single().Title);
+    }
+
+    [Fact]
+    public async Task The_same_booking_confirmed_twice_is_one_booking_and_a_changed_one_is_a_new_booking()
+    {
+        _ai.Replies.Enqueue(Booked("Scheduled for Monday."));
+        _ai.Replies.Enqueue(Booked("Scheduled for Monday."));
+        _ai.Replies.Enqueue(Booked("Moved to Tuesday.", "Demo moved to Tue 3 Nov at 11:00 AM IST."));
+
+        await ReceiveAsync("ok", ConversationMode.AI);
+        await ReceiveAsync("yes", ConversationMode.AI);
+        await ReceiveAsync("make it Tuesday", ConversationMode.AI);
+
+        // The repeat is neither saved nor announced again; the change is both.
+        Assert.Equal(2, await _db.NextStepBookings.CountAsync());
+        Assert.Equal(2, _tenantNotices.Sent.Count);
+        Assert.NotEqual(_tenantNotices.Sent[0].EpisodeKey, _tenantNotices.Sent[1].EpisodeKey);
+    }
+
+    [Fact]
+    public async Task A_reply_that_is_not_a_confirmation_tells_the_tenant_nothing()
+    {
+        _ai.Replies.Enqueue(Reply("Sure - what time zone are you in?"));
+
+        await ReceiveAsync("yes please, a demo", ConversationMode.AI);
+
+        Assert.Empty(_tenantNotices.Sent);
+        Assert.Empty(await _db.NextStepBookings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_booking_with_nothing_to_tell_the_tenant_is_not_a_booking()
+    {
+        _ai.Replies.Enqueue(Booked("Scheduled.", summary: "  "));
+
+        await ReceiveAsync("all topics", ConversationMode.AI);
+
+        Assert.Empty(_tenantNotices.Sent);
+        Assert.Empty(await _db.NextStepBookings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Someone_who_asked_us_to_stop_booked_nothing()
+    {
+        _ai.Replies.Enqueue(Booked("Understood.") with { OptOutRequested = true });
+
+        await ReceiveAsync("stop messaging me", ConversationMode.AI);
+
+        Assert.Empty(_tenantNotices.Sent);
+        Assert.Empty(await _db.NextStepBookings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_booking_held_as_a_draft_for_the_agent_is_not_announced_before_it_is_sent()
+    {
+        _hot = true;
+        _ai.Replies.Enqueue(Booked("Scheduled.") with { BuyingIntentDetected = true });
+
+        await ReceiveAsync("all topics", ConversationMode.Hybrid);
+
+        // Hybrid holds a hot reply as a draft: nothing went to the customer yet, so there is nothing to announce.
+        Assert.Empty(_sent);
+        Assert.Empty(_tenantNotices.Sent);
+    }
 
     [Fact]
     public async Task A_customer_who_cannot_proceed_now_gets_a_follow_up_suggested_and_a_normal_reply()

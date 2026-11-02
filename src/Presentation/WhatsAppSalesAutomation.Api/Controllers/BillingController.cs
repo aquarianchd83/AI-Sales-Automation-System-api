@@ -137,7 +137,13 @@ public class BillingController : ControllerBase
     [HttpGet("quota/ledger")]
     [Authorize(Roles = AppRoles.Admin)]
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetQuotaLedger([FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
-        => Ok(await _quota.GetLedgerAsync(RequireTenantId(), query, cancellationToken));
+        => Ok(await _quota.GetLedgerAsync(RequireTenantId(), query with { WithConversationText = true }, cancellationToken));
+
+    /// <summary>The replies the AI gave in the tenant's Test chat, newest first. Free: they reach the AI provider but take no credits, so they are listed apart from the ledger.</summary>
+    [HttpGet("quota/test-chat")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<PagedResult<TestChatCallDto>>> GetTestChat([FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
+        => Ok(await _quota.GetTestChatAsync(RequireTenantId(), query, cancellationToken));
 
     /// <summary>The tenant's credit history at a glance: totals per kind of entry and per feature over the chosen days, and a
     /// daily series for a graph, optionally narrowed to one feature or kind of entry.</summary>

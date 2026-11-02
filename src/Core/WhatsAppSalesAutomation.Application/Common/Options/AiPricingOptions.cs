@@ -45,5 +45,23 @@ public class AiPricingOptions
         return !string.IsNullOrWhiteSpace(DefaultModel) && Models.TryGetValue(DefaultModel, out var chosen) ? chosen : null;
     }
 
+    /// <summary>The row for the model a provider is configured to run, or null when it has none. Unlike <see cref="RatesFor"/> it never falls back to the
+    /// default model, which belongs to a different provider's call. A dated model id ("claude-haiku-4-5-20251001") matches its row ("claude-haiku-4-5").</summary>
+    public AiModelRates? RatesForConfiguredModel(string provider, string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return null;
+
+        if (Models.TryGetValue($"{provider}/{model}", out var exact))
+            return exact;
+
+        var prefix = provider + "/";
+        return Models
+            .Where(m => m.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && model.StartsWith(m.Key[prefix.Length..], StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(m => m.Key.Length)
+            .Select(m => m.Value)
+            .FirstOrDefault();
+    }
+
     public static string KeyFor(string modelUsed) => modelUsed.Replace(':', '/');
 }

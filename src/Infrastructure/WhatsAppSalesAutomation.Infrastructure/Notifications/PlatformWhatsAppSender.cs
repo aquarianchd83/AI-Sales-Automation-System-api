@@ -62,6 +62,27 @@ public class PlatformWhatsAppSender : IPlatformWhatsAppSender, IPlatformWhatsApp
         }
     }
 
+    public async Task<DeliveryResult> SendTextAsync(string toPhoneE164, string text, CancellationToken cancellationToken = default)
+    {
+        var credentials = Credentials();
+        if (credentials is null)
+        {
+            _logger.LogInformation("WhatsApp text to {To} not sent: the platform WhatsApp number isn't configured", toPhoneE164);
+            return new DeliveryResult(false, "platform WhatsApp number not configured", Skipped: true);
+        }
+
+        try
+        {
+            var result = await _meta.SendTextMessageAsync(credentials, toPhoneE164, text, cancellationToken);
+            return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "WhatsApp text to {To} failed", toPhoneE164);
+            return new DeliveryResult(false, ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default)
     {
         var credentials = Credentials();

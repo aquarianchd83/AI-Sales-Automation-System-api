@@ -65,9 +65,7 @@ public class AiInteraction : BaseEntity, ITenantOwned
     public bool OptOutReported { get; set; }
 
     /// <summary>The language AND script the model read this turn's message as, BCP-47 with a script
-    /// subtag where one is needed: "en", "hi" (Devanagari), "hi-Latn" (Roman Hinglish). Stored per
-    /// turn rather than only on the Customer because the rule for updating the customer's saved
-    /// preference needs the PREVIOUS turn's reading to compare against - see
-    /// ConversationOrchestrator.UpdatePreferredLanguage for why one turn is not enough evidence.</summary>
+    /// subtag where one is needed: "en", "hi" (Devanagari), "hi-Latn" (Roman Hinglish). A reading
+    /// only: the customer's saved language is the one they chose (AiReplyResult.ChosenLanguage).</summary>
     public string? DetectedLanguage { get; set; }
 }

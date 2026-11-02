@@ -22,7 +22,9 @@ public record QuotaLedgerEntryDto(
     string? ReferenceType,
     string? ReferenceId,
     string? Note,
-    DateTime OccurredAtUtc);
+    DateTime OccurredAtUtc,
+    // For an AI reply, the start of the customer's message it answered, so the entry says what it was for. Only filled in for the tenant's own history.
+    string? CustomerText = null);
 
 /// <summary>How many entries of one kind a tenant has, and the units they moved (signed: units in are positive, units out negative).</summary>
 public record QuotaEntryTotalDto(QuotaEntryType EntryType, int Count, decimal Units);
@@ -38,7 +40,12 @@ public record QuotaLedgerSummaryDto(
     int TotalEntries,
     IReadOnlyList<QuotaEntryTotalDto> ByEntryType,
     IReadOnlyList<QuotaFeatureTotalDto> ByFeature,
-    IReadOnlyList<QuotaDailyPointDto> Daily);
+    IReadOnlyList<QuotaDailyPointDto> Daily,
+    // Test chat replies in the range: free, so not among the entries or the credits above.
+    int TestChatReplies = 0);
+
+/// <summary>One reply the AI gave in the tenant's Test chat. It reached the AI provider, but no credits were taken.</summary>
+public record TestChatCallDto(Guid Id, DateTime OccurredAtUtc, string? Model, string? Text = null);
 
 public record QuotaLedgerQuery : Common.Models.PagedRequest
 {
@@ -55,6 +62,9 @@ public record QuotaLedgerQuery : Common.Models.PagedRequest
 
     /// <summary>Last day to include (UTC, the whole day). Left out: up to now.</summary>
     public DateOnly? To { get; init; }
+
+    /// <summary>Add the start of the customer's message to each AI reply entry. Set by the tenant's own screen only: a customer's words are the tenant's, not shown to anyone else.</summary>
+    public bool WithConversationText { get; init; }
 }
 
 /// <summary>A request to spend units. <see cref="OperationKey"/> must be unique per real-world event

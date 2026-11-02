@@ -181,6 +181,26 @@ public sealed class QuotaLedgerServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_day_in_the_history_is_the_tenants_own_day_not_a_UTC_day()
+    {
+        // 20:00 UTC on 12 Sep is 01:30 on 13 Sep in India (the default time zone), so that is the day it belongs to.
+        _clock.UtcNow = new DateTime(2026, 9, 12, 20, 0, 0, DateTimeKind.Utc);
+        await GrantPlanAsync();
+        await SpendAsync(40, "late");
+        var utcDay = new DateOnly(2026, 9, 12);
+        var tenantDay = new DateOnly(2026, 9, 13);
+
+        var onTenantDay = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { From = tenantDay, To = tenantDay, EntryType = QuotaEntryType.Consumption, PageSize = 50 });
+        var onUtcDay = await _service.GetLedgerAsync(_tenant, new QuotaLedgerQuery { From = utcDay, To = utcDay, EntryType = QuotaEntryType.Consumption, PageSize = 50 });
+        var summary = await _service.GetLedgerSummaryAsync(_tenant, 30, from: utcDay, to: tenantDay);
+
+        Assert.Equal(-40m, Assert.Single(onTenantDay.Items).UnitsDelta);
+        Assert.Empty(onUtcDay.Items);
+        Assert.Equal(40m, summary.Daily.Single(d => d.Date == tenantDay).Used);
+        Assert.Equal(0m, summary.Daily.Single(d => d.Date == utcDay).Used);
+    }
+
+    [Fact]
     public async Task Same_operation_key_never_charges_twice()
     {
         await GrantPlanAsync();

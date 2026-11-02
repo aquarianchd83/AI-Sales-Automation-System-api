@@ -32,6 +32,10 @@ public interface IPlatformWhatsAppSender
     Task<DeliveryResult> SendTemplateAsync(
         string toPhoneE164, string templateName, string languageCode, IReadOnlyList<string> parameters,
         CancellationToken cancellationToken = default, string? mediaUrl = null);
+
+    /// <summary>Plain text, with no template. Meta only delivers it inside the 24-hour window after the person last messaged the platform number, so it is
+    /// the fallback for a notice whose template is not available, not the normal way.</summary>
+    Task<DeliveryResult> SendTextAsync(string toPhoneE164, string text, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -105,6 +105,40 @@ public static class AiUses
     public static IReadOnlyList<string> Tasks { get; } = All.Select(u => u.Task).ToList();
 }
 
+public static class AiCallOrigins
+{
+    /// <summary>A tenant trying its own AI in Test chat. It calls the real provider and costs the platform, but takes no credits from the tenant.</summary>
+    public const string TestChat = "TestChat";
+}
+
+/// <summary>Marks the AI calls made inside a scope with where they came from, so the call log can tell a test from a customer's reply:
+/// <c>using var _ = AiCallOrigin.Use(AiCallOrigins.TestChat);</c>.</summary>
+public static class AiCallOrigin
+{
+    private static readonly AsyncLocal<(string? Origin, string? Detail)> State = new();
+
+    public static string? Current => State.Value.Origin;
+
+    /// <summary>A few words saying what the call was about (for a test, the start of what was typed), kept with the call so a screen can say what it was for.</summary>
+    public static string? CurrentDetail => State.Value.Detail;
+
+    public static IDisposable Use(string origin, string? detail = null)
+    {
+        var previous = State.Value;
+        State.Value = (origin, detail);
+        return new Restore(previous);
+    }
+
+    private sealed class Restore : IDisposable
+    {
+        private readonly (string? Origin, string? Detail) _previous;
+
+        public Restore((string? Origin, string? Detail) previous) => _previous = previous;
+
+        public void Dispose() => State.Value = _previous;
+    }
+}
+
 /// <summary>
 /// Names the AI use a one-shot text call is for (keyword suggestions, the description rewrite), so the call can be recorded against it. Set by
 /// the feature around its call: <c>using var _ = AiCallLabel.Use(AiTaskKinds.BusinessKeywordSuggestion);</c>. An unlabelled call is not recorded.

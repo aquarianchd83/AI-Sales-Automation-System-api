@@ -713,6 +713,99 @@ public sealed class ProductKnowledgeServingTests : IDisposable
         Assert.Contains("guarantee", reply.DraftBlocked);
     }
 
+    // A booking confirmed in Test chat is saved and announced to the business, marked as a test, exactly as in live chat.
+
+    private sealed class TenantNotices : WhatsAppSalesAutomation.Application.Notifications.ITenantNotifier
+    {
+        public List<WhatsAppSalesAutomation.Application.Notifications.TenantNotificationRequest> Sent { get; } = new();
+
+        public Task<bool> NotifyAsync(WhatsAppSalesAutomation.Application.Notifications.TenantNotificationRequest request, CancellationToken cancellationToken = default)
+        {
+            Sent.Add(request);
+            return Task.FromResult(true);
+        }
+    }
+
+    private readonly TenantNotices _notices = new();
+
+    private ProductTestChat TestChatWithBookings() =>
+        new(_db, _kb, _chatAi, new WhatsAppSalesAutomation.Application.Ai.AiReplyValidator(), _config, new FakeAiConfig(), _alerts,
+            new WhatsAppSalesAutomation.Application.Bookings.BookingRecorder(_db, _notices, NullLogger<WhatsAppSalesAutomation.Application.Bookings.BookingRecorder>.Instance));
+
+    private static AiReplyResult Confirms(string text, string summary = "Demo on Mon 2 Nov at 4:00 PM IST; all topics.") =>
+        Says(text, "Interested") with { NextStepBooked = true, NextStepSummary = summary };
+
+    [Fact]
+    public async Task A_booking_confirmed_in_test_chat_is_still_shown_and_the_business_is_told_it_is_a_test()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Confirms("Your demo is scheduled for 4:00 PM on Mon 2 Nov (IST). Our team will be in touch."));
+
+        var reply = await TestChatWithBookings().AskAsync(_a, new TestChatRequest("timezone +5:30, all topics", null));
+
+        Assert.Equal("Your demo is scheduled for 4:00 PM on Mon 2 Nov (IST). Our team will be in touch.", reply.Reply);
+        var notice = Assert.Single(_notices.Sent);
+        Assert.Equal(_a, notice.TenantId);
+        Assert.Equal(TenantNotificationKind.NextStepBooked, notice.Kind);
+        Assert.StartsWith("Test:", notice.Title);
+        Assert.Contains("This is a test from Test chat.", notice.Body);
+        Assert.Contains("Demo on Mon 2 Nov at 4:00 PM IST", notice.Body);
+        Assert.True(notice.AlsoWhatsApp);
+        Assert.True(notice.ToSupportPhone);
+        Assert.True(notice.PlainTextFallback);
+
+        // Saved, but marked as a test, with no conversation or customer behind it.
+        var booking = await _db.NextStepBookings.IgnoreQueryFilters().SingleAsync(b => b.TenantId == _a);
+        Assert.True(booking.IsTest);
+        Assert.Null(booking.ConversationId);
+        Assert.Null(booking.CustomerId);
+    }
+
+    [Fact]
+    public async Task Every_test_chat_confirmation_is_announced_so_the_notice_can_be_tried_again_and_again()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Confirms("Scheduled."));
+        _chatAi.Replies.Enqueue(Confirms("Scheduled."));
+
+        await TestChatWithBookings().AskAsync(_a, new TestChatRequest("all topics", null));
+        await TestChatWithBookings().AskAsync(_a, new TestChatRequest("all topics", null));
+
+        Assert.Equal(2, _notices.Sent.Count);
+        Assert.NotEqual(_notices.Sent[0].EpisodeKey, _notices.Sent[1].EpisodeKey);
+    }
+
+    [Fact]
+    public async Task A_test_chat_reply_that_is_not_a_confirmation_or_is_handed_over_tells_nobody()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Says("The consultation fee is Rs 500 for the first visit.", "PriceEnquiry"));
+        await TestChatWithBookings().AskAsync(_a, new TestChatRequest("What is the consultation fee?", null));
+
+        // A confirmation the AI was not confident about is handed to a person, not shown - so there is nothing to announce.
+        _chatAi.Replies.Enqueue(Confirms("Scheduled.") with { ConfidenceScore = 0.1 });
+        var held = await TestChatWithBookings().AskAsync(_a, new TestChatRequest("all topics", null));
+
+        Assert.Equal("HandedOver", held.Outcome);
+        Assert.Empty(_notices.Sent);
+    }
+
+    [Fact]
+    public async Task A_test_booking_is_not_counted_as_a_customers_booking()
+    {
+        await PublishStandardSet();
+        _chatAi.Replies.Enqueue(Confirms("Scheduled."));
+        await TestChatWithBookings().AskAsync(_a, new TestChatRequest("all topics", null));
+
+        var service = new WhatsAppSalesAutomation.Application.Bookings.BookingService(_db);
+        var real = await service.GetPagedAsync(new WhatsAppSalesAutomation.Application.Bookings.BookingQuery { Page = 1, PageSize = 10 });
+        var withTests = await service.GetPagedAsync(new WhatsAppSalesAutomation.Application.Bookings.BookingQuery { Page = 1, PageSize = 10, IncludeTests = true });
+
+        Assert.Equal(0, real.TotalCount);
+        Assert.Equal(1, withTests.TotalCount);
+        Assert.True(withTests.Items.Single().IsTest);
+    }
+
     [Fact]
     public async Task A_low_confidence_reply_or_a_request_for_a_person_is_handed_over_like_live_chat()
     {

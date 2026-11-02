@@ -15,6 +15,8 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// Console still shows a value on first run.</param>
 /// <param name="Options">When set, the value must be one of these: the console shows a dropdown instead of a text box and a save of anything else
 /// is refused.</param>
+/// <param name="HiddenInEditor">Kept as a setting (still stored, still read) but not listed in the admin editor - for a value the editor must not offer
+/// because another screen owns it, such as the per-provider token prices that Model token prices replaced.</param>
 /// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
 /// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
 /// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
@@ -29,7 +31,8 @@ public record AppSettingDefinition(
     string? Description = null,
     bool IsTenantOverridable = false,
     string? DefaultValue = null,
-    IReadOnlyList<string>? Options = null);
+    IReadOnlyList<string>? Options = null,
+    bool HiddenInEditor = false);
 
 /// <summary>
 /// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
@@ -88,22 +91,22 @@ public static class AppSettingCatalog
         new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:ApiVersion", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:BaseUrl", "AiProviders", IsSecret: false),
-        new("AiProviders:Anthropic:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude input for the model above, US dollars per million tokens. Copy it from the provider's price list - it is only used to estimate cost.", DefaultValue: "0"),
-        new("AiProviders:Anthropic:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude output for the model above, US dollars per million tokens.", DefaultValue: "0"),
+        new("AiProviders:Anthropic:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
+        new("AiProviders:Anthropic:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:OpenAI:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns ChatGPT off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:OpenAI:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:OpenAI:ChatModel", "AiProviders", IsSecret: false),
         new("AiProviders:OpenAI:EmbeddingModel", "AiProviders", IsSecret: false),
         new("AiProviders:OpenAI:BaseUrl", "AiProviders", IsSecret: false),
-        new("AiProviders:OpenAI:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT input for the model above, US dollars per million tokens. Copy it from the provider's price list - it is only used to estimate cost.", DefaultValue: "0"),
-        new("AiProviders:OpenAI:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT output for the model above, US dollars per million tokens.", DefaultValue: "0"),
+        new("AiProviders:OpenAI:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
+        new("AiProviders:OpenAI:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:Google:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Gemini off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Google:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:Google:ChatModel", "AiProviders", IsSecret: false),
         new("AiProviders:Google:EmbeddingModel", "AiProviders", IsSecret: false),
         new("AiProviders:Google:BaseUrl", "AiProviders", IsSecret: false),
-        new("AiProviders:Google:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini input for the model above, US dollars per million tokens. Copy it from the provider's price list - it is only used to estimate cost.", DefaultValue: "0"),
-        new("AiProviders:Google:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini output for the model above, US dollars per million tokens.", DefaultValue: "0"),
+        new("AiProviders:Google:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
+        new("AiProviders:Google:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),
 
         // Media - tenant-overridable, see IsTenantOverridable's own doc comment.
         new("Media:MaxSizeBytes", "Media", IsSecret: false, IsTenantOverridable: true),

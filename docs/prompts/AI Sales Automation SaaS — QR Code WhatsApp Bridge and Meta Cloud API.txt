@@ -1,0 +1,519 @@
+# Senior Business Analyst Prompt: Configurable WhatsApp Provider Architecture
+## AI Sales Automation SaaS — QR Code WhatsApp Bridge and Meta Cloud API
+
+### 1. Role and Responsibilities
+
+Act as a **Senior Business Analyst, Solution Architect, Product Owner, and Technical Business Analyst** with experience in multi-tenant SaaS platforms, ASP.NET Core, Angular, WhatsApp integrations, campaign management, prepaid billing, and AI-powered customer communication.
+
+Your task is to analyze the existing AI Sales Automation SaaS repository and prepare a complete, implementation-ready business and technical specification for introducing a platform-admin-controlled WhatsApp provider configuration.
+
+Do not begin by rewriting the existing WhatsApp integration. First understand the current implementation, document the requirements, identify dependencies and risks, and propose the safest migration strategy.
+
+Use the existing repository as the source of truth for current application behavior.
+
+---
+
+### 2. Business Objective
+
+The platform currently uses the Meta WhatsApp Cloud API for sending and receiving WhatsApp messages.
+
+Due to implementation complexity and integration issues, the business wants to introduce a QR-code-based WhatsApp Bridge as an alternative messaging provider.
+
+The platform administrator must be able to select the active WhatsApp integration from the platform administration panel.
+
+The supported configuration options are:
+
+1. Meta WhatsApp Cloud API
+2. QR-Code WhatsApp Bridge
+
+The selected provider must be configurable without requiring application code changes, recompilation, or deployment for routine provider switching, wherever the existing architecture permits.
+
+The change must not unnecessarily modify the existing lead discovery engine, AI conversation engine, campaign management, tenant onboarding, customer management, or prepaid wallet.
+
+**Primary business objective:** Make WhatsApp messaging provider-independent while preserving existing business workflows and supporting controlled provider switching.
+
+---
+
+### 3. Mandatory Repository Analysis
+
+Before proposing implementation changes, inspect the complete relevant repository structure.
+
+Identify and document:
+
+- Frontend framework and existing platform-admin screens.
+- Backend architecture and ASP.NET Core version.
+- Database technology, ORM, entities, repositories, and migrations.
+- Existing Meta Cloud API service classes, controllers, DTOs, configuration, and authentication flows.
+- WhatsApp webhook endpoints and event-processing logic.
+- Lead discovery, lead verification, DND handling, and consent management.
+- Campaign creation, scheduling, execution, retries, and reporting.
+- AI conversation services and incoming-message processing.
+- Tenant management and tenant-isolation mechanisms.
+- Existing prepaid wallet, usage ledger, reservations, refunds, and billing rules.
+- Background jobs, Hangfire jobs, queues, scheduled workers, and retry policies, where present.
+- Logging, exception handling, monitoring, and audit trails.
+- Existing automated tests and integration-test infrastructure.
+
+Search for all direct references to the Meta Cloud API. Determine which application services are coupled to Meta-specific endpoints, payloads, identifiers, and response models.
+
+Produce a dependency map before recommending code changes.
+
+Do not assume that a feature or service exists merely because it is described in this specification. Verify it in the repository and distinguish existing functionality from proposed functionality.
+
+---
+
+### 4. Functional Requirements: Platform Administration
+
+Introduce a new configuration section named **WhatsApp Provider Configuration** in the platform-admin panel.
+
+#### 4.1 Provider Selection
+
+Provide a dropdown or radio selection with these options:
+
+- Meta WhatsApp Cloud API
+- QR-Code WhatsApp Bridge
+
+Display the currently selected provider and its operational status.
+
+The administrator must be able to save the configuration and see whether the change was successfully applied.
+
+#### 4.2 Provider Configuration
+
+When Meta Cloud API is selected, display the applicable existing Meta configuration, including the relevant credentials, WABA information, phone-number configuration, webhook settings, and other settings already supported by the repository.
+
+When QR-Code WhatsApp Bridge is selected, display only the settings required by the selected bridge provider, such as:
+
+- Bridge API base URL.
+- Authentication configuration.
+- Webhook configuration and verification secret.
+- Session-management settings.
+- Connection-health and reconnection settings.
+- Provider-specific messaging capabilities.
+
+The exact fields must be derived from the chosen bridge provider's actual documentation.
+
+Never expose secret values to unauthorized users. Use masked fields and secure server-side secret storage.
+
+#### 4.3 Configuration Validation
+
+Before saving a configuration:
+
+- Validate required fields.
+- Validate URL formats.
+- Validate that the selected provider's configuration is complete.
+- Validate provider connectivity where a documented health-check endpoint exists.
+- Display actionable error messages.
+- Do not overwrite a working configuration with invalid settings.
+- Record the administrator, timestamp, previous configuration reference, and new configuration reference in the audit log.
+
+Do not store credentials, session tokens, or QR authentication secrets in plain text in logs or browser-accessible configuration objects.
+
+#### 4.4 Platform-Level Scope
+
+The provider selector is controlled by the platform administrator.
+
+Initially, the selected provider applies to all tenants that use the platform's shared messaging configuration.
+
+However, analyze whether the existing architecture has tenant-specific WhatsApp credentials or phone numbers. Do not assume that selecting a single global provider means all tenants can share one WhatsApp session.
+
+If tenant-specific connections are required, separate:
+
+- Platform-wide provider selection.
+- Tenant-specific WhatsApp connection records.
+- Tenant-specific credentials and sessions.
+- Tenant-specific sending eligibility and connection health.
+
+Do not implement tenant-level provider overrides unless they are explicitly approved as a separate business requirement.
+
+---
+
+### 5. Functional Requirements: QR-Code Connection Workflow
+
+Design a complete QR-code-based WhatsApp connection process for the selected bridge provider.
+
+#### 5.1 Connection Initiation
+
+The authorized platform administrator or tenant administrator, according to the approved access model, must be able to initiate a connection.
+
+The system must:
+
+1. Identify the relevant tenant and WhatsApp connection.
+2. Request a new connection or pairing session from the bridge provider.
+3. Generate or retrieve the QR code using the provider's documented API.
+4. Display the QR code in the appropriate UI.
+5. Display its expiration time and connection status, where supported.
+6. Allow the user to refresh or cancel the connection request.
+
+QR codes and pairing tokens must be treated as temporary authentication material. They must not be persisted in logs, exposed to unrelated tenants, or cached beyond their intended lifetime.
+
+#### 5.2 QR-Code Scanning
+
+Display instructions for the authorized WhatsApp account owner to scan the QR code using the supported WhatsApp application and device-linking workflow.
+
+The system must not mark the connection as successful merely because the QR code was displayed or scanned.
+
+Connection success must be confirmed through the bridge provider's documented connection-status mechanism.
+
+#### 5.3 Connection Status
+
+Support the following application-level statuses, mapping provider-specific statuses where necessary:
+
+- Not Connected
+- Connection Initiated
+- QR Code Available
+- Awaiting Authentication
+- Connected
+- Disconnected
+- Reconnecting
+- Connection Failed
+- Disabled
+
+Do not invent provider statuses. Maintain a mapping between the application's internal status model and the provider's actual status responses or webhook events.
+
+#### 5.4 Session Lifecycle
+
+Document and implement the appropriate workflows for:
+
+- Initial connection.
+- Session expiration.
+- Manual disconnection.
+- Unexpected disconnection.
+- Reconnection.
+- Provider restart.
+- Credential or session invalidation.
+- Account removal.
+- Connection-health monitoring.
+
+Reconnection must not trigger duplicate campaigns or duplicate message sends.
+
+The system must not silently fall back to Meta Cloud API when a QR bridge disconnects. A provider switch must follow an explicit, auditable configuration change or an explicitly approved fallback policy.
+
+---
+
+### 6. WhatsApp Provider Abstraction
+
+Analyze the existing architecture and propose a provider-independent messaging interface.
+
+A conceptual interface could include:
+
+- Connect or initialize a channel.
+- Retrieve connection status.
+- Disconnect a channel.
+- Send a text message.
+- Send a template message, if supported.
+- Send supported media.
+- Receive inbound messages through normalized events.
+- Receive delivery and read statuses, where supported.
+- Retrieve message details where the provider supports it.
+- Process provider errors.
+- Perform health checks.
+- Support documented retry and reconciliation operations.
+
+These are conceptual business capabilities, not a requirement to expose identical APIs for every provider.
+
+Document which capabilities are supported by Meta Cloud API, which are supported by the selected bridge, and which require different handling.
+
+Create a capability matrix and identify any feature that cannot be supported consistently across both providers.
+
+Do not claim that the bridge supports approved templates, delivery receipts, read receipts, media, group messaging, message history, or other features until its documentation confirms them.
+
+All provider-specific request and response formats must remain inside their respective adapter implementations.
+
+The campaign service and AI conversation service must use normalized application contracts rather than calling provider-specific endpoints directly.
+
+---
+
+### 7. Campaign Execution Requirements
+
+Preserve the current business workflow:
+
+Lead Discovery → Lead Verification → DND/Consent Checks → Campaign Creation → Message Dispatch → Webhook Processing → Conversation Management → Reporting.
+
+The selected provider must be resolved by the backend at the appropriate dispatch boundary.
+
+For every campaign execution:
+
+1. Resolve the tenant's authorized WhatsApp connection.
+2. Confirm that the selected provider is correctly configured.
+3. Confirm that the connection is healthy.
+4. Validate recipient eligibility, consent, opt-out status, and applicable messaging rules.
+5. Validate template requirements where applicable.
+6. Validate wallet availability and billing eligibility.
+7. Dispatch the message through the selected provider.
+8. Persist the provider message ID and normalized response.
+9. Process subsequent delivery, failure, or inbound-message events.
+10. Update campaign analytics and billing records.
+
+If the provider is disconnected, invalid, or unavailable, the system must follow the approved failure policy.
+
+It must not silently send the same campaign message through another provider, because the original request may already have been accepted.
+
+Implement idempotency, duplicate-event protection, and reconciliation for ambiguous send outcomes.
+
+---
+
+### 8. Webhook Architecture
+
+Analyze the existing webhook implementation before introducing new endpoints.
+
+Determine whether both providers can use a shared webhook endpoint with provider-specific validation or require separate endpoints.
+
+The webhook pipeline must:
+
+- Validate provider authenticity.
+- Normalize inbound events.
+- Resolve the correct tenant and channel using trusted identifiers.
+- Persist events reliably.
+- Deduplicate events.
+- Process events asynchronously where appropriate.
+- Update message status and conversation state.
+- Trigger AI responses only for eligible inbound messages.
+- Avoid duplicate wallet debits.
+- Record actionable failures and provide operational diagnostics.
+
+Never trust an unverified webhook payload to establish tenant identity.
+
+Do not assume the two providers use the same webhook signature algorithm, event structure, retry behavior, or delivery guarantees.
+
+---
+
+### 9. Prepaid Wallet and Billing
+
+Preserve the existing centralized prepaid wallet and billing engine.
+
+Provider switching must not create a new wallet or reset existing balances.
+
+Analyze the existing billing rules and document how provider-specific costs will be reconciled.
+
+The specification must cover:
+
+- Pre-send wallet validation.
+- Credit reservation, if supported by the existing system.
+- Successful message submission.
+- Failed message submission.
+- Ambiguous submission outcomes.
+- Provider billing reconciliation.
+- Duplicate webhook protection.
+- Refunds and reservation releases.
+- AI usage charges.
+- Provider cost versus platform markup.
+- Tenant-level usage reporting.
+
+Do not assume that a provider's accepted response means the message was delivered or that it incurred the same charge as a delivered message.
+
+Preserve existing financial rules unless a change is explicitly approved.
+
+---
+
+### 10. Security, Compliance, and Business Risk
+
+Conduct a dedicated risk assessment for QR-code-based WhatsApp sessions.
+
+The specification must cover:
+
+- Whether the bridge uses an officially supported WhatsApp Business integration or an unofficial WhatsApp Web session.
+- Provider authorization and commercial-use terms.
+- Account restriction and suspension risk.
+- Session-token protection.
+- Credential encryption and rotation.
+- Tenant isolation.
+- Webhook authenticity.
+- Unauthorized session access.
+- Audit logging.
+- Data retention and deletion.
+- Rate limiting and abuse prevention.
+- Customer consent and opt-out enforcement.
+- Applicable WhatsApp messaging policies.
+
+The QR-code implementation must not bypass consent requirements, business messaging rules, template restrictions applicable to the relevant platform, or rate limits.
+
+If the proposed bridge is unofficial or its authorization status cannot be established, document that as a production-readiness blocker requiring explicit business and security review.
+
+Do not represent QR-code connectivity as a guaranteed workaround for Meta restrictions.
+
+---
+
+### 11. Provider Switching and Migration
+
+Define the exact behavior when the platform administrator changes the selected provider.
+
+The specification must answer:
+
+- Does the change apply immediately or only to newly started campaigns?
+- What happens to campaigns already in progress?
+- What happens to queued messages?
+- How are existing message IDs and conversation records preserved?
+- Are existing tenant WhatsApp connections retained?
+- Must tenants reconnect when the provider changes?
+- How are webhook subscriptions updated?
+- How are provider-specific credentials validated?
+- How are in-flight requests and retries handled?
+- How is the previous configuration restored if activation fails?
+
+Recommend a safe configuration state machine.
+
+Do not switch providers while a message request is in an ambiguous state without reconciliation.
+
+Do not migrate session credentials or assume a QR session can be converted into a Cloud API registration.
+
+The existing Meta implementation must remain available as a selectable option unless the business explicitly approves its removal.
+
+---
+
+### 12. Non-Functional Requirements
+
+Document requirements for:
+
+- Availability and reliability.
+- Response times and timeouts.
+- Background processing.
+- Retry policies and dead-letter handling, where supported by the existing architecture.
+- Scalability across tenants.
+- Observability and diagnostics.
+- Secure secret storage.
+- Database consistency.
+- Idempotency.
+- Rate limiting.
+- Disaster recovery.
+- Provider outages.
+- Maintainability and automated testing.
+
+Identify any requirements that cannot be guaranteed by an external bridge provider.
+
+---
+
+### 13. Required Business Analysis Deliverables
+
+Produce the following documents in order.
+
+**Deliverable 1: Existing System Assessment**
+
+Document the current architecture, provider dependencies, existing workflows, affected modules, and technical debt.
+
+**Deliverable 2: Business Requirements Document (BRD)**
+
+Include:
+
+- Business objective.
+- Problem statement.
+- Scope and exclusions.
+- Stakeholders.
+- Business requirements.
+- Assumptions and constraints.
+- Business rules.
+- Risks and dependencies.
+- Success criteria.
+
+**Deliverable 3: Functional Requirements Specification (FRS)**
+
+Include functional requirements with unique IDs, descriptions, actors, preconditions, main flows, alternative flows, exceptions, and acceptance criteria.
+
+**Deliverable 4: User Stories and Acceptance Criteria**
+
+Create implementation-ready stories for:
+
+- Platform-admin provider selection.
+- Provider configuration validation.
+- QR connection initiation.
+- QR display and expiration.
+- Connection status monitoring.
+- Manual disconnect and reconnect.
+- Campaign dispatch.
+- Inbound webhooks.
+- Delivery-status processing.
+- Wallet reconciliation.
+- Provider switching.
+- Failure handling and recovery.
+
+Use Given/When/Then acceptance criteria.
+
+**Deliverable 5: Solution Architecture Specification**
+
+Include:
+
+- Component diagram.
+- Sequence diagrams.
+- Provider adapter design.
+- Configuration resolution.
+- Tenant/channel mapping.
+- Webhook processing.
+- Message lifecycle.
+- Provider switching.
+- Failure and recovery flows.
+
+**Deliverable 6: Data Model and Database Changes**
+
+Document required tables, fields, relationships, indexes, unique constraints, migrations, audit records, and data-retention requirements.
+
+Reuse existing entities wherever appropriate.
+
+**Deliverable 7: API Contract Specification**
+
+Document proposed endpoints for configuration management, connection initiation, QR retrieval, connection status, disconnect, messaging, and webhooks.
+
+Clearly distinguish existing endpoints from new endpoints.
+
+Provider-specific API contracts must be verified against the selected provider's documentation.
+
+**Deliverable 8: Security and Risk Assessment**
+
+Include a risk register with severity, likelihood, impact, mitigation, ownership, and go/no-go criteria.
+
+**Deliverable 9: Test Strategy**
+
+Include unit tests, integration tests, end-to-end tests, multi-tenant isolation tests, provider outage tests, duplicate-event tests, billing tests, session-expiration tests, and migration tests.
+
+**Deliverable 10: Implementation Plan**
+
+Provide an ordered, incremental implementation plan with dependencies, impacted files, expected changes, testing gates, rollback strategy, and deployment considerations.
+
+---
+
+### 14. Acceptance Criteria
+
+The solution is acceptable only when all of the following conditions are met:
+
+1. A platform administrator can select and save the supported WhatsApp provider.
+2. Invalid configuration cannot replace a working configuration.
+3. QR connection is completed only after provider-confirmed authentication.
+4. Connection status is accurately reflected in the administration UI.
+5. Existing lead discovery and campaign creation continue to function.
+6. Campaign messages are dispatched through the configured provider.
+7. Incoming messages are mapped to the correct tenant and conversation.
+8. Webhook processing is authenticated and idempotent.
+9. Existing wallet balances and financial records are preserved.
+10. Duplicate events cannot create duplicate AI responses or wallet debits.
+11. Provider disconnections are handled without uncontrolled message retries.
+12. Switching providers does not silently duplicate messages or abandon in-flight work.
+13. Provider-specific capabilities and limitations are documented.
+14. Security and compliance risks are assessed before production activation.
+15. The original Cloud API implementation remains usable after the change.
+16. All relevant automated tests pass and the changes are documented.
+
+---
+
+### 15. Working Instructions for the AI Coding Assistant
+
+Follow these phases strictly.
+
+**Phase A — Discovery:** Inspect the repository and identify existing functionality. Do not modify code.
+
+**Phase B — Analysis:** Produce the BRD, FRS, user stories, architecture assessment, risks, and acceptance criteria.
+
+**Phase C — Design Review:** Identify unresolved business decisions, provider-specific dependencies, and potential regressions. Request clarification only for decisions that materially affect the design.
+
+**Phase D — Implementation Planning:** Map every approved requirement to the existing codebase and propose incremental changes.
+
+**Phase E — Implementation:** After the analysis and design are approved, implement the changes in small, testable increments. Reuse existing services and conventions. Do not rewrite unrelated modules.
+
+**Phase F — Verification:** Run the relevant tests, document results, verify tenant isolation, test both provider configurations, and report any unresolved issues.
+
+**Phase G — Delivery:** Provide a summary of implemented changes, files modified, migrations required, configuration steps, deployment steps, known limitations, rollback instructions, and test results.
+
+Do not fabricate repository findings, provider API capabilities, successful tests, or completed implementation steps.
+
+### Final Expected Outcome
+
+Deliver an implementation-ready specification for a **provider-independent WhatsApp messaging layer controlled by platform administration**, allowing the existing AI Sales Automation SaaS to use either Meta Cloud API or a QR-code-based bridge while preserving business workflows, tenant isolation, AI automation, campaign execution, and centralized prepaid billing.
+
+The priority is a safe, maintainable, reversible provider integration—not merely making a QR code appear and sending a test message.

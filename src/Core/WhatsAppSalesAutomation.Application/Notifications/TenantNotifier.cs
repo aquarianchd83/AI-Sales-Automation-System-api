@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Platform;
@@ -100,7 +101,13 @@ public class TenantNotifier : ITenantNotifier
                 if (sent.Note is not null) notes.Add($"email: {sent.Note}");
             }
 
-            if (!request.AlsoWhatsApp || !tenant.BillingAlertWhatsAppEnabled || string.IsNullOrWhiteSpace(tenant.BillingAlertPhoneE164))
+            // The number WhatsApp goes to: the support phone for a notice that asks for it (when it is one WhatsApp can use), otherwise - and as
+            // the fallback - the billing alert number.
+            var whatsAppTo = tenant.BillingAlertPhoneE164;
+            if (request.ToSupportPhone && PhoneNumberNormalizer.TryNormalize(tenant.SupportPhone, out var support))
+                whatsAppTo = support;
+
+            if (!request.AlsoWhatsApp || !tenant.BillingAlertWhatsAppEnabled || string.IsNullOrWhiteSpace(whatsAppTo))
             {
                 notification.WhatsAppStatus = DeliveryStatus.Skipped;
                 notes.Add(!request.AlsoWhatsApp ? "whatsapp: not used for this notice" : "whatsapp: opted out or no number on file");
@@ -111,18 +118,29 @@ public class TenantNotifier : ITenantNotifier
                 if (_templates is null)
                 {
                     sent = await _whatsApp.SendTemplateAsync(
-                        tenant.BillingAlertPhoneE164, _options.WhatsAppTemplateName, _options.WhatsAppTemplateLanguage,
+                        whatsAppTo, _options.WhatsAppTemplateName, _options.WhatsAppTemplateLanguage,
                         new[] { tenant.Name, request.Body }, cancellationToken);
                 }
                 else
                 {
-                    // The platform admin owns one template per kind of notice; one that is missing, switched off or not yet approved by Meta
-                    // is skipped with the reason on the notification - never sent as something else.
+                    // The platform admin owns one template per kind of notice. One that is missing, switched off or not yet approved by Meta is skipped
+                    // with the reason on the notification - unless the notice allows plain text, when the same words go as a plain message instead.
                     var resolution = await _templates.ResolveAsync(request.Kind, tenant.Name, request.Title, request.Body, cancellationToken);
-                    sent = resolution.Message is { } message
-                        ? await _whatsApp.SendTemplateAsync(
-                            tenant.BillingAlertPhoneE164, message.TemplateName, message.Language, message.Parameters, cancellationToken, message.MediaUrl)
-                        : new DeliveryResult(false, resolution.SkipNote, Skipped: true);
+                    if (resolution.Message is { } message)
+                    {
+                        sent = await _whatsApp.SendTemplateAsync(whatsAppTo, message.TemplateName, message.Language, message.Parameters, cancellationToken, message.MediaUrl);
+                    }
+                    else if (request.PlainTextFallback)
+                    {
+                        sent = await _whatsApp.SendTextAsync(whatsAppTo, $"{request.Title}\n\n{request.Body}", cancellationToken);
+                        notes.Add(sent.Success
+                            ? $"whatsapp: sent as plain text ({resolution.SkipNote})"
+                            : $"whatsapp: plain text fallback after: {resolution.SkipNote}");
+                    }
+                    else
+                    {
+                        sent = new DeliveryResult(false, resolution.SkipNote, Skipped: true);
+                    }
                 }
 
                 notification.WhatsAppStatus = sent.Skipped ? DeliveryStatus.Skipped : sent.Success ? DeliveryStatus.Sent : DeliveryStatus.Failed;

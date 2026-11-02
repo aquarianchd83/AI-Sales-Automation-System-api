@@ -30,6 +30,9 @@ public class AiExecution : BaseEntity
 
     public string? Model { get; set; }
 
+    /// <summary>Where the call came from when that is not an ordinary live use - "TestChat" for a tenant's Test chat, which never takes credits. Null for everything else.</summary>
+    public string? Origin { get; set; }
+
     public AiExecutionMode Mode { get; set; }
 
     public AiExecutionStatus Status { get; set; }

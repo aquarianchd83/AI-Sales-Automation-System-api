@@ -149,6 +149,8 @@ public interface IApplicationDbContext
 
     DbSet<TenantFeatureCap> TenantFeatureCaps { get; }
 
+    DbSet<NextStepBooking> NextStepBookings { get; }
+
     DbSet<CreditPack> CreditPacks { get; }
 
     DbSet<PlanPrice> PlanPrices { get; }
