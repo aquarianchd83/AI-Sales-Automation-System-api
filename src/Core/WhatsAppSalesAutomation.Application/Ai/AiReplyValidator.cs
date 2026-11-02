@@ -133,7 +133,7 @@ public class AiReplyValidator : IAiReplyValidator
 
         // ── Product knowledge served to chat (the tenant's switch ON) ───────────────────────
         if (context.ProductKnowledgeServing)
-            ValidateAgainstPublishedKnowledge(text, intent, context, failures);
+            ValidateAgainstPublishedKnowledge(text, intent, context, failures, answeredLanguageQuestion: !string.IsNullOrWhiteSpace(result.ChosenLanguage));
 
         return new ValidatedReply(
             CanSend: !failures.Any(f => f.Blocking),
@@ -153,7 +153,11 @@ public class AiReplyValidator : IAiReplyValidator
             // Someone who asked us to stop is not "interested but not now", whatever else the model reported.
             CannotProceedNow: result.CannotProceedNow && !result.OptOutRequested,
             CannotProceedReason: Truncate(result.CannotProceedReason, 300),
-            FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null);
+            FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null,
+            ChosenLanguage: Truncate(result.ChosenLanguage, 10),
+            // A booking with nothing to tell the tenant is not one, and someone who asked us to stop booked nothing.
+            NextStepBooked: result.NextStepBooked && !result.OptOutRequested && !string.IsNullOrWhiteSpace(result.NextStepSummary),
+            NextStepSummary: Truncate(result.NextStepSummary, 400));
     }
 
     /// <summary>Intents where the customer wants the business to state something: a reply to one of these needs approved knowledge behind it.</summary>
@@ -172,7 +176,7 @@ public class AiReplyValidator : IAiReplyValidator
     ///    (not merely in the customer's own message - repeating what they said is not backing it);
     ///  - when nothing approved covers a question, the reply may only be ONE clarifying question; anything else is blocked, so the conversation goes to a person.
     /// </summary>
-    private static void ValidateAgainstPublishedKnowledge(string text, string intent, AiConversationContext context, List<ValidationFailure> failures)
+    private static void ValidateAgainstPublishedKnowledge(string text, string intent, AiConversationContext context, List<ValidationFailure> failures, bool answeredLanguageQuestion)
     {
         var approved = ClaimRules.NormalizeForClaims(string.Join(" ", context.GroundingChunks.Select(c => c.Text)));
         var unbacked = ClaimRules.MaterialClaims(text).Where(c => !approved.Contains(c.Needle, StringComparison.Ordinal)).Select(c => c.Display).ToList();
@@ -184,7 +188,9 @@ public class AiReplyValidator : IAiReplyValidator
                 Blocking: true));
         }
 
-        if (context.GroundingChunks.Count == 0 && KnowledgeSeekingIntents.Contains(intent))
+        // "Hinglish" in answer to "which language?" is not a question about the business, so finding nothing for it is not a knowledge miss.
+        // Any number or claim in the reply is still checked above.
+        if (context.GroundingChunks.Count == 0 && KnowledgeSeekingIntents.Contains(intent) && !answeredLanguageQuestion)
         {
             var clarifying = IsSingleQuestion(text);
             failures.Add(new ValidationFailure(

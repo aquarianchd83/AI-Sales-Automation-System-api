@@ -80,3 +80,9 @@ public record LeadQualificationDto(
 /// <summary>A human correcting or supplying a value on the lead screen. Stored with
 /// ExtractionConfidence 1.0 and CapturedByUserId set, which also means it is never re-asked.</summary>
 public record SetLeadQualificationValueRequest(string Value);
+
+/// <summary>The one closing step the AI may invite customers to (a demo, a site visit...) and the tenant's own
+/// one-line description of it. <paramref name="Goal"/> is a <c>ConversationGoal</c> name; "Enquiry" means nothing is offered.</summary>
+public record NextStepDto(string Goal, string? Detail);
+
+public record SetNextStepRequest(string Goal, string? Detail);

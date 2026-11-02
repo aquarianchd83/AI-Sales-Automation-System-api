@@ -90,6 +90,16 @@ public class QualificationController : ControllerBase
         return Ok(await _qualification.SeedDefaultsAsync(tenantId, cancellationToken));
     }
 
+    /// <summary>The one next step (demo, site visit...) the AI may invite customers to, once, mid-conversation. "Enquiry" = none.</summary>
+    [HttpGet("next-step")]
+    public async Task<ActionResult<NextStepDto>> GetNextStep(CancellationToken cancellationToken)
+        => Ok(await _qualification.GetNextStepAsync(CurrentTenantId(), cancellationToken));
+
+    [HttpPut("next-step")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<NextStepDto>> SetNextStep([FromBody] SetNextStepRequest request, CancellationToken cancellationToken)
+        => Ok(await _qualification.SetNextStepAsync(CurrentTenantId(), request, cancellationToken));
+
     [HttpGet("leads/{leadId:guid}")]
     public async Task<ActionResult<LeadQualificationDto>> GetLeadQualification(Guid leadId, CancellationToken cancellationToken)
         => Ok(await _qualification.GetLeadQualificationAsync(leadId, cancellationToken));

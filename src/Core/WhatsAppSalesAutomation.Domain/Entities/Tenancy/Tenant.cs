@@ -111,6 +111,11 @@ public class Tenant : BaseEntity
     /// builder gets "schedule a site visit".</summary>
     public ConversationGoal AiConversationGoal { get; set; } = ConversationGoal.Enquiry;
 
+    /// <summary>One line the tenant writes about the offer in <see cref="AiConversationGoal"/> - "Free 30-minute
+    /// demo on Zoom, Mon-Sat". It is the only thing the AI may say about the offer, so it cannot invent one.
+    /// Ignored while the goal is <see cref="ConversationGoal.Enquiry"/> (nothing is offered).</summary>
+    public string? AiConversationGoalDetail { get; set; }
+
     /// <summary>Whether the AI may say anything to a customer about how they are assessed or ranked.
     /// Off by default: a lead score is internal, and a customer told they scored 42 is a customer lost.</summary>
     public bool AiMayDiscloseLeadScore { get; set; }

@@ -16,6 +16,7 @@ public class AiExecutionConfiguration : IEntityTypeConfiguration<AiExecution>
         builder.Property(e => e.RequestedProvider).IsRequired().HasMaxLength(20);
         builder.Property(e => e.Provider).IsRequired().HasMaxLength(20);
         builder.Property(e => e.Model).HasMaxLength(100);
+        builder.Property(e => e.Origin).HasMaxLength(20);
         builder.Property(e => e.Mode).HasConversion<string>().HasMaxLength(10);
         builder.Property(e => e.Status).HasConversion<string>().HasMaxLength(10);
         builder.Property(e => e.FallbackFromProvider).HasMaxLength(20);

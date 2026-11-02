@@ -40,7 +40,8 @@ public class PlatformTenantQuotaController : ControllerBase
 
     [HttpGet("ledger")]
     public async Task<ActionResult<PagedResult<QuotaLedgerEntryDto>>> GetLedger(Guid tenantId, [FromQuery] QuotaLedgerQuery query, CancellationToken cancellationToken)
-        => Ok(await _quota.GetLedgerAsync(tenantId, query, cancellationToken));
+        // A customer's words belong to the tenant: the platform admin's view of its history never carries them, whatever the request asks for.
+        => Ok(await _quota.GetLedgerAsync(tenantId, query with { WithConversationText = false }, cancellationToken));
 
     /// <summary>Totals over the whole credit history and a daily series for charting.</summary>
     [HttpGet("ledger/summary")]

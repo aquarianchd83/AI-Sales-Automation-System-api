@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Ai;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
+using WhatsAppSalesAutomation.Application.Bookings;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
+using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -26,7 +29,8 @@ public record TestChatReply(string? Reply, string Outcome, string Why, IReadOnly
 
 /// <summary>
 /// A tester talking to the AI as a customer would, answered only from the tenant's published product knowledge - the same retrieval, prompt and reply checks as
-/// live chat, so what is said here is what customers would be told. Nothing is stored or sent: no conversation, lead, WhatsApp message or credit is used.
+/// live chat, so what is said here is what customers would be told. No conversation, lead, WhatsApp message to a customer or credit is used. The one thing that does
+/// go out is the business's own notice when the AI confirms a booking (marked as a test), so that can be tried too.
 /// It works whether or not the platform administrator has switched live chat over, so the tenant can try their knowledge first.
 /// </summary>
 public interface IProductTestChat
@@ -46,10 +50,12 @@ public sealed class ProductTestChat : IProductTestChat
     private readonly ITenantConfigOverrideProvider _config;
     private readonly IPlatformAiConfigProvider _platformAi;
     private readonly IPlatformSetupAlerts _alerts;
+    private readonly IBookingRecorder? _bookings;
 
     public ProductTestChat(IApplicationDbContext db, IKnowledgeBaseService knowledge, IAiService ai, IAiReplyValidator validator, ITenantConfigOverrideProvider config,
-        IPlatformAiConfigProvider platformAi, IPlatformSetupAlerts alerts)
+        IPlatformAiConfigProvider platformAi, IPlatformSetupAlerts alerts, IBookingRecorder? bookings = null)
     {
+        _bookings = bookings;
         _db = db;
         _knowledge = knowledge;
         _ai = ai;
@@ -99,16 +105,28 @@ public sealed class ProductTestChat : IProductTestChat
         var retrieved = await _knowledge.RetrievePublishedProductKnowledgeAsync(SearchText(message, history), ct);
         var snippets = retrieved.Select(r => new AiKnowledgeSnippet(r.ChunkId, r.Text, r.RelevanceScore, r.KnowledgeItemId, r.KnowledgeVersionId, r.IsMaterialClaim)).ToList();
 
+        // The tenant's own customer questions, in the order live chat asks them, so the test shows what a real customer would be asked. Nothing is
+        // remembered between turns here, so the AI relies on the conversation so far to avoid asking something twice.
+        var options = await _config.GetAiOptionsAsync(ct);
+        var questions = (await _db.QualificationFields.AsNoTracking()
+                .Where(f => f.TenantId == tenantId && f.IsActive)
+                .OrderByDescending(f => f.IsRequired).ThenByDescending(f => f.Priority).ThenBy(f => f.SortOrder).ThenBy(f => f.FieldKey)
+                .ToListAsync(ct))
+            .Select(QualificationPlanner.ToPromptField).ToList();
+
         var context = new AiConversationContext(
             Guid.NewGuid(), "the customer", message,
             history.Select(t => new AiConversationTurn(t.Role == "assistant" ? MessageDirection.Outbound : MessageDirection.Inbound, t.Text, DateTime.UtcNow)).ToList(),
             snippets, null, await BusinessAsync(tenantId, ct),
-            Array.Empty<AiQualificationField>(), Array.Empty<AiCapturedField>(), Array.Empty<AiQualificationField>(),
-            QualificationPaused: true, PreferredLanguage: null, Crm: null, ProductKnowledgeServing: true);
+            questions, Array.Empty<AiCapturedField>(), questions.Take(Math.Max(0, options.MaxFieldsToAsk)).ToList(),
+            QualificationPaused: false, PreferredLanguage: null, Crm: null, ProductKnowledgeServing: true);
 
         AiReplyResult result;
         try
         {
+            // Marked as a test so the call log, and the tenant's credit history, can tell it from a customer's reply: it costs the platform, and no credits are taken.
+            // The first words of what was typed go with it, so the history can say what each test reply answered.
+            using var origin = AiCallOrigin.Use(AiCallOrigins.TestChat, Quota.QuotaLedgerService.Snippet(message));
             result = await _ai.GetResponseAsync(context, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -120,7 +138,6 @@ public sealed class ProductTestChat : IProductTestChat
             throw new ConflictException("The AI could not answer just now. Try again in a moment.");
 
         var validated = _validator.Validate(result, context);
-        var options = await _config.GetAiOptionsAsync(ct);
         var number = live.Number;
         var cited = validated.CitedChunkIds.ToHashSet();
         var itemQuestions = await ItemQuestionsAsync(tenantId, snippets, ct);
@@ -147,6 +164,15 @@ public sealed class ProductTestChat : IProductTestChat
                 : null;
             return new TestChatReply(null, "HandedOver", why, sources, blocked, validated.DetectedIntent);
         }
+
+        // A booking the AI confirms is saved and announced to the business exactly as in live chat - in the app, by email and on WhatsApp - marked as a test, so
+        // the tenant can see the whole thing work without a real customer.
+        if (validated.NextStepBooked && _bookings is not null)
+            await _bookings.RecordAsync(tenantId, null, null, validated.NextStepSummary!, isTest: true, ct);
+
+        // A greeting or the language question needs no published answer: that is not a miss, and must not count towards a hand-over on the next turn.
+        if (snippets.Count == 0 && !validated.Failures.Any(f => f.Code == AiReplyValidator.NoApprovedKnowledgeCode))
+            return new TestChatReply(validated.ResponseText, "Answered", "This message did not need a published answer (a greeting, or choosing a language).", sources, null, validated.DetectedIntent);
 
         if (snippets.Count == 0)
             return new TestChatReply(validated.ResponseText, "Clarifying", "Nothing you published covers this, so the AI asks one question instead of guessing.", sources, null, validated.DetectedIntent);
@@ -185,6 +211,6 @@ public sealed class ProductTestChat : IProductTestChat
             ? new AiBusinessProfile("the business", null, null, null, null, null, null, ConversationGoal.Enquiry, false)
             : new AiBusinessProfile(
                 tenant.Name, string.IsNullOrWhiteSpace(tenant.IndustrySubcategory) ? tenant.Industry : $"{tenant.Industry} ({tenant.IndustrySubcategory})",
-                tenant.BusinessLocation, tenant.WebsiteUrl, tenant.WorkingHours, tenant.ProductName, tenant.BusinessDescription, tenant.AiConversationGoal, false);
+                tenant.BusinessLocation, tenant.WebsiteUrl, tenant.WorkingHours, tenant.ProductName, tenant.BusinessDescription, tenant.AiConversationGoal, false, tenant.AiConversationGoalDetail);
     }
 }

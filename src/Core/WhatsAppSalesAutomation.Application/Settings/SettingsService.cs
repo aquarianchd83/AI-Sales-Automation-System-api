@@ -54,7 +54,7 @@ public class SettingsService : ISettingsService
     private static SettingCategoryDto BuildCategory(string category, IReadOnlyDictionary<string, string?> stored)
     {
         var items = AppSettingCatalog.All
-            .Where(d => d.Category == category)
+            .Where(d => d.Category == category && !d.HiddenInEditor)
             .Select(d => ToDto(d, stored.GetValueOrDefault(d.Key)))
             .ToList();
 

@@ -34,6 +34,7 @@ public static class PlatformAuditActions
     public const string TenantJobsReconciled = "TenantJobsReconciled";
     public const string TenantQuotaAdjusted = "TenantQuotaAdjusted";
     public const string CreditPayerChanged = "CreditPayerChanged";
+    public const string ServiceChargesChanged = "ServiceChargesChanged";
     public const string PlatformWalletAdjusted = "PlatformWalletAdjusted";
     public const string PlatformWalletToppedUp = "PlatformWalletToppedUp";
     public const string CreditUsageRedeemed = "CreditUsageRedeemed";

@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Quota;
@@ -343,14 +346,16 @@ public class QuotaLedgerService : IQuotaLedgerService
             entries = entries.Where(e => e.Feature == feature);
         if (query.EntryType is { } entryType)
             entries = entries.Where(e => e.EntryType == entryType);
+        // A day is the tenant's own day: "29 Oct" runs from midnight to midnight where the tenant is, not in UTC.
+        var zone = await ZoneOfAsync(tenantId, cancellationToken);
         if (query.From is { } from)
         {
-            var start = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var start = DayStartUtc(from, zone);
             entries = entries.Where(e => e.OccurredAtUtc >= start);
         }
         if (query.To is { } to)
         {
-            var endExclusive = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var endExclusive = DayStartUtc(to.AddDays(1), zone);
             entries = entries.Where(e => e.OccurredAtUtc < endExclusive);
         }
 
@@ -360,10 +365,99 @@ public class QuotaLedgerService : IQuotaLedgerService
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(e => new QuotaLedgerEntryDto(
-                e.Id, e.QuotaType, e.Feature, e.EntryType, e.UnitsDelta, e.BalanceAfter, e.GrantId, e.ReferenceType, e.ReferenceId, e.Note, e.OccurredAtUtc))
+                e.Id, e.QuotaType, e.Feature, e.EntryType, e.UnitsDelta, e.BalanceAfter, e.GrantId, e.ReferenceType, e.ReferenceId, e.Note, e.OccurredAtUtc, null))
             .ToListAsync(cancellationToken);
 
+        if (query.WithConversationText)
+            items = await WithCustomerTextAsync(tenantId, items, cancellationToken);
+
         return new PagedResult<QuotaLedgerEntryDto>(items, total, query.Page, query.PageSize);
+    }
+
+    private const int CustomerTextLength = 90;
+
+    /// <summary>An AI reply entry says only "ConversationReply", which does not tell the tenant which conversation it was. This follows the entry to the AI transaction it
+    /// paid for, and that to the customer's message it answered, and adds the start of that message. An entry it cannot follow is left as it was.</summary>
+    private async Task<List<QuotaLedgerEntryDto>> WithCustomerTextAsync(Guid tenantId, List<QuotaLedgerEntryDto> items, CancellationToken cancellationToken)
+    {
+        var transactionIds = items
+            .Where(i => i.ReferenceType == "AiTransaction" && Guid.TryParse(i.ReferenceId, out _))
+            .Select(i => Guid.Parse(i.ReferenceId!))
+            .Distinct().ToList();
+        if (transactionIds.Count == 0)
+            return items;
+
+        // The transaction's own reference is the inbound message the AI answered.
+        var messageOf = (await _context.AiTransactions.IgnoreQueryFilters().AsNoTracking()
+                .Where(t => t.TenantId == tenantId && transactionIds.Contains(t.Id))
+                .Select(t => new { t.Id, t.ReferenceId })
+                .ToListAsync(cancellationToken))
+            .Where(t => Guid.TryParse(t.ReferenceId, out _))
+            .ToDictionary(t => t.Id, t => Guid.Parse(t.ReferenceId!));
+
+        var messageIds = messageOf.Values.Distinct().ToList();
+        var textOf = (await _context.Messages.IgnoreQueryFilters().AsNoTracking()
+                .Where(m => m.TenantId == tenantId && messageIds.Contains(m.Id))
+                .Select(m => new { m.Id, m.Text })
+                .ToListAsync(cancellationToken))
+            .ToDictionary(m => m.Id, m => Snippet(m.Text));
+
+        return items.Select(i =>
+            i.ReferenceType == "AiTransaction" && Guid.TryParse(i.ReferenceId, out var tx)
+            && messageOf.TryGetValue(tx, out var message) && textOf.TryGetValue(message, out var text) && text is not null
+                ? i with { CustomerText = text }
+                : i).ToList();
+    }
+
+    /// <summary>The first words of a message on one line, cut at a word where it can be.</summary>
+    internal static string? Snippet(string? text)
+    {
+        var flat = string.Join(' ', (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (flat.Length == 0)
+            return null;
+        if (flat.Length <= CustomerTextLength)
+            return flat;
+
+        var cut = flat.LastIndexOf(' ', CustomerTextLength);
+        return flat[..(cut > CustomerTextLength / 2 ? cut : CustomerTextLength)] + "…";
+    }
+
+    public async Task<PagedResult<TestChatCallDto>> GetTestChatAsync(Guid tenantId, QuotaLedgerQuery query, CancellationToken cancellationToken = default)
+    {
+        var zone = await ZoneOfAsync(tenantId, cancellationToken);
+        var calls = InRange(TestChatReplies(tenantId), query.From, query.To, zone);
+
+        var total = await calls.CountAsync(cancellationToken);
+        var items = await calls
+            .OrderByDescending(e => e.CreatedAt)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(e => new TestChatCallDto(e.Id, e.CreatedAt, e.Model, e.Detail))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<TestChatCallDto>(items, total, query.Page, query.PageSize);
+    }
+
+    /// <summary>The tenant's Test chat replies that the AI gave: calls to the provider marked as tests. A failed attempt is not a reply, and none of it takes credits.</summary>
+    private IQueryable<AiExecution> TestChatReplies(Guid tenantId) =>
+        _context.AiExecutions.AsNoTracking().IgnoreQueryFilters()
+            .Where(e => e.TenantId == tenantId && e.Origin == AiCallOrigins.TestChat && e.Task == AiTaskKinds.ConversationReply
+                        && e.Mode == AiExecutionMode.Live && e.Status == AiExecutionStatus.Succeeded);
+
+    /// <summary>Narrows to the tenant's own days, as the ledger does: "29 Oct" runs from midnight to midnight where the tenant is.</summary>
+    private static IQueryable<AiExecution> InRange(IQueryable<AiExecution> calls, DateOnly? from, DateOnly? to, TimeZoneInfo zone)
+    {
+        if (from is { } first)
+        {
+            var start = DayStartUtc(first, zone);
+            calls = calls.Where(e => e.CreatedAt >= start);
+        }
+        if (to is { } last)
+        {
+            var endExclusive = DayStartUtc(last.AddDays(1), zone);
+            calls = calls.Where(e => e.CreatedAt < endExclusive);
+        }
+        return calls;
     }
 
     public async Task<QuotaLedgerSummaryDto> GetLedgerSummaryAsync(Guid tenantId, int days, PlatformFeature? feature = null, QuotaEntryType? entryType = null, DateOnly? from = null, DateOnly? to = null, CancellationToken cancellationToken = default)
@@ -378,14 +472,15 @@ public class QuotaLedgerService : IQuotaLedgerService
             .ToListAsync(cancellationToken);
 
         // The date range narrows everything the screen shows: the totals, the tiles and the graph.
+        var zone = await ZoneOfAsync(tenantId, cancellationToken);
         if (from is { } rangeStart)
         {
-            var start = rangeStart.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var start = DayStartUtc(rangeStart, zone);
             rows = rows.Where(r => r.OccurredAtUtc >= start).ToList();
         }
         if (to is { } rangeEnd)
         {
-            var endExclusive = rangeEnd.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var endExclusive = DayStartUtc(rangeEnd.AddDays(1), zone);
             rows = rows.Where(r => r.OccurredAtUtc < endExclusive).ToList();
         }
 
@@ -402,7 +497,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             .OrderBy(t => t.Feature)
             .ToList();
 
-        var today = DateOnly.FromDateTime(_dateTime.UtcNow);
+        var today = LocalDay(_dateTime.UtcNow, zone);
         var last = to ?? today;
         // With a start date the graph covers exactly the chosen range (at most a year); otherwise the last `days` days.
         var first = from is { } chosen ? (last.DayNumber - chosen.DayNumber >= 366 ? last.AddDays(-365) : chosen) : last.AddDays(-(days - 1));
@@ -411,7 +506,7 @@ public class QuotaLedgerService : IQuotaLedgerService
         days = last.DayNumber - first.DayNumber + 1;
         var perDay = rows.Where(r => (feature is null || r.Feature == feature) && (entryType is null || r.EntryType == entryType))
             .Where(r => r.EntryType == QuotaEntryType.Purchase || IsSpend(r.EntryType))
-            .GroupBy(r => DateOnly.FromDateTime(r.OccurredAtUtc))
+            .GroupBy(r => LocalDay(r.OccurredAtUtc, zone))
             .ToDictionary(g => g.Key, g => (
                 Purchased: g.Where(r => r.EntryType == QuotaEntryType.Purchase).Sum(r => r.UnitsDelta),
                 Used: -g.Where(r => IsSpend(r.EntryType)).Sum(r => r.UnitsDelta)));
@@ -421,8 +516,27 @@ public class QuotaLedgerService : IQuotaLedgerService
             .Select(d => perDay.TryGetValue(d, out var v) ? new QuotaDailyPointDto(d, v.Purchased, v.Used) : new QuotaDailyPointDto(d, 0m, 0m))
             .ToList();
 
-        return new QuotaLedgerSummaryDto(rows.Count, byType, byFeature, daily);
+        var testChat = await InRange(TestChatReplies(tenantId), from, to, zone).CountAsync(cancellationToken);
+
+        return new QuotaLedgerSummaryDto(rows.Count, byType, byFeature, daily, testChat);
     }
+
+    /// <summary>The tenant's own time zone (India Standard Time when it has not chosen one), so history days follow the tenant's clock.</summary>
+    private async Task<TimeZoneInfo> ZoneOfAsync(Guid tenantId, CancellationToken cancellationToken) =>
+        TimeZoneCatalog.Resolve(await _context.Tenants.IgnoreQueryFilters().AsNoTracking()
+            .Where(t => t.Id == tenantId).Select(t => t.Timezone).FirstOrDefaultAsync(cancellationToken));
+
+    /// <summary>The UTC moment a local calendar day begins. A day whose midnight does not exist (a daylight-saving jump) begins an hour later.</summary>
+    private static DateTime DayStartUtc(DateOnly day, TimeZoneInfo zone)
+    {
+        var local = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(local))
+            local = local.AddHours(1);
+        return TimeZoneInfo.ConvertTimeToUtc(local, zone);
+    }
+
+    private static DateOnly LocalDay(DateTime utc, TimeZoneInfo zone) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone));
 
     /// <summary>The working set for one tenant and quota type: the wallet, every grant not yet written
     /// off (so <see cref="Running"/> starts equal to the ledger's own sum), and the running balance. Opening
