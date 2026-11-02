@@ -51,7 +51,11 @@ public static class DependencyInjection
         services.Configure<StudioOptions>(configuration.GetSection("ContentStudio"));
 
         services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.CinematicOptions>(configuration.GetSection("ContentStudio:Cinematic"));
-        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryStudioService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryStudioService>();        services.AddScoped<IStudioMeteringService, StudioMeteringService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryStudioService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryStudioService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipService>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>());
+        services.AddScoped<IStudioMeteringService, StudioMeteringService>();
         services.AddScoped<IStudioSettingsService, StudioSettingsService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.IQuestionnaireService, WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.QuestionnaireService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.IBusinessFactService, WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.BusinessFactService>();

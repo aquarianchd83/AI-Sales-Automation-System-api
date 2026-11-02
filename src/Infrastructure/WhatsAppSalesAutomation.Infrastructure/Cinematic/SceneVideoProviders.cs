@@ -15,11 +15,14 @@ public class SimulatorSceneVideoProvider : ISceneVideoProvider
 
     public SceneVideoProviderKind Kind => SceneVideoProviderKind.Simulator;
 
+    // The idempotency key contains colons, which a Windows file name cannot.
+    private static string TempPath(string key) => Path.Combine(Path.GetTempPath(), $"sim-{key.Replace(':', '-')}.mp4");
+
     public decimal? EstimateCostUsd(int seconds) => 0m;
 
     public async Task<SceneClipResult> SubmitAsync(SceneClipRequest request, CancellationToken cancellationToken = default)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"sim-{request.IdempotencyKey}.mp4");
+        var path = TempPath(request.IdempotencyKey);
         try
         {
             if (!File.Exists(path)) await _ffmpeg.CreateTestClipAsync(path, Math.Max(1, request.TargetSeconds), "Test data", cancellationToken);
@@ -33,7 +36,7 @@ public class SimulatorSceneVideoProvider : ISceneVideoProvider
 
     public Task<SceneClipResult> PollAsync(string providerJobId, CancellationToken cancellationToken = default)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"sim-{providerJobId}.mp4");
+        var path = TempPath(providerJobId);
         return Task.FromResult(File.Exists(path)
             ? new SceneClipResult(SceneClipState.Completed, providerJobId, path, 0m, null)
             : new SceneClipResult(SceneClipState.Failed, providerJobId, null, null, "The test clip is gone."));

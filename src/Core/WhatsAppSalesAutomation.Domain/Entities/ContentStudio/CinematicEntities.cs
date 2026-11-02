@@ -233,6 +233,9 @@ public class StoryGenerationJob : BaseEntity, ITenantOwned
 
     public string? Error { get; set; }
 
+    /// <summary>The metering activity that charged this job, so a failure can give the units back.</summary>
+    public Guid? ChargeActivityId { get; set; }
+
     public DateTime? StartedAtUtc { get; set; }
 
     public DateTime? FinishedAtUtc { get; set; }

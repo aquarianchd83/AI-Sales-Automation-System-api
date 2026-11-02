@@ -2156,6 +2156,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<int>("Attempts")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("ChargeActivityId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
