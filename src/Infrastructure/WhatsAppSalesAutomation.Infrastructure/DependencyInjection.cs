@@ -37,7 +37,12 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
-        services.AddScoped<AuditTrailSaveChangesInterceptor>();
+
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IFfmpegService, WhatsAppSalesAutomation.Infrastructure.Cinematic.FfmpegService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorSceneVideoProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.FlowImportSceneVideoProvider>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.VeoSceneVideoProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProviderFactory, WhatsAppSalesAutomation.Infrastructure.Cinematic.SceneVideoProviderFactory>();        services.AddScoped<AuditTrailSaveChangesInterceptor>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();

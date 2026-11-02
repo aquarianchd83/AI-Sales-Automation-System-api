@@ -82,6 +82,12 @@ public static class AppSettingCatalog
         new("ContentStudio:SignedUrlMinutes", "ContentStudio", IsSecret: false, Description: "How long a signed address stays valid, in minutes. Only used in SignedUrls mode.", IsTenantOverridable: true, DefaultValue: "60", Options: new[] { "15", "30", "60", "120", "240" }),
         new("ContentStudio:ReadinessRules", "ContentStudio", IsSecret: false, Description: "JSON that decides what each kind of content needs to be ready (requirements, weights, critical items, minimum scores). Leave empty to use the built-in rules. An invalid value is ignored and the built-in rules are used.", DefaultValue: ""),
 
+        new("ContentStudio:Cinematic:FfmpegPath", "ContentStudio", IsSecret: false, Description: "Full path to ffmpeg for the cinematic story studio. Empty = ffmpeg on PATH. Local/dev installs only for now.", DefaultValue: ""),
+        new("ContentStudio:Cinematic:FfprobePath", "ContentStudio", IsSecret: false, Description: "Full path to ffprobe. Empty = ffprobe on PATH.", DefaultValue: ""),
+        new("ContentStudio:Cinematic:GeminiApiKey", "ContentStudio", IsSecret: true, Description: "Gemini API key used for Veo scene clips. Without it only the simulator and Flow import work."),
+        new("ContentStudio:Cinematic:VeoModel", "ContentStudio", IsSecret: false, Description: "Veo model id sent to the Gemini API.", DefaultValue: "veo-3.1-fast-generate-preview"),
+        new("ContentStudio:Cinematic:VeoUsdPerSecond", "ContentStudio", IsSecret: false, Description: "Price per generated second used for the cost estimate shown before a paid clip. Check Google pricing; this is an estimate, not billing data.", DefaultValue: "0.12"),
+        new("ContentStudio:Cinematic:MaxAutomaticRetries", "ContentStudio", IsSecret: false, Description: "How many times a failed scene may be retried automatically. Paid regeneration beyond this needs the user to confirm.", DefaultValue: "1", Options: new[] { "0", "1", "2" }),
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
         new("AiProviders:Provider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"Anthropic\", \"OpenAI\" or \"Google\" - the one provider every tenant's AI chat runs on. Live once saved."),
         new("AiProviders:EmbeddingProvider", "AiProviders", IsSecret: false, Description: "\"Simulated\", \"OpenAI\" or \"Google\" - provider that embeds knowledge-base text for every tenant. Live once saved."),
