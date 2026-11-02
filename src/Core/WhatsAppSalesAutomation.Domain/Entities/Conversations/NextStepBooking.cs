@@ -29,4 +29,17 @@ public class NextStepBooking : BaseEntity, ITenantOwned
     /// <summary>The new time the tenant picked when it marked the booking Reschedule (UTC), so the customer can be offered it. Only set while the status is Reschedule;
     /// cleared when the booking moves on, and when the customer confirms a time of their own.</summary>
     public DateTime? NewSlotUtc { get; set; }
+
+    /// <summary>Why the tenant moved the booking, as it typed it when marking it Reschedule. Only set while the status is Reschedule; cleared when the booking moves on.</summary>
+    public string? RescheduleReason { get; set; }
+
+    /// <summary>The email address the customer gave in the chat, so the confirmation (and anything the tenant sends later, such as a meeting link) can reach them.
+    /// Null when they gave none.</summary>
+    public string? CustomerEmail { get; set; }
+
+    /// <summary>How the confirmation email went: Sent, Failed, or Skipped (no email set up on the platform). Null when there was no address to send to.</summary>
+    public string? ConfirmationStatus { get; set; }
+
+    /// <summary>Why the confirmation failed or was skipped, so the tenant knows to contact the customer themselves.</summary>
+    public string? ConfirmationNote { get; set; }
 }

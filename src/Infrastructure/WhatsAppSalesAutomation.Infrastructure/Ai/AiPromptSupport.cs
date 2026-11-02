@@ -120,11 +120,17 @@ internal static class AiPromptSupport
           general questions, price or feature questions and early curiosity are NOT that moment.
         - If you have already offered the next step and they did not take it up, do not offer it again.
         - When the customer takes up the next step, ask only for what is really needed to arrange it (for a demo: when,
-          and in which time zone), one thing at a time, and never for something they have already told you.
+          in which time zone, and the email address a confirmation should be sent to),
+          one thing at a time, and never for something they have already told you.
+        - The email address is only for the confirmation email. If they would rather not give one, accept that and carry on
+          without it - and then never say or imply that an email will be sent.
+        - You cannot send calendar invitations or meeting links (Zoom, Google Meet...) and must never offer, promise or invent
+          one. How to join is shared by the team afterwards.
         - "All of them", "everything", "anything", "no preference" and "you decide" ARE answers. Accept them and move on;
           never ask that question again, in the same words or in other words.
         - Once you have what is needed, send ONE short confirmation that ends the exchange: say what is arranged (what,
-          when, which time zone) and that the team has been told and will be in touch. That reply must NOT end with a
+          when, which time zone) and that the team has been told and will be in touch. If you have set customer_email
+          (below), also say that a confirmation email is being sent to that address, naming it. That reply must NOT end with a
           question, and must not repeat any question already asked earlier in the conversation.
 
         ============================================================================
@@ -142,6 +148,9 @@ internal static class AiPromptSupport
         zone the customer gave) and anything they asked to be covered. Set both only on the reply that confirms it - not
         while details are still being collected, and not again for the same booking. You have no calendar: confirm what
         the customer asked for, never invent a time they did not choose, and say the team will be in touch.
+        When the customer gave an email address, set customer_email to it exactly as they wrote it. The platform emails them
+        a confirmation of the booking from that. WITHOUT customer_email no email is sent: then never say or imply that an
+        email, confirmation, calendar invitation, invite, reminder or meeting link will be sent.
 
         Set human_requested when they ask for a person or a callback, and whenever they are clearly
         frustrated or have asked the same thing more than twice without getting what they needed.
@@ -592,6 +601,13 @@ internal static class AiPromptSupport
                     "One sentence in English for the business owner: what was agreed, when (with the customer's time zone) "
                     + "and anything they asked to be covered. Required when next_step_booked is true."
             },
+            ["customer_email"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["description"] =
+                    "The email address the customer gave for the booking's confirmation email, exactly as written. Only on the reply "
+                    + "that confirms the next step, and only if they gave one."
+            },
             ["agent_note"] = new Dictionary<string, object>
             {
                 ["type"] = "string",
@@ -676,7 +692,8 @@ internal static class AiPromptSupport
             payload.FollowUpInMonths,
             ChosenLanguage: string.IsNullOrWhiteSpace(payload.PreferredLanguage) ? null : payload.PreferredLanguage.Trim(),
             NextStepBooked: payload.NextStepBooked,
-            NextStepSummary: string.IsNullOrWhiteSpace(payload.NextStepSummary) ? null : payload.NextStepSummary.Trim());
+            NextStepSummary: string.IsNullOrWhiteSpace(payload.NextStepSummary) ? null : payload.NextStepSummary.Trim(),
+            CustomerEmail: string.IsNullOrWhiteSpace(payload.CustomerEmail) ? null : payload.CustomerEmail.Trim());
     }
 
     /// <summary>Projects the three well-known field keys out of the dynamic extraction, so every caller
@@ -756,6 +773,9 @@ internal class ToolResultPayload
 
     [JsonPropertyName("next_step_summary")]
     public string? NextStepSummary { get; set; }
+
+    [JsonPropertyName("customer_email")]
+    public string? CustomerEmail { get; set; }
 
     [JsonPropertyName("agent_note")]
     public string? AgentNote { get; set; }

@@ -401,6 +401,7 @@ public static class DependencyInjection
 
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpOptions>(configuration.GetSection("Email:Smtp"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IEmailSender, WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpEmailSender>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Bookings.IBookingMessenger, WhatsAppSalesAutomation.Application.Bookings.BookingMessenger>();
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91Options>(configuration.GetSection("Sms:Msg91"));
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Notifications.ISmsOtpSender, WhatsAppSalesAutomation.Infrastructure.Notifications.Msg91SmsSender>();
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IDeliveryTester, WhatsAppSalesAutomation.Infrastructure.Notifications.DeliveryTester>();

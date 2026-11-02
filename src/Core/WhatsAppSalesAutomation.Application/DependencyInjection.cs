@@ -225,6 +225,8 @@ public static class DependencyInjection
         services.AddScoped<IServiceMarginService, ServiceMarginService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
         services.AddScoped<IPlatformPaymentService, PlatformPaymentService>();
+        services.AddScoped<IPlatformRevenueService, PlatformRevenueService>();
+        services.AddScoped<IPlatformTenantNotificationService, PlatformTenantNotificationService>();
         services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();
         services.AddScoped<IPlatformUserSearchService, PlatformUserSearchService>();
         services.AddScoped<IAnnouncementService, AnnouncementService>();

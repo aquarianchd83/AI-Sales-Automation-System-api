@@ -168,7 +168,7 @@ public sealed class ProductTestChat : IProductTestChat
         // A booking the AI confirms is saved and announced to the business exactly as in live chat - in the app, by email and on WhatsApp - marked as a test, so
         // the tenant can see the whole thing work without a real customer.
         if (validated.NextStepBooked && _bookings is not null)
-            await _bookings.RecordAsync(tenantId, null, null, validated.NextStepSummary!, isTest: true, ct);
+            await _bookings.RecordAsync(tenantId, null, null, validated.NextStepSummary!, isTest: true, validated.Confirmation, ct);
 
         // A greeting or the language question needs no published answer: that is not a miss, and must not count towards a hand-over on the next turn.
         if (snippets.Count == 0 && !validated.Failures.Any(f => f.Code == AiReplyValidator.NoApprovedKnowledgeCode))

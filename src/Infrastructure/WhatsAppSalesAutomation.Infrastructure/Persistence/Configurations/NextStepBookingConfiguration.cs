@@ -13,6 +13,10 @@ public class NextStepBookingConfiguration : IEntityTypeConfiguration<NextStepBoo
         builder.HasKey(b => b.Id);
         builder.Property(b => b.Kind).IsRequired().HasMaxLength(30);
         builder.Property(b => b.Summary).IsRequired().HasMaxLength(400);
+        builder.Property(b => b.RescheduleReason).HasMaxLength(500);
+        builder.Property(b => b.CustomerEmail).HasMaxLength(254);
+        builder.Property(b => b.ConfirmationStatus).HasMaxLength(20);
+        builder.Property(b => b.ConfirmationNote).HasMaxLength(300);
         builder.Property(b => b.Status).HasConversion<string>().HasMaxLength(20).HasDefaultValue(BookingStatus.Pending);
 
         // The list is the tenant's bookings, newest first.

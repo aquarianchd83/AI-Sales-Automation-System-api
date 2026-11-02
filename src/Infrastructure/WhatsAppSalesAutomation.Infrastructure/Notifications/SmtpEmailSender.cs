@@ -53,8 +53,32 @@ public static class SmtpMailer
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Email to {To} failed", toEmail);
-            return new DeliveryResult(false, ex.Message);
+            return new DeliveryResult(false, Describe(ex));
         }
+    }
+
+    /// <summary>SmtpException's own message is often just "Failure sending mail."; the server's reply or the socket error that
+    /// explains it sits in the status code and the inner exceptions.</summary>
+    private static string Describe(Exception ex)
+    {
+        var parts = new List<string>();
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            var text = current is SmtpException smtp && smtp.StatusCode != SmtpStatusCode.GeneralFailure
+                ? $"{current.Message} ({smtp.StatusCode})"
+                : current.Message;
+            if (!parts.Contains(text))
+                parts.Add(text);
+        }
+
+        var message = string.Join(" - ", parts);
+
+        // After a rejected login .NET's SmtpClient reports only that the server closed the connection; the server's own
+        // reply (535 "Username and Password not accepted") never reaches the exception.
+        if (message.Contains("connection was closed", StringComparison.OrdinalIgnoreCase))
+            message += ". This usually means the SMTP server rejected the user name or password (Gmail and Microsoft 365 need an app password, not the account password).";
+
+        return message;
     }
 }
 
