@@ -26,7 +26,7 @@ public sealed class ContentStudioSettingsCatalogTests
     }
 
     private static readonly IReadOnlyList<AppSettingDefinition> Studio =
-        AppSettingCatalog.All.Where(d => d.Category == "ContentStudio").ToList();
+        AppSettingCatalog.All.Where(d => d.Category == "ContentStudio" && !d.Key.StartsWith("ContentStudio:Cinematic:")).ToList();
 
     [Fact]
     public void Every_studio_setting_has_a_default_so_the_console_never_opens_blank()

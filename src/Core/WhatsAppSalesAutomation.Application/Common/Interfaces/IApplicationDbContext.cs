@@ -239,6 +239,26 @@ public interface IApplicationDbContext
 
     DbSet<QuestionnaireAnswerRevision> QuestionnaireAnswerRevisions { get; }
 
+    DbSet<StoryCharacter> StoryCharacters { get; }
+
+    DbSet<StoryCharacterReference> StoryCharacterReferences { get; }
+
+    DbSet<StoryProject> StoryProjects { get; }
+
+    DbSet<StoryProjectCharacter> StoryProjectCharacters { get; }
+
+    DbSet<StoryScriptVersion> StoryScriptVersions { get; }
+
+    DbSet<StoryScene> StoryScenes { get; }
+
+    DbSet<StoryDialogueLine> StoryDialogueLines { get; }
+
+    DbSet<StoryMediaAsset> StoryMediaAssets { get; }
+
+    DbSet<StoryGenerationJob> StoryGenerationJobs { get; }
+
+    DbSet<StoryRender> StoryRenders { get; }
+
     DbSet<KnowledgeGapDecision> KnowledgeGapDecisions { get; }
 
     DbSet<Flowchart> Flowcharts { get; }

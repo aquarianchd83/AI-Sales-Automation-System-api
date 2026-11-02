@@ -348,7 +348,7 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         var claude = await Panel("Anthropic");
 
         Assert.Equal(AiUses.Tasks, claude.Capabilities.Select(c => c.Task));
-        Assert.Equal(new[] { AiUses.CustomerChat, AiUses.Onboarding, AiUses.Discovery, AiUses.ProductKnowledge }, claude.Capabilities.Select(c => c.Area).Distinct());
+        Assert.Equal(new[] { AiUses.CustomerChat, AiUses.Onboarding, AiUses.Discovery, AiUses.ProductKnowledge, AiUses.ContentStudio }, claude.Capabilities.Select(c => c.Area).Distinct());
         Assert.All(claude.Capabilities, c => Assert.False(string.IsNullOrWhiteSpace(c.Title)));
 
         // What its code can and cannot call.
