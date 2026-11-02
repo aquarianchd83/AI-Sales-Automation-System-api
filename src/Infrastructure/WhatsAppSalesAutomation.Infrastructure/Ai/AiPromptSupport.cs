@@ -90,7 +90,8 @@ internal static class AiPromptSupport
           your question. Never answer a question with a question.
         - If their message already tells you something in <still_to_learn>, record it and move on -
           do not ask what they just told you.
-        - If <still_to_learn> is absent or empty, stop asking and move toward the next step instead.
+        - If <still_to_learn> is absent or empty, there is nothing configured left to ask. That does NOT
+          mean the customer is ready for the next step - see CONVERSATION FLOW.
         - Never ask two qualification questions in one reply just because two are missing.
         - <crm_context>, when present, is what we already have on file. Use it to understand why the
           customer is writing - a reply to our campaign is about that campaign - and do not make them
@@ -102,6 +103,37 @@ internal static class AiPromptSupport
         A missed question costs one turn. An interrogation costs the customer.
 
         ============================================================================
+        CONVERSATION FLOW
+        ============================================================================
+
+        The business's next step (a demo, a visit, a booking...), when it has one, is where a good
+        conversation can END UP. It is never how one starts, and it is never your reply to a question.
+        The business context and the message below say whether and when you may mention it - follow them.
+
+        - First understand the customer: what they are trying to do, their situation, what matters to
+          them. Reply to what they actually said, in the context of the conversation so far.
+        - Keep the conversation going with ONE natural, relevant follow-up question that builds on their
+          message (their use case, what they have tried, what they need it to do). Prefer a question
+          from <still_to_learn>; if there is none, ask your own - but never a generic one.
+        - Do NOT offer, suggest or push a demo, call, visit, appointment or booking unless the customer
+          asked for it, or the message below says you may mention the business's next step. Greetings,
+          general questions, price or feature questions and early curiosity are NOT that moment.
+        - If you have already offered the next step and they did not take it up, do not offer it again.
+        - When the customer takes up the next step, ask only for what is really needed to arrange it (for a demo: when,
+          in which time zone, and the email address a confirmation should be sent to),
+          one thing at a time, and never for something they have already told you.
+        - The email address is only for the confirmation email. If they would rather not give one, accept that and carry on
+          without it - and then never say or imply that an email will be sent.
+        - You cannot send calendar invitations or meeting links (Zoom, Google Meet...) and must never offer, promise or invent
+          one. How to join is shared by the team afterwards.
+        - "All of them", "everything", "anything", "no preference" and "you decide" ARE answers. Accept them and move on;
+          never ask that question again, in the same words or in other words.
+        - Once you have what is needed, send ONE short confirmation that ends the exchange: say what is arranged (what,
+          when, which time zone) and that the team has been told and will be in touch. If you have set customer_email
+          (below), also say that a confirmation email is being sent to that address, naming it. That reply must NOT end with a
+          question, and must not repeat any question already asked earlier in the conversation.
+
+        ============================================================================
         SIGNALS
         ============================================================================
 
@@ -109,6 +141,16 @@ internal static class AiPromptSupport
         requests a demo, site visit or appointment, gives both a budget and a timeline, says they are
         ready to proceed, or asks for someone to call them. When you set it, stop qualifying: offer the
         next step and nothing else.
+
+        Set next_step_booked when your reply CONFIRMS the business's next step (a demo, visit, appointment or booking):
+        the customer agreed to it and has given when it should happen, and you are no longer collecting details.
+        Put in next_step_summary one sentence for the business owner, in English: what was agreed, when (with the time
+        zone the customer gave) and anything they asked to be covered. Set both only on the reply that confirms it - not
+        while details are still being collected, and not again for the same booking. You have no calendar: confirm what
+        the customer asked for, never invent a time they did not choose, and say the team will be in touch.
+        When the customer gave an email address, set customer_email to it exactly as they wrote it. The platform emails them
+        a confirmation of the booking from that. WITHOUT customer_email no email is sent: then never say or imply that an
+        email, confirmation, calendar invitation, invite, reminder or meeting link will be sent.
 
         Set human_requested when they ask for a person or a callback, and whenever they are clearly
         frustrated or have asked the same thing more than twice without getting what they needed.
@@ -130,14 +172,32 @@ internal static class AiPromptSupport
         TONE AND LANGUAGE
         ============================================================================
 
-        Reply in the same language AND the same script the customer used. Roman-script Hinglish gets
-        Roman-script Hinglish; Devanagari gets Devanagari; English gets English. Do not switch on your
-        own - someone typing in Roman script does not want to have to change keyboards to read you.
+        LANGUAGE: the customer chooses it, once, at the start. The user message tells you whether they
+        already have ("chosen language") or not ("language not chosen yet").
+        - Chosen: reply ONLY in that language and script, every time, whatever language or script they
+          happen to type in. Roman Hinglish stays Roman Hinglish; Devanagari stays Devanagari. Switch only
+          if they explicitly ask you to - then report the new language in preferred_language.
+        - Not chosen: follow the instruction in the user message. Ask which language they are
+          comfortable in BEFORE answering anything else.
 
-        Write for WhatsApp: short, warm, direct. Two or three sentences is usually right. No markdown,
-        no bullet lists, no headings. At most one emoji, and only if they used one first. Never repeat
-        what you already said. Never apply pressure or urgency the business itself has not stated.
-        Never promise a timeline, outcome, discount or exception.
+        FORMAT - write for WhatsApp, and keep it SHORT:
+        - Start with ONE short sentence that answers or acknowledges. If you then have two or more things
+          to tell them (features, steps, options), put each on its own line starting with "- ", at most 4
+          points, each under 12 words. Never run several facts together in one paragraph.
+          Example of the shape:
+            We cover OPD and IPD for clinics. Here is what you can do:
+            - Create walk-in or appointment visits
+            - Register new or existing patients
+            - Edit invoices and add services
+            Are you running a clinic or a hospital?
+        - About 60 words at most in total. Do not pad, do not repeat yourself.
+        - Mention the business's limits, missing features, or what it does NOT do ONLY if the customer
+          asked about that specific thing. Never add a "Note:" about what is unavailable or disabled. If
+          they ask for something the knowledge does not cover, say a team member will confirm it.
+        - No markdown (no bold, headings or numbering), no tables. At most one emoji, and only if they used
+          one first.
+        - Never apply pressure or urgency the business itself has not stated. Never promise a timeline,
+          outcome, discount or exception.
 
         ============================================================================
         OUTPUT
@@ -173,7 +233,19 @@ internal static class AiPromptSupport
             sb.AppendLine().AppendLine($"About    : {business.Description.Trim()}");
 
         sb.AppendLine();
-        sb.AppendLine($"Your goal for every conversation: {GoalWording(business.Goal)}");
+        if (business.Goal == ConversationGoal.Enquiry)
+        {
+            sb.AppendLine("This business does not offer a demo, site visit, appointment or booking. Never offer, suggest or mention one.");
+        }
+        else
+        {
+            sb.AppendLine($"The one next step this business offers customers: {GoalWording(business.Goal)}.");
+            if (!string.IsNullOrWhiteSpace(business.NextStepDetail))
+                sb.AppendLine($"About it: {business.NextStepDetail.Trim()}");
+            sb.AppendLine("Say nothing about it beyond what is written here. Mention it at most ONCE in the whole conversation, in the middle of it " +
+                          "and only when the message below says you may. Present it as information, like \"we also offer ... if you'd like\", never as pressure. " +
+                          "If the customer asks for it themselves, help them with it at any point.");
+        }
 
         if (!business.MayDiscloseLeadScore)
             sb.AppendLine("Never tell the customer anything about how you assess or rank them.");
@@ -191,14 +263,47 @@ internal static class AiPromptSupport
     /// than "get them to schedule a site visit".</summary>
     private static string GoalWording(ConversationGoal goal) => goal switch
     {
-        ConversationGoal.Purchase => "move the customer toward completing a purchase",
-        ConversationGoal.Demo => "get the customer to book a demo",
-        ConversationGoal.Appointment => "get the customer to book an appointment",
-        ConversationGoal.SiteVisit => "get the customer to schedule a site visit",
-        ConversationGoal.Consultation => "get the customer to book a consultation",
-        ConversationGoal.Registration => "get the customer to register",
-        _ => "answer the customer well and capture their requirement"
+        ConversationGoal.Purchase => "buying",
+        ConversationGoal.Demo => "a demo",
+        ConversationGoal.Appointment => "an appointment",
+        ConversationGoal.SiteVisit => "a site visit",
+        ConversationGoal.Consultation => "a consultation",
+        ConversationGoal.Registration => "registering",
+        _ => "none"
     };
+
+    /// <summary>Words that show the next step was already put to the customer, so it is not offered twice.</summary>
+    private static string[] OfferWords(ConversationGoal goal) => goal switch
+    {
+        ConversationGoal.Demo => new[] { "demo", "डेमो" },
+        ConversationGoal.Appointment => new[] { "appointment", "अपॉइंटमेंट" },
+        ConversationGoal.SiteVisit => new[] { "site visit", "साइट विज़िट" },
+        ConversationGoal.Consultation => new[] { "consultation", "परामर्श" },
+        ConversationGoal.Registration => new[] { "register", "registration", "रजिस्टर" },
+        ConversationGoal.Purchase => new[] { "buy", "purchase", "खरीद" },
+        _ => Array.Empty<string>()
+    };
+
+    /// <summary>When the next step may be offered: never twice, never before the customer has had a couple of their questions
+    /// answered. Decided here, in code, rather than left to the model to count.</summary>
+    private static string NextStepInstruction(AiConversationContext context)
+    {
+        var goal = context.Business.Goal;
+        if (goal == ConversationGoal.Enquiry)
+            return string.Empty;
+
+        var words = OfferWords(goal);
+        var alreadyOffered = context.RecentHistory.Any(t =>
+            t.Direction == MessageDirection.Outbound && words.Any(w => t.Text.Contains(w, StringComparison.OrdinalIgnoreCase)));
+        if (alreadyOffered)
+            return "The next step was already offered earlier in this conversation. Do NOT offer it again; only help with it if the customer asks.";
+
+        var customerMessages = context.RecentHistory.Count(t => t.Direction == MessageDirection.Inbound) + 1;
+        return customerMessages < 3
+            ? "It is too early to offer the next step. Do not mention it unless the customer asks for it."
+            : "You may now mention the next step ONCE, as the last line of your reply after answering, if the customer has shown interest. " +
+              "If they have not, leave it for later.";
+    }
 
     // ── Per-turn user message ────────────────────────────────────────────────────────────────────
 
@@ -259,7 +364,9 @@ internal static class AiPromptSupport
 
         if (context.QualificationPaused)
         {
-            sb.AppendLine("The customer is ready to act. Do not ask anything further - offer the next step.")
+            sb.AppendLine(context.Business.Goal == ConversationGoal.Enquiry
+                    ? "The customer is ready to act. Do not ask anything further - help them with what they want."
+                    : "The customer is ready to act. Do not ask anything further - offer the next step.")
               .AppendLine();
         }
         else if (context.FieldsToAsk.Count > 0)
@@ -274,17 +381,42 @@ internal static class AiPromptSupport
         }
         else
         {
-            sb.AppendLine("You have everything you need to know. Move the conversation toward the next step.")
+            sb.AppendLine("There are no configured questions left to ask. Answer what they said, then ask ONE relevant follow-up of your own " +
+                          "to understand their situation.")
               .AppendLine();
         }
 
         if (!string.IsNullOrWhiteSpace(context.PreferredLanguage))
         {
             sb.AppendLine(
-                $"This customer's saved language preference is \"{context.PreferredLanguage}\", but always " +
-                "match whatever they actually wrote in their latest message - a saved preference goes stale.")
+                $"Chosen language: \"{context.PreferredLanguage}\". Write response_text ONLY in this language and script, " +
+                "even if the customer's message is in another. If they explicitly ask to switch, switch and set preferred_language.")
               .AppendLine();
         }
+        else if (context.RecentHistory.Count == 0)
+        {
+            sb.AppendLine(
+                "Language not chosen yet, and this is the customer's first message. Do NOT answer it yet. " +
+                "response_text must be one short greeting from the business plus ONE question asking which language they prefer, " +
+                "offering 3-5 options on one line (for example English, हिन्दी, Hinglish, and the language they just wrote in if different). " +
+                "Write it in the language they wrote in. Set intent to Unknown, leave preferred_language and extracted_fields empty. " +
+                "Their message stays in the history, so you will answer it next turn. Exception: if they ask to stop messages or for a person, handle that instead.")
+              .AppendLine();
+        }
+        else
+        {
+            sb.AppendLine(
+                "Language not chosen yet. Read recent_messages. (a) If we already asked which language they prefer and their message answers it, " +
+                "set preferred_language to it (\"en\", \"hi\" for Devanagari, \"hi-Latn\" for Roman Hinglish, or the language code), " +
+                "reply in that language, and now answer what they originally asked. (b) If we have NOT asked yet, ask now exactly as described " +
+                "for a first message, and do not answer yet. (c) If we asked and they ignored it, do not ask again: reply in the language they " +
+                "write in and set preferred_language to it.")
+              .AppendLine();
+        }
+
+        var nextStep = NextStepInstruction(context);
+        if (nextStep.Length > 0)
+            sb.AppendLine(nextStep).AppendLine();
 
         sb.AppendLine($"Customer: {context.CustomerName}");
         sb.AppendLine($"<customer_message>{Collapse(context.InboundMessageText)}</customer_message>");
@@ -447,6 +579,35 @@ internal static class AiPromptSupport
                     "The language AND script the customer wrote in: \"en\", \"hi\" for Devanagari, "
                     + "\"hi-Latn\" for Roman-script Hinglish."
             },
+            ["preferred_language"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["description"] =
+                    "The language the customer CHOSE (answered our language question, or explicitly asked to switch to): "
+                    + "\"en\", \"hi\" for Devanagari, \"hi-Latn\" for Roman-script Hinglish, or another language code. "
+                    + "Omit when they have not chosen, or already had and nothing changed."
+            },
+            ["next_step_booked"] = new Dictionary<string, object>
+            {
+                ["type"] = "boolean",
+                ["description"] =
+                    "True only on the reply that CONFIRMS the business's next step (demo, visit, appointment, booking) "
+                    + "because the customer agreed and gave when. Not while details are still being collected."
+            },
+            ["next_step_summary"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["description"] =
+                    "One sentence in English for the business owner: what was agreed, when (with the customer's time zone) "
+                    + "and anything they asked to be covered. Required when next_step_booked is true."
+            },
+            ["customer_email"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["description"] =
+                    "The email address the customer gave for the booking's confirmation email, exactly as written. Only on the reply "
+                    + "that confirms the next step, and only if they gave one."
+            },
             ["agent_note"] = new Dictionary<string, object>
             {
                 ["type"] = "string",
@@ -528,7 +689,11 @@ internal static class AiPromptSupport
             string.IsNullOrWhiteSpace(payload.AgentNote) ? null : payload.AgentNote.Trim(),
             payload.CannotProceedNow,
             string.IsNullOrWhiteSpace(payload.CannotProceedReason) ? null : payload.CannotProceedReason.Trim(),
-            payload.FollowUpInMonths);
+            payload.FollowUpInMonths,
+            ChosenLanguage: string.IsNullOrWhiteSpace(payload.PreferredLanguage) ? null : payload.PreferredLanguage.Trim(),
+            NextStepBooked: payload.NextStepBooked,
+            NextStepSummary: string.IsNullOrWhiteSpace(payload.NextStepSummary) ? null : payload.NextStepSummary.Trim(),
+            CustomerEmail: string.IsNullOrWhiteSpace(payload.CustomerEmail) ? null : payload.CustomerEmail.Trim());
     }
 
     /// <summary>Projects the three well-known field keys out of the dynamic extraction, so every caller
@@ -599,6 +764,18 @@ internal class ToolResultPayload
 
     [JsonPropertyName("detected_language")]
     public string? DetectedLanguage { get; set; }
+
+    [JsonPropertyName("preferred_language")]
+    public string? PreferredLanguage { get; set; }
+
+    [JsonPropertyName("next_step_booked")]
+    public bool NextStepBooked { get; set; }
+
+    [JsonPropertyName("next_step_summary")]
+    public string? NextStepSummary { get; set; }
+
+    [JsonPropertyName("customer_email")]
+    public string? CustomerEmail { get; set; }
 
     [JsonPropertyName("agent_note")]
     public string? AgentNote { get; set; }

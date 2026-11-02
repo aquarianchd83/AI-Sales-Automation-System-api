@@ -42,7 +42,11 @@ public record ValidatedReply(
     string? AgentNote,
     bool CannotProceedNow = false,
     string? CannotProceedReason = null,
-    int? FollowUpInMonths = null)
+    int? FollowUpInMonths = null,
+    string? ChosenLanguage = null,
+    bool NextStepBooked = false,
+    string? NextStepSummary = null,
+    Bookings.BookingConfirmation? Confirmation = null)
 {
     public bool HasFailures => Failures.Count > 0;
 

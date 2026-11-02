@@ -200,7 +200,7 @@ public class QualificationPlanner : IQualificationPlanner
         }
     }
 
-    private static AiQualificationField ToPromptField(QualificationField f)
+    internal static AiQualificationField ToPromptField(QualificationField f)
     {
         var allowed = QualificationValueNormalizer.ParseAllowedValues(f.AllowedValuesJson);
 

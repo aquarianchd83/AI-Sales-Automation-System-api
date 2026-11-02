@@ -92,6 +92,10 @@ public class LeadDiscoveryExecution : BaseEntity, ITenantOwned
     /// raises separately.</summary>
     public bool QuotaExhausted { get; set; }
 
+    /// <summary>Why the run stopped, or never started, for want of allowance - a sentence for the tenant ("Lead discovery has used its monthly limit of 25 credits...").
+    /// Set for out-of-credits as well as for a used-up monthly limit or a plan without the feature; only the first of those sets <see cref="QuotaExhausted"/>.</summary>
+    public string? QuotaStopReason { get; set; }
+
     public int CustomersDiscovered { get; set; }
 
     public int CustomersCreated { get; set; }

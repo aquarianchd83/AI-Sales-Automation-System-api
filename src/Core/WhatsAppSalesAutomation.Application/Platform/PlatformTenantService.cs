@@ -34,6 +34,7 @@ public class PlatformTenantService : IPlatformTenantService
 
     private readonly IAiSpendEstimator _aiSpend;
     private readonly ICountryAvailability _countries;
+    private readonly ITenantDataPurger _purger;
 
     public PlatformTenantService(
         IApplicationDbContext context,
@@ -50,8 +51,10 @@ public class PlatformTenantService : IPlatformTenantService
         IQuotaGate quota,
         ICreditAllocationService credits,
         IAiSpendEstimator aiSpend,
-        ICountryAvailability countries)
+        ICountryAvailability countries,
+        ITenantDataPurger purger)
     {
+        _purger = purger;
         _countries = countries;
         _aiSpend = aiSpend;
         _quota = quota;
@@ -170,7 +173,8 @@ public class PlatformTenantService : IPlatformTenantService
             Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero),
             tenant.RefundRequestsEnabled,
             tenant.StateCode,
-            tenant.WhatsAppNumber);
+            tenant.WhatsAppNumber,
+            tenant.BillingAlertEmail);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -215,7 +219,12 @@ public class PlatformTenantService : IPlatformTenantService
 
         var result = await _userManager.CreateAsync(user, request.AdminPassword);
         if (!result.Succeeded)
+        {
+            // The tenant row is already saved; without this every failed attempt left an orphan tenant (no users, no owner).
+            _context.Tenants.Remove(tenant);
+            await _context.SaveChangesAsync(cancellationToken);
             throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.AdminPassword), e.Description)));
+        }
 
         await _userManager.AddToRoleAsync(user, AppRoles.Admin);
 
@@ -271,6 +280,31 @@ public class PlatformTenantService : IPlatformTenantService
         await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
 
         await _auditService.LogAsync(actorUserId, actorEmail, PlatformAuditActions.TenantDeleted, tenantId, cancellationToken: cancellationToken);
+    }
+
+    public async Task<PurgeTenantResultDto> PurgeAsync(Guid tenantId, PurgeTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+
+        if (!string.Equals(request.ConfirmSlug?.Trim(), tenant.Slug, StringComparison.Ordinal))
+            throw new ConflictException($"Type the tenant's slug ('{tenant.Slug}') to confirm a permanent delete.");
+
+        var name = tenant.Name;
+        var slug = tenant.Slug;
+
+        // Locked out and unscheduled first, so nothing is mid-run against rows that are about to disappear.
+        tenant.Status = TenantStatus.Deleted;
+        await _context.SaveChangesAsync(cancellationToken);
+        await _jobProvisioner.SyncTenantAsync(tenantId, cancellationToken);
+
+        var result = await _purger.PurgeAsync(tenantId, cancellationToken);
+
+        // The audit trail is the one thing that outlives the tenant.
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantPurged, tenantId,
+            details: $"Permanently deleted tenant '{name}' ({slug}): {result.RowsDeleted} rows across {result.TablesAffected} tables", cancellationToken: cancellationToken);
+
+        return result;
     }
 
     public async Task<ImpersonationSessionDto> ImpersonateAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -334,6 +368,28 @@ public class PlatformTenantService : IPlatformTenantService
             details: $"Timezone {previousTimezone ?? "(default)"} -> {request.Timezone}", cancellationToken: cancellationToken);
 
         return TenantProfileDto.From(tenant);
+    }
+
+    public async Task<TenantNotificationEmailDto> UpdateNotificationEmailAsync(
+        Guid tenantId, UpdateTenantNotificationEmailRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        var email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim();
+        if (email is not null && (email.Length > 256 || !System.Net.Mail.MailAddress.TryCreate(email, out var address) || address.Address != email))
+            throw new FluentValidation.ValidationException(new[] { new FluentValidation.Results.ValidationFailure(nameof(request.Email), "Enter a valid email address.") });
+
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+        var previous = tenant.BillingAlertEmail;
+        tenant.BillingAlertEmail = email;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantNotificationEmailUpdated, tenantId,
+            details: $"Notification email {previous ?? "(owner's address)"} -> {email ?? "(owner's address)"}", cancellationToken: cancellationToken);
+
+        string? ownerEmail = null;
+        if (tenant.OwnerUserId is { } ownerId)
+            ownerEmail = (await _userManager.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == ownerId, cancellationToken))?.Email;
+        return new TenantNotificationEmailDto(tenant.BillingAlertEmail, ownerEmail);
     }
 
     public async Task<TenantProfileDto> UpdateCountryAsync(

@@ -92,7 +92,10 @@ public record AiBusinessProfile(
     ConversationGoal Goal,
     /// <summary>Whether the agent may say anything to the customer about how they are assessed.
     /// False adds an explicit prohibition to the system prompt.</summary>
-    bool MayDiscloseLeadScore);
+    bool MayDiscloseLeadScore,
+    /// <summary>The tenant's own one-line description of the step in <see cref="Goal"/> ("Free 30-minute demo on Zoom"). The only
+    /// thing the agent may say about the offer.</summary>
+    string? NextStepDetail = null);
 
 /// <summary>One configured qualification field, flattened for the prompt and the tool schema.</summary>
 public record AiQualificationField(
@@ -161,7 +164,18 @@ public record AiReplyResult(
     int? FollowUpInMonths = null,
     /// <summary>True when the provider call itself failed (outage, rejected key, malformed answer) rather than the
     /// model giving a low-confidence answer. A failed call is not billed to the tenant: the credit is given back.</summary>
-    bool ProviderFailed = false);
+    bool ProviderFailed = false,
+    /// <summary>The language the customer chose when asked (or asked to switch to). Unlike
+    /// <see cref="DetectedLanguage"/>, which is only what they typed in, this is a decision: it is saved
+    /// and every later reply is written in it.</summary>
+    string? ChosenLanguage = null,
+    /// <summary>The customer took up the business's next step (a demo, a visit...) and has now given everything it needs, so the reply
+    /// confirms it. A report, like the other signals: the orchestrator tells the tenant.</summary>
+    bool NextStepBooked = false,
+    /// <summary>What was agreed, in a sentence for the tenant: what, when, in which time zone, and what they want covered. English.</summary>
+    string? NextStepSummary = null,
+    /// <summary>The email address the customer gave for the booking's confirmation. Unchecked here: the validator decides if it is usable.</summary>
+    string? CustomerEmail = null);
 
 /// <summary>One qualification value the model claims the customer supplied. Claims, not facts - the
 /// validator checks the key is in this tenant's schema and the value fits the field's type before any

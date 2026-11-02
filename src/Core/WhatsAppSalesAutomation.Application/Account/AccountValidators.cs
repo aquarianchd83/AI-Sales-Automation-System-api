@@ -16,6 +16,10 @@ public class UpdateUserProfileRequestValidator : AbstractValidator<UpdateUserPro
 
         RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(256);
 
+        RuleFor(x => x.NotificationEmail)
+            .EmailAddress().MaximumLength(256)
+            .When(x => !string.IsNullOrWhiteSpace(x.NotificationEmail));
+
         RuleFor(x => x.PhoneNumber)
             .Matches(PhonePattern)
             .When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber))

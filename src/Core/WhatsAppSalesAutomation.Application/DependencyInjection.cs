@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.Configure<TaxOptions>(configuration.GetSection("Tax"));
         services.Configure<CostAssumptionsOptions>(configuration.GetSection("Costing"));
         services.Configure<FxOptions>(configuration.GetSection("Fx"));
+        services.Configure<ManualServiceCostOptions>(configuration.GetSection("ServiceCost"));
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Consent.IConsentInvitationService, WhatsAppSalesAutomation.Application.Consent.ConsentInvitationService>();
         services.Configure<WhatsAppSalesAutomation.Application.Consent.ConsentPageOptions>(configuration.GetSection("ConsentPage"));
@@ -216,6 +217,8 @@ public static class DependencyInjection
 
         // Phase 5: publishing the approved answers as an immutable version.
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IProductTestChat, WhatsAppSalesAutomation.Application.ProductKnowledge.ProductTestChat>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Bookings.IBookingService, WhatsAppSalesAutomation.Application.Bookings.BookingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Bookings.IBookingRecorder, WhatsAppSalesAutomation.Application.Bookings.BookingRecorder>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeServingIndexer, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgeServingIndexer>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgePublishingService, WhatsAppSalesAutomation.Application.ProductKnowledge.KnowledgePublishingService>();
 
@@ -232,8 +235,11 @@ public static class DependencyInjection
         services.AddScoped<IPlatformMediaService, PlatformMediaService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayService, WhatsAppSalesAutomation.Application.Razorpay.RazorpayService>();
         services.AddScoped<IPlanCostReportService, PlanCostReportService>();
+        services.AddScoped<IServiceMarginService, ServiceMarginService>();
         services.AddScoped<IPlatformUsageService, PlatformUsageService>();
         services.AddScoped<IPlatformPaymentService, PlatformPaymentService>();
+        services.AddScoped<IPlatformRevenueService, PlatformRevenueService>();
+        services.AddScoped<IPlatformTenantNotificationService, PlatformTenantNotificationService>();
         services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();
         services.AddScoped<IPlatformUserSearchService, PlatformUserSearchService>();
         services.AddScoped<IAnnouncementService, AnnouncementService>();

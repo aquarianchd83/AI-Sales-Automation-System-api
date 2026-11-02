@@ -14,10 +14,12 @@ public static class PlatformAuditActions
     public const string TenantSendingResumed = "TenantSendingResumed";
     public const string TenantReactivated = "TenantReactivated";
     public const string TenantDeleted = "TenantDeleted";
+    public const string TenantPurged = "TenantPurged";
     public const string TenantImpersonated = "TenantImpersonated";
     public const string TenantPlanOverridden = "TenantPlanOverridden";
     public const string TenantTimezoneUpdated = "TenantTimezoneUpdated";
     public const string TenantCountryUpdated = "TenantCountryUpdated";
+    public const string TenantNotificationEmailUpdated = "TenantNotificationEmailUpdated";
     public const string TenantWhatsAppConfigSaved = "TenantWhatsAppConfigSaved";
     public const string TenantWhatsAppConfigDeleted = "TenantWhatsAppConfigDeleted";
     public const string TenantConfigOverridesSaved = "TenantConfigOverridesSaved";
@@ -33,6 +35,7 @@ public static class PlatformAuditActions
     public const string TenantJobsReconciled = "TenantJobsReconciled";
     public const string TenantQuotaAdjusted = "TenantQuotaAdjusted";
     public const string CreditPayerChanged = "CreditPayerChanged";
+    public const string ServiceChargesChanged = "ServiceChargesChanged";
     public const string PlatformWalletAdjusted = "PlatformWalletAdjusted";
     public const string PlatformWalletToppedUp = "PlatformWalletToppedUp";
     public const string CreditUsageRedeemed = "CreditUsageRedeemed";

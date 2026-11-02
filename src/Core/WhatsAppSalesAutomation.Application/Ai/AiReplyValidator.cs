@@ -131,9 +131,20 @@ public class AiReplyValidator : IAiReplyValidator
                 Blocking: true));
         }
 
+        // ── V-11: never promise what the platform is not going to send ──────────────────────────
+        // A calendar invitation is never sent, so a sentence that says one is coming is always a promise nobody will keep. A confirmation email is sent only when the
+        // customer gave a usable address (see ReadConfirmation), so a sentence promising an email without one is the same. Either way the reply is held for a person
+        // instead of reaching the customer.
+        var confirmation = ReadConfirmation(result);
+        var promise = FindUnbackedPromise(text, confirmation is not null);
+        if (promise is not null)
+        {
+            failures.Add(new ValidationFailure("UnbackedPromise", promise, Blocking: true));
+        }
+
         // ── Product knowledge served to chat (the tenant's switch ON) ───────────────────────
         if (context.ProductKnowledgeServing)
-            ValidateAgainstPublishedKnowledge(text, intent, context, failures);
+            ValidateAgainstPublishedKnowledge(text, intent, context, failures, answeredLanguageQuestion: !string.IsNullOrWhiteSpace(result.ChosenLanguage));
 
         return new ValidatedReply(
             CanSend: !failures.Any(f => f.Blocking),
@@ -153,7 +164,12 @@ public class AiReplyValidator : IAiReplyValidator
             // Someone who asked us to stop is not "interested but not now", whatever else the model reported.
             CannotProceedNow: result.CannotProceedNow && !result.OptOutRequested,
             CannotProceedReason: Truncate(result.CannotProceedReason, 300),
-            FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null);
+            FollowUpInMonths: result.FollowUpInMonths is { } months ? Math.Clamp(months, 1, 12) : null,
+            ChosenLanguage: Truncate(result.ChosenLanguage, 10),
+            // A booking with nothing to tell the tenant is not one, and someone who asked us to stop booked nothing.
+            NextStepBooked: result.NextStepBooked && !result.OptOutRequested && !string.IsNullOrWhiteSpace(result.NextStepSummary),
+            NextStepSummary: Truncate(result.NextStepSummary, 400),
+            Confirmation: confirmation);
     }
 
     /// <summary>Intents where the customer wants the business to state something: a reply to one of these needs approved knowledge behind it.</summary>
@@ -172,7 +188,7 @@ public class AiReplyValidator : IAiReplyValidator
     ///    (not merely in the customer's own message - repeating what they said is not backing it);
     ///  - when nothing approved covers a question, the reply may only be ONE clarifying question; anything else is blocked, so the conversation goes to a person.
     /// </summary>
-    private static void ValidateAgainstPublishedKnowledge(string text, string intent, AiConversationContext context, List<ValidationFailure> failures)
+    private static void ValidateAgainstPublishedKnowledge(string text, string intent, AiConversationContext context, List<ValidationFailure> failures, bool answeredLanguageQuestion)
     {
         var approved = ClaimRules.NormalizeForClaims(string.Join(" ", context.GroundingChunks.Select(c => c.Text)));
         var unbacked = ClaimRules.MaterialClaims(text).Where(c => !approved.Contains(c.Needle, StringComparison.Ordinal)).Select(c => c.Display).ToList();
@@ -184,7 +200,9 @@ public class AiReplyValidator : IAiReplyValidator
                 Blocking: true));
         }
 
-        if (context.GroundingChunks.Count == 0 && KnowledgeSeekingIntents.Contains(intent))
+        // "Hinglish" in answer to "which language?" is not a question about the business, so finding nothing for it is not a knowledge miss.
+        // Any number or claim in the reply is still checked above.
+        if (context.GroundingChunks.Count == 0 && KnowledgeSeekingIntents.Contains(intent) && !answeredLanguageQuestion)
         {
             var clarifying = IsSingleQuestion(text);
             failures.Add(new ValidationFailure(
@@ -255,6 +273,46 @@ public class AiReplyValidator : IAiReplyValidator
 
     /// <summary>Word-boundary match, so "prompt" does not fire on "promptly" and "score" does not fire
     /// on "scorecard".</summary>
+    private static readonly Regex CalendarWord = new(@"calendar|\binvit(e|es|ed|ation|ations)\b|\.ics\b|\bzoom\b|\bmeeting link\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex EmailWord = new(@"\be-?mail(ed|ing|s)?\b|\bmailed\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex PromiseWord = new(
+        @"will be (sent|emailed|mailed|shared)|has been (sent|emailed|mailed)|have been (sent|emailed)|is on its way|being (sent|emailed)|\bshortly\b|i'?ll (send|email|share)|we'?ll (send|email|share)|will (send|email|receive|get)|you'?ll (receive|get)|sending you|coming your way|is sent to|was sent to",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>The first sentence of the reply that promises something that will not happen, or null. A calendar invitation (or a meeting link, which the AI cannot make) is
+    /// never sent, so promising one is always wrong; an email is sent only when <paramref name="emailWillBeSent"/>. A question ("what email should it go to?") asks for what is
+    /// needed and promises nothing, so it never counts.</summary>
+    internal static string? FindUnbackedPromise(string text, bool emailWillBeSent)
+    {
+        foreach (var sentence in Regex.Split(text, @"(?<=[.!?])\s+|\r?\n"))
+        {
+            if (sentence.Contains('?') || !PromiseWord.IsMatch(sentence))
+                continue;
+            if (CalendarWord.IsMatch(sentence))
+                return "Reply promises a calendar invitation or meeting link, which the platform does not send.";
+            if (!emailWillBeSent && EmailWord.IsMatch(sentence))
+                return "Reply promises an email, but the customer gave no valid email address to send one to.";
+        }
+
+        return null;
+    }
+
+    /// <summary>The confirmation the customer asked for, or null when none can be sent: it needs the booking to have been confirmed and a well-formed email address.
+    /// Nothing is guessed from the conversation - the address is the one the model reported the customer gave.</summary>
+    private static Bookings.BookingConfirmation? ReadConfirmation(AiReplyResult result)
+    {
+        if (!result.NextStepBooked || result.OptOutRequested || string.IsNullOrWhiteSpace(result.NextStepSummary))
+            return null;
+
+        var email = result.CustomerEmail?.Trim();
+        if (string.IsNullOrEmpty(email) || email.Length > 254 || !System.Net.Mail.MailAddress.TryCreate(email, out var address) || address.Address != email)
+            return null;
+
+        return new Bookings.BookingConfirmation(email);
+    }
+
     private static bool ContainsPhrase(string text, string phrase)
     {
         var index = 0;

@@ -442,6 +442,35 @@ public class QualificationAdminService : IQualificationAdminService
         return cleaned.Count == 0 ? null : JsonSerializer.Serialize(cleaned);
     }
 
+    public const int MaxNextStepDetail = 300;
+
+    public async Task<NextStepDto> GetNextStepAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var tenant = await _context.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+            ?? throw new NotFoundException("Tenant not found.");
+        return new NextStepDto(tenant.AiConversationGoal.ToString(), tenant.AiConversationGoalDetail);
+    }
+
+    public async Task<NextStepDto> SetNextStepAsync(Guid tenantId, SetNextStepRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!Enum.TryParse<ConversationGoal>(request.Goal, ignoreCase: true, out var goal) || !Enum.IsDefined(goal))
+            throw Invalid("goal", $"Goal must be one of: {string.Join(", ", Enum.GetNames<ConversationGoal>())}.");
+
+        var detail = Clean(request.Detail);
+        if (detail is { Length: > MaxNextStepDetail })
+            throw Invalid("detail", $"Keep the details under {MaxNextStepDetail} characters.");
+
+        var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+            ?? throw new NotFoundException("Tenant not found.");
+
+        tenant.AiConversationGoal = goal;
+        // Nothing offered, nothing to describe: a stale line must not reappear if a step is chosen again later.
+        tenant.AiConversationGoalDetail = goal == ConversationGoal.Enquiry ? null : detail;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return new NextStepDto(tenant.AiConversationGoal.ToString(), tenant.AiConversationGoalDetail);
+    }
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static FluentValidation.ValidationException Invalid(string property, string message) =>

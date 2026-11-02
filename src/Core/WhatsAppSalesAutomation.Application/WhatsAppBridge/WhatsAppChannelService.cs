@@ -33,8 +33,10 @@ public interface IWhatsAppChannelStore
 
 /// <param name="Qr">Present only while pairing: temporary authentication material, shown once and never persisted.</param>
 /// <param name="Confirmed">False when a disconnect was requested but the bridge still reports the session open.</param>
+/// <param name="BridgeReachable">False when the bridge could not be asked just now: <c>Status</c> is then only what was last stored, not confirmed.</param>
 public record WhatsAppChannelStatusDto(
-    string Status, string? ConnectedPhone, string? LastError, DateTime? StatusUpdatedAtUtc, string? QrBase64, int? QrRefreshSeconds, bool Confirmed = true);
+    string Status, string? ConnectedPhone, string? LastError, DateTime? StatusUpdatedAtUtc, string? QrBase64, int? QrRefreshSeconds, bool Confirmed = true,
+    bool BridgeReachable = true);
 
 public interface IWhatsAppChannelService
 {
@@ -107,7 +109,7 @@ public class WhatsAppChannelService : IWhatsAppChannelService
         }
         catch (WhatsAppBridgeException ex)
         {
-            return ToDto(channel) with { LastError = ex.Message };
+            return ToDto(channel) with { LastError = ex.Message, BridgeReachable = false };
         }
 
         return ToDto(channel);

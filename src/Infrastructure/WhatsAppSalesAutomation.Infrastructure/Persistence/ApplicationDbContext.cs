@@ -154,6 +154,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<TenantFeatureCap> TenantFeatureCaps => Set<TenantFeatureCap>();
 
+    public DbSet<NextStepBooking> NextStepBookings => Set<NextStepBooking>();
+
     public DbSet<CreditPack> CreditPacks => Set<CreditPack>();
 
     public DbSet<PlanPrice> PlanPrices => Set<PlanPrice>();

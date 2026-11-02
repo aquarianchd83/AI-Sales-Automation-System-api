@@ -49,7 +49,9 @@ public record PlatformTenantDetailDto(
     // The tenant's state where its country's tax splits by state (India); decides CGST + SGST versus IGST.
     string? StateCode = null,
     // The WhatsApp number the tenant gave during onboarding - what the operator connects to WhatsApp for it.
-    string? WhatsAppNumber = null);
+    string? WhatsAppNumber = null,
+    // Where the tenant's own notices are emailed. Null means they go to the owner's address (OwnerEmail).
+    string? BillingAlertEmail = null);
 
 public record ImpersonationSessionDto(
     string AccessToken,
@@ -58,6 +60,12 @@ public record ImpersonationSessionDto(
     string ImpersonatedUserEmail,
     Guid TenantId,
     string TenantName);
+
+/// <summary>The address a tenant's notices (quota, billing, bookings...) are emailed to. Empty clears it, so they go to the owner's address again.</summary>
+public record UpdateTenantNotificationEmailRequest(string? Email);
+
+/// <summary>Where a tenant's notices go now: <paramref name="BillingAlertEmail"/> when one is set, otherwise the owner's address (<paramref name="OwnerEmail"/>).</summary>
+public record TenantNotificationEmailDto(string? BillingAlertEmail, string? OwnerEmail);
 
 /// <summary>Force-sets a tenant's plan without going through Stripe Checkout - e.g. a manually
 /// negotiated enterprise deal, or support compensating a customer. Does not touch Stripe at all;
@@ -95,3 +103,9 @@ public record CreatePlatformTenantRequest(
     string? SupportPhone = null,
     IReadOnlyList<string>? DomainKeywords = null,
     string? StateCode = null) : Tenancy.ITenantBusinessDetails;
+
+/// <summary>Permanent removal of a tenant. <see cref="ConfirmSlug"/> must equal the tenant's slug - the API's own guard against
+/// a wrong id or a stray call, on top of the console asking the operator to type it.</summary>
+public record PurgeTenantRequest(string ConfirmSlug);
+
+public record PurgeTenantResultDto(int TablesAffected, int RowsDeleted);

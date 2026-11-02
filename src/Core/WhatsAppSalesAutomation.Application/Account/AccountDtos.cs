@@ -21,7 +21,8 @@ public record UserProfileDto(
     DateTime CreatedAt,
     DateTime? LastLoginAt,
     bool EmailConfirmed = true,
-    bool PhoneNumberConfirmed = false);
+    bool PhoneNumberConfirmed = false,
+    string? NotificationEmail = null);
 
 /// <summary>
 /// Body of PUT account/profile - replaces every editable field at once, so a null optional field clears it.
@@ -30,10 +31,14 @@ public record UserProfileDto(
 /// with (their Identity user name moves with it). The access token they are holding keeps the old email in
 /// its claims until they sign in again, so anything claim-derived - notably the actor email recorded on
 /// platform audit entries - shows the previous address until then.
+///
+/// <paramref name="NotificationEmail"/> is where this account's alerts are emailed, kept apart from the sign-in address so redirecting alerts never changes how anyone
+/// signs in. Empty means alerts go to the sign-in email.
 /// </summary>
 public record UpdateUserProfileRequest(
     string FullName,
     string Email,
     string? PhoneNumber,
     string Timezone,
-    string? CountryCode);
+    string? CountryCode,
+    string? NotificationEmail = null);

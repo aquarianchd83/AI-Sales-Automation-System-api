@@ -74,6 +74,12 @@ public class PlatformTenantsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Irreversible: removes the tenant and all of its users, configuration, jobs and data. The body must repeat the
+    /// tenant's slug. The audit log entry is kept.</summary>
+    [HttpPost("{id:guid}/purge")]
+    public async Task<ActionResult<PurgeTenantResultDto>> Purge(Guid id, [FromBody] PurgeTenantRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.PurgeAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
+
     /// <summary>Issues a short-lived, no-refresh-token access token for this tenant's admin - audited,
     /// time-boxed, per the spec's Impersonate action.</summary>
     [HttpPost("{id:guid}/impersonate")]
@@ -96,6 +102,11 @@ public class PlatformTenantsController : ControllerBase
     /// <summary>Support-facing override of one tenant's country (and therefore plan pricing currency -
     /// see Application.Billing.RegionalPricingCatalog.Resolve) - see
     /// IPlatformTenantService.UpdateCountryAsync's own doc comment.</summary>
+    /// <summary>Sets or clears the address a tenant's notices are emailed to - see IPlatformTenantService.UpdateNotificationEmailAsync.</summary>
+    [HttpPut("{id:guid}/notification-email")]
+    public async Task<ActionResult<TenantNotificationEmailDto>> UpdateNotificationEmail(Guid id, [FromBody] UpdateTenantNotificationEmailRequest request, CancellationToken cancellationToken)
+        => Ok(await _tenantService.UpdateNotificationEmailAsync(id, request, ActorUserId, ActorEmail, cancellationToken));
+
     [HttpPut("{id:guid}/country")]
     public async Task<ActionResult<TenantProfileDto>> UpdateCountry(Guid id, [FromBody] UpdateTenantCountryRequest request, CancellationToken cancellationToken)
         => Ok(await _tenantService.UpdateCountryAsync(id, request, ActorUserId, ActorEmail, cancellationToken));

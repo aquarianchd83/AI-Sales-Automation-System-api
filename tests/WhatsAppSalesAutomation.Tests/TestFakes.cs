@@ -142,6 +142,22 @@ public sealed class FakePlatformWhatsApp : IPlatformWhatsAppSender
         Templates.Add((templateName, mediaUrl));
         return Task.FromResult(new DeliveryResult(true));
     }
+
+    /// <summary>Plain texts sent, and whether the next one should fail (a person outside the 24-hour window).</summary>
+    public List<(string To, string Text)> Texts { get; } = new();
+
+    public bool TextFails { get; set; }
+
+    public Task<DeliveryResult> SendTextAsync(string toPhoneE164, string text, CancellationToken cancellationToken = default)
+    {
+        if (!Configured)
+            return Task.FromResult(new DeliveryResult(false, "not configured", Skipped: true));
+        if (TextFails)
+            return Task.FromResult(new DeliveryResult(false, "Re-engagement message (131047)"));
+
+        Texts.Add((toPhoneE164, text));
+        return Task.FromResult(new DeliveryResult(true));
+    }
 }
 
 /// <summary>An interface stub whose every call goes to one handler - enough to stand in for a collaborator the

@@ -7,6 +7,7 @@ using WhatsAppSalesAutomation.Application.Handoffs;
 using WhatsAppSalesAutomation.Application.KnowledgeBase;
 using WhatsAppSalesAutomation.Application.Leads;
 using WhatsAppSalesAutomation.Application.Leads.FollowUps;
+using WhatsAppSalesAutomation.Application.Bookings;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
@@ -49,6 +50,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
     private readonly ILeadFollowUpService _followUps;
     private readonly ILogger<ConversationOrchestrator> _logger;
     private readonly WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? _productKnowledge;
+    private readonly IBookingRecorder? _bookings;
 
     public ConversationOrchestrator(
         IApplicationDbContext context,
@@ -68,8 +70,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
         ICrmContextBuilder crm,
         ILeadFollowUpService followUps,
         ILogger<ConversationOrchestrator> logger,
-        WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? productKnowledge = null)
+        WhatsAppSalesAutomation.Application.ProductKnowledge.IProductKnowledgeServing? productKnowledge = null,
+        IBookingRecorder? bookings = null)
     {
+        _bookings = bookings;
         _productKnowledge = productKnowledge;
         _aiUsage = aiUsage;
         _context = context;
@@ -367,7 +371,10 @@ public class ConversationOrchestrator : IConversationOrchestrator
         if (Enum.TryParse<LeadScoreBand>(score.Band, ignoreCase: true, out var parsedBand))
             conversation.LastLeadScore = parsedBand;
 
-        await UpdatePreferredLanguageAsync(customer, conversationId, interaction.Id, validated.DetectedLanguage, cancellationToken);
+        // The customer's own choice (answer to the language question, or an explicit switch). Detection alone no longer
+        // changes it: a customer who chose Hindi and types an English word is still answered in Hindi.
+        if (!string.IsNullOrWhiteSpace(validated.ChosenLanguage))
+            customer.PreferredLanguage = validated.ChosenLanguage;
 
         if (escalate)
         {
@@ -424,6 +431,11 @@ public class ConversationOrchestrator : IConversationOrchestrator
         else
         {
             await SendAiReplyAsync(conversation, customer, inboundMessageId, validated.ResponseText, cancellationToken);
+
+            // The confirmation really went out (a failed send hands the conversation to a person instead), so the booking is saved to the tenant's
+            // list and the business is told: a booking made with the AI is only real if someone is ready for it. Never fails the customer's reply.
+            if (validated.NextStepBooked && conversation.Status != ConversationStatus.Escalated && _bookings is not null)
+                await _bookings.RecordAsync(conversation.TenantId, conversation.Id, customer.Id, validated.NextStepSummary!, isTest: false, validated.Confirmation, cancellationToken);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -501,48 +513,8 @@ public class ConversationOrchestrator : IConversationOrchestrator
                 tenant.ProductName,
                 tenant.BusinessDescription,
                 tenant.AiConversationGoal,
-                tenant.AiMayDiscloseLeadScore);
-    }
-
-    /// <summary>
-    /// Updates the customer's saved language only once they have used the same one on two turns
-    /// running.
-    ///
-    /// One turn is not evidence. Someone who writes Hindi throughout and answers "ok" once would have
-    /// every future message pinned to English by a single-turn rule - and the saved preference
-    /// reaches the prompt, so a wrong one is not harmless. Two consecutive turns is cheap to check
-    /// and gets that case right.
-    ///
-    /// The stored value stays a hint either way: the prompt tells the agent to match whatever the
-    /// customer actually wrote in the latest message, whatever the preference says.
-    /// </summary>
-    private async Task UpdatePreferredLanguageAsync(
-        Customer customer,
-        Guid conversationId,
-        Guid currentInteractionId,
-        string? detected,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(detected))
-            return;
-
-        if (string.Equals(customer.PreferredLanguage, detected, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        // Excluding this turn's own row explicitly rather than relying on it being unsaved. It is
-        // unsaved - it was only added to the change tracker above, and EF does not flush before a
-        // query - but a rule that silently depends on that would break the day anything upstream
-        // saves earlier, and it would break by confirming a language against itself.
-        var previous = await _context.AiInteractions
-            .Where(i => i.ConversationId == conversationId
-                && i.Id != currentInteractionId
-                && i.DetectedLanguage != null)
-            .OrderByDescending(i => i.CreatedAt)
-            .Select(i => i.DetectedLanguage)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (string.Equals(previous, detected, StringComparison.OrdinalIgnoreCase))
-            customer.PreferredLanguage = detected;
+                tenant.AiMayDiscloseLeadScore,
+                tenant.AiConversationGoalDetail);
     }
 
     /// <summary>Whether the AI's previous turn in this conversation also found nothing approved for a question (it asked its one clarifying question then).</summary>

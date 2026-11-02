@@ -228,10 +228,16 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         // still recorded, the same way a run that ran out of quota partway through is.
         if (await _quota.GetAvailableAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
         {
-            await NotifyQuotaExhaustedAsync(profile.TenantId, cancellationToken);
+            // Zero affordable has three different causes, and only one of them is "out of credits": a tenant whose wallet is full but whose
+            // monthly limit for this feature is used up must be told that, not to buy credits.
+            var shortfall = await _quota.GetShortfallAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken);
+            var outOfCredits = shortfall is null || shortfall.Kind == QuotaShortfallKind.InsufficientCredits;
+            if (outOfCredits)
+                await NotifyQuotaExhaustedAsync(profile.TenantId, cancellationToken);
+
             return await RecordSkipAsync(profile,
-                "Skipped: no lead-candidate quota left - buy credits or wait for the plan to renew.",
-                quotaExhausted: true, cancellationToken);
+                "Skipped: " + (shortfall?.Message ?? "no lead-candidate quota left - buy credits or wait for the plan to renew."),
+                quotaExhausted: outOfCredits, cancellationToken, stopReason: shortfall?.Message);
         }
 
         return await ExecuteAsync(profile, null, LeadDiscoveryTriggers.Scheduled, batchSize, cancellationToken);
@@ -242,7 +248,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     /// a mid-run quota exhaustion (DiscoverCustomersAsync, via FinalizeAsync), rather than Failed: there is
     /// nothing a retry could resume, and a Failed row would offer one.</summary>
     private async Task<string> RecordSkipAsync(
-        LeadDiscoveryProfile profile, string summary, bool quotaExhausted, CancellationToken cancellationToken)
+        LeadDiscoveryProfile profile, string summary, bool quotaExhausted, CancellationToken cancellationToken, string? stopReason = null)
     {
         var now = _dateTime.UtcNow;
 
@@ -257,6 +263,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             EndedAtUtc = now,
             Status = LeadDiscoveryExecutionStatus.Completed,
             QuotaExhausted = quotaExhausted,
+            QuotaStopReason = Truncate(stopReason, 500),
             LockKey = LeadDiscoveryLockClaim.KeyFor(profile.TenantId, profile.Id),
             CampaignStatus = LeadDiscoveryCampaignStatus.Skipped,
             TemplateStatus = LeadDiscoveryAssociationStatus.Skipped,
@@ -507,8 +514,13 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 var affordable = await _quota.GetAvailableAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
                 if (affordable < 1)
                 {
-                    stats.QuotaExhausted = true;
-                    await NotifyQuotaExhaustedAsync(tenantId, cancellationToken);
+                    var shortfall = await _quota.GetShortfallAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
+                    stats.QuotaExhausted = shortfall is null || shortfall.Kind == QuotaShortfallKind.InsufficientCredits;
+                    stats.QuotaStopReason = shortfall?.Message;
+                    if (stats.QuotaExhausted)
+                        await NotifyQuotaExhaustedAsync(tenantId, cancellationToken);
+                    else
+                        stats.StoppedEarlyForAllowance = true;
                     break;
                 }
 
@@ -1612,6 +1624,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         execution.EndedAtUtc = _dateTime.UtcNow;
         execution.QuotaExhausted = run.Stats.QuotaExhausted;
+        execution.QuotaStopReason = Truncate(run.Stats.QuotaStopReason, 500);
         execution.Summary = Truncate(BuildSummary(run), 2000);
 
         // The lock fields belong to the lock store; bring them up to date before writing the whole row, so the
@@ -1949,6 +1962,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         public int Saved { get; set; }
         public int Duplicates { get; set; }
         public bool QuotaExhausted { get; set; }
+
+        /// <summary>Why the research stopped for want of allowance, when it did (see LeadDiscoveryExecution.QuotaStopReason).</summary>
+        public string? QuotaStopReason { get; set; }
+
+        /// <summary>Stopped because a monthly limit or the plan ran out, not the wallet.</summary>
+        public bool StoppedEarlyForAllowance { get; set; }
         public LeadDiscoveryUsage Usage { get; set; } = LeadDiscoveryUsage.None;
 
         public int Rejected => _rejections.Values.Sum();
@@ -1966,6 +1985,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
             if (QuotaExhausted)
                 summary += " stoppedEarly=quotaExhausted";
+            else if (StoppedEarlyForAllowance)
+                summary += " stoppedEarly=allowanceLimit";
 
             return _rejections.Count == 0
                 ? summary

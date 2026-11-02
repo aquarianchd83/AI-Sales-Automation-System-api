@@ -31,6 +31,10 @@ public interface IPlatformTenantService
     /// doc comment) - never a physical cascade-delete of the tenant's data.</summary>
     Task DeleteAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 
+    /// <summary>Irreversibly removes the tenant and everything it owns (users, configuration, background jobs, data) -
+    /// see <see cref="ITenantDataPurger"/>. Refused unless <see cref="PurgeTenantRequest.ConfirmSlug"/> equals the tenant's slug.</summary>
+    Task<PurgeTenantResultDto> PurgeAsync(Guid tenantId, PurgeTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
     /// <summary>Issues a short-lived, no-refresh-token access token for the tenant's own admin (see
     /// <c>IJwtTokenService.GenerateImpersonationAccessToken</c> and the returned
     /// <c>impersonated_by</c> claim), for a support session. Picks <c>Tenant.OwnerUserId</c> when it
@@ -50,5 +54,9 @@ public interface IPlatformTenantService
     /// counterpart to ITenantService.UpdateCountryForCurrentTenantAsync's self-service path; both
     /// write the same <c>Tenant.CountryCode</c> column. The typical use: fixing a tenant's plan
     /// pricing currency (see Billing.RegionalPricingCatalog.Resolve) on their behalf.</summary>
+    /// <summary>Sets (or clears) the address a tenant's notices are emailed to. A platform operator's call: the tenant's own owner may never have set one, and the notices
+    /// then go to whoever created the tenant. Audited.</summary>
+    Task<TenantNotificationEmailDto> UpdateNotificationEmailAsync(Guid tenantId, UpdateTenantNotificationEmailRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
     Task<TenantProfileDto> UpdateCountryAsync(Guid tenantId, UpdateTenantCountryRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }

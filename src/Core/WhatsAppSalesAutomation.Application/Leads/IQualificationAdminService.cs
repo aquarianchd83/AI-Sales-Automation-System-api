@@ -58,4 +58,9 @@ public interface IQualificationAdminService
     /// value that was extracted wrongly and cannot simply be replaced with the right one.</summary>
     Task<LeadQualificationDto> ClearLeadValueAsync(
         Guid leadId, string fieldKey, CancellationToken cancellationToken = default);
+
+    /// <summary>The step this business offers customers, or Enquiry when it offers none.</summary>
+    Task<NextStepDto> GetNextStepAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    Task<NextStepDto> SetNextStepAsync(Guid tenantId, SetNextStepRequest request, CancellationToken cancellationToken = default);
 }

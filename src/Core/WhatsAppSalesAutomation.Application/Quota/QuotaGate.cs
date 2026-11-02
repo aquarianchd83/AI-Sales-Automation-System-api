@@ -53,17 +53,27 @@ public class QuotaGate : IQuotaGate
 
     /// <summary>How many units of the action behind the (older, per-feature) <paramref name="quotaType"/> the tenant could still afford - see
     /// <see cref="ICreditWalletService.GetAffordableUnitsAsync"/>. Asking for <see cref="QuotaType.Credits"/> is the plain balance.</summary>
+    private static CreditScenario? ScenarioOf(QuotaType quotaType) => quotaType switch
+    {
+        QuotaType.WhatsAppMessages => CreditScenario.WhatsAppTemplateSend,
+        QuotaType.AiConversations => CreditScenario.CustomerChatReply,
+        QuotaType.LeadCandidates => CreditScenario.LeadDiscovery,
+        QuotaType.ContentGenerations => CreditScenario.ContentStudioGeneration,
+        QuotaType.VideoRenders => CreditScenario.ContentStudioVideoRender,
+        _ => null
+    };
+
+    public async Task<QuotaShortfall?> GetShortfallAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default)
+    {
+        if (ScenarioOf(quotaType) is not { } scenario)
+            return null;
+
+        return await _wallet.GetShortfallAsync(tenantId, scenario, cancellationToken);
+    }
+
     public async Task<decimal> GetAvailableAsync(Guid tenantId, QuotaType quotaType, CancellationToken cancellationToken = default)
     {
-        CreditScenario? scenario = quotaType switch
-        {
-            QuotaType.WhatsAppMessages => CreditScenario.WhatsAppTemplateSend,
-            QuotaType.AiConversations => CreditScenario.CustomerChatReply,
-            QuotaType.LeadCandidates => CreditScenario.LeadDiscovery,
-            QuotaType.ContentGenerations => CreditScenario.ContentStudioGeneration,
-            QuotaType.VideoRenders => CreditScenario.ContentStudioVideoRender,
-            _ => null
-        };
+        var scenario = ScenarioOf(quotaType);
 
         return scenario is { } known
             ? await _wallet.GetAffordableUnitsAsync(tenantId, known, cancellationToken)

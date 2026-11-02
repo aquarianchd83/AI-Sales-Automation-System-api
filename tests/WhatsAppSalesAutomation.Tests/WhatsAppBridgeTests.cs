@@ -355,6 +355,26 @@ public class WhatsAppChannelServiceTests
         Assert.Equal(BridgeStatuses.NotConnected, (await Service().GetStatusAsync(Guid.NewGuid())).Status);
     }
 
+    [Fact]
+    public async Task Status_read_while_the_bridge_is_down_returns_the_stored_status_but_says_it_is_not_confirmed()
+    {
+        await Service().ConnectAsync(Tenant);
+        await Service().ApplyConnectionUpdateAsync(Tenant, "open", "919800000009");
+
+        _bridge.Unreachable = true;
+        var down = await Service().GetStatusAsync(Tenant);
+
+        Assert.Equal(BridgeStatuses.Connected, down.Status);
+        Assert.False(down.BridgeReachable);
+        Assert.Equal("The bridge could not be reached.", down.LastError);
+
+        _bridge.Unreachable = false;
+        _bridge.State = "open";
+        var up = await Service().GetStatusAsync(Tenant);
+        Assert.True(up.BridgeReachable);
+        Assert.Null(up.LastError);
+    }
+
     // ---- fakes ----------------------------------------------------------------------------------------------------
 
     private sealed class FakeSettings : IWhatsAppBridgeSettingsService
@@ -390,7 +410,10 @@ public class WhatsAppChannelServiceTests
         public Task<BridgeQr?> ConnectAsync(BridgeEndpoint e, string name, CancellationToken ct = default) =>
             Task.FromResult<BridgeQr?>(new BridgeQr($"data:image/png;base64,QR{++_qrCount}", "2@code"));
 
-        public Task<string?> GetStateAsync(BridgeEndpoint e, string name, CancellationToken ct = default) => Task.FromResult(State);
+        public bool Unreachable { get; set; }
+
+        public Task<string?> GetStateAsync(BridgeEndpoint e, string name, CancellationToken ct = default) =>
+            Unreachable ? throw new WhatsAppBridgeException("The bridge could not be reached.") : Task.FromResult(State);
 
         public Task ConfigureWebhookAsync(BridgeEndpoint e, string name, string url, string header, string secret, CancellationToken ct = default)
         {

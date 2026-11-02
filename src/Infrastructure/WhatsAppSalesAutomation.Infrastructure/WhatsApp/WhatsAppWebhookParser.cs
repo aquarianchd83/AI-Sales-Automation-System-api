@@ -88,7 +88,8 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
                         contactName,
                         ParseUnixTimestamp(m.Timestamp),
                         m.Type ?? "unknown",
-                        m.Text?.Body));
+                        // A tapped quick-reply or reply button, or a chosen list row, is not typed text, but the words on it are what the customer said.
+                        m.Text?.Body ?? m.Interactive?.ButtonReply?.Title ?? m.Interactive?.ListReply?.Title ?? m.Button?.Text));
                 }
 
                 foreach (var s in value.Statuses ?? Enumerable.Empty<MetaStatus>())
@@ -216,6 +217,35 @@ public class WhatsAppWebhookParser : IWhatsAppWebhookParser
 
         [JsonPropertyName("text")]
         public MetaText? Text { get; set; }
+
+        /// <summary>Type "interactive": the customer answered one of our reply buttons or list rows.</summary>
+        [JsonPropertyName("interactive")]
+        public MetaInteractive? Interactive { get; set; }
+
+        /// <summary>Type "button": the customer tapped a quick-reply button on a template.</summary>
+        [JsonPropertyName("button")]
+        public MetaButton? Button { get; set; }
+    }
+
+    private class MetaInteractive
+    {
+        [JsonPropertyName("button_reply")]
+        public MetaReply? ButtonReply { get; set; }
+
+        [JsonPropertyName("list_reply")]
+        public MetaReply? ListReply { get; set; }
+    }
+
+    private class MetaReply
+    {
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+    }
+
+    private class MetaButton
+    {
+        [JsonPropertyName("text")]
+        public string? Text { get; set; }
     }
 
     private class MetaText

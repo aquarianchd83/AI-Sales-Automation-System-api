@@ -29,6 +29,7 @@ public class LeadDiscoveryExecutionConfiguration : IEntityTypeConfiguration<Lead
         builder.Property(e => e.TemplateStatus).HasConversion<string>().HasMaxLength(30);
         builder.Property(e => e.MappingStatus).HasConversion<string>().HasMaxLength(30);
         builder.Property(e => e.Summary).HasMaxLength(2000);
+        builder.Property(e => e.QuotaStopReason).HasMaxLength(500);
 
         // History is read by processing date; retry lookups by profile and status.
         builder.HasIndex(e => new { e.TenantId, e.ProcessingDate });

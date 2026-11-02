@@ -93,6 +93,10 @@ public static class PlatformTemplateCatalog
             "Hi {{TenantName}}, your plan has ended and could not be renewed, so no new balance was added. {{Message}} Please contact support or check the Billing page in your dashboard.",
             "Your Growth plan ended on 4 Oct 2026 but can't renew automatically right now."),
 
+        Define(TenantNotificationKind.NextStepBooked, "Customer booked a demo or visit", "tenant_alert_next_step_booked",
+            "Hi {{TenantName}}, a customer has booked with you through your AI assistant. {{Message}} Open Conversations in your dashboard to see the chat and be ready.",
+            "Asha (+91 98000 00001) booked a demo for 4:00 PM on Mon 2 Nov, IST. Topics: all."),
+
         // Goes to the product owner, not the tenant: {{TenantName}} is the company that ran into the problem.
         Define(TenantNotificationKind.PlatformSetupNeeded, "Platform setup needed (to product owner)", "platform_alert_setup_needed",
             "Urgent: {{TenantName}} ran into a platform setting that only you can change. {{Message}} An urgent ticket has been raised - open the Tickets page in the Platform Admin Console to see it and fix the setting.",

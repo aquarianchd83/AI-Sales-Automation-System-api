@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.WhatsAppBridge;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -60,13 +61,12 @@ public class WhatsAppServiceFactory : IWhatsAppService
     /// <summary>The tenant to route through the bridge, or null when this call is not a bridge call at all.</summary>
     private Guid? BridgeTenant()
     {
-        if (!string.Equals(_providerOptions.Value.Active, WhatsAppProviders.QrBridge, StringComparison.OrdinalIgnoreCase))
-            return null;
         if (_tenantContext.TenantId is not { } tenantId)
             return null;
 
-        var pilots = _bridgeOptions.Value.PilotTenantIds;
-        return pilots.Count == 0 || pilots.Contains(tenantId) ? tenantId : null;
+        var provider = WhatsAppProviderRouting.Resolve(
+            _providerOptions.Value.Active, _providerOptions.Value.TenantOverrides, _bridgeOptions.Value.PilotTenantIds, tenantId);
+        return provider == WhatsAppProviders.QrBridge ? tenantId : null;
     }
 
     private async Task<(BridgeEndpoint? Endpoint, WhatsAppChannelRecord? Channel, string? Problem)> ResolveBridgeAsync(Guid tenantId, CancellationToken cancellationToken)

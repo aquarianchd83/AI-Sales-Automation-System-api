@@ -38,6 +38,7 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(t => t.TargetLocation).HasMaxLength(500);
         builder.Property(t => t.TargetCustomerType).HasMaxLength(50);
         builder.Property(t => t.AiConversationGoal).HasConversion<string>().HasMaxLength(20);
+        builder.Property(t => t.AiConversationGoalDetail).HasMaxLength(300);
         builder.Property(t => t.QualityRating).HasConversion<string>().HasMaxLength(10);
         builder.Property(t => t.SendingPauseReason).HasMaxLength(500);
 

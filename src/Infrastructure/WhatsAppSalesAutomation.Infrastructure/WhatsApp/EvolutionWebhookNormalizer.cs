@@ -121,15 +121,23 @@ public static class EvolutionWebhookNormalizer
         var text = Str(content, "conversation") ?? Str(Obj(content, "extendedTextMessage"), "text");
         var messageType = Str(data, "messageType");
 
+        // A tapped button or a chosen list row is not typed text, but the words on it are what the customer said: kept as the body, so the conversation reads
+        // and the AI answers what was chosen. The message is still not "text" (it stays an interactive reply).
+        var choice = text is null
+            ? Str(Obj(content, "buttonsResponseMessage"), "selectedDisplayText")
+              ?? Str(Obj(content, "listResponseMessage"), "title")
+              ?? Str(Obj(content, "templateButtonReplyMessage"), "selectedDisplayText")
+            : null;
+
         return new
         {
             id,
             from = phone,
             name = Str(data, "pushName"),
             ts = Number(data, "messageTimestamp"),
-            // Anything but plain text is recorded without a body, like the Meta path.
+            // Anything else (a photo, a voice note) is recorded without a body, like the Meta path.
             type = text is not null ? "text" : messageType ?? "unsupported",
-            text,
+            text = text ?? choice,
         };
     }
 

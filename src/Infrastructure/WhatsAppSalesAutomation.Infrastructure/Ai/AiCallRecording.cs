@@ -54,6 +54,8 @@ public sealed class AiCallRecorder
                 RequestedProvider = provider,
                 Provider = provider,
                 Model = model,
+                Origin = AiCallOrigin.Current,
+                Detail = AiCallOrigin.Current is null ? null : AiCallOrigin.CurrentDetail,
                 Mode = AiExecutionMode.Live,
                 Status = success ? AiExecutionStatus.Succeeded : AiExecutionStatus.Failed,
                 DurationMs = durationMs,
