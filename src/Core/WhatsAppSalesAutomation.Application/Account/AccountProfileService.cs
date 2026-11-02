@@ -63,6 +63,7 @@ public class AccountProfileService : IAccountProfileService
             user.PhoneNumberConfirmed = false;
         user.PhoneNumber = newPhone;
         user.Timezone = request.Timezone;
+        user.NotificationEmail = string.IsNullOrWhiteSpace(request.NotificationEmail) ? null : request.NotificationEmail.Trim();
         await _countries.EnsureAllowedAsync(request.CountryCode, user.CountryCode, cancellationToken);
         user.CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim();
 
@@ -121,7 +122,8 @@ public class AccountProfileService : IAccountProfileService
             user.CreatedAt,
             user.LastLoginAt,
             user.EmailConfirmed,
-            user.PhoneNumberConfirmed);
+            user.PhoneNumberConfirmed,
+            user.NotificationEmail);
     }
 
     /// <summary>Identity reports its own failures as a result object rather than throwing; surface them as

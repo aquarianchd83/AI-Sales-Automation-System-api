@@ -173,7 +173,8 @@ public class PlatformTenantService : IPlatformTenantService
             Math.Round(estimatedAiSpend * pricing.RateToUsd, 6, MidpointRounding.AwayFromZero),
             tenant.RefundRequestsEnabled,
             tenant.StateCode,
-            tenant.WhatsAppNumber);
+            tenant.WhatsAppNumber,
+            tenant.BillingAlertEmail);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -367,6 +368,28 @@ public class PlatformTenantService : IPlatformTenantService
             details: $"Timezone {previousTimezone ?? "(default)"} -> {request.Timezone}", cancellationToken: cancellationToken);
 
         return TenantProfileDto.From(tenant);
+    }
+
+    public async Task<TenantNotificationEmailDto> UpdateNotificationEmailAsync(
+        Guid tenantId, UpdateTenantNotificationEmailRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        var email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim();
+        if (email is not null && (email.Length > 256 || !System.Net.Mail.MailAddress.TryCreate(email, out var address) || address.Address != email))
+            throw new FluentValidation.ValidationException(new[] { new FluentValidation.Results.ValidationFailure(nameof(request.Email), "Enter a valid email address.") });
+
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+        var previous = tenant.BillingAlertEmail;
+        tenant.BillingAlertEmail = email;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantNotificationEmailUpdated, tenantId,
+            details: $"Notification email {previous ?? "(owner's address)"} -> {email ?? "(owner's address)"}", cancellationToken: cancellationToken);
+
+        string? ownerEmail = null;
+        if (tenant.OwnerUserId is { } ownerId)
+            ownerEmail = (await _userManager.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == ownerId, cancellationToken))?.Email;
+        return new TenantNotificationEmailDto(tenant.BillingAlertEmail, ownerEmail);
     }
 
     public async Task<TenantProfileDto> UpdateCountryAsync(

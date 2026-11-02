@@ -67,7 +67,9 @@ public class PlatformNotifier : IPlatformNotifier
             // Platform operators are exactly the users with no tenant.
             var recipients = await _userManager.Users.IgnoreQueryFilters()
                 .Where(u => u.TenantId == null && u.IsActive && u.Email != null)
-                .Select(u => u.Email!)
+                // An operator who has set a notification email gets alerts there; otherwise at the address they sign in with.
+                .Select(u => string.IsNullOrEmpty(u.NotificationEmail) ? u.Email! : u.NotificationEmail)
+                .Distinct()
                 .ToListAsync(cancellationToken);
 
             if (recipients.Count == 0)

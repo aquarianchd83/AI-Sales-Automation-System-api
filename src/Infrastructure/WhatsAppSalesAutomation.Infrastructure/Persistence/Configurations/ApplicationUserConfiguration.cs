@@ -9,6 +9,7 @@ public class ApplicationUserConfiguration : IEntityTypeConfiguration<Application
     public void Configure(EntityTypeBuilder<ApplicationUser> builder)
     {
         builder.Property(u => u.FullName).IsRequired().HasMaxLength(200);
+        builder.Property(u => u.NotificationEmail).HasMaxLength(256);
         builder.HasIndex(u => u.TenantId);
 
         // No HasQueryFilter here - ApplicationUser is deliberately not ITenantOwned (its TenantId is

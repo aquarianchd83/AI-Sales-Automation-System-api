@@ -54,5 +54,9 @@ public interface IPlatformTenantService
     /// counterpart to ITenantService.UpdateCountryForCurrentTenantAsync's self-service path; both
     /// write the same <c>Tenant.CountryCode</c> column. The typical use: fixing a tenant's plan
     /// pricing currency (see Billing.RegionalPricingCatalog.Resolve) on their behalf.</summary>
+    /// <summary>Sets (or clears) the address a tenant's notices are emailed to. A platform operator's call: the tenant's own owner may never have set one, and the notices
+    /// then go to whoever created the tenant. Audited.</summary>
+    Task<TenantNotificationEmailDto> UpdateNotificationEmailAsync(Guid tenantId, UpdateTenantNotificationEmailRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
     Task<TenantProfileDto> UpdateCountryAsync(Guid tenantId, UpdateTenantCountryRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 }
