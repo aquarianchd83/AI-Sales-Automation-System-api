@@ -45,11 +45,12 @@ public sealed class AiTaskRunner : IAiTaskRunner
         var correlation = Guid.NewGuid();
         var attempts = new List<AiAttempt>();
 
-        if (!AiTaskKinds.Product.Contains(request.Task, StringComparer.Ordinal))
+        var isStudio = AiTaskKinds.Studio.Contains(request.Task, StringComparer.Ordinal);
+        if (!isStudio && !AiTaskKinds.Product.Contains(request.Task, StringComparer.Ordinal))
             return Fail(request, new AiFeatureChoice(false, AiCapabilities.Simulator), correlation, attempts, AiErrorCodes.CapabilityUnsupported, $"'{request.Task}' is not a product-knowledge task.");
 
         // Each task follows the switch of its group on the Integrations page, unless the caller names a feature itself.
-        request = request with { Feature = request.Feature ?? AiFeatures.GroupOf(request.Task) };
+        request = request with { Feature = request.Feature ?? (isStudio ? AiFeatures.ContentGeneration : AiFeatures.GroupOf(request.Task)) };
         var route = _routing.Resolve(request.Feature!);
 
         if (route.IsOff)

@@ -83,6 +83,26 @@ public static class DependencyInjection
         services.AddSingleton<WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.IHostAddressResolver, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.DnsHostAddressResolver>();
         services.AddHttpClient<WhatsAppSalesAutomation.Application.ProductKnowledge.IWebsiteCrawler, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.WebsiteCrawler>()
             .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler);
+        // Stock photos: the platform's key lives in the settings; the image host is the only place pictures are fetched from, behind the same network guard.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Assets.IStockAssetProvider, WhatsAppSalesAutomation.Infrastructure.ContentStudio.PexelsStockProvider>()
+            .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+        // Making videos: the voice and the video are hosted services; the private files they need are handed over as short-lived single-file links.
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.ITenantFileLinks, WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.S3TenantDocumentStore>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVoiceSynthesizer, WhatsAppSalesAutomation.Infrastructure.ContentStudio.GoogleTtsVoiceSynthesizer>()
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(60)).RemoveAllLoggers();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderer, WhatsAppSalesAutomation.Infrastructure.ContentStudio.ShotstackVideoRenderer>()
+            .ConfigurePrimaryHttpMessageHandler(WhatsAppSalesAutomation.Infrastructure.ProductKnowledge.NetworkGuard.CreateHandler)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5)).RemoveAllLoggers();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Video.IVideoRenderQueue, HangfireVideoRenderQueue>();
+        services.AddScoped<VideoRenderJob>();
+        // Publishing: Google's sign-in and YouTube. The client secret and tokens travel in bodies and headers only, so request logging is off.
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IYouTubeClient, WhatsAppSalesAutomation.Infrastructure.ContentStudio.YouTubeClient>()
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(30)).RemoveAllLoggers();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Publishing.IPublicationQueue, HangfirePublicationQueue>();
+        services.AddScoped<PublicationJob>();
+        services.AddScoped<PublicationMetricsJob>();
+        services.AddScoped<StudioMaintenanceJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeSourceQueue, HangfireKnowledgeSourceQueue>();
         services.AddScoped<KnowledgeSourceProcessingJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ProductKnowledge.IKnowledgeDraftQueue, HangfireKnowledgeDraftQueue>();

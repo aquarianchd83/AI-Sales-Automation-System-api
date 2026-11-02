@@ -4,6 +4,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.ContentStudio.Video;
 using WhatsAppSalesAutomation.Application.ProductKnowledge;
 using WhatsAppSalesAutomation.Infrastructure.Storage;
 
@@ -18,7 +19,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.ProductKnowledge;
 /// anyone who guesses a key, so these objects live outside it, are encrypted at rest, are never cached publicly, and are read back only
 /// through the tenant's own API. Uses the same bucket, region and credentials as the AWS Settings page.
 /// </summary>
-public sealed class S3TenantDocumentStore : ITenantDocumentStore
+public sealed class S3TenantDocumentStore : ITenantDocumentStore, ITenantFileLinks
 {
     public const string KeyMarker = "s3:";
     public const string Root = "private";
@@ -76,6 +77,24 @@ public sealed class S3TenantDocumentStore : ITenantDocumentStore
     {
         EnsureConfigured();
         await Translate(() => _client.Value.DeleteObjectAsync(_settings.BucketName, ObjectKey(storageKey), cancellationToken));
+    }
+
+    /// <summary>A short-lived https address that reads exactly one of the tenant's own files. Refuses any key outside the tenant's folder.</summary>
+    public string CreateTemporaryReadUrl(Guid tenantId, string storageKey, TimeSpan lifetime)
+    {
+        EnsureConfigured();
+        var objectKey = ObjectKey(storageKey);
+        if (!objectKey.StartsWith(FolderOf(tenantId), StringComparison.Ordinal) || objectKey.Contains("..", StringComparison.Ordinal))
+            throw new InvalidOperationException("That file is not in this tenant's folder.");
+
+        return _client.Value.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _settings.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.GET,
+            Protocol = Protocol.HTTPS,
+            Expires = DateTime.UtcNow.Add(lifetime),
+        });
     }
 
     private static string ObjectKey(string storageKey) => storageKey.StartsWith(KeyMarker) ? storageKey[KeyMarker.Length..] : storageKey;

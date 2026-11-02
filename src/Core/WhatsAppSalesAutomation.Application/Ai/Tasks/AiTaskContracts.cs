@@ -30,6 +30,13 @@ public static class AiTaskKinds
     public const string DiscoveryKeywordSuggestion = "DiscoveryKeywordSuggestion";
     public const string LeadDiscovery = "LeadDiscovery";
 
+    // AI Content Studio. These run through the same task runner, on the "Content generation" switch of the Integrations page.
+    public const string ContentTopicIdeas = "ContentTopicIdeas";
+    public const string ContentScript = "ContentScript";
+
+    /// <summary>The AI Content Studio's tasks. Not product-knowledge work, so they have no group of their own: the caller names the feature.</summary>
+    public static readonly IReadOnlyList<string> Studio = new[] { ContentTopicIdeas, ContentScript };
+
     /// <summary>Not product work: the platform's own checks, recorded in the same log.</summary>
     public const string ConnectionCheck = "ConnectionCheck";
     public const string Benchmark = "Benchmark";
@@ -77,6 +84,7 @@ public static class AiUses
     public const string Onboarding = "Onboarding and profile";
     public const string Discovery = "Lead discovery";
     public const string ProductKnowledge = "Product knowledge";
+    public const string ContentStudio = "Content Studio";
 
     private static readonly string[] Three = { "OpenAI", "Anthropic", "Google" };
 
@@ -100,6 +108,8 @@ public static class AiUses
         new(AiTaskKinds.ConflictIdentification, ProductKnowledge, "Conflict identification", Three),
         new(AiTaskKinds.KnowledgeConsolidation, ProductKnowledge, "Knowledge consolidation", Three),
         new(AiTaskKinds.KnowledgeDraft, ProductKnowledge, "Draft knowledge file", Three),
+        new(AiTaskKinds.ContentTopicIdeas, ContentStudio, "Video topic ideas", Three),
+        new(AiTaskKinds.ContentScript, ContentStudio, "Video script and scenes", Three),
     };
 
     public static IReadOnlyList<string> Tasks { get; } = All.Select(u => u.Task).ToList();

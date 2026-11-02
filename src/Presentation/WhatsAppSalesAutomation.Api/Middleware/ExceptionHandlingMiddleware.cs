@@ -36,6 +36,7 @@ public class ExceptionHandlingMiddleware
             NotFoundException notFound => (StatusCodes.Status404NotFound, notFound.Message, (IReadOnlyList<string>?)null),
             ConflictException conflict => (StatusCodes.Status409Conflict, conflict.Message, null),
             FeatureDisabledException disabled => (StatusCodes.Status403Forbidden, disabled.Message, null),
+            ForbiddenException forbidden => (StatusCodes.Status403Forbidden, forbidden.Message, null),
             AuthenticationFailedException auth => (StatusCodes.Status401Unauthorized, auth.Message, null),
             StorageUnavailableException storage => (StatusCodes.Status503ServiceUnavailable, storage.Message, null),
             SetupIncompleteException incomplete => (StatusCodes.Status409Conflict, incomplete.Message, null),

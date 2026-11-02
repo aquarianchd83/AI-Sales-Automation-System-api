@@ -78,6 +78,31 @@ public static class SimulatedTaskEngine
 
         var note = $"{Marker} Predefined test data. No source was read and no AI provider was contacted.";
 
+        // The AI Content Studio's tasks: a fixed set of ideas or scenes, plainly marked, citing nothing the tenant said.
+        if (task == AiTaskKinds.ContentTopicIdeas)
+            return JsonSerializer.Serialize(new
+            {
+                topics = new[]
+                {
+                    new { title = $"{Marker} Meet the team behind the service", rationale = "Predefined test idea. It was not written from your facts.", facts = Array.Empty<int>() },
+                    new { title = $"{Marker} Three questions customers ask before they book", rationale = "Predefined test idea. It was not written from your facts.", facts = Array.Empty<int>() },
+                    new { title = $"{Marker} A day at the clinic", rationale = "Predefined test idea. It was not written from your facts.", facts = Array.Empty<int>() },
+                },
+                note
+            });
+
+        if (task == AiTaskKinds.ContentScript)
+            return JsonSerializer.Serialize(new
+            {
+                scenes = new[]
+                {
+                    new { narration = $"{Marker} Welcome. This is a predefined test script.", onScreenText = "Welcome", durationSeconds = 6, visualHint = "Exterior of the business", facts = Array.Empty<int>() },
+                    new { narration = $"{Marker} It says nothing about your business.", onScreenText = "Test script", durationSeconds = 8, visualHint = "Team at work", facts = Array.Empty<int>() },
+                    new { narration = $"{Marker} Get in touch to find out more.", onScreenText = "Get in touch", durationSeconds = 6, visualHint = "Contact details", facts = Array.Empty<int>() },
+                },
+                note
+            });
+
         if (string.Equals(scenario, AiSimulatorScenarios.MissingEvidence, StringComparison.OrdinalIgnoreCase))
             return JsonSerializer.Serialize(new
             {

@@ -54,6 +54,16 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<SocialAdSyncJob>(
             "social-ad-sync", job => job.RunAsync(), "10 4 * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Daily at 03:50 UTC (after data retention at 03:20): the studio's housekeeping - ends renders and publications that stopped moving (returning charges), deletes
+        // video files past their retention, removes sign-ins that needed reconnecting for too long. Each tenant in its own scope; idempotent.
+        recurringJobs.AddOrUpdate<StudioMaintenanceJob>(
+            "studio-maintenance", job => job.RunAsync(), "50 3 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Daily at 05:15 UTC: reads views, likes and comments of recently published videos and adds a snapshot for each. Read-only on the platform; a video already asked
+        // about in the last 20 hours is left alone, so a repeat is harmless.
+        recurringJobs.AddOrUpdate<PublicationMetricsJob>(
+            "studio-publication-metrics", job => job.RunAsync(), "15 5 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Hourly at :40, clear of the subscription pass at :05 and the tenants' own template syncs at :00: sends the platform's notice
         // templates to Meta and brings their review status back. A no-op until the platform WhatsApp number is set up.
         recurringJobs.AddOrUpdate<PlatformTemplateSyncJob>(
