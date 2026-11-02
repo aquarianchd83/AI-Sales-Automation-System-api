@@ -21,14 +21,18 @@ public class ContentStudioStoriesController : ControllerBase
     private readonly IStoryStudioService _stories;
     private readonly IStoryClipService _clips;
     private readonly IStoryRenderService _renders;
+    private readonly IStoryReviewService _review;
+    private readonly IStoryCharacterGenerationService _characters;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
         _renders = renders;
+        _review = review;
+        _characters = characters;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
     }
@@ -149,6 +153,28 @@ public class ContentStudioStoriesController : ControllerBase
         var stream = await _renders.OpenClipAsync(RequireTenantId(), sceneId, ct);
         return stream is null ? NotFound() : File(stream, "video/mp4", enableRangeProcessing: true);
     }
+
+    /// <summary>Option C: makes the characters the script needs, with preview pictures to approve.</summary>
+    [HttpPost("projects/{id:guid}/characters/generate")]
+    public async Task<ActionResult<IReadOnlyList<GeneratedCharacterDto>>> GenerateCharacters(Guid id, [FromBody] GenerateCharactersRequest request, CancellationToken ct)
+        => Ok(await _characters.GenerateForScriptAsync(RequireTenantId(), _currentUser.UserId, id, request, ct));
+
+    /// <summary>Another preview for one character, never replacing the approved one.</summary>
+    [HttpPost("characters/{id:guid}/references/generate")]
+    public async Task<ActionResult<StoryReferenceDto>> GenerateReference(Guid id, [FromBody] GenerateReferenceRequest request, CancellationToken ct)
+        => Ok(await _characters.GenerateReferenceAsync(RequireTenantId(), _currentUser.UserId, id, request, ct));
+
+    [HttpPut("scenes/{sceneId:guid}/dialogue/{order:int}")]
+    public async Task<ActionResult<StoryClipSceneDto>> EditDialogue(Guid sceneId, int order, [FromBody] EditDialogueRequest request, CancellationToken ct)
+        => Ok(await _review.EditDialogueAsync(RequireTenantId(), sceneId, order, request.Text, ct));
+
+    [HttpPost("projects/{id:guid}/approve-video")]
+    public async Task<ActionResult<StoryProjectDto>> ApproveVideo(Guid id, CancellationToken ct)
+        => Ok(await _review.ApproveFinalAsync(RequireTenantId(), _currentUser.UserId, id, ct));
+
+    [HttpGet("projects/{id:guid}/usage")]
+    public async Task<ActionResult<StoryUsageDto>> GetUsage(Guid id, CancellationToken ct)
+        => Ok(await _review.GetUsageAsync(RequireTenantId(), id, ct));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated content studio request has no tenant in scope.");

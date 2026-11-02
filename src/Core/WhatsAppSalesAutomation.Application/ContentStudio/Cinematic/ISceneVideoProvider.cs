@@ -69,4 +69,14 @@ public class CinematicOptions
     public decimal VeoUsdPerSecond { get; set; } = 0.12m;
 
     public int MaxAutomaticRetries { get; set; } = 1;
+
+    public string OpenAiApiKey { get; set; } = string.Empty;
+
+    /// <summary>"Simulator" (free placeholder pictures) or "OpenAI".</summary>
+    public string CharacterImageProvider { get; set; } = "Simulator";
+
+    public string ImageModel { get; set; } = "gpt-image-1";
+
+    /// <summary>Estimate shown before a paid picture. Check OpenAI's pricing page; this is not billing data.</summary>
+    public decimal ImageUsdEstimate { get; set; } = 0.17m;
 }

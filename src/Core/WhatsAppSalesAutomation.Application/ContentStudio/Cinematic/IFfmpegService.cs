@@ -33,6 +33,9 @@ public interface IFfmpegService
     /// <summary>A 9:16 test clip with a tone, standing in for a provider clip in simulator mode.</summary>
     Task CreateTestClipAsync(string outputPath, int seconds, string label, CancellationToken cancellationToken = default);
 
+    /// <summary>A plain placeholder PNG, standing in for a generated picture in simulator mode.</summary>
+    Task CreateTestImageAsync(string outputPath, int width, int height, CancellationToken cancellationToken = default);
+
     /// <summary>Joins the clips in order into one 1080x1920 H.264/AAC MP4, normalising size, frame rate and audio first so clips from different
     /// providers concatenate cleanly. A clip with no audio gets silence.</summary>
     Task MergeAsync(IReadOnlyList<string> clipPaths, string outputPath, string? subtitlesPath, CancellationToken cancellationToken = default);

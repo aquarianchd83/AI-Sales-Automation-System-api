@@ -66,6 +66,12 @@ public class FfmpegService : IFfmpegService
         await RunCheckedAsync(Ffmpeg, args, cancellationToken);
     }
 
+    public async Task CreateTestImageAsync(string outputPath, int width, int height, CancellationToken cancellationToken = default)
+    {
+        var args = new List<string> { "-y", "-f", "lavfi", "-i", $"color=c=0x486078:s={width}x{height}", "-frames:v", "1", outputPath };
+        await RunCheckedAsync(Ffmpeg, args, cancellationToken);
+    }
+
     public async Task MergeAsync(IReadOnlyList<string> clipPaths, string outputPath, string? subtitlesPath, CancellationToken cancellationToken = default)
     {
         if (clipPaths.Count == 0) throw new ArgumentException("There are no clips to merge.", nameof(clipPaths));
