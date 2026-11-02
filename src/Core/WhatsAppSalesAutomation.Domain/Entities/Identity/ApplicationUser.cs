@@ -40,6 +40,10 @@ public class ApplicationUser : IdentityUser<Guid>
     /// Informational: unlike <c>Tenant.CountryCode</c> it drives no pricing or currency.</summary>
     public string? CountryCode { get; set; }
 
+    /// <summary>Where this account's alerts are emailed when that should not be the sign-in address - a platform operator's own alerts (jobs failing, platform setup needed)
+    /// go here. Null means the sign-in email. Changing it never changes what the user signs in with.</summary>
+    public string? NotificationEmail { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? LastLoginAt { get; set; }
