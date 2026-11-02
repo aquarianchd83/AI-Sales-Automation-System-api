@@ -435,7 +435,7 @@ public class ConversationOrchestrator : IConversationOrchestrator
             // The confirmation really went out (a failed send hands the conversation to a person instead), so the booking is saved to the tenant's
             // list and the business is told: a booking made with the AI is only real if someone is ready for it. Never fails the customer's reply.
             if (validated.NextStepBooked && conversation.Status != ConversationStatus.Escalated && _bookings is not null)
-                await _bookings.RecordAsync(conversation.TenantId, conversation.Id, customer.Id, validated.NextStepSummary!, isTest: false, cancellationToken);
+                await _bookings.RecordAsync(conversation.TenantId, conversation.Id, customer.Id, validated.NextStepSummary!, isTest: false, validated.Confirmation, cancellationToken);
         }
 
         await _context.SaveChangesAsync(cancellationToken);

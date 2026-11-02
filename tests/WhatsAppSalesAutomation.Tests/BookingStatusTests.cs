@@ -108,7 +108,7 @@ public sealed class BookingStatusTests : IDisposable
     {
         var booking = await AddAsync(BookingStatus.Done);
 
-        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest(requested));
+        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest(requested, null, "Customer asked"));
 
         Assert.Equal(expected.ToString(), updated.Status);
         Assert.Equal(expected, (await _db.NextStepBookings.AsNoTracking().SingleAsync(b => b.Id == booking.Id)).Status);
@@ -123,7 +123,7 @@ public sealed class BookingStatusTests : IDisposable
     {
         var booking = await AddAsync();
 
-        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest(requested)));
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest(requested, null, "Customer asked")));
 
         Assert.Equal(BookingStatus.Pending, (await _db.NextStepBookings.AsNoTracking().SingleAsync(b => b.Id == booking.Id)).Status);
     }
@@ -136,7 +136,7 @@ public sealed class BookingStatusTests : IDisposable
         var booking = await AddAsync();
 
         // 11:00 on the tenant's clock (India by default, UTC+5:30) is 05:30 UTC, whatever zone the browser is in.
-        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00"));
+        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00", "Customer asked"));
 
         Assert.Equal("Reschedule", updated.Status);
         Assert.Equal(new DateTime(2099, 11, 4, 5, 30, 0, DateTimeKind.Utc), updated.NewSlotUtc);
@@ -150,7 +150,7 @@ public sealed class BookingStatusTests : IDisposable
         await _db.SaveChangesAsync();
         var booking = await AddAsync();
 
-        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00"));
+        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00", "Customer asked"));
 
         // New York is UTC-5 in November (standard time).
         Assert.Equal(new DateTime(2099, 11, 4, 16, 0, 0), updated.NewSlotUtc);
@@ -161,17 +161,50 @@ public sealed class BookingStatusTests : IDisposable
     {
         var booking = await AddAsync();
 
-        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule"));
+        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", null, "Customer asked"));
 
         Assert.Equal("Reschedule", updated.Status);
         Assert.Null(updated.NewSlotUtc);
     }
 
     [Fact]
+    public async Task Rescheduling_keeps_the_reason_trimmed()
+    {
+        var booking = await AddAsync();
+
+        var updated = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", null, "  Customer is travelling  "));
+
+        Assert.Equal("Customer is travelling", updated.RescheduleReason);
+        Assert.Equal("Customer is travelling", (await _db.NextStepBookings.AsNoTracking().SingleAsync()).RescheduleReason);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Rescheduling_without_a_reason_is_refused(string? reason)
+    {
+        var booking = await AddAsync();
+
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", null, reason)));
+    }
+
+    [Fact]
+    public async Task Moving_a_booking_on_from_reschedule_drops_the_reason()
+    {
+        var booking = await AddAsync();
+        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", null, "Customer asked"));
+
+        var done = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Done"));
+
+        Assert.Null(done.RescheduleReason);
+    }
+
+    [Fact]
     public async Task Moving_a_booking_on_from_reschedule_drops_the_slot_that_was_picked()
     {
         var booking = await AddAsync();
-        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00"));
+        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00", "Customer asked"));
 
         var pending = await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Pending"));
 
@@ -200,7 +233,7 @@ public sealed class BookingStatusTests : IDisposable
     {
         var booking = await AddAsync();
 
-        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", slot)));
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() => Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", slot, "Customer asked")));
 
         var stored = await _db.NextStepBookings.AsNoTracking().SingleAsync();
         Assert.Equal(BookingStatus.Pending, stored.Status);
@@ -211,7 +244,7 @@ public sealed class BookingStatusTests : IDisposable
     public async Task The_list_carries_the_slot_that_was_picked()
     {
         var booking = await AddAsync();
-        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00"));
+        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00", "Customer asked"));
 
         var item = Assert.Single((await Service().GetPagedAsync(new BookingQuery { Page = 1, PageSize = 10 })).Items);
 
@@ -222,7 +255,7 @@ public sealed class BookingStatusTests : IDisposable
     public async Task When_the_customer_confirms_a_time_of_their_own_the_slot_the_team_proposed_is_cleared()
     {
         var booking = await AddAsync();
-        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00"));
+        await Service().SetStatusAsync(booking.Id, new SetBookingStatusRequest("Reschedule", "2099-11-04T11:00", "Customer asked"));
 
         await Recorder().RecordAsync(_tenant, _conversation, _customer, "Demo Thu 5 Nov 3 PM IST", isTest: false);
 

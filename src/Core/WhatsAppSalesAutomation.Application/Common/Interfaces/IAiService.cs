@@ -173,7 +173,9 @@ public record AiReplyResult(
     /// confirms it. A report, like the other signals: the orchestrator tells the tenant.</summary>
     bool NextStepBooked = false,
     /// <summary>What was agreed, in a sentence for the tenant: what, when, in which time zone, and what they want covered. English.</summary>
-    string? NextStepSummary = null);
+    string? NextStepSummary = null,
+    /// <summary>The email address the customer gave for the booking's confirmation. Unchecked here: the validator decides if it is usable.</summary>
+    string? CustomerEmail = null);
 
 /// <summary>One qualification value the model claims the customer supplied. Claims, not facts - the
 /// validator checks the key is in this tenant's schema and the value fits the field's type before any

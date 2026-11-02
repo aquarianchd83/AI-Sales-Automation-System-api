@@ -24,4 +24,9 @@ public class BookingsController : ControllerBase
     [HttpPut("{id:guid}/status")]
     public async Task<ActionResult<BookingDto>> SetStatus(Guid id, [FromBody] SetBookingStatusRequest request, CancellationToken cancellationToken)
         => Ok(await _bookings.SetStatusAsync(id, request, cancellationToken));
+
+    /// <summary>Sends the customer of a booking a message - a meeting link, joining details, anything - by email, WhatsApp or both. Answers with how each went.</summary>
+    [HttpPost("{id:guid}/message")]
+    public async Task<ActionResult<IReadOnlyList<BookingMessageResult>>> Message(Guid id, [FromBody] BookingMessageRequest request, CancellationToken cancellationToken)
+        => Ok(await _bookings.MessageCustomerAsync(id, request, cancellationToken));
 }

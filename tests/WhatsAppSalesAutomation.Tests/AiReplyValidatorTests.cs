@@ -344,6 +344,76 @@ public class AiReplyValidatorTests
         Assert.DoesNotContain(grounded.Failures, f => f.Code == "NoApprovedKnowledge");
     }
 
+    // ── Promises: nothing is said to be on its way unless it will be sent ─────────────────
+
+    private static AiReplyResult Booked(string text, string? email) =>
+        Reply(text) with { NextStepBooked = true, NextStepSummary = "Demo agreed.", CustomerEmail = email };
+
+    [Theory]
+    [InlineData("Demo confirmed. Calendar invite will be sent shortly.")]
+    [InlineData("All set! I will send you a calendar invitation.")]
+    [InlineData("You'll receive a Zoom link by email.")]
+    [InlineData("A meeting link is on its way.")]
+    public void A_calendar_invite_or_meeting_link_is_never_promised_even_with_an_email(string text)
+    {
+        var result = _validator.Validate(Booked(text, "asha@example.com"), Context(inbound: text));
+
+        Assert.False(result.CanSend);
+        Assert.Contains(result.Failures, f => f.Code == "UnbackedPromise");
+    }
+
+    [Theory]
+    [InlineData("Demo confirmed. A confirmation email will be sent shortly.")]
+    [InlineData("You'll receive an email with the details.")]
+    public void An_email_promised_without_a_valid_address_blocks_the_reply(string text)
+    {
+        var result = _validator.Validate(Booked(text, null), Context(inbound: text));
+
+        Assert.False(result.CanSend);
+        Assert.Contains(result.Failures, f => f.Code == "UnbackedPromise");
+    }
+
+    [Fact]
+    public void A_confirmation_email_promised_with_a_valid_address_is_allowed_and_carried_out()
+    {
+        var text = "Demo confirmed. A confirmation email is being sent to asha@example.com.";
+
+        var result = _validator.Validate(Booked(text, "asha@example.com"), Context(inbound: text));
+
+        Assert.DoesNotContain(result.Failures, f => f.Code == "UnbackedPromise");
+        Assert.Equal("asha@example.com", result.Confirmation!.Email);
+    }
+
+    [Fact]
+    public void Asking_for_the_email_is_not_a_promise()
+    {
+        var text = "Great, what email address should the confirmation go to?";
+
+        var result = _validator.Validate(Reply(text), Context(inbound: text));
+
+        Assert.DoesNotContain(result.Failures, f => f.Code == "UnbackedPromise");
+    }
+
+    [Theory]
+    [InlineData("not-an-email")]
+    [InlineData("Asha <asha@example.com>")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void An_unusable_email_sends_no_confirmation(string? email)
+    {
+        var result = _validator.Validate(Booked("Demo confirmed, the team will be in touch.", email), Context());
+
+        Assert.Null(result.Confirmation);
+    }
+
+    [Fact]
+    public void Someone_who_opted_out_gets_no_confirmation()
+    {
+        var reply = Booked("Understood, I will stop messaging you.", "asha@example.com") with { OptOutRequested = true };
+
+        Assert.Null(_validator.Validate(reply, Context()).Confirmation);
+    }
+
     private static AiReplyResult Reply(string text) => new(
         ResponseText: text,
         DetectedIntent: nameof(CustomerIntent.PriceEnquiry),

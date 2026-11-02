@@ -2152,6 +2152,18 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ConfirmationNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("ConfirmationStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
                     b.Property<bool>("IsTest")
                         .HasColumnType("bit");
 
@@ -2162,6 +2174,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime?>("NewSlotUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("RescheduleReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Status")
                         .ValueGeneratedOnAdd()

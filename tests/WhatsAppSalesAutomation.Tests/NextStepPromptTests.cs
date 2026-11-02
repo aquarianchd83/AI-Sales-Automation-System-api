@@ -97,6 +97,19 @@ public sealed class NextStepPromptTests
     }
 
     [Fact]
+    public void The_ai_asks_for_an_email_for_the_confirmation_and_never_offers_an_invite_or_meeting_link()
+    {
+        var prompt = AiPromptSupport.SystemPrompt(Context(ConversationGoal.Demo, "Free 30-minute demo"));
+
+        Assert.Contains("the email address a confirmation should be sent to", prompt);
+        Assert.Contains("never say or imply that an email will be sent", prompt);
+        Assert.Contains("customer_email", prompt);
+        Assert.Contains("WITHOUT customer_email no email is sent", prompt);
+        Assert.Contains("You cannot send calendar invitations or meeting links", prompt);
+        Assert.DoesNotContain("next_step_starts_at", prompt);
+    }
+
+    [Fact]
     public void The_ai_is_told_when_to_report_a_booking_and_that_it_has_no_calendar()
     {
         var prompt = AiPromptSupport.SystemPrompt(Context(ConversationGoal.Demo));
