@@ -20,13 +20,15 @@ public class ContentStudioStoriesController : ControllerBase
 {
     private readonly IStoryStudioService _stories;
     private readonly IStoryClipService _clips;
+    private readonly IStoryRenderService _renders;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
+        _renders = renders;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
     }
@@ -124,6 +126,29 @@ public class ContentStudioStoriesController : ControllerBase
     [HttpPost("scenes/{sceneId:guid}/flag")]
     public async Task<ActionResult<StoryClipSceneDto>> FlagScene(Guid sceneId, [FromBody] FlagSceneRequest request, CancellationToken ct)
         => Ok(await _clips.FlagSceneAsync(RequireTenantId(), sceneId, request.Reason, ct));
+
+    [HttpGet("projects/{id:guid}/renders")]
+    public async Task<ActionResult<IReadOnlyList<StoryRenderDto>>> ListRenders(Guid id, CancellationToken ct)
+        => Ok(await _renders.ListRendersAsync(RequireTenantId(), id, ct));
+
+    /// <summary>Puts the clips together with subtitles into the final video. Runs in the background.</summary>
+    [HttpPost("projects/{id:guid}/renders")]
+    public async Task<ActionResult<StoryRenderDto>> StartRender(Guid id, CancellationToken ct)
+        => Ok(await _renders.StartRenderAsync(RequireTenantId(), _currentUser.UserId, id, ct));
+
+    [HttpGet("renders/{renderId:guid}/video")]
+    public async Task<IActionResult> DownloadFinal(Guid renderId, CancellationToken ct)
+    {
+        var stream = await _renders.OpenFinalAsync(RequireTenantId(), renderId, ct);
+        return stream is null ? NotFound() : File(stream, "video/mp4", $"story-{renderId:N}.mp4", enableRangeProcessing: true);
+    }
+
+    [HttpGet("scenes/{sceneId:guid}/clip")]
+    public async Task<IActionResult> PreviewClip(Guid sceneId, CancellationToken ct)
+    {
+        var stream = await _renders.OpenClipAsync(RequireTenantId(), sceneId, ct);
+        return stream is null ? NotFound() : File(stream, "video/mp4", enableRangeProcessing: true);
+    }
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated content studio request has no tenant in scope.");

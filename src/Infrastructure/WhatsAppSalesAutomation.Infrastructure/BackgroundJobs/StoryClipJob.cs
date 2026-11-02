@@ -38,3 +38,33 @@ public sealed class StoryClipJob
         return _runner.RunAsync(jobId);
     }
 }
+
+/// <summary>Enqueues <see cref="StoryRenderJob"/>.</summary>
+public sealed class HangfireStoryRenderQueue : IStoryRenderQueue
+{
+    private readonly IBackgroundJobClient _client;
+
+    public HangfireStoryRenderQueue(IBackgroundJobClient client) => _client = client;
+
+    public void Enqueue(Guid renderId, Guid tenantId) => _client.Enqueue<StoryRenderJob>(job => job.RunAsync(renderId, tenantId));
+}
+
+/// <summary>Puts one story's clips together in the tenant's scope. No automatic retry: the render row records its own failure and the user starts it again.</summary>
+[AutomaticRetry(Attempts = 0)]
+public sealed class StoryRenderJob
+{
+    private readonly ITenantContext _tenantContext;
+    private readonly IStoryRenderRunner _runner;
+
+    public StoryRenderJob(ITenantContext tenantContext, IStoryRenderRunner runner)
+    {
+        _tenantContext = tenantContext;
+        _runner = runner;
+    }
+
+    public Task RunAsync(Guid renderId, Guid tenantId)
+    {
+        _tenantContext.SetTenant(tenantId);
+        return _runner.RunAsync(renderId);
+    }
+}

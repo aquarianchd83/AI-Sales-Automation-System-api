@@ -94,7 +94,7 @@ public class FfmpegService : IFfmpegService
         {
             // The subtitles filter wants forward slashes and an escaped drive colon.
             var escaped = subtitlesPath.Replace('\\', '/').Replace(":", "\\:");
-            filter.Append(CultureInfo.InvariantCulture, $";[v]subtitles='{escaped}'[vs]");
+            filter.Append(CultureInfo.InvariantCulture, $";[v]subtitles='{escaped}':force_style='FontSize=9,MarginV=40,Outline=1,Alignment=2'[vs]");
             videoLabel = "[vs]";
         }
 
