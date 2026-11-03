@@ -347,7 +347,7 @@ public sealed class StoryVoiceAndPublishingTests : IDisposable
         Assert.True(checks["pictures"].Ok);    // placeholders are chosen, so no key is needed
         Assert.True(checks["storage"].Ok);
 
-        var chosen = new Options { Value = new CinematicOptions { VideoProvider = "Veo", CharacterImageProvider = "OpenAI", SpeechProvider = "OpenAI" } };
+        var chosen = new Options { Value = new CinematicOptions { VideoProvider = "Google", CharacterImageProvider = "OpenAI", SpeechProvider = "OpenAI" } };
         var veoNoKey = (await new StoryDiagnosticsService(_ffmpeg, chosen, _store, new Keys()).RunAsync()).ToDictionary(c => c.Key);
         Assert.False(veoNoKey["veo"].Ok);      // switched on but no Gemini key under AI Providers
         var after = (await new StoryDiagnosticsService(_ffmpeg, chosen, _store, new Keys { Google = "g" }).RunAsync()).ToDictionary(c => c.Key);

@@ -34,7 +34,7 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
         var ai = _credentials.Get();
         var hasGoogle = ai.IsEnabled("Google") && !string.IsNullOrWhiteSpace(ai.GoogleApiKey);
         var hasOpenAi = ai.IsEnabled("OpenAI") && !string.IsNullOrWhiteSpace(ai.OpenAiApiKey);
-        var veoOn = string.Equals(o.VideoProvider, "Veo", StringComparison.OrdinalIgnoreCase);
+        var veoOn = string.Equals(o.VideoProvider, "Google", StringComparison.OrdinalIgnoreCase);
         const string where = "Add it (and switch the provider on) under Configuration > AI Providers.";
         var ffmpegOk = await _ffmpeg.IsAvailableAsync(cancellationToken);
         var font = _ffmpeg.FindDevanagariFont();
@@ -48,8 +48,8 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
             new StoryCheckDto("storage", "File storage (S3)", _store.IsConfigured,
                 _store.IsConfigured ? "Configured." : "Not configured. Clips, pictures and finished videos cannot be saved."),
             new StoryCheckDto("veo", "Veo (Gemini key)", !veoOn || hasGoogle,
-                !veoOn ? "Veo is switched off (clips come from the free test clips or Google Flow). Switch it on under Platform > Integrations > Story Studio." :
-                !hasGoogle ? "Veo is switched on but no Gemini key is available. " + where : "The Gemini key from AI Providers is used. It has not been tried against Google from here."),
+                !veoOn ? "Gemini (Veo) is switched off: clips come from the free test clips or Google Flow. Switch it on under Platform > Integrations > Story Studio." :
+                !hasGoogle ? "Gemini (Veo) is switched on but no Gemini key is available. " + where : "The Gemini key from AI Providers is used. It has not been tried against Google from here."),
             new StoryCheckDto("pictures", "Character pictures", o.CharacterImageProvider != "OpenAI" || hasOpenAi,
                 o.CharacterImageProvider != "OpenAI" ? "Using free placeholder pictures." :
                 !hasOpenAi ? "OpenAI pictures are chosen but there is no ChatGPT key. " + where : "The ChatGPT key from AI Providers is used. It has not been tried from here."),

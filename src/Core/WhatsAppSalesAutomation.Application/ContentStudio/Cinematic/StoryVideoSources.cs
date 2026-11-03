@@ -45,8 +45,8 @@ public class StoryVideoSourcePolicy : IStoryVideoSourcePolicy
 
     private string? VeoReason()
     {
-        if (!string.Equals(_options.Value.VideoProvider, "Veo", StringComparison.OrdinalIgnoreCase))
-            return "Veo is not switched on for the studio. Choose the free test clips or Google Flow, or ask the platform operator to switch Veo on.";
+        if (!string.Equals(_options.Value.VideoProvider, "Google", StringComparison.OrdinalIgnoreCase))
+            return "Gemini (Veo) is not switched on for the studio. Choose the free test clips or Google Flow, or ask the platform operator to switch Gemini on under Integrations > Story Studio.";
 
         var ai = _credentials.Get();
         if (!ai.IsEnabled("Google") || string.IsNullOrWhiteSpace(ai.GoogleApiKey))

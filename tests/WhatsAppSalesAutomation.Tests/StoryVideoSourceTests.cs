@@ -141,14 +141,15 @@ public sealed class StoryVideoSourceTests : IDisposable
         Assert.True(Open(off, SceneVideoProviderKind.FlowImport));
         Assert.False(Open(off, SceneVideoProviderKind.Veo));
         Assert.Contains("not switched on", Reason(off));
+        Assert.Contains("Gemini", Reason(off));
 
-        var noKey = Policy("Veo", null);
+        var noKey = Policy("Google", null);
         Assert.False(Open(noKey, SceneVideoProviderKind.Veo));
         Assert.Contains("Configuration > AI Providers", Reason(noKey));
 
-        Assert.False(Open(Policy("Veo", "g", googleOn: false), SceneVideoProviderKind.Veo));   // Gemini switched off there
-        Assert.True(Open(Policy("Veo", "g"), SceneVideoProviderKind.Veo));
-        Assert.Null(Reason(Policy("Veo", "g")));
+        Assert.False(Open(Policy("Google", "g", googleOn: false), SceneVideoProviderKind.Veo));   // Gemini switched off there
+        Assert.True(Open(Policy("Google", "g"), SceneVideoProviderKind.Veo));
+        Assert.Null(Reason(Policy("Google", "g")));
     }
 
     [Fact]
@@ -168,7 +169,7 @@ public sealed class StoryVideoSourceTests : IDisposable
     [Fact]
     public async Task With_veo_switched_on_and_a_key_a_story_can_choose_it()
     {
-        var studio = Studio(Policy("Veo", "g"));
+        var studio = Studio(Policy("Google", "g"));
 
         var project = await studio.CreateProjectAsync(_tenant, null, Request(SceneVideoProviderKind.Veo));
 
@@ -178,7 +179,7 @@ public sealed class StoryVideoSourceTests : IDisposable
     [Fact]
     public async Task A_story_that_chose_veo_earlier_cannot_start_clips_after_the_platform_switches_it_off()
     {
-        var project = await Studio(Policy("Veo", "g")).CreateProjectAsync(_tenant, null, Request(SceneVideoProviderKind.Veo));
+        var project = await Studio(Policy("Google", "g")).CreateProjectAsync(_tenant, null, Request(SceneVideoProviderKind.Veo));
         var stored = await _db.StoryProjects.IgnoreQueryFilters().SingleAsync();
         var script = new StoryScriptVersion { TenantId = _tenant, ProjectId = project.Id, Number = 1, Json = "{}", ContentHash = "h", Source = "Simulator", Status = StoryScriptStatus.Approved };
         _db.StoryScriptVersions.Add(script);
@@ -191,7 +192,7 @@ public sealed class StoryVideoSourceTests : IDisposable
         Assert.Equal(0, _queue.Enqueued);
         Assert.Empty(await _db.StoryGenerationJobs.IgnoreQueryFilters().ToListAsync());
 
-        await Clips(Policy("Veo", "g")).GenerateClipsAsync(_tenant, null, project.Id, new GenerateClipsRequest(true));
+        await Clips(Policy("Google", "g")).GenerateClipsAsync(_tenant, null, project.Id, new GenerateClipsRequest(true));
         Assert.Equal(1, _queue.Enqueued);
     }
 }
