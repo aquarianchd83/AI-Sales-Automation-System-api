@@ -27,6 +27,7 @@ public class AiFeatureOptions
     public AiFeatureOption ProductQuestionnaire { get; set; } = new();
     public AiFeatureOption ProductGapCheck { get; set; } = new();
     public AiFeatureOption ProductKnowledgeDraft { get; set; } = new();
+    public AiFeatureOption StoryScript { get; set; } = new();
     public AiPolicyOptions Policy { get; set; } = new();
 
     public AiFeatureOption BusinessKeywords { get; set; } = new();
@@ -45,6 +46,7 @@ public class AiFeatureOptions
         AiFeatures.ProductQuestionnaire => ProductQuestionnaire,
         AiFeatures.ProductGapCheck => ProductGapCheck,
         AiFeatures.ProductKnowledgeDraft => ProductKnowledgeDraft,
+        AiFeatures.StoryScript => StoryScript,
         AiFeatures.BusinessKeywords => BusinessKeywords,
         AiFeatures.DiscoveryKeywords => DiscoveryKeywords,
         _ => new AiFeatureOption(),
