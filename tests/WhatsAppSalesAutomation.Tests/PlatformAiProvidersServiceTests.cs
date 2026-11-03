@@ -635,7 +635,7 @@ public sealed class PlatformAiProvidersServiceTests : IDisposable
         var groups = AiFeatures.ProductTaskGroups.Select(g => $"Integrations:Ai:{g.Feature}:").ToList();
         var keys = AppSettingCatalog.All.Where(d => d.Key.StartsWith("Integrations:Ai:Policy:") || groups.Any(g => d.Key.StartsWith(g))).ToList();
 
-        Assert.Equal(7 + 6 * 2, keys.Count);
+        Assert.Equal(7 + AiFeatures.ProductTaskGroups.Count * 2, keys.Count);   // the policy settings, and a Mode and a Provider for every task group
         Assert.DoesNotContain(AppSettingCatalog.All, d => d.Key.StartsWith("Integrations:Ai:ProductKnowledge:") || d.Key.EndsWith("ScannedDocumentsViaAi"));
         Assert.All(keys.Where(d => d.Key.EndsWith(":Mode")), d => Assert.Equal(new[] { "Off", "Simulator", "Api" }, d.Options));
         Assert.Equal("Off", keys.Single(d => d.Key == "Integrations:Ai:ProductScannedReading:Mode").DefaultValue); // the scanned-pages switch starts off
