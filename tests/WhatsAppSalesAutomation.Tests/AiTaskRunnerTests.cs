@@ -486,7 +486,7 @@ public sealed class AiTaskRunnerTests
 
         Assert.Empty(AiCapabilities.DeclaredFor("Nobody"));
         Assert.Contains(AiTaskKinds.GroundedQuestionAnswering, AiTaskKinds.Product);
-        Assert.Equal(13, AiTaskKinds.Product.Count);
+        Assert.Equal(14, AiTaskKinds.Product.Count);
     }
 
     [Fact]

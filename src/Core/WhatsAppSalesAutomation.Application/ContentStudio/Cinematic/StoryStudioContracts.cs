@@ -24,7 +24,8 @@ public sealed record CreateStoryProjectRequest(
     SceneVideoProviderKind VideoProvider, decimal? BudgetUsd, IReadOnlyList<Guid> CharacterIds);
 
 public sealed record StoryScriptVersionDto(
-    Guid Id, int Number, StoryScriptStatus Status, string Source, string ContentHash, CinematicScript Script, bool IsSimulated, DateTime CreatedAt);
+    Guid Id, int Number, StoryScriptStatus Status, string Source, string ContentHash, CinematicScript Script, bool IsSimulated, DateTime CreatedAt,
+    IReadOnlyList<StoryKnowledgeFactDto>? FactsUsed = null, IReadOnlyList<ScriptClaimDto>? Claims = null);
 
 public sealed record SaveStoryScriptRequest(CinematicScript Script);
 
@@ -81,10 +82,24 @@ public static class StoryPrompts
         "every speaker is one of the declared characters. Write dialogue in the requested language (Hindi in Devanagari, or Hinglish in Latin letters). " +
         "videoPrompt describes only what the camera sees and hears, repeats each character's look for continuity, and keeps non-speakers' mouths still.";
 
-    public static string User(StoryProjectDto project, IReadOnlyList<StoryCharacterDto> characters, int sceneCount, int sceneSeconds)
+    public const string IdeasSystem =
+        "You suggest short vertical marketing videos for a small business. Each idea is ONE real problem a customer has that this business solves. " +
+        "Use only the verified facts you are given; never invent a product, price, result or promise. Reply with ONE JSON object and nothing else: " +
+        "{ideas:[{title, problem, solution, factIds:[...]}]}. title is short and catchy; problem is what the customer struggles with, in one sentence; " +
+        "solution is how this business helps, in one sentence, using only the facts; factIds are ids copied exactly from the facts list that the idea rests on (at least one).";
+
+    public static string IdeasUser(IReadOnlyList<WhatsAppSalesAutomation.Application.ContentStudio.Knowledge.GroundingFactDto> facts, string? language, int count) =>
+        $"Suggest {count} different video ideas, written in {(string.IsNullOrWhiteSpace(language) ? "English" : language)}.\n\nVerified facts (id in brackets):\n{StoryIdeaPrompts.FactLines(facts)}";
+
+    public static string User(StoryProjectDto project, IReadOnlyList<StoryCharacterDto> characters, int sceneCount, int sceneSeconds, string? groundingBlock = null)
     {
-        var cast = string.Join("\n", characters.Select(c => $"- {c.Name}: {c.VisualAttributes ?? c.Description}; personality {c.Personality}; voice {c.VoicePreferences}"));
-        return $"Topic: {project.Topic}\nLanguage: {project.Language}\nStyle: {project.Style}\nAudience: {project.Audience}\nMoral or call to action: {project.Moral}\n" +
+        var cast = characters.Count == 0
+            ? "No characters were chosen. Use at most two simple speakers (for example a Customer and the business Owner), or one Narrator, and declare them in characters."
+            : string.Join("\n", characters.Select(c => $"- {c.Name}: {c.VisualAttributes ?? c.Description}; personality {c.Personality}; voice {c.VoicePreferences}"));
+        var grounded = groundingBlock is null ? string.Empty :
+            groundingBlock + "\n\nStructure: scene 1 shows the customer's problem and hooks the viewer in the first two seconds; the middle scene shows how this business solves it, using only the facts above; " +
+            "the last scene is a clear, simple call to action. Do not state any price, number, percentage, result or guarantee that is not in the facts.\n\n";
+        return grounded + $"Topic: {project.Topic}\nLanguage: {project.Language}\nStyle: {project.Style}\nAudience: {project.Audience}\nMoral or call to action: {project.Moral}\n" +
                $"Target length: {project.TargetSeconds} seconds as {sceneCount} scenes of about {sceneSeconds} seconds.\nCharacters:\n{cast}";
     }
 

@@ -26,11 +26,12 @@ public class ContentStudioStoriesController : ControllerBase
     private readonly IStoryPublishingService _publishing;
     private readonly IStoryDiagnosticsService _diagnostics;
     private readonly IStoryVideoSourcePolicy _videoSources;
+    private readonly IStoryGroundingService _grounding;
     private readonly IStoryCharacterGenerationService _characters;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryVideoSourcePolicy videoSources, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryVideoSourcePolicy videoSources, IStoryGroundingService grounding, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
@@ -40,6 +41,7 @@ public class ContentStudioStoriesController : ControllerBase
         _publishing = publishing;
         _diagnostics = diagnostics;
         _videoSources = videoSources;
+        _grounding = grounding;
         _characters = characters;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -183,6 +185,16 @@ public class ContentStudioStoriesController : ControllerBase
     [HttpGet("projects/{id:guid}/usage")]
     public async Task<ActionResult<StoryUsageDto>> GetUsage(Guid id, CancellationToken ct)
         => Ok(await _review.GetUsageAsync(RequireTenantId(), id, ct));
+
+    /// <summary>What the studio knows about the tenant's business: their verified Business Facts. Step 1 of a story.</summary>
+    [HttpGet("knowledge")]
+    public async Task<ActionResult<StoryKnowledgeDto>> GetKnowledge(CancellationToken ct)
+        => Ok(await _grounding.GetKnowledgeAsync(RequireTenantId(), ct));
+
+    /// <summary>Video ideas (customer problems the business solves) drawn from the verified facts, written by the AI provider chosen for the Story script.</summary>
+    [HttpPost("ideas")]
+    public async Task<ActionResult<IReadOnlyList<StoryIdeaDto>>> SuggestIdeas([FromBody] SuggestIdeasRequest request, CancellationToken ct)
+        => Ok(await _grounding.SuggestIdeasAsync(RequireTenantId(), _currentUser.UserId, request.Language, ct));
 
     /// <summary>Where scene clips can come from right now: the free test clips, Veo (only when the operator switched it on and a Gemini key exists) and Google Flow import.</summary>
     [HttpGet("video-sources")]

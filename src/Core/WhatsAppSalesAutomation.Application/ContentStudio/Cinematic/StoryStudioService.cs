@@ -6,6 +6,7 @@ using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
+using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.ProductKnowledge;
 using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
@@ -28,12 +29,15 @@ public class StoryStudioService : IStoryStudioService
     private readonly ISceneVideoProviderFactory _providers;
     private readonly IDateTimeProvider _clock;
     private readonly IStoryVideoSourcePolicy? _sources;
+    private readonly IStoryGroundingService? _grounding;
 
     public StoryStudioService(
         IApplicationDbContext context, ITenantConfigOverrideProvider config, IAiTaskRunner ai, IStudioMeteringService metering,
-        ITenantDocumentStore store, ISceneVideoProviderFactory providers, IDateTimeProvider clock, IStoryVideoSourcePolicy? sources = null)
+        ITenantDocumentStore store, ISceneVideoProviderFactory providers, IDateTimeProvider clock, IStoryVideoSourcePolicy? sources = null,
+        IStoryGroundingService? grounding = null)
     {
         _sources = sources;
+        _grounding = grounding;
         _context = context;
         _config = config;
         _ai = ai;
@@ -221,6 +225,8 @@ public class StoryStudioService : IStoryStudioService
         var cast = (await ListCharactersAsync(tenantId, null, ct)).Where(c => dto.CharacterIds.Contains(c.Id)).ToList();
         var sceneCount = Math.Clamp((int)Math.Ceiling(project.TargetSeconds / (double)SceneSeconds), 1, CinematicScriptValidator.MaxScenes);
         var perScene = (int)Math.Ceiling(project.TargetSeconds / (double)sceneCount);
+        // The script rests on what the tenant has verified. With no facts there is nothing true to write from, so this stops before any charge.
+        var grounding = _grounding is null ? null : await _grounding.GatherAsync(tenantId, project.Topic, ct);
 
         var charge = await _metering.ChargeAsync(new StudioChargeRequest(
             tenantId, StudioActivityKind.StoryScript, $"story-script:{projectId}:{Guid.NewGuid():N}", $"Story script for '{project.Title}'",
@@ -230,7 +236,7 @@ public class StoryStudioService : IStoryStudioService
         try
         {
             var result = await _ai.RunAsync(new AiTaskRequest(
-                AiTaskKinds.CinematicScript, StoryPrompts.System, StoryPrompts.User(dto, cast, sceneCount, perScene), 3500, ExpectJson: true,
+                AiTaskKinds.CinematicScript, StoryPrompts.System, StoryPrompts.User(dto, cast, sceneCount, perScene, grounding?.PromptBlock), 3500, ExpectJson: true,
                 TenantId: tenantId), ct);
 
             CinematicScript? script;
@@ -261,7 +267,8 @@ public class StoryStudioService : IStoryStudioService
                 await _metering.CompleteAsync(charge.ActivityId, ct);
             }
 
-            return await SaveVersionAsync(project, script!, source, ct);
+            var factsJson = grounding is null ? null : JsonSerializer.Serialize(grounding.Facts.Select(f => new StoryKnowledgeFactDto(f.Id, f.Category, f.Subject, f.Statement)));
+            return await SaveVersionAsync(project, script!, source, ct, factsJson);
         }
         catch (OperationCanceledException)
         {
@@ -278,7 +285,9 @@ public class StoryStudioService : IStoryStudioService
         var json = JsonSerializer.Serialize(request.Script);
         var result = CinematicScriptValidator.Validate(json, project.TargetSeconds);
         if (!result.IsValid) throw new ArgumentException(string.Join(" ", result.Errors));
-        return await SaveVersionAsync(project, result.Script!, "Edited", ct);
+        // An edit keeps resting on the facts the first version was written from.
+        var previous = project.CurrentScriptVersionId is { } id ? await _context.StoryScriptVersions.IgnoreQueryFilters().FirstOrDefaultAsync(v => v.Id == id, ct) : null;
+        return await SaveVersionAsync(project, result.Script!, "Edited", ct, previous?.GroundingJson);
     }
 
     public async Task<StoryScriptVersionDto?> GetCurrentScriptAsync(Guid tenantId, Guid projectId, CancellationToken ct = default)
@@ -286,7 +295,7 @@ public class StoryStudioService : IStoryStudioService
         var project = await ProjectAsync(tenantId, projectId, ct);
         if (project.CurrentScriptVersionId is not { } id) return null;
         var version = await _context.StoryScriptVersions.IgnoreQueryFilters().FirstAsync(v => v.Id == id, ct);
-        return ToDto(version);
+        return await ToDtoAsync(version, tenantId, ct);
     }
 
     public async Task<IReadOnlyList<StorySceneDto>> ApproveScriptAsync(Guid tenantId, Guid? userId, Guid projectId, CancellationToken ct = default)
@@ -301,6 +310,14 @@ public class StoryStudioService : IStoryStudioService
         if (!result.IsValid) throw new ConflictException("The script no longer meets the rules: " + string.Join(" ", result.Errors));
 
         var script = result.Script!;
+        if (_grounding is not null && version.Source != "Simulator")
+        {
+            // Checked again at approval, against what is verified now. A figure, guarantee or result that no verified fact supports must be changed first.
+            var risky = (await _grounding.CheckScriptAsync(tenantId, script, ct)).Where(c => c.IsRisky).ToList();
+            if (risky.Count > 0)
+                throw new ConflictException("These lines make a claim your verified facts do not support. Change them before approving: " + string.Join(" | ", risky.Take(3).Select(c => $"scene {c.Scene}: \"{c.Text}\"")));
+        }
+
         var characters = await _context.StoryCharacters.IgnoreQueryFilters()
             .Where(c => _context.StoryProjectCharacters.IgnoreQueryFilters().Where(l => l.ProjectId == projectId).Select(l => l.CharacterId).Contains(c.Id)).ToListAsync(ct);
 
@@ -360,7 +377,7 @@ public class StoryStudioService : IStoryStudioService
 
     // ----- helpers -----------------------------------------------------------------------------------------------------------------
 
-    private async Task<StoryScriptVersionDto> SaveVersionAsync(StoryProject project, CinematicScript script, string source, CancellationToken ct)
+    private async Task<StoryScriptVersionDto> SaveVersionAsync(StoryProject project, CinematicScript script, string source, CancellationToken ct, string? groundingJson = null)
     {
         var previous = await _context.StoryScriptVersions.IgnoreQueryFilters().Where(v => v.ProjectId == project.Id).ToListAsync(ct);
         foreach (var old in previous.Where(v => v.Status == StoryScriptStatus.Draft)) old.Status = StoryScriptStatus.Superseded;
@@ -373,12 +390,13 @@ public class StoryStudioService : IStoryStudioService
             Json = JsonSerializer.Serialize(script),
             ContentHash = CinematicScriptValidator.ContentHash(script),
             Status = StoryScriptStatus.Draft,
-            Source = source
+            Source = source,
+            GroundingJson = groundingJson
         };
         _context.StoryScriptVersions.Add(version);
         project.CurrentScriptVersionId = version.Id;
         await _context.SaveChangesAsync(ct);
-        return ToDto(version);
+        return await ToDtoAsync(version, project.TenantId, ct);
     }
 
     private async Task<StoryProject> ProjectAsync(Guid tenantId, Guid projectId, CancellationToken ct)
@@ -425,10 +443,19 @@ public class StoryStudioService : IStoryStudioService
         p.Id, p.Title, p.Topic, p.Language, p.Style, p.Audience, p.Moral, p.TargetSeconds, p.Status, p.VideoProvider, p.BudgetUsd, p.CurrentScriptVersionId,
         characterIds, p.CreatedAt);
 
-    private static StoryScriptVersionDto ToDto(StoryScriptVersion v)
+    private async Task<StoryScriptVersionDto> ToDtoAsync(StoryScriptVersion v, Guid tenantId, CancellationToken ct)
     {
         var script = JsonSerializer.Deserialize<CinematicScript>(v.Json, StoryPrompts.Json)!;
-        return new StoryScriptVersionDto(v.Id, v.Number, v.Status, v.Source, v.ContentHash, script, v.Source == "Simulator", v.CreatedAt);
+        IReadOnlyList<StoryKnowledgeFactDto> facts = Array.Empty<StoryKnowledgeFactDto>();
+        if (!string.IsNullOrWhiteSpace(v.GroundingJson))
+        {
+            try { facts = JsonSerializer.Deserialize<List<StoryKnowledgeFactDto>>(v.GroundingJson, StoryPrompts.Json) ?? new(); }
+            catch (JsonException) { /* an unreadable record shows as no facts rather than breaking the script */ }
+        }
+
+        // Test data is placeholder text, not claims, so it is not checked. Real scripts are checked on every read, against the facts as they are now.
+        IReadOnlyList<ScriptClaimDto> claims = _grounding is null || v.Source == "Simulator" ? Array.Empty<ScriptClaimDto>() : await _grounding.CheckScriptAsync(tenantId, script, ct);
+        return new StoryScriptVersionDto(v.Id, v.Number, v.Status, v.Source, v.ContentHash, script, v.Source == "Simulator", v.CreatedAt, facts, claims);
     }
 }
 

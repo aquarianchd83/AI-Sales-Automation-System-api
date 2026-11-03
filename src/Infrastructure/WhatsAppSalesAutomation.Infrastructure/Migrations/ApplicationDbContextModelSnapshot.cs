@@ -2548,6 +2548,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("GroundingJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Json")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");

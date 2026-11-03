@@ -120,6 +120,9 @@ public class StoryScriptVersion : BaseEntity, ITenantOwned
 
     public StoryScriptStatus Status { get; set; }
 
+    /// <summary>The verified facts this script was written from (id, category, subject, statement), as JSON. Kept so the tenant can always see what it rested on.</summary>
+    public string? GroundingJson { get; set; }
+
     /// <summary>"Simulator", "OpenAI" or "Edited": who wrote this version.</summary>
     public string Source { get; set; } = string.Empty;
 

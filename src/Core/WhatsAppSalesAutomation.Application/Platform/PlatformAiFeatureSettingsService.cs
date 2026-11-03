@@ -59,8 +59,8 @@ public static class AiFeatures
             "Writes the draft knowledge file the AI chat answers from, for the tenant to review before it is used.",
             new[] { AiTaskKinds.KnowledgeDraft }),
         new(StoryScript, "Story script",
-            "Writes the scenes, dialogue and video prompts of a story in the Story studio. The script must be approved before any paid video work starts.",
-            new[] { AiTaskKinds.CinematicScript }),
+            "Suggests video ideas from the tenant's verified facts and writes the script (scenes, dialogue, video prompts) in the Story studio. The script must be approved before any paid video work starts.",
+            new[] { AiTaskKinds.CinematicScript, AiTaskKinds.CinematicIdeas }),
     };
 
     /// <summary>The product-knowledge group a task belongs to, or null for a task that is not one of them.</summary>
