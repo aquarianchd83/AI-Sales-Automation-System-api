@@ -151,6 +151,27 @@ public class StoryScene : BaseEntity, ITenantOwned
     public Guid? ClipAssetId { get; set; }
 
     public string? FlagReason { get; set; }
+
+    /// <summary>A generated voice-over replaced the clip's own audio. The original clip's asset is kept.</summary>
+    public bool VoiceOverApplied { get; set; }
+}
+
+/// <summary>A record that the approved video was shared somewhere, with where. Made by the user; the studio never posts on their behalf.</summary>
+public class StoryPublication : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid ProjectId { get; set; }
+
+    public Guid RenderId { get; set; }
+
+    public StoryPlatform Platform { get; set; }
+
+    public string Url { get; set; } = string.Empty;
+
+    public DateTime PublishedAtUtc { get; set; }
+
+    public Guid? RecordedBy { get; set; }
 }
 
 public class StoryDialogueLine : BaseEntity, ITenantOwned

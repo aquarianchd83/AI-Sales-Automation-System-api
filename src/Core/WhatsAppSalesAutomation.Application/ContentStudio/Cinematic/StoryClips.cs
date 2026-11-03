@@ -266,7 +266,7 @@ public class StoryClipService : IStoryClipService, IStoryClipRunner
         if (estimate > 0)
         {
             var charge = await _metering.ChargeAsync(new StudioChargeRequest(
-                project.TenantId, StudioActivityKind.VideoRender, job.IdempotencyKey, $"Scene {scene.Index} clip of '{project.Title}'",
+                project.TenantId, StudioActivityKind.StorySceneClip, job.IdempotencyKey, $"Scene {scene.Index} clip of '{project.Title}'",
                 ReferenceType: nameof(StoryScene), ReferenceId: scene.Id.ToString(), Provider: project.VideoProvider.ToString(), ActorUserId: userId), ct);
             if (!charge.Allowed) throw new PlanLimitExceededException(charge.Message ?? "Your video quota is used up.");
             job.ChargeActivityId = charge.ActivityId; // remembered so a failure can give the units back

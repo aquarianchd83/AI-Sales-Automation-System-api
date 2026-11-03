@@ -73,6 +73,14 @@ public enum StoryMediaKind
     Intermediate = 5
 }
 
+/// <summary>Where a finished story was shared. Recorded by hand: the studio does not publish for the user.</summary>
+public enum StoryPlatform
+{
+    YouTubeShorts = 0,
+    FacebookReels = 1,
+    InstagramReels = 2
+}
+
 public enum StoryJobKind
 {
     Script = 0,

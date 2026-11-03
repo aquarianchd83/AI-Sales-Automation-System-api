@@ -19,6 +19,10 @@ public static class StudioChargeCatalog
         [StudioActivityKind.VideoRender] = new(QuotaType.VideoRenders, 1m, "Video render"),
         [StudioActivityKind.Publish] = new(QuotaType.ContentGenerations, 0m, "Publish"),
         [StudioActivityKind.Other] = new(QuotaType.ContentGenerations, 1m, "Other"),
+        [StudioActivityKind.StoryScript] = new(QuotaType.ContentGenerations, 1m, "Story script"),
+        [StudioActivityKind.StoryCharacterImage] = new(QuotaType.ContentGenerations, 2m, "Story character picture"),
+        [StudioActivityKind.StorySceneClip] = new(QuotaType.VideoRenders, 1m, "Story scene clip"),
+        [StudioActivityKind.StoryVoice] = new(QuotaType.ContentGenerations, 1m, "Story voice-over"),
     };
 
     public static StudioChargeRule For(StudioActivityKind kind) => Rules[kind];

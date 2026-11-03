@@ -39,6 +39,9 @@ public static class DependencyInjection
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
 
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipQueue, WhatsAppSalesAutomation.Infrastructure.BackgroundJobs.HangfireStoryClipQueue>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorSpeechProvider>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Cinematic.OpenAiSpeechProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISpeechProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.SpeechProviderSelector>();
         services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorCharacterImageProvider>();
         services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Cinematic.OpenAiCharacterImageProvider>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ICharacterImageProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.CharacterImageProviderSelector>();

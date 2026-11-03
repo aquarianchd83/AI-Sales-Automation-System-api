@@ -70,6 +70,20 @@ public class CinematicOptions
 
     public int MaxAutomaticRetries { get; set; } = 1;
 
+    /// <summary>Folder holding a Devanagari-capable font (for example Noto Sans Devanagari) that ffmpeg's subtitle renderer may use. Empty = the host's own fonts.</summary>
+    public string SubtitleFontsDirectory { get; set; } = string.Empty;
+
+    /// <summary>Font family name to use for subtitles. Empty = the renderer's default, which may lack Devanagari on a bare server.</summary>
+    public string SubtitleFontName { get; set; } = string.Empty;
+
+    /// <summary>"Simulator" (free test tones) or "OpenAI". Only used when the user adds a voice-over to a scene.</summary>
+    public string SpeechProvider { get; set; } = "Simulator";
+
+    public string SpeechModel { get; set; } = "gpt-4o-mini-tts";
+
+    /// <summary>Estimate per spoken line, shown before a paid voice-over. Check OpenAI pricing; not billing data.</summary>
+    public decimal SpeechUsdPerLine { get; set; } = 0.02m;
+
     public string OpenAiApiKey { get; set; } = string.Empty;
 
     /// <summary>"Simulator" (free placeholder pictures) or "OpenAI".</summary>

@@ -269,6 +269,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StoryRender> StoryRenders => Set<StoryRender>();
 
+    public DbSet<StoryPublication> StoryPublications => Set<StoryPublication>();
+
     public DbSet<KnowledgeGapDecision> KnowledgeGapDecisions => Set<KnowledgeGapDecision>();
 
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();

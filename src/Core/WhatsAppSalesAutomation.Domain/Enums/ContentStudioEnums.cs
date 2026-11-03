@@ -13,7 +13,13 @@ public enum StudioActivityKind
     ImageGeneration = 5,
     VideoRender = 6,
     Publish = 7,
-    Other = 8
+    Other = 8,
+
+    // The cinematic story studio, one category per kind of paid work so the ledger can say what a story cost.
+    StoryScript = 9,
+    StoryCharacterImage = 10,
+    StorySceneClip = 11,
+    StoryVoice = 12
 }
 
 /// <summary>Where one metered studio activity stands.</summary>

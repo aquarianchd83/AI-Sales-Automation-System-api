@@ -22,16 +22,22 @@ public class ContentStudioStoriesController : ControllerBase
     private readonly IStoryClipService _clips;
     private readonly IStoryRenderService _renders;
     private readonly IStoryReviewService _review;
+    private readonly IStoryVoiceService _voice;
+    private readonly IStoryPublishingService _publishing;
+    private readonly IStoryDiagnosticsService _diagnostics;
     private readonly IStoryCharacterGenerationService _characters;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
         _renders = renders;
         _review = review;
+        _voice = voice;
+        _publishing = publishing;
+        _diagnostics = diagnostics;
         _characters = characters;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -175,6 +181,24 @@ public class ContentStudioStoriesController : ControllerBase
     [HttpGet("projects/{id:guid}/usage")]
     public async Task<ActionResult<StoryUsageDto>> GetUsage(Guid id, CancellationToken ct)
         => Ok(await _review.GetUsageAsync(RequireTenantId(), id, ct));
+
+    /// <summary>What this host has and lacks for live use (ffmpeg, subtitle font, storage, provider keys). Reports configuration; calls no paid service.</summary>
+    [HttpGet("diagnostics")]
+    public async Task<ActionResult<IReadOnlyList<StoryCheckDto>>> Diagnostics(CancellationToken ct)
+        => Ok(await _diagnostics.RunAsync(ct));
+
+    /// <summary>Replaces a scene's own audio with generated speech for its dialogue. Costs money with a paid provider, so the cost is confirmed first.</summary>
+    [HttpPost("scenes/{sceneId:guid}/voice-over")]
+    public async Task<ActionResult<VoiceOverResultDto>> AddVoiceOver(Guid sceneId, [FromBody] VoiceOverRequest request, CancellationToken ct)
+        => Ok(await _voice.ApplyVoiceOverAsync(RequireTenantId(), _currentUser.UserId, sceneId, request, ct));
+
+    [HttpGet("projects/{id:guid}/publish-pack")]
+    public async Task<ActionResult<StoryPublishPackDto>> GetPublishPack(Guid id, CancellationToken ct)
+        => Ok(await _publishing.GetPackAsync(RequireTenantId(), id, ct));
+
+    [HttpPost("projects/{id:guid}/publications")]
+    public async Task<ActionResult<StoryPublicationDto>> RecordPublication(Guid id, [FromBody] RecordPublicationRequest request, CancellationToken ct)
+        => Ok(await _publishing.RecordAsync(RequireTenantId(), _currentUser.UserId, id, request, ct));
 
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated content studio request has no tenant in scope.");

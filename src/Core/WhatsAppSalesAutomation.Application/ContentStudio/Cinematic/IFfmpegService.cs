@@ -33,6 +33,18 @@ public interface IFfmpegService
     /// <summary>A 9:16 test clip with a tone, standing in for a provider clip in simulator mode.</summary>
     Task CreateTestClipAsync(string outputPath, int seconds, string label, CancellationToken cancellationToken = default);
 
+    /// <summary>The name of a Devanagari-capable font found on this host or in the configured fonts folder, or null. A host without one shows Hindi subtitles as boxes.</summary>
+    string? FindDevanagariFont();
+
+    /// <summary>How long an audio file lasts, in milliseconds.</summary>
+    Task<int> ProbeAudioMillisecondsAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>A short tone, standing in for synthesized speech in simulator mode.</summary>
+    Task CreateToneAsync(string outputPath, int milliseconds, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces the clip's audio with the given spoken lines, each starting at its own time. The picture is copied untouched.</summary>
+    Task ReplaceAudioAsync(string clipPath, IReadOnlyList<(string AudioPath, int StartMs)> lines, string outputPath, CancellationToken cancellationToken = default);
+
     /// <summary>A plain placeholder PNG, standing in for a generated picture in simulator mode.</summary>
     Task CreateTestImageAsync(string outputPath, int width, int height, CancellationToken cancellationToken = default);
 

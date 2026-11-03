@@ -66,6 +66,64 @@ public class FfmpegService : IFfmpegService
         await RunCheckedAsync(Ffmpeg, args, cancellationToken);
     }
 
+    private static readonly string[] DevanagariHints = { "devanagari", "nirmala", "mangal", "lohit-dev", "kokila", "utsaah", "aparajita", "hind" };
+
+    public string? FindDevanagariFont()
+    {
+        var folders = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_options.Value.SubtitleFontsDirectory)) folders.Add(_options.Value.SubtitleFontsDirectory);
+        folders.Add(Environment.GetFolderPath(Environment.SpecialFolder.Fonts));
+        folders.AddRange(new[] { "/usr/share/fonts", "/usr/local/share/fonts", "/Library/Fonts", "/System/Library/Fonts" });
+
+        foreach (var folder in folders.Where(f => !string.IsNullOrWhiteSpace(f) && Directory.Exists(f)))
+        {
+            try
+            {
+                var hit = Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
+                    .Where(p => p.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
+                    .FirstOrDefault(p => DevanagariHints.Any(h => Path.GetFileName(p).Contains(h, StringComparison.OrdinalIgnoreCase)));
+                if (hit is not null) return Path.GetFileNameWithoutExtension(hit);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { /* an unreadable folder is skipped */ }
+        }
+
+        return null;
+    }
+
+    public async Task<int> ProbeAudioMillisecondsAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var (code, output, error) = await RunAsync(Ffprobe, new[] { "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path }, cancellationToken);
+        if (code != 0 || !double.TryParse(output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)) throw new InvalidOperationException($"ffprobe could not read the audio: {Tail(error)}");
+        return (int)(seconds * 1000);
+    }
+
+    public async Task CreateToneAsync(string outputPath, int milliseconds, CancellationToken cancellationToken = default)
+    {
+        var seconds = (Math.Max(200, milliseconds) / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
+        await RunCheckedAsync(Ffmpeg, new[] { "-y", "-f", "lavfi", "-i", $"sine=frequency=330:duration={seconds}", "-c:a", "libmp3lame", outputPath }, cancellationToken);
+    }
+
+    public async Task ReplaceAudioAsync(string clipPath, IReadOnlyList<(string AudioPath, int StartMs)> lines, string outputPath, CancellationToken cancellationToken = default)
+    {
+        if (lines.Count == 0) throw new ArgumentException("There are no spoken lines to lay over the clip.", nameof(lines));
+
+        var args = new List<string> { "-y", "-i", clipPath };
+        var filter = new StringBuilder();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            args.Add("-i");
+            args.Add(lines[i].AudioPath);
+            // adelay shifts each line to its own start; one line is silent until it is that line's turn, so a listener's mouth stays still.
+            filter.Append(CultureInfo.InvariantCulture, $"[{i + 1}:a]aresample=44100,aformat=channel_layouts=stereo,adelay={lines[i].StartMs}|{lines[i].StartMs}[a{i}];");
+        }
+
+        for (var i = 0; i < lines.Count; i++) filter.Append(CultureInfo.InvariantCulture, $"[a{i}]");
+        filter.Append(CultureInfo.InvariantCulture, $"amix=inputs={lines.Count}:normalize=0:dropout_transition=0,apad[a]");
+
+        args.AddRange(new[] { "-filter_complex", filter.ToString(), "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", outputPath });
+        await RunCheckedAsync(Ffmpeg, args, cancellationToken);
+    }
+
     public async Task CreateTestImageAsync(string outputPath, int width, int height, CancellationToken cancellationToken = default)
     {
         var args = new List<string> { "-y", "-f", "lavfi", "-i", $"color=c=0x486078:s={width}x{height}", "-frames:v", "1", outputPath };
@@ -100,7 +158,12 @@ public class FfmpegService : IFfmpegService
         {
             // The subtitles filter wants forward slashes and an escaped drive colon.
             var escaped = subtitlesPath.Replace('\\', '/').Replace(":", "\\:");
-            filter.Append(CultureInfo.InvariantCulture, $";[v]subtitles='{escaped}':force_style='FontSize=9,MarginV=40,Outline=1,Alignment=2'[vs]");
+            var style = "FontSize=9,MarginV=40,Outline=1,Alignment=2";
+            if (!string.IsNullOrWhiteSpace(_options.Value.SubtitleFontName)) style += ",FontName=" + _options.Value.SubtitleFontName.Replace(",", string.Empty).Replace("'", string.Empty);
+            var fonts = string.Empty;
+            if (!string.IsNullOrWhiteSpace(_options.Value.SubtitleFontsDirectory))
+                fonts = ":fontsdir='" + _options.Value.SubtitleFontsDirectory.Replace('\\', '/').Replace(":", "\\:").Replace("'", string.Empty) + "'";
+            filter.Append(CultureInfo.InvariantCulture, $";[v]subtitles='{escaped}'{fonts}:force_style='{style}'[vs]");
             videoLabel = "[vs]";
         }
 

@@ -259,6 +259,8 @@ public interface IApplicationDbContext
 
     DbSet<StoryRender> StoryRenders { get; }
 
+    DbSet<StoryPublication> StoryPublications { get; }
+
     DbSet<KnowledgeGapDecision> KnowledgeGapDecisions { get; }
 
     DbSet<Flowchart> Flowcharts { get; }

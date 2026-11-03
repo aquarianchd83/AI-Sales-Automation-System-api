@@ -125,7 +125,7 @@ public class StoryCharacterGenerationService : IStoryCharacterGenerationService
         if (estimate > 0)
         {
             var charge = await _metering.ChargeAsync(new StudioChargeRequest(
-                character.TenantId, StudioActivityKind.ImageGeneration, $"char-image:{character.Id:N}:{Guid.NewGuid():N}", $"Picture of {character.Name}",
+                character.TenantId, StudioActivityKind.StoryCharacterImage, $"char-image:{character.Id:N}:{Guid.NewGuid():N}", $"Picture of {character.Name}",
                 ReferenceType: nameof(StoryCharacter), ReferenceId: character.Id.ToString(), Provider: _images.Name, ActorUserId: userId), ct);
             if (!charge.Allowed) throw new PlanLimitExceededException(charge.Message ?? "Your content quota is used up.");
             activity = charge.ActivityId;

@@ -138,6 +138,18 @@ public class StoryGenerationJobConfiguration : IEntityTypeConfiguration<StoryGen
     }
 }
 
+public class StoryPublicationConfiguration : IEntityTypeConfiguration<StoryPublication>
+{
+    public void Configure(EntityTypeBuilder<StoryPublication> builder)
+    {
+        builder.ToTable("StoryPublications");
+        builder.HasKey(p => p.Id);
+        builder.Property(p => p.Platform).HasConversion<string>().HasMaxLength(20);
+        builder.Property(p => p.Url).IsRequired().HasMaxLength(1000);
+        builder.HasIndex(p => p.ProjectId);
+    }
+}
+
 public class StoryRenderConfiguration : IEntityTypeConfiguration<StoryRender>
 {
     public void Configure(EntityTypeBuilder<StoryRender> builder)

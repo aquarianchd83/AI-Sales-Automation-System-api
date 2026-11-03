@@ -219,7 +219,7 @@ public class StoryStudioService : IStoryStudioService
         var perScene = (int)Math.Ceiling(project.TargetSeconds / (double)sceneCount);
 
         var charge = await _metering.ChargeAsync(new StudioChargeRequest(
-            tenantId, StudioActivityKind.Script, $"story-script:{projectId}:{Guid.NewGuid():N}", $"Story script for '{project.Title}'",
+            tenantId, StudioActivityKind.StoryScript, $"story-script:{projectId}:{Guid.NewGuid():N}", $"Story script for '{project.Title}'",
             ReferenceType: nameof(StoryProject), ReferenceId: projectId.ToString(), ActorUserId: userId), ct);
         if (!charge.Allowed) throw new PlanLimitExceededException(charge.Message ?? "Your content generation quota is used up.");
 
