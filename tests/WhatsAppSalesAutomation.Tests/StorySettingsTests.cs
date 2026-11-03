@@ -21,14 +21,24 @@ public sealed class StorySettingsTests
     }
 
     [Fact]
-    public void The_keys_are_secret_and_have_no_default()
+    public void There_is_no_second_place_to_enter_a_provider_key()
     {
-        foreach (var name in new[] { "GeminiApiKey", "OpenAiApiKey" })
-        {
-            var setting = Story.Single(d => d.Key == "ContentStudio:Cinematic:" + name);
-            Assert.True(setting.IsSecret);
-            Assert.True(string.IsNullOrEmpty(setting.DefaultValue));
-        }
+        // Veo uses the Gemini key and pictures/voice the ChatGPT key saved under Configuration > AI Providers.
+        Assert.DoesNotContain(Story, d => d.IsSecret);
+        Assert.DoesNotContain(Story, d => d.Key.EndsWith("ApiKey"));
+        Assert.Empty(typeof(CinematicOptions).GetProperties().Where(p => p.Name.EndsWith("ApiKey")));
+    }
+
+    [Fact]
+    public void The_story_script_has_its_own_switch_on_the_integrations_page()
+    {
+        var group = WhatsAppSalesAutomation.Application.Platform.AiFeatures.ProductTaskGroups.Single(g => g.Feature == WhatsAppSalesAutomation.Application.Platform.AiFeatures.StoryScript);
+
+        Assert.Equal("Story script", group.Title);
+        Assert.Contains(WhatsAppSalesAutomation.Application.Ai.Tasks.AiTaskKinds.CinematicScript, group.Tasks);
+        Assert.Equal(WhatsAppSalesAutomation.Application.Platform.AiFeatures.StoryScript, WhatsAppSalesAutomation.Application.Platform.AiFeatures.GroupOf(WhatsAppSalesAutomation.Application.Ai.Tasks.AiTaskKinds.CinematicScript));
+        Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, WhatsAppSalesAutomation.Application.Platform.AiFeatures.SupportedProviders(WhatsAppSalesAutomation.Application.Platform.AiFeatures.StoryScript));
+        Assert.Equal("Simulator", WhatsAppSalesAutomation.Application.Platform.AiFeatures.DefaultMode(WhatsAppSalesAutomation.Application.Platform.AiFeatures.StoryScript));
     }
 
     [Fact]
@@ -48,8 +58,6 @@ public sealed class StorySettingsTests
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ContentStudio:Cinematic:GeminiApiKey"] = "gemini-key",
-            ["ContentStudio:Cinematic:OpenAiApiKey"] = "openai-key",
             ["ContentStudio:Cinematic:SpeechProvider"] = "OpenAI",
             ["ContentStudio:Cinematic:VeoUsdPerSecond"] = "0.40",
             ["ContentStudio:Cinematic:SubtitleFontName"] = "Noto Sans Devanagari"
@@ -57,8 +65,6 @@ public sealed class StorySettingsTests
 
         var options = config.GetSection("ContentStudio:Cinematic").Get<CinematicOptions>()!;
 
-        Assert.Equal("gemini-key", options.GeminiApiKey);
-        Assert.Equal("openai-key", options.OpenAiApiKey);
         Assert.Equal("OpenAI", options.SpeechProvider);
         Assert.Equal(0.40m, options.VeoUsdPerSecond);
         Assert.Equal("Noto Sans Devanagari", options.SubtitleFontName);

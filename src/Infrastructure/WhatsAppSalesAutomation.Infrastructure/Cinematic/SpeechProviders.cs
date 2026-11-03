@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Cinematic;
@@ -38,11 +39,13 @@ public class OpenAiSpeechProvider
 
     private readonly HttpClient _http;
     private readonly IOptionsSnapshot<CinematicOptions> _options;
+    private readonly IPlatformAiConfigProvider _credentials;
 
-    public OpenAiSpeechProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options)
+    public OpenAiSpeechProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options, IPlatformAiConfigProvider credentials)
     {
         _http = http;
         _options = options;
+        _credentials = credentials;
     }
 
     /// <summary>The same character always gets the same voice, so identity holds across scenes.</summary>
@@ -56,8 +59,8 @@ public class OpenAiSpeechProvider
 
     public async Task<SpeechResult> SynthesizeAsync(SpeechRequest request, CancellationToken ct)
     {
-        var key = _options.Value.OpenAiApiKey;
-        if (string.IsNullOrWhiteSpace(key)) return new SpeechResult(false, null, null, "No OpenAI API key is configured for speech.");
+        var key = _credentials.Get() is { } c && c.IsEnabled("OpenAI") ? c.OpenAiApiKey : null;
+        if (string.IsNullOrWhiteSpace(key)) return new SpeechResult(false, null, null, "No ChatGPT (OpenAI) key is saved, or it is switched off, under Configuration > AI Providers.");
 
         var body = new
         {

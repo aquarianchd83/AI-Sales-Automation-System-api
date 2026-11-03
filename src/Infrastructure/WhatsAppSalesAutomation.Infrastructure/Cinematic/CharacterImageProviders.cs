@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Cinematic;
@@ -40,17 +41,19 @@ public class OpenAiCharacterImageProvider
 {
     private readonly HttpClient _http;
     private readonly IOptionsSnapshot<CinematicOptions> _options;
+    private readonly IPlatformAiConfigProvider _credentials;
 
-    public OpenAiCharacterImageProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options)
+    public OpenAiCharacterImageProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options, IPlatformAiConfigProvider credentials)
     {
         _http = http;
         _options = options;
+        _credentials = credentials;
     }
 
     public async Task<CharacterImageResult> GenerateAsync(string prompt, CancellationToken ct)
     {
-        var key = _options.Value.OpenAiApiKey;
-        if (string.IsNullOrWhiteSpace(key)) return new CharacterImageResult(false, null, null, "No OpenAI API key is configured for pictures.");
+        var key = _credentials.Get() is { } c && c.IsEnabled("OpenAI") ? c.OpenAiApiKey : null;
+        if (string.IsNullOrWhiteSpace(key)) return new CharacterImageResult(false, null, null, "No ChatGPT (OpenAI) key is saved, or it is switched off, under Configuration > AI Providers.");
 
         using var message = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/images/generations")
         {

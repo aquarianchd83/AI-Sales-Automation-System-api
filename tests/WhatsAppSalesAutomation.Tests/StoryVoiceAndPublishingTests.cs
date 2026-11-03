@@ -326,21 +326,40 @@ public sealed class StoryVoiceAndPublishingTests : IDisposable
         public CinematicOptions Get(string? name) => Value;
     }
 
+    private sealed class Keys : WhatsAppSalesAutomation.Application.Common.Interfaces.IPlatformAiConfigProvider
+    {
+        public string? Google { get; init; }
+        public string? OpenAi { get; init; }
+        public bool GoogleOn { get; init; } = true;
+
+        public WhatsAppSalesAutomation.Application.Common.Interfaces.AiCredentials Get() =>
+            new("Simulated", "Simulated", null, "m", "v", "u", OpenAi, "m", "e", "u", Google, "m", "e", "u", GoogleEnabled: GoogleOn);
+    }
+
     [Fact]
     public async Task Diagnostics_name_what_is_missing_without_calling_any_paid_service()
     {
-        var bare = new StoryDiagnosticsService(_ffmpeg, new Options(), _store);
+        var bare = new StoryDiagnosticsService(_ffmpeg, new Options(), _store, new Keys());
         var checks = (await bare.RunAsync()).ToDictionary(c => c.Key);
 
         Assert.False(checks["veo"].Ok);
         Assert.True(checks["pictures"].Ok);    // placeholders are chosen, so no key is needed
         Assert.True(checks["storage"].Ok);
 
-        var configured = new StoryDiagnosticsService(_ffmpeg, new Options { Value = new CinematicOptions { GeminiApiKey = "k", CharacterImageProvider = "OpenAI", SpeechProvider = "OpenAI" } }, _store);
-        var after = (await configured.RunAsync()).ToDictionary(c => c.Key);
-        Assert.True(after["veo"].Ok);
-        Assert.False(after["pictures"].Ok);    // OpenAI chosen but no key
+        var chosen = new Options { Value = new CinematicOptions { CharacterImageProvider = "OpenAI", SpeechProvider = "OpenAI" } };
+        var after = (await new StoryDiagnosticsService(_ffmpeg, chosen, _store, new Keys { Google = "g" }).RunAsync()).ToDictionary(c => c.Key);
+        Assert.True(after["veo"].Ok);          // the Google key from AI Providers
+        Assert.Contains("AI Providers", after["pictures"].Detail);
+        Assert.False(after["pictures"].Ok);    // OpenAI chosen but no ChatGPT key
         Assert.False(after["voice"].Ok);
+
+        var withKeys = (await new StoryDiagnosticsService(_ffmpeg, chosen, _store, new Keys { Google = "g", OpenAi = "o" }).RunAsync()).ToDictionary(c => c.Key);
+        Assert.True(withKeys["pictures"].Ok);
+        Assert.True(withKeys["voice"].Ok);
+
+        // Switching Gemini off under AI Providers takes Veo away even though a key is saved.
+        var off = (await new StoryDiagnosticsService(_ffmpeg, chosen, _store, new Keys { Google = "g", GoogleOn = false }).RunAsync()).ToDictionary(c => c.Key);
+        Assert.False(off["veo"].Ok);
     }
 
     [Theory]

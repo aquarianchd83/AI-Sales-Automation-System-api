@@ -20,6 +20,9 @@ public static class AiFeatures
     public const string ProductGapCheck = "ProductGapCheck";
     public const string ProductKnowledgeDraft = "ProductKnowledgeDraft";
 
+    /// <summary>The cinematic story studio writing a script. Its own switch, so changing it never moves another feature.</summary>
+    public const string StoryScript = "StoryScript";
+
     /// <summary>"AI suggest" on the tenant's Domain keywords (onboarding and business profile).</summary>
     public const string BusinessKeywords = "BusinessKeywords";
 
@@ -55,6 +58,9 @@ public static class AiFeatures
         new(ProductKnowledgeDraft, "Draft knowledge file",
             "Writes the draft knowledge file the AI chat answers from, for the tenant to review before it is used.",
             new[] { AiTaskKinds.KnowledgeDraft }),
+        new(StoryScript, "Story script",
+            "Writes the scenes, dialogue and video prompts of a story in the Story studio. The script must be approved before any paid video work starts.",
+            new[] { AiTaskKinds.CinematicScript }),
     };
 
     /// <summary>The product-knowledge group a task belongs to, or null for a task that is not one of them.</summary>

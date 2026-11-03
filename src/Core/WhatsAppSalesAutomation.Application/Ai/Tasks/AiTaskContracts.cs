@@ -41,7 +41,7 @@ public static class AiTaskKinds
     {
         DocumentAnalysis, ProductInfoExtraction, KnowledgeConsolidation, GroundedQuestionAnswering, CustomQuestionAnswering,
         QuestionnaireGeneration, BenefitAnalysis, MissingInformationDetection, ConflictIdentification, SuggestedAnswerGeneration,
-        KnowledgeDraft, ScannedDocumentReading
+        KnowledgeDraft, ScannedDocumentReading, CinematicScript
     };
 }
 

@@ -61,8 +61,6 @@ public class CinematicOptions
 
     public string FfprobePath { get; set; } = string.Empty;
 
-    public string GeminiApiKey { get; set; } = string.Empty;
-
     public string VeoModel { get; set; } = "veo-3.1-fast-generate-preview";
 
     /// <summary>Estimate used for the pre-spend confirmation (USD per generated second). Replace with the figure on Google's pricing page.</summary>
@@ -83,8 +81,6 @@ public class CinematicOptions
 
     /// <summary>Estimate per spoken line, shown before a paid voice-over. Check OpenAI pricing; not billing data.</summary>
     public decimal SpeechUsdPerLine { get; set; } = 0.02m;
-
-    public string OpenAiApiKey { get; set; } = string.Empty;
 
     /// <summary>"Simulator" (free placeholder pictures) or "OpenAI".</summary>
     public string CharacterImageProvider { get; set; } = "Simulator";

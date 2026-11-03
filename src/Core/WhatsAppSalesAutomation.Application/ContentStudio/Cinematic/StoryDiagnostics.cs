@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.ProductKnowledge;
 
 namespace WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
@@ -17,17 +18,23 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
     private readonly IFfmpegService _ffmpeg;
     private readonly IOptionsSnapshot<CinematicOptions> _options;
     private readonly ITenantDocumentStore _store;
+    private readonly IPlatformAiConfigProvider _credentials;
 
-    public StoryDiagnosticsService(IFfmpegService ffmpeg, IOptionsSnapshot<CinematicOptions> options, ITenantDocumentStore store)
+    public StoryDiagnosticsService(IFfmpegService ffmpeg, IOptionsSnapshot<CinematicOptions> options, ITenantDocumentStore store, IPlatformAiConfigProvider credentials)
     {
         _ffmpeg = ffmpeg;
         _options = options;
         _store = store;
+        _credentials = credentials;
     }
 
     public async Task<IReadOnlyList<StoryCheckDto>> RunAsync(CancellationToken cancellationToken = default)
     {
         var o = _options.Value;
+        var ai = _credentials.Get();
+        var hasGoogle = ai.IsEnabled("Google") && !string.IsNullOrWhiteSpace(ai.GoogleApiKey);
+        var hasOpenAi = ai.IsEnabled("OpenAI") && !string.IsNullOrWhiteSpace(ai.OpenAiApiKey);
+        const string where = "Add it (and switch the provider on) under Configuration > AI Providers.";
         var ffmpegOk = await _ffmpeg.IsAvailableAsync(cancellationToken);
         var font = _ffmpeg.FindDevanagariFont();
 
@@ -39,14 +46,14 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
                 font is not null ? $"Found \"{font}\"." : "None found on this host. Hindi subtitles would show as boxes. Install Noto Sans Devanagari and set the subtitle fonts folder and font name under Platform > Integrations > Story studio."),
             new StoryCheckDto("storage", "File storage (S3)", _store.IsConfigured,
                 _store.IsConfigured ? "Configured." : "Not configured. Clips, pictures and finished videos cannot be saved."),
-            new StoryCheckDto("veo", "Veo (Gemini API key)", !string.IsNullOrWhiteSpace(o.GeminiApiKey),
-                string.IsNullOrWhiteSpace(o.GeminiApiKey) ? "No key. Veo is unavailable; test clips and Flow import still work. Set it under Platform > Integrations > Story studio." : "A key is set. It has not been tried against Google from here."),
-            new StoryCheckDto("pictures", "Character pictures", o.CharacterImageProvider != "OpenAI" || !string.IsNullOrWhiteSpace(o.OpenAiApiKey),
+            new StoryCheckDto("veo", "Veo (Gemini key)", hasGoogle,
+                !hasGoogle ? "No Gemini key is available, so Veo is unavailable; test clips and Flow import still work. " + where : "The Gemini key from AI Providers is used. It has not been tried against Google from here."),
+            new StoryCheckDto("pictures", "Character pictures", o.CharacterImageProvider != "OpenAI" || hasOpenAi,
                 o.CharacterImageProvider != "OpenAI" ? "Using free placeholder pictures." :
-                string.IsNullOrWhiteSpace(o.OpenAiApiKey) ? "OpenAI pictures are chosen but there is no OpenAI key. Set it under Platform > Integrations > Story studio." : "An OpenAI key is set. It has not been tried from here."),
-            new StoryCheckDto("voice", "Voice-over (OpenAI speech)", o.SpeechProvider != "OpenAI" || !string.IsNullOrWhiteSpace(o.OpenAiApiKey),
+                !hasOpenAi ? "OpenAI pictures are chosen but there is no ChatGPT key. " + where : "The ChatGPT key from AI Providers is used. It has not been tried from here."),
+            new StoryCheckDto("voice", "Voice-over (OpenAI speech)", o.SpeechProvider != "OpenAI" || hasOpenAi,
                 o.SpeechProvider != "OpenAI" ? "Using free test tones. The clips keep their own voices unless you add a voice-over." :
-                string.IsNullOrWhiteSpace(o.OpenAiApiKey) ? "OpenAI speech is chosen but there is no OpenAI key. Set it under Platform > Integrations > Story studio." : "An OpenAI key is set. It has not been tried from here.")
+                !hasOpenAi ? "OpenAI speech is chosen but there is no ChatGPT key. " + where : "The ChatGPT key from AI Providers is used. It has not been tried from here.")
         };
     }
 }

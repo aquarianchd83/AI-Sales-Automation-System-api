@@ -227,7 +227,7 @@ public class StoryStudioService : IStoryStudioService
         {
             var result = await _ai.RunAsync(new AiTaskRequest(
                 AiTaskKinds.CinematicScript, StoryPrompts.System, StoryPrompts.User(dto, cast, sceneCount, perScene), 3500, ExpectJson: true,
-                TenantId: tenantId, Feature: AiFeatures.ContentGeneration), ct);
+                TenantId: tenantId), ct);
 
             CinematicScript? script;
             string source;

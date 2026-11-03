@@ -461,7 +461,7 @@ public sealed class AiTaskRunnerTests
         foreach (var task in AiTaskKinds.Product)
             Assert.Single(AiFeatures.ProductTaskGroups, g => g.Tasks.Contains(task));
 
-        Assert.Equal(6, AiFeatures.ProductTaskGroups.Count);
+        Assert.Equal(7, AiFeatures.ProductTaskGroups.Count);   // the six product-knowledge groups and the story script
         Assert.All(AiFeatures.ProductTaskGroups, g => Assert.NotEmpty(g.Tasks));
         Assert.Equal(AiFeatures.OffMode, AiFeatures.DefaultMode(AiFeatures.ProductScannedReading)); // page images leave the platform: starts Off
         Assert.Equal(PlatformIntegrationSettingsService.SimulatorMode, AiFeatures.DefaultMode(AiFeatures.ProductSuggestedAnswers));
@@ -486,7 +486,7 @@ public sealed class AiTaskRunnerTests
 
         Assert.Empty(AiCapabilities.DeclaredFor("Nobody"));
         Assert.Contains(AiTaskKinds.GroundedQuestionAnswering, AiTaskKinds.Product);
-        Assert.Equal(12, AiTaskKinds.Product.Count);
+        Assert.Equal(13, AiTaskKinds.Product.Count);
     }
 
     [Fact]

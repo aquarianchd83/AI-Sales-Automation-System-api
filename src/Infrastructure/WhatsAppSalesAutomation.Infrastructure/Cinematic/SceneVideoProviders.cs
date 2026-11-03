@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -71,12 +72,17 @@ public class VeoSceneVideoProvider : ISceneVideoProvider
 
     private readonly HttpClient _http;
     private readonly IOptionsSnapshot<CinematicOptions> _options;
+    private readonly IPlatformAiConfigProvider _credentials;
 
-    public VeoSceneVideoProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options)
+    public VeoSceneVideoProvider(HttpClient http, IOptionsSnapshot<CinematicOptions> options, IPlatformAiConfigProvider credentials)
     {
         _http = http;
         _options = options;
+        _credentials = credentials;
     }
+
+    /// <summary>Veo is reached through the Gemini API, so it uses the Google key saved under Configuration > AI Providers (and stops when Gemini is switched off there).</summary>
+    private string? Key => _credentials.Get() is { } c && c.IsEnabled("Google") ? c.GoogleApiKey : null;
 
     public SceneVideoProviderKind Kind => SceneVideoProviderKind.Veo;
 
@@ -84,8 +90,8 @@ public class VeoSceneVideoProvider : ISceneVideoProvider
 
     public async Task<SceneClipResult> SubmitAsync(SceneClipRequest request, CancellationToken cancellationToken = default)
     {
-        var key = _options.Value.GeminiApiKey;
-        if (string.IsNullOrWhiteSpace(key)) return new(SceneClipState.Failed, null, null, null, "No Gemini API key is configured.");
+        var key = Key;
+        if (string.IsNullOrWhiteSpace(key)) return new(SceneClipState.Failed, null, null, null, "No Gemini key is saved (or Gemini is switched off) under Configuration > AI Providers.");
 
         var body = new
         {
@@ -115,7 +121,7 @@ public class VeoSceneVideoProvider : ISceneVideoProvider
 
     public async Task<SceneClipResult> PollAsync(string providerJobId, CancellationToken cancellationToken = default)
     {
-        var key = _options.Value.GeminiApiKey;
+        var key = Key;
         using var message = new HttpRequestMessage(HttpMethod.Get, Base + providerJobId);
         message.Headers.Add("x-goog-api-key", key);
         try
