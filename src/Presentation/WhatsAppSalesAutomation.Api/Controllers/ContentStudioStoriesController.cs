@@ -25,11 +25,12 @@ public class ContentStudioStoriesController : ControllerBase
     private readonly IStoryVoiceService _voice;
     private readonly IStoryPublishingService _publishing;
     private readonly IStoryDiagnosticsService _diagnostics;
+    private readonly IStoryVideoSourcePolicy _videoSources;
     private readonly IStoryCharacterGenerationService _characters;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryVideoSourcePolicy videoSources, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
@@ -38,6 +39,7 @@ public class ContentStudioStoriesController : ControllerBase
         _voice = voice;
         _publishing = publishing;
         _diagnostics = diagnostics;
+        _videoSources = videoSources;
         _characters = characters;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -181,6 +183,10 @@ public class ContentStudioStoriesController : ControllerBase
     [HttpGet("projects/{id:guid}/usage")]
     public async Task<ActionResult<StoryUsageDto>> GetUsage(Guid id, CancellationToken ct)
         => Ok(await _review.GetUsageAsync(RequireTenantId(), id, ct));
+
+    /// <summary>Where scene clips can come from right now: the free test clips, Veo (only when the operator switched it on and a Gemini key exists) and Google Flow import.</summary>
+    [HttpGet("video-sources")]
+    public ActionResult<IReadOnlyList<VideoSourceDto>> VideoSources() => Ok(_videoSources.Sources());
 
     /// <summary>What this host has and lacks for live use (ffmpeg, subtitle font, storage, provider keys). Reports configuration; calls no paid service.</summary>
     [HttpGet("diagnostics")]

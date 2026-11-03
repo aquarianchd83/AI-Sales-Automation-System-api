@@ -27,11 +27,13 @@ public class StoryStudioService : IStoryStudioService
     private readonly ITenantDocumentStore _store;
     private readonly ISceneVideoProviderFactory _providers;
     private readonly IDateTimeProvider _clock;
+    private readonly IStoryVideoSourcePolicy? _sources;
 
     public StoryStudioService(
         IApplicationDbContext context, ITenantConfigOverrideProvider config, IAiTaskRunner ai, IStudioMeteringService metering,
-        ITenantDocumentStore store, ISceneVideoProviderFactory providers, IDateTimeProvider clock)
+        ITenantDocumentStore store, ISceneVideoProviderFactory providers, IDateTimeProvider clock, IStoryVideoSourcePolicy? sources = null)
     {
+        _sources = sources;
         _context = context;
         _config = config;
         _ai = ai;
@@ -162,6 +164,7 @@ public class StoryStudioService : IStoryStudioService
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Topic)) throw new ArgumentException("A project needs a title and a topic.");
         if (request.TargetSeconds is < 8 or > 40) throw new ArgumentException("The target length must be between 8 and 40 seconds.");
         if (request.BudgetUsd is < 0) throw new ArgumentException("The budget cannot be negative.");
+        _sources?.EnsureAllowed(request.VideoProvider);
 
         var characterIds = request.CharacterIds.Distinct().ToList();
         // Only characters this tenant may use: its own, or explicitly shared ones.
@@ -201,6 +204,7 @@ public class StoryStudioService : IStoryStudioService
     {
         var project = await ProjectAsync(tenantId, projectId, ct);
         if (project.Status is StoryProjectStatus.Generating) throw new ConflictException("Clips are being generated; the provider cannot be changed now.");
+        _sources?.EnsureAllowed(provider);
         project.VideoProvider = provider;
         await _context.SaveChangesAsync(ct);
         return ToDto(project, await CharacterIdsAsync(projectId, ct));

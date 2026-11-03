@@ -59,11 +59,14 @@ public class StoryClipService : IStoryClipService, IStoryClipRunner
     private readonly IStoryClipQueue _queue;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<StoryClipService> _logger;
+    private readonly IStoryVideoSourcePolicy? _sources;
 
     public StoryClipService(
         IApplicationDbContext context, ITenantConfigOverrideProvider config, ISceneVideoProviderFactory providers, IStudioMeteringService metering,
-        ITenantDocumentStore store, IFfmpegService ffmpeg, IStoryClipQueue queue, IDateTimeProvider clock, ILogger<StoryClipService> logger)
+        ITenantDocumentStore store, IFfmpegService ffmpeg, IStoryClipQueue queue, IDateTimeProvider clock, ILogger<StoryClipService> logger,
+        IStoryVideoSourcePolicy? sources = null)
     {
+        _sources = sources;
         _context = context;
         _config = config;
         _providers = providers;
@@ -89,6 +92,8 @@ public class StoryClipService : IStoryClipService, IStoryClipRunner
         var project = await ProjectAsync(tenantId, projectId, ct);
         if (project.Status is StoryProjectStatus.Draft) throw new ConflictException("Approve the script before making clips.");
         if (project.Status is StoryProjectStatus.Cancelled) throw new ConflictException("This story was cancelled.");
+        // Checked again here: the operator may have switched Veo off, or removed the key, since the story chose it.
+        _sources?.EnsureAllowed(project.VideoProvider);
 
         var todo = await ScenesOfCurrentScriptAsync(project, ct);
         todo = todo.Where(s => s.Status is StorySceneStatus.Pending or StorySceneStatus.Failed or StorySceneStatus.Flagged).ToList();
@@ -108,6 +113,7 @@ public class StoryClipService : IStoryClipService, IStoryClipRunner
         var project = await ProjectAsync(tenantId, scene.ProjectId, ct);
         if (scene.Status is StorySceneStatus.Queued or StorySceneStatus.Processing)
             throw new ConflictException("This scene is already being made.");
+        _sources?.EnsureAllowed(project.VideoProvider);
 
         await EnsureCostAllowedAsync(project, new List<StoryScene> { scene }, request.ConfirmCost, ct);
         await StartSceneAsync(project, scene, userId, ct);

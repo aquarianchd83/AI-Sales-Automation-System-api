@@ -34,6 +34,7 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
         var ai = _credentials.Get();
         var hasGoogle = ai.IsEnabled("Google") && !string.IsNullOrWhiteSpace(ai.GoogleApiKey);
         var hasOpenAi = ai.IsEnabled("OpenAI") && !string.IsNullOrWhiteSpace(ai.OpenAiApiKey);
+        var veoOn = string.Equals(o.VideoProvider, "Veo", StringComparison.OrdinalIgnoreCase);
         const string where = "Add it (and switch the provider on) under Configuration > AI Providers.";
         var ffmpegOk = await _ffmpeg.IsAvailableAsync(cancellationToken);
         var font = _ffmpeg.FindDevanagariFont();
@@ -46,8 +47,9 @@ public class StoryDiagnosticsService : IStoryDiagnosticsService
                 font is not null ? $"Found \"{font}\"." : "None found on this host. Hindi subtitles would show as boxes. Install Noto Sans Devanagari and set the subtitle fonts folder and font name under Platform > Integrations > Story studio."),
             new StoryCheckDto("storage", "File storage (S3)", _store.IsConfigured,
                 _store.IsConfigured ? "Configured." : "Not configured. Clips, pictures and finished videos cannot be saved."),
-            new StoryCheckDto("veo", "Veo (Gemini key)", hasGoogle,
-                !hasGoogle ? "No Gemini key is available, so Veo is unavailable; test clips and Flow import still work. " + where : "The Gemini key from AI Providers is used. It has not been tried against Google from here."),
+            new StoryCheckDto("veo", "Veo (Gemini key)", !veoOn || hasGoogle,
+                !veoOn ? "Veo is switched off (clips come from the free test clips or Google Flow). Switch it on under Platform > Integrations > Story Studio." :
+                !hasGoogle ? "Veo is switched on but no Gemini key is available. " + where : "The Gemini key from AI Providers is used. It has not been tried against Google from here."),
             new StoryCheckDto("pictures", "Character pictures", o.CharacterImageProvider != "OpenAI" || hasOpenAi,
                 o.CharacterImageProvider != "OpenAI" ? "Using free placeholder pictures." :
                 !hasOpenAi ? "OpenAI pictures are chosen but there is no ChatGPT key. " + where : "The ChatGPT key from AI Providers is used. It has not been tried from here."),

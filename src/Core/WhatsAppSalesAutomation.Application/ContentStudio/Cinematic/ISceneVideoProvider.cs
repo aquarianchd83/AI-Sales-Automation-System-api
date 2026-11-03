@@ -61,6 +61,9 @@ public class CinematicOptions
 
     public string FfprobePath { get; set; } = string.Empty;
 
+    /// <summary>"Simulator" (free test clips) or "Veo". Whether tenants may choose Veo for a story; Google Flow import and test clips are always open.</summary>
+    public string VideoProvider { get; set; } = "Simulator";
+
     public string VeoModel { get; set; } = "veo-3.1-fast-generate-preview";
 
     /// <summary>Estimate used for the pre-spend confirmation (USD per generated second). Replace with the figure on Google's pricing page.</summary>
