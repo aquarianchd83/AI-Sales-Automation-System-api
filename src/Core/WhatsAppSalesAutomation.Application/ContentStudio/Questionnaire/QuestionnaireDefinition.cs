@@ -14,6 +14,9 @@ public enum QuestionType
     SingleChoice,
     MultiChoice,
 
+    /// <summary>A short list of points, one thing per point ("slow quotes", "no follow-up"). Answered as an array of short texts; the fact it makes reads them as one numbered list.</summary>
+    PointList,
+
     /// <summary>A small fixed set of named fields answered together - opening hours, an address - kept as one object.</summary>
     Structured
 }

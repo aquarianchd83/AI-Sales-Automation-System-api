@@ -86,7 +86,8 @@ public static class StoryPrompts
         "You suggest short vertical marketing videos for a small business. Each idea is ONE real problem a customer has that this business solves. " +
         "Use only the verified facts you are given; never invent a product, price, result or promise. Reply with ONE JSON object and nothing else: " +
         "{ideas:[{title, problem, solution, factIds:[...]}]}. title is short and catchy; problem is what the customer struggles with, in one sentence; " +
-        "solution is how this business helps, in one sentence, using only the facts; factIds are ids copied exactly from the facts list that the idea rests on (at least one).";
+        "solution is how this business helps, in one sentence, using only the facts; factIds are ids copied exactly from the facts list that the idea rests on (at least one). " +
+        "Facts in the Problems category are the problems the business says its product solves: build the ideas on those first, one idea per problem.";
 
     public static string IdeasUser(IReadOnlyList<WhatsAppSalesAutomation.Application.ContentStudio.Knowledge.GroundingFactDto> facts, string? language, int count) =>
         $"Suggest {count} different video ideas, written in {(string.IsNullOrWhiteSpace(language) ? "English" : language)}.\n\nVerified facts (id in brackets):\n{StoryIdeaPrompts.FactLines(facts)}";
