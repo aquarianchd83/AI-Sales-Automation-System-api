@@ -158,11 +158,20 @@ public sealed class StoryVoiceAndPublishingTests : IDisposable
         _db.StoryProjects.Add(project);
         _db.StoryScriptVersions.Add(script);
 
-        var path = Path.Combine(Path.GetTempPath(), $"voice-test-{Guid.NewGuid():N}.mp4");
-        await _ffmpeg.CreateTestClipAsync(path, 8, "t");
+        // The tests that listen to the result need a real clip and return early without ffmpeg; the others only need a stored file to exist, so a machine
+        // without ffmpeg (a CI runner) still runs them.
         string key;
-        await using (var file = File.OpenRead(path)) key = await _store.SaveAsync(_tenant, "clips/1.mp4", file, "video/mp4");
-        File.Delete(path);
+        if (await _ffmpeg.IsAvailableAsync())
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"voice-test-{Guid.NewGuid():N}.mp4");
+            await _ffmpeg.CreateTestClipAsync(path, 8, "t");
+            await using (var file = File.OpenRead(path)) key = await _store.SaveAsync(_tenant, "clips/1.mp4", file, "video/mp4");
+            File.Delete(path);
+        }
+        else
+        {
+            key = await _store.SaveAsync(_tenant, "clips/1.mp4", new MemoryStream(new byte[] { 0 }), "video/mp4");
+        }
 
         var asset = new StoryMediaAsset { TenantId = _tenant, ProjectId = project.Id, Kind = StoryMediaKind.SceneClip, StorageKey = key, ContentType = "video/mp4", DurationMs = 8000 };
         _db.StoryMediaAssets.Add(asset);
