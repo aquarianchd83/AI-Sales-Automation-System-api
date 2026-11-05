@@ -153,7 +153,9 @@ public sealed class StudioKnowledgeServiceTests : IDisposable
             ("target_audience", S("Working adults aged 30 to 60.")),
             ("products_services", S("Groceries and household items.")),
             ("service_locations", S("Pune")),
-            ("content_language", """["english","hindi"]""")
+            ("content_language", """["english","hindi"]"""),
+            // Mandatory for every tenant: the problems the product solves, as points.
+            (StarterTemplates.ProblemsSolvedKey, """["Slow quotes","No follow-up after the first visit"]""")
         };
         answers.AddRange(extra);
         return await _questionnaire.SaveAnswersAsync(tenant, Save(answers.ToArray()), actor);
@@ -293,7 +295,8 @@ public sealed class StudioKnowledgeServiceTests : IDisposable
         await _questionnaire.SaveAnswersAsync(_software, Save(
             ("industry", S("Technology & software")), ("business_description", S("Shared inbox for sales teams.")), ("target_audience", S("Small sales teams.")),
             ("products_services", """["saas"]"""), ("service_locations", S("Online across India")), ("content_language", """["english"]"""),
-            ("key_features", S("Shared inbox and reports."))));
+            ("key_features", S("Shared inbox and reports.")),
+            (StarterTemplates.ProblemsSolvedKey, """["Slow quotes","No follow-up after the first visit"]""")));
         var done = await _questionnaire.CompleteAsync(_software, _admin);
 
         Assert.Equal(QuestionnaireResponseStatus.Completed, done.State.Status);
@@ -322,7 +325,8 @@ public sealed class StudioKnowledgeServiceTests : IDisposable
 
         await _questionnaire.SaveAnswersAsync(_retail, Save(
             ("business_name", S("Corner Store")), ("industry", S("Retail & e-commerce")), ("business_description", unknown), ("target_audience", """{ "$special": "need_help" }"""),
-            ("products_services", unknown), ("service_locations", """{ "$special": "not_applicable" }"""), ("content_language", unknown)));
+            ("products_services", unknown), ("service_locations", """{ "$special": "not_applicable" }"""), ("content_language", unknown),
+            (StarterTemplates.ProblemsSolvedKey, """["Slow quotes","No follow-up after the first visit"]""")));
         var done = await _questionnaire.CompleteAsync(_retail, _admin);
 
         Assert.Equal(QuestionnaireResponseStatus.Completed, done.State.Status);
@@ -343,7 +347,8 @@ public sealed class StudioKnowledgeServiceTests : IDisposable
         await _questionnaire.GetStateAsync(_retail);
         await _questionnaire.SaveAnswersAsync(_retail, Save(
             ("business_name", S("Corner Store")), ("industry", S("Retail & e-commerce")), ("business_description", S("A grocery store.")),
-            ("target_audience", """{ "$special": "unknown" }"""), ("products_services", S("Groceries.")), ("service_locations", S("Pune")), ("content_language", """["english"]""")));
+            ("target_audience", """{ "$special": "unknown" }"""), ("products_services", S("Groceries.")), ("service_locations", S("Pune")), ("content_language", """["english"]"""),
+            (StarterTemplates.ProblemsSolvedKey, """["Slow quotes","No follow-up after the first visit"]""")));
         await _questionnaire.CompleteAsync(_retail, _admin);
 
         Assert.DoesNotContain(await AllFacts(_retail).ToListAsync(), f => f.SourceRef == "target_audience");

@@ -18,6 +18,12 @@ public static class AiTaskKinds
     public const string SuggestedAnswerGeneration = "SuggestedAnswerGeneration";
     public const string KnowledgeDraft = "KnowledgeDraft";
 
+    /// <summary>The cinematic story studio writing a structured script (scenes, dialogue, video prompts).</summary>
+    public const string CinematicScript = "CinematicScript";
+
+    /// <summary>Suggesting video ideas from the tenant's verified facts (same Story script switch).</summary>
+    public const string CinematicIdeas = "CinematicIdeas";
+
     /// <summary>Reading a scanned page or image. Needs a model that accepts images, which is why it is a task of its own.</summary>
     public const string ScannedDocumentReading = "ScannedDocumentReading";
 
@@ -38,7 +44,7 @@ public static class AiTaskKinds
     {
         DocumentAnalysis, ProductInfoExtraction, KnowledgeConsolidation, GroundedQuestionAnswering, CustomQuestionAnswering,
         QuestionnaireGeneration, BenefitAnalysis, MissingInformationDetection, ConflictIdentification, SuggestedAnswerGeneration,
-        KnowledgeDraft, ScannedDocumentReading
+        KnowledgeDraft, ScannedDocumentReading, CinematicScript, CinematicIdeas
     };
 }
 
@@ -77,6 +83,7 @@ public static class AiUses
     public const string Onboarding = "Onboarding and profile";
     public const string Discovery = "Lead discovery";
     public const string ProductKnowledge = "Product knowledge";
+    public const string ContentStudio = "Content studio";
 
     private static readonly string[] Three = { "OpenAI", "Anthropic", "Google" };
 
@@ -100,6 +107,8 @@ public static class AiUses
         new(AiTaskKinds.ConflictIdentification, ProductKnowledge, "Conflict identification", Three),
         new(AiTaskKinds.KnowledgeConsolidation, ProductKnowledge, "Knowledge consolidation", Three),
         new(AiTaskKinds.KnowledgeDraft, ProductKnowledge, "Draft knowledge file", Three),
+        new(AiTaskKinds.CinematicScript, ContentStudio, "Cinematic story scripts", Three),
+        new(AiTaskKinds.CinematicIdeas, ContentStudio, "Story video ideas", Three),
     };
 
     public static IReadOnlyList<string> Tasks { get; } = All.Select(u => u.Task).ToList();

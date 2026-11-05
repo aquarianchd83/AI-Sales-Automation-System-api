@@ -37,7 +37,20 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
-        services.AddScoped<AuditTrailSaveChangesInterceptor>();
+
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipQueue, WhatsAppSalesAutomation.Infrastructure.BackgroundJobs.HangfireStoryClipQueue>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorSpeechProvider>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Cinematic.OpenAiSpeechProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISpeechProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.SpeechProviderSelector>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorCharacterImageProvider>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Cinematic.OpenAiCharacterImageProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ICharacterImageProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.CharacterImageProviderSelector>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryRenderQueue, WhatsAppSalesAutomation.Infrastructure.BackgroundJobs.HangfireStoryRenderQueue>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IFfmpegService, WhatsAppSalesAutomation.Infrastructure.Cinematic.FfmpegService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.SimulatorSceneVideoProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.FlowImportSceneVideoProvider>();
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProvider, WhatsAppSalesAutomation.Infrastructure.Cinematic.VeoSceneVideoProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProviderFactory, WhatsAppSalesAutomation.Infrastructure.Cinematic.SceneVideoProviderFactory>();        services.AddScoped<AuditTrailSaveChangesInterceptor>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();

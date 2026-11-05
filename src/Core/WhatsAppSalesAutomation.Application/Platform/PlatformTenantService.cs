@@ -181,13 +181,21 @@ public class PlatformTenantService : IPlatformTenantService
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
 
-        var existingUser = await _userManager.FindByEmailAsync(request.AdminEmail);
-        if (existingUser is not null)
+        // IgnoreQueryFilters: the caller is a PlatformSuperAdmin with no ambient tenant, so FindByEmailAsync would not see
+        // an account that belongs to another tenant - and the unique index would then fail the insert as a 500 instead.
+        var normalizedEmail = _userManager.NormalizeEmail(request.AdminEmail);
+        var emailTaken = await _userManager.Users.IgnoreQueryFilters()
+            .AnyAsync(u => u.NormalizedEmail == normalizedEmail || u.NormalizedUserName == normalizedEmail, cancellationToken);
+        if (emailTaken)
             throw new ConflictException($"A user with email '{request.AdminEmail}' already exists.");
 
         var slug = await _slugResolver.ResolveAsync(request.Slug, request.CompanyName, cancellationToken);
 
         await _countries.EnsureAllowedAsync(request.CountryCode, null, cancellationToken);
+
+        // Tenant, admin user, role, quota and audit entry are one unit: any failure (not just a rejected password) rolls the
+        // whole thing back, so a failed attempt never leaves an orphan tenant behind. Disposing without Commit rolls back.
+        await using var transaction = await _context.BeginTransactionAsync(cancellationToken);
 
         var tenant = new Tenant
         {
@@ -219,26 +227,26 @@ public class PlatformTenantService : IPlatformTenantService
 
         var result = await _userManager.CreateAsync(user, request.AdminPassword);
         if (!result.Succeeded)
-        {
-            // The tenant row is already saved; without this every failed attempt left an orphan tenant (no users, no owner).
-            _context.Tenants.Remove(tenant);
-            await _context.SaveChangesAsync(cancellationToken);
             throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.AdminPassword), e.Description)));
-        }
 
-        await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+        var roleResult = await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+        if (!roleResult.Succeeded)
+            throw new InvalidOperationException("Could not assign the Admin role: " + string.Join("; ", roleResult.Errors.Select(e => e.Description)));
 
         tenant.OwnerUserId = user.Id;
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Same reasoning as self-serve signup (see AuthService.SignUpAsync) - the tenant's background
-        // jobs exist and are registered from the moment it does.
-        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
         await _quota.AssignTrialPlanAsync(tenant.Id, cancellationToken);
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantCreated, tenant.Id, user.Id,
             details: $"Created tenant '{tenant.Name}' ({tenant.Slug}) with admin {user.Email}", cancellationToken: cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+
+        // Same reasoning as self-serve signup (see AuthService.SignUpAsync) - the tenant's background jobs exist and are
+        // registered from the moment it does. After the commit: job registration lives outside this database transaction.
+        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
         return await GetDetailAsync(tenant.Id, cancellationToken);
     }

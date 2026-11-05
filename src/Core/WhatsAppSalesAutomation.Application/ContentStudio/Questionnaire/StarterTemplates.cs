@@ -210,6 +210,7 @@ public static class StarterTemplates
     /// <summary>The questions every business shares: a current offer, prices, and a real customer result (with the permission to share it).</summary>
     private static IEnumerable<QuestionDef> Tail()
     {
+        yield return ProblemsSolved();
         yield return Bool("has_offer", "Offers and prices", "Do you have an offer or discount running right now?");
         yield return Text("offer_details", "Offers and prices", "What is the offer, and until when?", required: true, showWhen: EqBool("has_offer", true),
             help: "Include the end date so we never promote an offer that has finished.", example: "Free eye check-up for senior citizens until 31 December.",
@@ -226,6 +227,22 @@ public static class StarterTemplates
             help: "We will ask you how you can show this afterwards.", fact: Fact("Consent", "Customer permission to feature them: {value}."),
             options: O(("written", "Yes, in writing"), ("verbal", "Yes, verbally"), ("no", "Not yet")));
     }
+
+    /// <summary>The key of the question every tenant must answer: what problems its product or service solves. The story studio writes its video ideas from it.</summary>
+    public const string ProblemsSolvedKey = "problems_solved";
+
+    /// <summary>
+    /// What problems the tenant's product solves, as points. Mandatory for every tenant and not skippable ("I don't know" is no use here): it is the
+    /// raw material of every marketing video. Shared by every starter questionnaire, and added to questionnaires that already exist by the seeder.
+    /// </summary>
+    public static QuestionDef ProblemsSolved() => new()
+    {
+        Key = ProblemsSolvedKey, Group = GroupOffer, Type = QuestionType.PointList, Required = true, RequireKnown = true,
+        Prompt = "What type of problem does your product solve for your customers?",
+        HelpText = "Write each problem as a separate point: something your customer struggles with that your product or service fixes. Short and plain, one per point.",
+        Example = "Slow quotes that take days. No follow-up after the first visit. Hidden charges that surprise customers.",
+        Fact = Fact("Problems", "Problems our product solves: {value}")
+    };
 
     // ----- small builders --------------------------------------------------------------------------------------------------------------
 

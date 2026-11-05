@@ -49,6 +49,22 @@ public static class DependencyInjection
         services.Configure<AppLinkOptions>(configuration.GetSection("App"));
         services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
         services.Configure<StudioOptions>(configuration.GetSection("ContentStudio"));
+
+        services.Configure<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.CinematicOptions>(configuration.GetSection("ContentStudio:Cinematic"));
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryStudioService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryStudioService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipService>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryVideoSourcePolicy, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryVideoSourcePolicy>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryGroundingService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryGroundingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryReviewService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryReviewService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryVoiceService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryVoiceService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryPublishingService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryPublishingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryDiagnosticsService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryDiagnosticsService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryCharacterGenerationService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryCharacterGenerationService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryRenderService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryRenderService>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryRenderService>());
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryRenderRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryRenderService>());
         services.AddScoped<IStudioMeteringService, StudioMeteringService>();
         services.AddScoped<IStudioSettingsService, StudioSettingsService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.IQuestionnaireService, WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire.QuestionnaireService>();

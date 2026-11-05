@@ -14,6 +14,11 @@ public static class QuestionnaireEngine
 {
     public const int MaxQuestions = 100;
     public const int DefaultShortTextLength = 200;
+
+    /// <summary>A point list holds a handful of short points: enough to name the problems, short enough that the fact made from them stays readable.</summary>
+    public const int MaxPoints = 8;
+    public const int MinPointLength = 3;
+    public const int MaxPointLength = 100;
     public const int DefaultLongTextLength = 4000;
 
     // Limits that together guarantee a generated fact always fits its column (see MaxFactStatementLength): the longest answer is a
@@ -536,6 +541,28 @@ public static class QuestionnaireEngine
                     return "Choose only from the listed options.";
                 return picked.Select(p => p.GetString()!.ToLowerInvariant()).Distinct().Count() != picked.Count ? "An option was chosen twice." : null;
             }
+            case QuestionType.PointList:
+            {
+                if (value.ValueKind != JsonValueKind.Array)
+                    return "Answer with a list of points.";
+                var points = value.EnumerateArray().ToList();
+                if (points.Any(p => p.ValueKind != JsonValueKind.String))
+                    return "Each point must be text.";
+                var texts = points.Select(p => p.GetString()!.Trim()).ToList();
+                if (texts.Count == 0 || texts.All(string.IsNullOrWhiteSpace))
+                    return "Add at least one point.";
+                if (texts.Count > MaxPoints)
+                    return $"Add at most {MaxPoints} points.";
+                if (texts.Any(string.IsNullOrWhiteSpace))
+                    return "Remove the empty point.";
+                if (texts.Any(t => t.Length < MinPointLength))
+                    return $"Each point needs at least {MinPointLength} characters.";
+                if (texts.Any(t => t.Length > MaxPointLength))
+                    return $"Keep each point to {MaxPointLength} characters or fewer.";
+                if (texts.Select(t => t.ToLowerInvariant()).Distinct().Count() != texts.Count)
+                    return "A point was written twice.";
+                return texts.Any(LooksLikeSecret) ? SecretMessage : null;
+            }
             case QuestionType.Structured:
             {
                 if (value.ValueKind != JsonValueKind.Object)
@@ -622,6 +649,9 @@ public static class QuestionnaireEngine
                 return LabelFor(q, value.GetString());
             case QuestionType.MultiChoice:
                 return JoinWithAnd(value.EnumerateArray().Select(v => LabelFor(q, v.GetString())).ToList());
+            case QuestionType.PointList:
+                // "1) slow quotes; 2) no follow-up": numbered so the points stay separate when they are read back as one fact.
+                return string.Join("; ", value.EnumerateArray().Select((p, i) => $"{i + 1}) {p.GetString()?.Trim()}"));
             case QuestionType.Structured:
             {
                 var parts = new List<string>();

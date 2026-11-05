@@ -249,6 +249,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<QuestionnaireAnswerRevision> QuestionnaireAnswerRevisions => Set<QuestionnaireAnswerRevision>();
 
+    public DbSet<StoryCharacter> StoryCharacters => Set<StoryCharacter>();
+
+    public DbSet<StoryCharacterReference> StoryCharacterReferences => Set<StoryCharacterReference>();
+
+    public DbSet<StoryProject> StoryProjects => Set<StoryProject>();
+
+    public DbSet<StoryProjectCharacter> StoryProjectCharacters => Set<StoryProjectCharacter>();
+
+    public DbSet<StoryScriptVersion> StoryScriptVersions => Set<StoryScriptVersion>();
+
+    public DbSet<StoryScene> StoryScenes => Set<StoryScene>();
+
+    public DbSet<StoryDialogueLine> StoryDialogueLines => Set<StoryDialogueLine>();
+
+    public DbSet<StoryMediaAsset> StoryMediaAssets => Set<StoryMediaAsset>();
+
+    public DbSet<StoryGenerationJob> StoryGenerationJobs => Set<StoryGenerationJob>();
+
+    public DbSet<StoryRender> StoryRenders => Set<StoryRender>();
+
+    public DbSet<StoryPublication> StoryPublications => Set<StoryPublication>();
+
     public DbSet<KnowledgeGapDecision> KnowledgeGapDecisions => Set<KnowledgeGapDecision>();
 
     public DbSet<Flowchart> Flowcharts => Set<Flowchart>();
