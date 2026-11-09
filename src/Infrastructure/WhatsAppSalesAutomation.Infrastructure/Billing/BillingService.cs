@@ -176,11 +176,15 @@ public class BillingService : IBillingService
             _context.Payments.Add(payment);
         }
 
+        // Subscription, tenant status, payment and the plan's credits are one unit: a failure granting the credits must not leave a
+        // tenant who has been charged (or switched plan) with nothing in the wallet. Disposing without Commit rolls back.
+        await using var transaction = await _context.BeginTransactionAsync(cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         // The plan never expires, so there is no period to replace: the plan's credits simply arrive in the wallet (once for the starter credits,
         // and this month's). What the tenant already has is untouched.
         await _credits.AssignPlanAsync(tenantId, plan.Id, payment?.Id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         // Subscribing is the one non-operator path that moves a tenant's status, so it re-syncs its
         // background jobs like the Platform Admin Console's own actions do: a tenant that was suspended
@@ -248,10 +252,14 @@ public class BillingService : IBillingService
             ?? throw new ConflictException("This credit pack isn't available in your country.");
         var payment = PaymentFactory.For(tenantId, PaymentKind.CreditPack, pack.Name, quote, now, creditPackId: pack.Id);
         _context.Payments.Add(payment);
+
+        // The payment and the credits it buys are one unit: a failed grant must not leave a recorded payment with nothing granted.
+        await using var transaction = await _context.BeginTransactionAsync(cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Idempotent per payment id, so a retry after a failure here can never grant twice.
+        // Idempotent per payment id, so a repeated call for the same payment can never grant twice.
         await _quota.GrantCreditsAsync(tenantId, pack, payment.Id, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         // Episode is the payment, so a repeated call for the same payment can never tell the tenant twice.
         if (_notifier is not null)

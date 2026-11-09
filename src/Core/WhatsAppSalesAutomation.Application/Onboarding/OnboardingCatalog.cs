@@ -2,7 +2,10 @@ namespace WhatsAppSalesAutomation.Application.Onboarding;
 
 /// <summary>One step of tenant onboarding: its place in the sequence, its weight towards the progress bar, and
 /// the screen where the tenant does it.</summary>
-public sealed record OnboardingStepDefinition(string Key, string Title, string Description, int Weight, string Route);
+/// <param name="Feature">The plan feature the step's screen needs. A tenant whose plan does not include it is not asked to do the step - the screen
+/// would only refuse them - and progress is measured over the steps that do apply.</param>
+public sealed record OnboardingStepDefinition(
+    string Key, string Title, string Description, int Weight, string Route, WhatsAppSalesAutomation.Domain.Enums.PlatformFeature? Feature = null);
 
 /// <summary>
 /// The onboarding steps, in the order a tenant must complete them. Progress is the sum of the weights of the
@@ -35,7 +38,8 @@ public static class OnboardingCatalog
         new(WhatsApp, "WhatsApp Configuration",
             "Connect your WhatsApp number with Meta. You choose or add the number in Meta's own window.", 20, "/tenant-settings"),
         new(LeadDiscovery, "Lead Discovery Profile",
-            "Describe the businesses you want to find: type, keywords and locations.", 15, "/lead-discovery/profile"),
+            "Describe the businesses you want to find: type, keywords and locations.", 15, "/lead-discovery/profile",
+            WhatsAppSalesAutomation.Domain.Enums.PlatformFeature.LeadDiscovery),
         // The key stays "knowledge-base" so tenants' saved progress is unchanged; the screen is now Product Sources.
         new(KnowledgeBase, "Product Knowledge",
             "Add your brochure, documents or website so the assistant can learn your products.", 15, "/product-knowledge/sources"),

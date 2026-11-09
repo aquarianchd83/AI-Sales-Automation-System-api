@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Constants;
 
@@ -18,6 +19,18 @@ public class PlatformUsersController : ControllerBase
     public PlatformUsersController(IPlatformUserSearchService userSearchService)
     {
         _userSearchService = userSearchService;
+    }
+
+    /// <summary>Support reset of a tenant user's password - audited, and signs the user out everywhere.</summary>
+    [HttpPost("{id:guid}/reset-password")]
+    public async Task<IActionResult> ResetPassword(
+        Guid id, [FromBody] ResetUserPasswordRequest request, [FromServices] ICurrentUserService currentUser, CancellationToken cancellationToken)
+    {
+        await _userSearchService.ResetPasswordAsync(
+            id, request,
+            currentUser.UserId ?? throw new InvalidOperationException("No authenticated user."),
+            currentUser.Email ?? string.Empty, cancellationToken);
+        return NoContent();
     }
 
     [HttpGet("search")]

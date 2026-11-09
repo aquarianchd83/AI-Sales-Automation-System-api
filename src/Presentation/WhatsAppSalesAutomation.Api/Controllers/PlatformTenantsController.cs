@@ -32,6 +32,12 @@ public class PlatformTenantsController : ControllerBase
     public async Task<ActionResult<PlatformTenantDetailDto>> GetDetail(Guid id, CancellationToken cancellationToken)
         => Ok(await _tenantService.GetDetailAsync(id, cancellationToken));
 
+    /// <summary>Every user of this tenant - the Tenants grid's Users count opens this list.</summary>
+    [HttpGet("{id:guid}/users")]
+    public async Task<ActionResult<IReadOnlyList<PlatformUserSearchResultDto>>> GetUsers(
+        Guid id, [FromServices] IPlatformUserSearchService users, CancellationToken cancellationToken)
+        => Ok(await users.ListForTenantAsync(id, cancellationToken));
+
     /// <summary>Operator-initiated tenant creation - see CreatePlatformTenantRequest's own doc
     /// comment for how this differs from self-serve signup.</summary>
     [HttpPost]

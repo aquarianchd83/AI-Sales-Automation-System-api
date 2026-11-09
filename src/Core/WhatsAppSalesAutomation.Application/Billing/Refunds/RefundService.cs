@@ -190,9 +190,12 @@ public class RefundService : IRefundService
             return (await ToDtosAsync(new[] { request }, cancellationToken)).Single();
         }
 
-        // Paid out. What was held beyond the approved share (a partial approval) goes back to the wallet.
+        // Paid out. The wallet release, the refund payment row, the request's status and the subscription change are one unit:
+        // money has already moved at the gateway, so the books must show all of it or none of it (a retry then redoes it cleanly).
+        await using var transaction = await _context.BeginTransactionAsync(cancellationToken);
+
+        // What was held beyond the approved share (a partial approval) goes back to the wallet.
         await _ledger.ReleaseRefundHoldAsync(request.TenantId, request.Id, fraction, cancellationToken);
-        await NotifyCreditsReturnedAsync(request, "part of your refund wasn't approved", cancellationToken);
 
         var share = payment.LocalAmount > 0 ? refundLocal / payment.LocalAmount : 0m;
         var refundTax = Math.Round(payment.TaxLocal * share, 2, MidpointRounding.AwayFromZero);
@@ -243,6 +246,9 @@ public class RefundService : IRefundService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        await NotifyCreditsReturnedAsync(request, "part of your refund wasn't approved", cancellationToken);
 
         await _notifier.NotifyAsync(new TenantNotificationRequest(
             request.TenantId, TenantNotificationKind.RefundApproved, null, request.Id.ToString(),

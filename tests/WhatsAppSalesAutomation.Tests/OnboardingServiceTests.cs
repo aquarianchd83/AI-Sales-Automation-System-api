@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Onboarding;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
@@ -114,6 +115,35 @@ public sealed class OnboardingServiceTests : IDisposable
             OnboardingCatalog.Steps.Select(s => s.Key));
         Assert.Equal(new[] { 15, 15, 20, 20, 15, 15 }, OnboardingCatalog.Steps.Select(s => s.Weight));
         Assert.Equal(100, OnboardingCatalog.Steps.Sum(s => s.Weight));
+    }
+
+    // ---- a plan without a step's feature ----------------------------------------------------------------------------
+
+    private sealed class Features : IFeatureAccessService
+    {
+        private readonly HashSet<PlatformFeature> _without;
+        public Features(params PlatformFeature[] without) => _without = without.ToHashSet();
+        public Task<IReadOnlySet<PlatformFeature>> GetFeaturesAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlySet<PlatformFeature>>(Enum.GetValues<PlatformFeature>().Where(f => !_without.Contains(f)).ToHashSet());
+        public Task<bool> HasAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default) => Task.FromResult(!_without.Contains(feature));
+        public Task RequireAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_plan_without_lead_discovery_is_not_asked_for_a_lead_discovery_profile_and_can_still_finish_setup()
+    {
+        var service = new OnboardingService(_db, new Ambient(_tenant), new AnonymousUser(), _whatsApp, _clock, features: new Features(PlatformFeature.LeadDiscovery));
+        await CompleteProfileAsync();
+        await SubscribeAsync();
+        await AddPackageAsync();
+        ConnectWhatsApp(verified: true);
+        await AddProcessedVoucherAsync();
+
+        var status = (await service.GetStatusAsync())!;
+
+        Assert.DoesNotContain(status.Steps, s => s.Key == OnboardingCatalog.LeadDiscovery);
+        Assert.True(status.IsCompleted);
+        Assert.Equal(100, status.ProgressPercent);
     }
 
     // ---- sequence and progress ---------------------------------------------------------------------------------------
@@ -398,7 +428,7 @@ public sealed class OnboardingServiceTests : IDisposable
         };
         _db.KnowledgeSources.Add(source);
         await _db.SaveChangesAsync();
-        Assert.Equal("knowledge-base", (await StatusAsync()).CurrentStepKey); // still being read
+        Assert.True((await StatusAsync()).IsCompleted); // added: it is read in the background, the tenant is not held up
 
         source.Status = KnowledgeSourceStatus.Failed;
         await _db.SaveChangesAsync();

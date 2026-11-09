@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -64,12 +65,15 @@ public class OnboardingService : IOnboardingService
     private readonly ITenantWhatsAppConfigProvider _whatsApp;
     private readonly IDateTimeProvider _clock;
     private readonly ITenantJobProvisioner? _jobs;
+    private readonly IFeatureAccessService? _features;
 
     public OnboardingService(
         IApplicationDbContext context, ITenantContext tenantContext, ICurrentUserService currentUser,
-        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock, ITenantJobProvisioner? jobs = null)
+        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock, ITenantJobProvisioner? jobs = null,
+        IFeatureAccessService? features = null)
     {
         _jobs = jobs;
+        _features = features;
         _context = context;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -91,8 +95,18 @@ public class OnboardingService : IOnboardingService
         var foundCurrent = false;
         var anyUnmet = false;
 
+        var leadDiscoveryApplies = true;
+
         foreach (var step in OnboardingCatalog.Steps)
         {
+            // A step whose screen the tenant's plan does not include is left out: it could never be completed, and would hold up everything after it.
+            if (step.Feature is { } feature && _features is not null && !await _features.HasAsync(tenantId, feature, cancellationToken))
+            {
+                if (step.Key == OnboardingCatalog.LeadDiscovery)
+                    leadDiscoveryApplies = false;
+                continue;
+            }
+
             recorded.TryGetValue(step.Key, out var row);
 
             var missing = await CheckAsync(step.Key, tenant, tenantId, cancellationToken);
@@ -135,10 +149,14 @@ public class OnboardingService : IOnboardingService
         await _context.SaveChangesAsync(cancellationToken);
 
         // The moment the setup is finished the lead discovery job (created paused) is switched on.
-        if (!wasComplete && tenant.OnboardingCompletedAt is not null && _jobs is not null)
+        // (Not for a plan without lead discovery: there is nothing for the job to do.)
+        if (!wasComplete && tenant.OnboardingCompletedAt is not null && _jobs is not null && leadDiscoveryApplies)
             await _jobs.EnableLeadDiscoveryAfterSetupAsync(tenantId, cancellationToken);
 
-        var progress = steps.Where(s => s.State == OnboardingStepState.Completed).Sum(s => s.Weight);
+        // Over the steps that apply to this plan: with all of them it is the plain sum of the weights (they add up to 100).
+        var applicableWeight = steps.Sum(s => s.Weight);
+        var completedWeight = steps.Where(s => s.State == OnboardingStepState.Completed).Sum(s => s.Weight);
+        var progress = applicableWeight == 0 ? 100 : (int)Math.Round(completedWeight * 100.0 / applicableWeight, MidpointRounding.AwayFromZero);
         return new OnboardingStatusDto(
             tenant.OnboardingCompletedAt is not null,
             progress,
@@ -204,17 +222,18 @@ public class OnboardingService : IOnboardingService
 
             case OnboardingCatalog.KnowledgeBase:
             {
-                // A document or website of the tenant that has been read. (A tenant who finished this step the old way - an article that
-                // finished processing - keeps it.)
-                var sourceRead = await _context.KnowledgeSources.AnyAsync(s =>
-                    s.TenantId == tenantId && !s.IsDeleted && s.Status == KnowledgeSourceStatus.Ready, cancellationToken);
-                if (sourceRead)
+                // A document or website of the tenant that has been added. Adding it is enough: it is read in the background, so the tenant
+                // is not held on this step while that happens. Only one that could not be read (Failed) does not count. (A tenant who finished
+                // this step the old way - an article that finished processing - keeps it.)
+                var sourceAdded = await _context.KnowledgeSources.AnyAsync(s =>
+                    s.TenantId == tenantId && !s.IsDeleted && s.Status != KnowledgeSourceStatus.Failed, cancellationToken);
+                if (sourceAdded)
                     return null;
 
                 var processed = await _context.KnowledgeIngestionJobs.AnyAsync(j =>
                     j.TenantId == tenantId && j.State == KnowledgeIngestionState.Completed
                     && _context.KnowledgeBaseArticles.Any(a => a.Id == j.ArticleId && a.TenantId == tenantId && !a.IsDeleted), cancellationToken);
-                return processed ? null : "Add a document or your website and wait until it has been read.";
+                return processed ? null : "Add a document or your website.";
             }
 
             default:

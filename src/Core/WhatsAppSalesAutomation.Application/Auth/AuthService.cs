@@ -95,6 +95,10 @@ public class AuthService : IAuthService
 
         await _countries.EnsureAllowedAsync(request.CountryCode, null, cancellationToken);
 
+        // Tenant, admin user, role, trial plan and seeded defaults are one unit: any failure rolls the whole signup back, so a
+        // failed attempt never leaves an orphan tenant behind. Disposing without Commit rolls back.
+        await using var transaction = await _context.BeginTransactionAsync(cancellationToken);
+
         var tenant = new Tenant
         {
             Name = request.CompanyName,
@@ -131,21 +135,14 @@ public class AuthService : IAuthService
 
         var result = await _userManager.CreateAsync(user, request.Password);
         if (!result.Succeeded)
-        {
-            // The tenant row is already saved; without this every failed attempt left an orphan tenant (no users, no owner).
-            _context.Tenants.Remove(tenant);
-            await _context.SaveChangesAsync(cancellationToken);
             throw new ValidationException(result.Errors.Select(e => new FluentValidation.Results.ValidationFailure(nameof(request.Password), e.Description)));
-        }
 
-        await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+        var roleResult = await _userManager.AddToRoleAsync(user, AppRoles.Admin);
+        if (!roleResult.Succeeded)
+            throw new InvalidOperationException("Could not assign the Admin role: " + string.Join("; ", roleResult.Errors.Select(e => e.Description)));
 
         tenant.OwnerUserId = user.Id;
         await _context.SaveChangesAsync(cancellationToken);
-
-        // Creates this tenant's background job schedules and registers them with Hangfire, so its first
-        // campaign can send within the minute rather than waiting for the daily reconcile pass.
-        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
         // A new tenant starts on the Trial plan: the minimum set of features and its starter credits, which never expire.
         await _quota.AssignTrialPlanAsync(tenant.Id, cancellationToken);
@@ -156,6 +153,13 @@ public class AuthService : IAuthService
         // unaffected, and a retry of this signup cannot double-seed.
         await _qualification.SeedDefaultsAsync(tenant.Id, cancellationToken);
         await _leadScoring.SeedDefaultsAsync(tenant.Id, cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+
+        // Creates this tenant's background job schedules and registers them with Hangfire, so its first
+        // campaign can send within the minute rather than waiting for the daily reconcile pass. After the commit:
+        // job registration lives outside this database transaction.
+        await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
         // The operators run the platform and see nothing of a signup unless told. Never throws, so a mail problem can't fail it.
         await _platformNotifier.NotifyAsync(new PlatformNotificationRequest(
