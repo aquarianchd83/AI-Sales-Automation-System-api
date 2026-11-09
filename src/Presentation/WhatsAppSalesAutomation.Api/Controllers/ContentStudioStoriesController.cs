@@ -196,6 +196,11 @@ public class ContentStudioStoriesController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<StoryIdeaDto>>> SuggestIdeas([FromBody] SuggestIdeasRequest request, CancellationToken ct)
         => Ok(await _grounding.SuggestIdeasAsync(RequireTenantId(), _currentUser.UserId, request.Language, ct));
 
+    /// <summary>Five or six takes on one problem, written from the brief the tenant filled in. The tenant ticks the ones they want; each becomes its own story.</summary>
+    [HttpPost("variations")]
+    public async Task<ActionResult<IReadOnlyList<StoryVariationDto>>> SuggestVariations([FromBody] StoryVariationRequest request, CancellationToken ct)
+        => Ok(await _grounding.SuggestVariationsAsync(RequireTenantId(), _currentUser.UserId, request, ct));
+
     /// <summary>Where scene clips can come from right now: the free test clips, Veo (only when the operator switched it on and a Gemini key exists) and Google Flow import.</summary>
     [HttpGet("video-sources")]
     public ActionResult<IReadOnlyList<VideoSourceDto>> VideoSources() => Ok(_videoSources.Sources());

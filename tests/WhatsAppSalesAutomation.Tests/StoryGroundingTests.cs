@@ -245,6 +245,84 @@ public sealed class StoryGroundingTests : IDisposable
         Assert.Equal(new[] { "charge", "refund", "charge", "refund" }, _metering.Log);
     }
 
+    // ----- variations of one problem ---------------------------------------------------------------------------------------------------------
+
+    private static StoryVariationRequest Brief(string? sector = "Real estate", string problem = "Finding customers is slow") =>
+        new(problem, sector!, "Small business owners", "AI lead discovery", "Finds leads", "Less manual work", "One platform", "Book a free demo", "Hinglish", 30);
+
+    [Fact]
+    public async Task Variations_need_a_problem_and_a_confirmed_sector_and_cost_nothing_without_them()
+    {
+        Fact(_tenant, "Services", "We find leads.");
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _grounding.SuggestVariationsAsync(_tenant, null, Brief(problem: " ")));
+        await Assert.ThrowsAsync<ArgumentException>(() => _grounding.SuggestVariationsAsync(_tenant, null, Brief(sector: "")));
+
+        Assert.Empty(_metering.Log);
+        Assert.Empty(_ai.Requests);
+    }
+
+    [Fact]
+    public async Task Variations_are_not_written_without_verified_facts()
+    {
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => _grounding.SuggestVariationsAsync(_tenant, null, Brief()));
+
+        Assert.Contains("verify your facts", ex.Message);
+        Assert.Empty(_metering.Log);
+    }
+
+    [Fact]
+    public async Task Test_variations_are_marked_as_test_data_and_cost_nothing()
+    {
+        Fact(_tenant, "Services", "We find leads.");
+        _ai.Mode = AiExecutionMode.Simulator;
+
+        var variations = await _grounding.SuggestVariationsAsync(_tenant, null, Brief());
+
+        Assert.Equal(StoryGroundingService.VariationCount, variations.Count);
+        Assert.All(variations, v => Assert.StartsWith("[Test data]", v.Title));
+        Assert.Equal(new[] { "charge", "refund" }, _metering.Log);
+    }
+
+    [Fact]
+    public async Task Live_variations_keep_the_complete_ones_and_the_model_is_given_the_whole_brief()
+    {
+        var real = Fact(_tenant, "Services", "We find leads.");
+        _ai.Text = JsonSerializer.Serialize(new
+        {
+            variations = new object[]
+            {
+                new { angle = "Question hook", title = "Still searching?", hook = "Still searching for customers?", outline = "Problem, solution, benefit, CTA." },
+                new { angle = "Missing parts", title = "No hook or outline" }
+            }
+        });
+
+        var variations = await _grounding.SuggestVariationsAsync(_tenant, null, Brief());
+
+        var one = Assert.Single(variations);
+        Assert.Equal("Question hook", one.Angle);
+        Assert.Equal(new[] { "charge", "complete" }, _metering.Log);
+        var sent = _ai.Requests.Single();
+        Assert.Equal(AiTaskKinds.CinematicIdeas, sent.Task);
+        Assert.Contains("Sector: Real estate", sent.User);
+        Assert.Contains("Call to action: Book a free demo", sent.User);
+        Assert.Contains(real.Id.ToString(), sent.User);
+    }
+
+    [Fact]
+    public async Task Unusable_variations_give_the_charge_back()
+    {
+        Fact(_tenant, "Services", "We find leads.");
+        _ai.Success = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _grounding.SuggestVariationsAsync(_tenant, null, Brief()));
+
+        _ai.Success = true;
+        _ai.Text = "{ not json";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _grounding.SuggestVariationsAsync(_tenant, null, Brief()));
+
+        Assert.Equal(new[] { "charge", "refund", "charge", "refund" }, _metering.Log);
+    }
+
     // ----- step 2: the script ---------------------------------------------------------------------------------------------------------------------
 
     [Fact]
