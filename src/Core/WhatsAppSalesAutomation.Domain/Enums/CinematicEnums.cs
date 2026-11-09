@@ -107,5 +107,7 @@ public enum StoryVideoRequestStatus
 {
     Raised = 0,
     ScriptReady = 1,
-    VideoReady = 2
+    VideoReady = 2,
+    /// <summary>The platform admin could not make the video; the credits were given back and the tenant told why.</summary>
+    Rejected = 3
 }

@@ -51,17 +51,25 @@ public sealed class StoryVideoRequestTests : IDisposable
     {
         public List<StudioChargeRequest> Charges { get; } = new();
         public List<string> Log { get; } = new();
+        public List<Guid> ChargedIds { get; } = new();
+        public List<(Guid Id, string Reason)> Refunds { get; } = new();
+        public List<Guid> Completed { get; } = new();
+        public bool Allow { get; set; } = true;
 
         public Task<StudioChargeResult> ChargeAsync(StudioChargeRequest request, CancellationToken cancellationToken = default)
         {
+            if (!Allow)
+                return Task.FromResult(new StudioChargeResult(false, Guid.NewGuid(), false, "You don't have enough credits left for this. Buy credits to continue."));
             Charges.Add(request);
             Log.Add("charge");
-            return Task.FromResult(new StudioChargeResult(true, Guid.NewGuid(), false, null));
+            var id = Guid.NewGuid();
+            ChargedIds.Add(id);
+            return Task.FromResult(new StudioChargeResult(true, id, false, null));
         }
 
-        public Task CompleteAsync(Guid activityId, CancellationToken cancellationToken = default) { Log.Add("complete"); return Task.CompletedTask; }
+        public Task CompleteAsync(Guid activityId, CancellationToken cancellationToken = default) { Log.Add("complete"); Completed.Add(activityId); return Task.CompletedTask; }
 
-        public Task RefundAsync(Guid activityId, string reason, CancellationToken cancellationToken = default) { Log.Add("refund"); return Task.CompletedTask; }
+        public Task RefundAsync(Guid activityId, string reason, CancellationToken cancellationToken = default) { Log.Add("refund"); Refunds.Add((activityId, reason)); return Task.CompletedTask; }
 
         public Task<PagedResult<StudioActivityDto>> GetActivityAsync(Guid tenantId, StudioActivityQuery query, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
@@ -151,7 +159,7 @@ public sealed class StoryVideoRequestTests : IDisposable
         var studio = new StoryStudioService(_db, config, ai, _metering, new DocStore(),
             new SceneVideoProviderFactory(new ISceneVideoProvider[] { new FlowImportSceneVideoProvider() }), _clock, null, grounding);
         _bucket = new Bucket(context);
-        _requests = new StoryVideoRequestService(_db, studio, _bucket, context, _notifier, _clock);
+        _requests = new StoryVideoRequestService(_db, studio, _bucket, context, _notifier, _clock, _metering);
     }
 
     public void Dispose()
@@ -173,18 +181,46 @@ public sealed class StoryVideoRequestTests : IDisposable
     private static MemoryStream Video() => new(new byte[] { 1, 2, 3, 4 });
 
     [Fact]
-    public async Task Raising_a_request_makes_the_story_and_the_request_and_charges_nothing()
+    public async Task Raising_a_request_takes_the_video_price_first_and_makes_the_story_and_the_request()
     {
         var raised = await _requests.RaiseAsync(_tenant, null, Brief());
 
         Assert.Equal(StoryVideoRequestStatus.Raised, raised.Status);
         Assert.Equal("Question hook", raised.Title);
         Assert.Null(raised.VideoUrl);
-        Assert.Empty(_metering.Charges);
+        var charge = Assert.Single(_metering.Charges);
+        Assert.Equal(StudioActivityKind.VideoRender, charge.Kind);   // priced as a video (the platform's video render credit cost), not a script step
+        Assert.Equal(_tenant, charge.TenantId);
         var project = await _db.StoryProjects.IgnoreQueryFilters().SingleAsync(p => p.Id == raised.ProjectId);
         Assert.Equal(_tenant, project.TenantId);
         Assert.Equal(StoryProjectStatus.Draft, project.Status);
         Assert.Equal("Book a free demo", project.Moral);
+        var row = await _db.StoryVideoRequests.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(_metering.ChargedIds.Single(), row.ChargeActivityId);   // remembered, so declining can give it back
+        Assert.Equal(raised.Id.ToString(), charge.ReferenceId);
+    }
+
+    [Fact]
+    public async Task A_tenant_who_cannot_pay_gets_a_payment_error_and_nothing_is_created()
+    {
+        _metering.Allow = false;
+
+        var ex = await Assert.ThrowsAsync<PlanLimitExceededException>(() => _requests.RaiseAsync(_tenant, null, Brief()));
+
+        Assert.Contains("enough credits", ex.Message);
+        Assert.Empty(await _db.StoryVideoRequests.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await _db.StoryProjects.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task When_the_story_cannot_be_made_after_the_charge_the_charge_is_given_back()
+    {
+        var tooShort = new CreateStoryProjectRequest("Hook", "Topic", "Hinglish", null, null, null, 2, SceneVideoProviderKind.Simulator, null, Array.Empty<Guid>());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _requests.RaiseAsync(_tenant, null, tooShort));
+
+        Assert.Equal(new[] { "charge", "refund" }, _metering.Log);
+        Assert.Empty(await _db.StoryVideoRequests.IgnoreQueryFilters().ToListAsync());
     }
 
     [Fact]
@@ -217,7 +253,7 @@ public sealed class StoryVideoRequestTests : IDisposable
     }
 
     [Fact]
-    public async Task The_script_is_written_for_the_tenant_and_charged_to_the_tenant()
+    public async Task The_script_is_written_for_the_tenant_without_charging_again()
     {
         Fact(_tenant, "We find leads.");
         var raised = await _requests.RaiseAsync(_tenant, null, Brief());
@@ -227,9 +263,8 @@ public sealed class StoryVideoRequestTests : IDisposable
         Assert.Equal(StoryVideoRequestStatus.ScriptReady, detail.Status);
         Assert.NotNull(detail.ScriptGeneratedAtUtc);
         Assert.NotNull(detail.Script);
-        var charge = Assert.Single(_metering.Charges);
-        Assert.Equal(_tenant, charge.TenantId);          // the tenant pays, not the platform
-        Assert.Equal(_admin, charge.ActorUserId);        // and the record says who asked for it
+        Assert.Single(_metering.Charges);                 // only the video price taken when it was raised: the script is covered by it
+        Assert.Equal(new[] { "charge" }, _metering.Log);
         Assert.Equal("Bansal Corp", detail.TenantName);
         Assert.Equal("Book a free demo", detail.CallToAction);
         Assert.False(detail.CanGenerateVideo);
@@ -243,7 +278,7 @@ public sealed class StoryVideoRequestTests : IDisposable
         await Assert.ThrowsAsync<ConflictException>(() => _requests.GenerateScriptAsync(raised.Id, _admin));
 
         Assert.Equal(StoryVideoRequestStatus.Raised, (await _requests.GetAsync(raised.Id)).Status);
-        Assert.Empty(_metering.Charges);
+        Assert.Single(_metering.Charges);   // still just the video price from raising
     }
 
     [Fact]
@@ -314,9 +349,78 @@ public sealed class StoryVideoRequestTests : IDisposable
     [Fact]
     public void The_status_goes_to_the_portal_as_a_word()
     {
-        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.ScriptReady, DateTime.UtcNow, null, null, null),
+        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.ScriptReady, DateTime.UtcNow, null, null, null, null),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Contains("\"status\":\"ScriptReady\"", json);
+    }
+
+    [Fact]
+    public async Task Delivering_the_video_completes_the_charge()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+
+        Assert.Equal(_metering.ChargedIds, _metering.Completed);
+        Assert.Empty(_metering.Refunds);
+    }
+
+    [Fact]
+    public async Task Declining_returns_the_credits_and_tells_the_tenant_why()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        var detail = await _requests.RejectAsync(raised.Id, _admin, "  The video engine could not make this one.  ");
+
+        Assert.Equal(StoryVideoRequestStatus.Rejected, detail.Status);
+        Assert.Equal("The video engine could not make this one.", detail.RejectedReason);
+        var refund = Assert.Single(_metering.Refunds);
+        Assert.Equal(_metering.ChargedIds.Single(), refund.Id);
+        Assert.Contains("declined", refund.Reason);
+        var notice = Assert.Single(_notifier.Sent);
+        Assert.Equal(TenantNotificationKind.StoryVideoRejected, notice.Kind);
+        Assert.Equal(_tenant, notice.TenantId);
+        Assert.Contains("could not make this one", notice.Body);
+        Assert.Contains("returned", notice.Body);
+        Assert.Equal("The video engine could not make this one.", Assert.Single(await _requests.ListForTenantAsync(_tenant)).RejectedReason);
+    }
+
+    [Fact]
+    public async Task A_reason_is_required_to_decline_and_a_delivered_or_declined_request_cannot_be_declined()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await Assert.ThrowsAsync<ArgumentException>(() => _requests.RejectAsync(raised.Id, _admin, "  "));
+        Assert.Empty(_metering.Refunds);
+
+        await _requests.RejectAsync(raised.Id, _admin, "Cannot be made.");
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.RejectAsync(raised.Id, _admin, "Again."));
+
+        var delivered = await _requests.RaiseAsync(_tenant, null, Brief("Second"));
+        await _requests.AttachVideoAsync(delivered.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.RejectAsync(delivered.Id, _admin, "Too late."));
+        Assert.Single(_metering.Refunds);
+    }
+
+    [Fact]
+    public async Task A_declined_request_gets_no_script_and_no_video()
+    {
+        Fact(_tenant, "We find leads.");
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.RejectAsync(raised.Id, _admin, "Cannot be made.");
+
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.GenerateScriptAsync(raised.Id, _admin));
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4));
+
+        Assert.Empty(_bucket.Stored);
+    }
+
+    [Fact]
+    public void Declined_requests_go_to_the_portal_as_a_word()
+    {
+        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.Rejected, DateTime.UtcNow, null, null, null, "why"),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"status\":\"Rejected\"", json);
     }
 }

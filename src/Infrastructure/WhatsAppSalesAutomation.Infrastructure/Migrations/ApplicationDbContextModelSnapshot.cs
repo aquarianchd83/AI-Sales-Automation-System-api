@@ -2591,6 +2591,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ChargeActivityId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -2602,6 +2605,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<Guid?>("RaisedBy")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RejectedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<DateTime?>("ScriptGeneratedAtUtc")
                         .HasColumnType("datetime2");

@@ -37,7 +37,7 @@ public class PlatformStoryVideoRequestsController : ControllerBase
     public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> Get(Guid id, CancellationToken ct)
         => Ok(await _requests.GetAsync(id, ct));
 
-    /// <summary>Writes the script for the tenant. Charged to the tenant's studio credits.</summary>
+    /// <summary>Writes the script for the tenant. Not charged again: the video's price, taken when the request was raised, covers it.</summary>
     [HttpPost("{id:guid}/script")]
     public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> GenerateScript(Guid id, CancellationToken ct)
     {
@@ -57,6 +57,15 @@ public class PlatformStoryVideoRequestsController : ControllerBase
         await using var stream = file.OpenReadStream();
         var result = await _requests.AttachVideoAsync(id, _currentUser.UserId, stream, file.FileName, file.ContentType, file.Length, ct);
         await LogAsync(PlatformAuditActions.StoryVideoAttached, $"Attached a video to \"{result.Title}\" ({result.TenantName})", ct);
+        return Ok(result);
+    }
+
+    /// <summary>Declines the request (the video cannot be made): the credits go back to the tenant, who is told why.</summary>
+    [HttpPost("{id:guid}/reject")]
+    public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> Reject(Guid id, [FromBody] RejectStoryVideoRequest request, CancellationToken ct)
+    {
+        var result = await _requests.RejectAsync(id, _currentUser.UserId, request.Reason, ct);
+        await LogAsync(PlatformAuditActions.StoryVideoRejected, $"Declined the video request \"{result.Title}\" ({result.TenantName}) and returned its credits", ct);
         return Ok(result);
     }
 

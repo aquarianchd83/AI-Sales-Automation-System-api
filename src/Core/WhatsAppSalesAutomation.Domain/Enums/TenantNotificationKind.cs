@@ -49,5 +49,7 @@ public enum TenantNotificationKind
     // ready for it: the AI has no calendar, so the booking is only as real as the tenant's follow-through.
     NextStepBooked = 22,
     // The platform admin attached the video a tenant asked for in the Story studio. In-app only: the tenant opens Story studio to watch it.
-    StoryVideoReady = 23
+    StoryVideoReady = 23,
+    // The platform admin declined a video request (it could not be made): the credits were returned, and the reason is in the notice.
+    StoryVideoRejected = 24
 }

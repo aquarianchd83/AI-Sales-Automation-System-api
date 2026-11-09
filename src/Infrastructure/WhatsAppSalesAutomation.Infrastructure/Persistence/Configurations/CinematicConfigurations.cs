@@ -174,6 +174,7 @@ public class StoryVideoRequestConfiguration : IEntityTypeConfiguration<StoryVide
         builder.Property(r => r.VideoStorageKey).HasMaxLength(500);
         builder.Property(r => r.VideoUrl).HasMaxLength(1000);
         builder.Property(r => r.VideoFileName).HasMaxLength(260);
+        builder.Property(r => r.RejectedReason).HasMaxLength(500);
         builder.HasIndex(r => r.ProjectId).IsUnique();
         builder.HasIndex(r => new { r.TenantId, r.RaisedAtUtc });
         builder.HasIndex(r => new { r.Status, r.RaisedAtUtc });

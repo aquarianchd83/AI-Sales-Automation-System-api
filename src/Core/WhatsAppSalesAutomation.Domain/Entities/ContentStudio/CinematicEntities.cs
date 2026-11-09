@@ -317,4 +317,11 @@ public class StoryVideoRequest : BaseEntity, ITenantOwned
     public DateTime? VideoReadyAtUtc { get; set; }
 
     public Guid? VideoAttachedBy { get; set; }
+
+    /// <summary>The studio activity that took the video's credits when the request was raised (given back if the request is declined).</summary>
+    public Guid? ChargeActivityId { get; set; }
+
+    public string? RejectedReason { get; set; }
+
+    public DateTime? RejectedAtUtc { get; set; }
 }

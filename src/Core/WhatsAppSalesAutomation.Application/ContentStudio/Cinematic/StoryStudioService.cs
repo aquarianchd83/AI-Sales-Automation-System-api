@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Ai.Tasks;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
 using WhatsAppSalesAutomation.Application.Platform;
@@ -216,8 +217,9 @@ public class StoryStudioService : IStoryStudioService
 
     // ----- scripts -----------------------------------------------------------------------------------------------------------------
 
-    public async Task<StoryScriptVersionDto> GenerateScriptAsync(Guid tenantId, Guid? userId, Guid projectId, CancellationToken ct = default)
+    public async Task<StoryScriptVersionDto> GenerateScriptAsync(Guid tenantId, Guid? userId, Guid projectId, CancellationToken ct = default, bool chargeTenant = true)
     {
+        var metering = chargeTenant ? _metering : Unmetered.Instance;
         var project = await ProjectAsync(tenantId, projectId, ct);
         if (project.Status != StoryProjectStatus.Draft) throw new ConflictException("The script is already approved. Start a new project to change it.");
 
@@ -228,7 +230,7 @@ public class StoryStudioService : IStoryStudioService
         // The script rests on what the tenant has verified. With no facts there is nothing true to write from, so this stops before any charge.
         var grounding = _grounding is null ? null : await _grounding.GatherAsync(tenantId, project.Topic, ct);
 
-        var charge = await _metering.ChargeAsync(new StudioChargeRequest(
+        var charge = await metering.ChargeAsync(new StudioChargeRequest(
             tenantId, StudioActivityKind.StoryScript, $"story-script:{projectId}:{Guid.NewGuid():N}", $"Story script for '{project.Title}'",
             ReferenceType: nameof(StoryProject), ReferenceId: projectId.ToString(), ActorUserId: userId), ct);
         if (!charge.Allowed) throw new PlanLimitExceededException(charge.Message ?? "Your content generation quota is used up.");
@@ -246,11 +248,11 @@ public class StoryStudioService : IStoryStudioService
                 // The simulator's generic reply is not a script. Use the clearly marked test script instead; it costs nothing, so the charge is returned.
                 script = SimulatedScriptWriter.Write(dto, cast, sceneCount, perScene);
                 source = "Simulator";
-                await _metering.RefundAsync(charge.ActivityId, "Test data: no AI provider was used.", ct);
+                await metering.RefundAsync(charge.ActivityId, "Test data: no AI provider was used.", ct);
             }
             else if (!result.Success)
             {
-                await _metering.RefundAsync(charge.ActivityId, result.ErrorMessage ?? "The AI provider failed.", ct);
+                await metering.RefundAsync(charge.ActivityId, result.ErrorMessage ?? "The AI provider failed.", ct);
                 throw new InvalidOperationException(result.ErrorMessage ?? "The AI provider could not write the script. Nothing was charged.");
             }
             else
@@ -258,13 +260,13 @@ public class StoryStudioService : IStoryStudioService
                 var checkedScript = CinematicScriptValidator.Validate(result.Text, project.TargetSeconds);
                 if (!checkedScript.IsValid)
                 {
-                    await _metering.RefundAsync(charge.ActivityId, "The AI reply did not meet the script rules.", ct);
+                    await metering.RefundAsync(charge.ActivityId, "The AI reply did not meet the script rules.", ct);
                     throw new InvalidOperationException("The AI wrote a script that broke the rules, so it was not saved and you were not charged: " + string.Join(" ", checkedScript.Errors.Take(3)));
                 }
 
                 script = checkedScript.Script;
                 source = result.Provider;
-                await _metering.CompleteAsync(charge.ActivityId, ct);
+                await metering.CompleteAsync(charge.ActivityId, ct);
             }
 
             var factsJson = grounding is null ? null : JsonSerializer.Serialize(grounding.Facts.Select(f => new StoryKnowledgeFactDto(f.Id, f.Category, f.Subject, f.Statement)));
@@ -272,7 +274,7 @@ public class StoryStudioService : IStoryStudioService
         }
         catch (OperationCanceledException)
         {
-            await _metering.RefundAsync(charge.ActivityId, "Cancelled before a script was saved.", CancellationToken.None);
+            await metering.RefundAsync(charge.ActivityId, "Cancelled before a script was saved.", CancellationToken.None);
             throw;
         }
     }
@@ -497,4 +499,21 @@ public static class ImageSniffer
 
         return (null, null);
     }
+}
+
+/// <summary>Stands in for the metering when the work is already paid for: every charge is allowed, nothing is recorded, nothing can be refunded.</summary>
+internal sealed class Unmetered : IStudioMeteringService
+{
+    public static readonly Unmetered Instance = new();
+
+    public Task<StudioChargeResult> ChargeAsync(StudioChargeRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new StudioChargeResult(true, Guid.NewGuid(), false, null));
+
+    public Task CompleteAsync(Guid activityId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task RefundAsync(Guid activityId, string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task<PagedResult<StudioActivityDto>> GetActivityAsync(Guid tenantId, StudioActivityQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task<StudioOverviewDto> GetOverviewAsync(Guid tenantId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 }
