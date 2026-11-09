@@ -110,7 +110,9 @@ public sealed class StoryVideoRequestTests : IDisposable
         }
 
         public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) { Deleted.Add(storageKey); return Task.CompletedTask; }
-        public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public HashSet<string> Missing { get; } = new();
+        public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) =>
+            Missing.Contains(storageKey) ? throw new FileNotFoundException() : Task.FromResult<Stream>(new MemoryStream(new byte[] { 9, 8, 7 }));
         public string GetPublicUrl(string storageKey) => "https://bucket.example/" + storageKey;
         public string GetLocalPath(string storageKey) => GetPublicUrl(storageKey);
         public bool IsPublicUrl(string url) => true;
@@ -460,5 +462,43 @@ public sealed class StoryVideoRequestTests : IDisposable
         var detail = await _requests.GetAsync(a.Id);
         Assert.Equal(1500m, detail.PrepaidCredits);
         Assert.Equal(0m, detail.CreditsRefunded);
+    }
+
+    [Fact]
+    public async Task A_tenant_can_download_its_own_finished_video_under_its_file_name()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.webm", "video/webm", 4);
+
+        var video = await _requests.OpenVideoAsync(_tenant, raised.Id);
+
+        Assert.Equal("promo.webm", video.FileName);
+        Assert.Equal("video/webm", video.ContentType);
+        using var buffer = new MemoryStream();
+        await video.Content.CopyToAsync(buffer);
+        Assert.Equal(new byte[] { 9, 8, 7 }, buffer.ToArray());
+    }
+
+    [Fact]
+    public async Task Another_tenants_request_cannot_be_downloaded_and_a_video_that_is_not_ready_is_a_conflict()
+    {
+        var mine = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.OpenVideoAsync(_tenant, mine.Id));
+        await _requests.AttachVideoAsync(mine.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.OpenVideoAsync(_other, mine.Id));
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.OpenVideoAsync(_tenant, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task A_video_that_is_gone_from_the_bucket_says_so_plainly()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+        _bucket.Missing.Add(_bucket.Stored.Single());
+
+        var ex = await Assert.ThrowsAsync<NotFoundException>(() => _requests.OpenVideoAsync(_tenant, raised.Id));
+
+        Assert.Contains("no longer available", ex.Message);
     }
 }

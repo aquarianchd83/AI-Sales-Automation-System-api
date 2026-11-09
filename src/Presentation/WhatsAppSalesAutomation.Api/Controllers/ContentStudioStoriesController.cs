@@ -95,6 +95,14 @@ public class ContentStudioStoriesController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<StoryVideoRequestDto>>> ListRequests(CancellationToken ct)
         => Ok(await _requests.ListForTenantAsync(RequireTenantId(), ct));
 
+    /// <summary>The finished video of one of the tenant's own requests, as a file to save. The request carries the sign-in, so it cannot be a plain link.</summary>
+    [HttpGet("requests/{id:guid}/video")]
+    public async Task<IActionResult> DownloadRequestVideo(Guid id, CancellationToken ct)
+    {
+        var video = await _requests.OpenVideoAsync(RequireTenantId(), id, ct);
+        return File(video.Content, video.ContentType, video.FileName);
+    }
+
     [HttpGet("projects/{id:guid}")]
     public async Task<ActionResult<StoryProjectDto>> GetProject(Guid id, CancellationToken ct)
         => Ok(await _stories.GetProjectAsync(RequireTenantId(), id, ct));

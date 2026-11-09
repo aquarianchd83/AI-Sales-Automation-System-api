@@ -35,6 +35,9 @@ public sealed record PlatformStoryVideoRequestDetailDto(
 
 public sealed record RejectStoryVideoRequest(string Reason);
 
+/// <summary>The tenant's finished video, opened for reading: the file, the name to save it under, and its type.</summary>
+public sealed record StoryVideoDownload(Stream Content, string FileName, string ContentType);
+
 public sealed record StoryVideoRequestQuery : PagedRequest
 {
     public StoryVideoRequestStatus? Status { get; init; }
@@ -51,6 +54,9 @@ public interface IStoryVideoRequestService
     Task<StoryVideoRequestDto> RaiseAsync(Guid tenantId, Guid? userId, CreateStoryProjectRequest request, CancellationToken ct = default);
 
     Task<IReadOnlyList<StoryVideoRequestDto>> ListForTenantAsync(Guid tenantId, CancellationToken ct = default);
+
+    /// <summary>Opens the finished video of one of the tenant's own requests so the tenant can save it. Not found for another tenant's request; a conflict until the video is ready.</summary>
+    Task<StoryVideoDownload> OpenVideoAsync(Guid tenantId, Guid requestId, CancellationToken ct = default);
 
     Task<PagedResult<PlatformStoryVideoRequestRowDto>> ListAllAsync(StoryVideoRequestQuery query, CancellationToken ct = default);
 
@@ -138,6 +144,33 @@ public class StoryVideoRequestService : IStoryVideoRequestService
                           select new { Request = r, p.Title }).ToListAsync(ct);
         var amounts = await AmountsAsync(rows.Select(x => x.Request.ChargeActivityId), ct);
         return rows.Select(x => ToDto(x.Request, x.Title, amounts)).ToList();
+    }
+
+    public async Task<StoryVideoDownload> OpenVideoAsync(Guid tenantId, Guid requestId, CancellationToken ct = default)
+    {
+        var row = await (from r in _context.StoryVideoRequests.IgnoreQueryFilters()
+                         join p in _context.StoryProjects.IgnoreQueryFilters() on r.ProjectId equals p.Id
+                         where r.Id == requestId && r.TenantId == tenantId
+                         select new { Request = r, p.Title }).FirstOrDefaultAsync(ct)
+                  ?? throw new NotFoundException("That request was not found.");
+
+        if (row.Request.Status != StoryVideoRequestStatus.VideoReady || string.IsNullOrEmpty(row.Request.VideoStorageKey))
+            throw new ConflictException("The video is not ready yet.");
+
+        Stream stream;
+        try { stream = await _storage.OpenReadAsync(row.Request.VideoStorageKey, ct); }
+        catch (FileNotFoundException) { throw new NotFoundException("The video file is no longer available. Ask the platform team to upload it again."); }
+
+        var extension = Path.GetExtension(row.Request.VideoFileName ?? row.Request.VideoStorageKey).ToLowerInvariant();
+        var type = extension switch { ".webm" => "video/webm", ".mov" => "video/quicktime", _ => "video/mp4" };
+        var fileName = !string.IsNullOrWhiteSpace(row.Request.VideoFileName) ? row.Request.VideoFileName! : SafeName(row.Title) + (extension.Length > 0 ? extension : ".mp4");
+        return new StoryVideoDownload(stream, fileName, type);
+    }
+
+    private static string SafeName(string title)
+    {
+        var cleaned = new string(title.Where(c => !Path.GetInvalidFileNameChars().Contains(c)).ToArray()).Trim();
+        return cleaned.Length == 0 ? "video" : cleaned;
     }
 
     public async Task<PagedResult<PlatformStoryVideoRequestRowDto>> ListAllAsync(StoryVideoRequestQuery query, CancellationToken ct = default)
