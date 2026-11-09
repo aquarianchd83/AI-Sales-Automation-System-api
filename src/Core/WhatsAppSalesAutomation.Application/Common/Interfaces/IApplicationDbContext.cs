@@ -245,6 +245,8 @@ public interface IApplicationDbContext
 
     DbSet<StoryProject> StoryProjects { get; }
 
+    DbSet<StoryVideoRequest> StoryVideoRequests { get; }
+
     DbSet<StoryProjectCharacter> StoryProjectCharacters { get; }
 
     DbSet<StoryScriptVersion> StoryScriptVersions { get; }

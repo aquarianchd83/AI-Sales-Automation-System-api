@@ -99,3 +99,13 @@ public enum StoryJobStatus
     Failed = 3,
     Cancelled = 4
 }
+
+/// <summary>Where a tenant's request for a video stands: raised, the platform admin has written the script, the video is attached.
+/// Sent as its name (the portal compares to words).</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum StoryVideoRequestStatus
+{
+    Raised = 0,
+    ScriptReady = 1,
+    VideoReady = 2
+}

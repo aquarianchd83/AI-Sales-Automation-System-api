@@ -47,5 +47,7 @@ public enum TenantNotificationKind
     ConsentPageSetupRequired = 21,
     // A customer agreed a demo, visit, appointment or similar with the AI and gave what it needs (when, topics...). Tells the tenant, so a person is
     // ready for it: the AI has no calendar, so the booking is only as real as the tenant's follow-through.
-    NextStepBooked = 22
+    NextStepBooked = 22,
+    // The platform admin attached the video a tenant asked for in the Story studio. In-app only: the tenant opens Story studio to watch it.
+    StoryVideoReady = 23
 }

@@ -57,6 +57,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryClipRunner>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryClipService>());
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryVideoSourcePolicy, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryVideoSourcePolicy>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryGroundingService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryGroundingService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryVideoRequestService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryVideoRequestService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryReviewService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryReviewService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryVoiceService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryVoiceService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.IStoryPublishingService, WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.StoryPublishingService>();

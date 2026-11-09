@@ -1,0 +1,322 @@
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Ai.Tasks;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.ContentStudio;
+using WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
+using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
+using WhatsAppSalesAutomation.Application.Notifications;
+using WhatsAppSalesAutomation.Application.ProductKnowledge;
+using WhatsAppSalesAutomation.Domain.Entities.ContentStudio;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
+using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Infrastructure.Cinematic;
+using WhatsAppSalesAutomation.Infrastructure.Persistence;
+using Xunit;
+
+namespace WhatsAppSalesAutomation.Tests;
+
+/// <summary>
+/// A tenant raises a request for a video; the platform admin writes the script (charged to the tenant) and attaches the finished video, which is stored
+/// under the tenant's folder, recorded, and announced to the tenant in-app.
+/// </summary>
+public sealed class StoryVideoRequestTests : IDisposable
+{
+    private sealed class Clock : IDateTimeProvider
+    {
+        public DateTime UtcNow { get; set; } = new(2026, 11, 9, 9, 0, 0, DateTimeKind.Utc);
+        public DateTime IstNow => UtcNow.AddHours(5.5);
+    }
+
+    private sealed class PlatformContext : ITenantContext
+    {
+        public Guid? TenantId { get; private set; }
+        public bool IsPlatformSuperAdmin => true;
+        public void SetTenant(Guid tenantId) => TenantId = tenantId;
+    }
+
+    private sealed class NoUser : ICurrentUserService
+    {
+        public Guid? UserId => null;
+        public string? Email => null;
+        public IReadOnlyList<string> Roles => Array.Empty<string>();
+        public Guid? TenantId => null;
+        public Guid? ImpersonatorUserId => null;
+    }
+
+    private sealed class Metering : IStudioMeteringService
+    {
+        public List<StudioChargeRequest> Charges { get; } = new();
+        public List<string> Log { get; } = new();
+
+        public Task<StudioChargeResult> ChargeAsync(StudioChargeRequest request, CancellationToken cancellationToken = default)
+        {
+            Charges.Add(request);
+            Log.Add("charge");
+            return Task.FromResult(new StudioChargeResult(true, Guid.NewGuid(), false, null));
+        }
+
+        public Task CompleteAsync(Guid activityId, CancellationToken cancellationToken = default) { Log.Add("complete"); return Task.CompletedTask; }
+
+        public Task RefundAsync(Guid activityId, string reason, CancellationToken cancellationToken = default) { Log.Add("refund"); return Task.CompletedTask; }
+
+        public Task<PagedResult<StudioActivityDto>> GetActivityAsync(Guid tenantId, StudioActivityQuery query, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+        public Task<StudioOverviewDto> GetOverviewAsync(Guid tenantId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class Ai : IAiTaskRunner
+    {
+        public AiExecutionMode Mode { get; set; } = AiExecutionMode.Simulator;
+
+        public Task<AiTaskResult> RunAsync(AiTaskRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AiTaskResult(
+                true, null, Mode, "Simulator", null, false, null, null, Guid.NewGuid(), Array.Empty<AiAttempt>(), null, null, null));
+    }
+
+    private sealed class DocStore : ITenantDocumentStore
+    {
+        public bool IsConfigured => true;
+        public Task<string> SaveAsync(Guid tenantId, string relativePath, Stream content, string contentType, CancellationToken cancellationToken = default) => Task.FromResult(relativePath);
+        public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public string FolderOf(Guid tenantId) => tenantId.ToString();
+    }
+
+    /// <summary>Like the bucket: puts a file under the folder of the tenant the context is acting as.</summary>
+    private sealed class Bucket : IMediaStorageService
+    {
+        private readonly ITenantContext _tenant;
+        public Bucket(ITenantContext tenant) => _tenant = tenant;
+        public List<string> Stored { get; } = new();
+        public List<string> Deleted { get; } = new();
+
+        public Task<MediaStorageResult> UploadAsync(Stream content, string fileName, string contentType, CancellationToken cancellationToken = default)
+        {
+            var key = $"s3:media/{_tenant.TenantId?.ToString("N") ?? "shared"}/{Stored.Count + 1}{Path.GetExtension(fileName)}";
+            Stored.Add(key);
+            return Task.FromResult(new MediaStorageResult(key, GetPublicUrl(key)));
+        }
+
+        public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default) { Deleted.Add(storageKey); return Task.CompletedTask; }
+        public Task<Stream> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public string GetPublicUrl(string storageKey) => "https://bucket.example/" + storageKey;
+        public string GetLocalPath(string storageKey) => GetPublicUrl(storageKey);
+        public bool IsPublicUrl(string url) => true;
+    }
+
+    private sealed class Notifier : ITenantNotifier
+    {
+        public List<TenantNotificationRequest> Sent { get; } = new();
+
+        public Task<bool> NotifyAsync(TenantNotificationRequest request, CancellationToken cancellationToken = default)
+        {
+            Sent.Add(request);
+            return Task.FromResult(true);
+        }
+    }
+
+    private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly SqliteApplicationDbContext _db;
+    private readonly Metering _metering = new();
+    private readonly Notifier _notifier = new();
+    private readonly Bucket _bucket;
+    private readonly Clock _clock = new();
+    private readonly StoryVideoRequestService _requests;
+    private readonly Guid _tenant = Guid.NewGuid();
+    private readonly Guid _other = Guid.NewGuid();
+    private readonly Guid _admin = Guid.NewGuid();
+
+    public StoryVideoRequestTests()
+    {
+        _connection.Open();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
+        var context = new PlatformContext();
+        _db = new SqliteApplicationDbContext(options, context, new NoUser());
+        _db.Database.EnsureCreated();
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Bansal Corp", Slug = "bansal" });
+        _db.Tenants.Add(new Tenant { Id = _other, Name = "Other Co", Slug = "other" });
+        _db.SaveChanges();
+
+        var config = Fake.Of<ITenantConfigOverrideProvider>((m, args) =>
+            m.Name == nameof(ITenantConfigOverrideProvider.GetStudioOptionsForTenantAsync)
+                ? Task.FromResult(new StudioOptions { Enabled = true })
+                : throw new NotImplementedException(m.Name));
+        var ai = new Ai();
+        var knowledge = new KnowledgeService(_db, config, _clock);
+        var grounding = new StoryGroundingService(knowledge, knowledge, ai, _metering);
+        var studio = new StoryStudioService(_db, config, ai, _metering, new DocStore(),
+            new SceneVideoProviderFactory(new ISceneVideoProvider[] { new FlowImportSceneVideoProvider() }), _clock, null, grounding);
+        _bucket = new Bucket(context);
+        _requests = new StoryVideoRequestService(_db, studio, _bucket, context, _notifier, _clock);
+    }
+
+    public void Dispose()
+    {
+        _db.Dispose();
+        _connection.Dispose();
+    }
+
+    private void Fact(Guid tenant, string statement)
+    {
+        _db.BusinessFacts.Add(new BusinessFact { TenantId = tenant, Category = "Services", Statement = statement, Status = BusinessFactStatus.Verified });
+        _db.SaveChanges();
+    }
+
+    private static CreateStoryProjectRequest Brief(string title = "Question hook") =>
+        new(title, "Sector: Real estate\nProblem: Finding customers is slow", "Hinglish", null, "Small business owners", "Book a free demo", 30,
+            SceneVideoProviderKind.Simulator, null, Array.Empty<Guid>());
+
+    private static MemoryStream Video() => new(new byte[] { 1, 2, 3, 4 });
+
+    [Fact]
+    public async Task Raising_a_request_makes_the_story_and_the_request_and_charges_nothing()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        Assert.Equal(StoryVideoRequestStatus.Raised, raised.Status);
+        Assert.Equal("Question hook", raised.Title);
+        Assert.Null(raised.VideoUrl);
+        Assert.Empty(_metering.Charges);
+        var project = await _db.StoryProjects.IgnoreQueryFilters().SingleAsync(p => p.Id == raised.ProjectId);
+        Assert.Equal(_tenant, project.TenantId);
+        Assert.Equal(StoryProjectStatus.Draft, project.Status);
+        Assert.Equal("Book a free demo", project.Moral);
+    }
+
+    [Fact]
+    public async Task A_tenant_sees_only_its_own_requests()
+    {
+        await _requests.RaiseAsync(_tenant, null, Brief("Mine"));
+        await _requests.RaiseAsync(_other, null, Brief("Theirs"));
+
+        var mine = await _requests.ListForTenantAsync(_tenant);
+
+        Assert.Equal("Mine", Assert.Single(mine).Title);
+    }
+
+    [Fact]
+    public async Task The_platform_admin_sees_every_tenants_requests_and_can_filter_them()
+    {
+        var a = await _requests.RaiseAsync(_tenant, null, Brief("Alpha"));
+        await _requests.RaiseAsync(_other, null, Brief("Beta"));
+        Fact(_tenant, "We find leads.");
+        await _requests.GenerateScriptAsync(a.Id, _admin);
+
+        var all = await _requests.ListAllAsync(new StoryVideoRequestQuery());
+        var waiting = await _requests.ListAllAsync(new StoryVideoRequestQuery { Status = StoryVideoRequestStatus.Raised });
+        var byTenant = await _requests.ListAllAsync(new StoryVideoRequestQuery { Search = "Bansal" });
+
+        Assert.Equal(2, all.TotalCount);
+        Assert.Contains(all.Items, r => r.TenantName == "Other Co");
+        Assert.Equal("Beta", Assert.Single(waiting.Items).Title);
+        Assert.Equal("Alpha", Assert.Single(byTenant.Items).Title);
+    }
+
+    [Fact]
+    public async Task The_script_is_written_for_the_tenant_and_charged_to_the_tenant()
+    {
+        Fact(_tenant, "We find leads.");
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        var detail = await _requests.GenerateScriptAsync(raised.Id, _admin);
+
+        Assert.Equal(StoryVideoRequestStatus.ScriptReady, detail.Status);
+        Assert.NotNull(detail.ScriptGeneratedAtUtc);
+        Assert.NotNull(detail.Script);
+        var charge = Assert.Single(_metering.Charges);
+        Assert.Equal(_tenant, charge.TenantId);          // the tenant pays, not the platform
+        Assert.Equal(_admin, charge.ActorUserId);        // and the record says who asked for it
+        Assert.Equal("Bansal Corp", detail.TenantName);
+        Assert.Equal("Book a free demo", detail.CallToAction);
+        Assert.False(detail.CanGenerateVideo);
+    }
+
+    [Fact]
+    public async Task A_script_is_not_written_for_a_tenant_without_verified_facts_and_the_request_stays_raised()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.GenerateScriptAsync(raised.Id, _admin));
+
+        Assert.Equal(StoryVideoRequestStatus.Raised, (await _requests.GetAsync(raised.Id)).Status);
+        Assert.Empty(_metering.Charges);
+    }
+
+    [Fact]
+    public async Task An_unknown_request_is_not_found()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.GetAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task The_uploaded_video_lands_under_the_tenants_folder_is_recorded_and_the_tenant_is_told_in_app()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        var detail = await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+
+        var key = Assert.Single(_bucket.Stored);
+        Assert.Contains(_tenant.ToString("N"), key);      // the tenant's folder, not "shared"
+        Assert.Equal(StoryVideoRequestStatus.VideoReady, detail.Status);
+        Assert.Equal("https://bucket.example/" + key, detail.VideoUrl);
+        Assert.Equal("promo.mp4", detail.VideoFileName);
+        Assert.Equal("Uploaded", detail.VideoSource);
+
+        var row = await _db.StoryVideoRequests.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(key, row.VideoStorageKey);
+        Assert.Equal(_admin, row.VideoAttachedBy);
+
+        var notice = Assert.Single(_notifier.Sent);
+        Assert.Equal(_tenant, notice.TenantId);
+        Assert.Equal(TenantNotificationKind.StoryVideoReady, notice.Kind);
+        Assert.Contains("Question hook", notice.Body);
+        Assert.False(notice.AlsoWhatsApp);
+
+        Assert.Equal("https://bucket.example/" + key, Assert.Single(await _requests.ListForTenantAsync(_tenant)).VideoUrl);
+    }
+
+    [Fact]
+    public async Task Replacing_the_video_removes_the_old_file_and_tells_the_tenant_again()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "first.mp4", "video/mp4", 4);
+        var first = _bucket.Stored.Single();
+        _clock.UtcNow = _clock.UtcNow.AddMinutes(5);
+
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "second.webm", "video/webm", 4);
+
+        Assert.Equal(new[] { first }, _bucket.Deleted);
+        Assert.Equal(2, _notifier.Sent.Count);
+        Assert.NotEqual(_notifier.Sent[0].EpisodeKey, _notifier.Sent[1].EpisodeKey);
+    }
+
+    [Theory]
+    [InlineData("notes.pdf", "application/pdf", 10)]
+    [InlineData("promo.mp4", "text/plain", 10)]
+    [InlineData("promo.exe", "video/mp4", 10)]
+    [InlineData("promo.mp4", "video/mp4", 0)]
+    [InlineData("promo.mp4", "video/mp4", StoryVideoRequestService.MaxVideoBytes + 1)]
+    public async Task Only_a_video_within_the_size_limit_is_accepted_and_nothing_is_stored_or_sent_otherwise(string name, string type, long length)
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _requests.AttachVideoAsync(raised.Id, _admin, Video(), name, type, length));
+
+        Assert.Empty(_bucket.Stored);
+        Assert.Empty(_notifier.Sent);
+        Assert.Equal(StoryVideoRequestStatus.Raised, (await _requests.GetAsync(raised.Id)).Status);
+    }
+
+    [Fact]
+    public void The_status_goes_to_the_portal_as_a_word()
+    {
+        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.ScriptReady, DateTime.UtcNow, null, null, null),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"status\":\"ScriptReady\"", json);
+    }
+}

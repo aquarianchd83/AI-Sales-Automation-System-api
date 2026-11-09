@@ -255,6 +255,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<StoryProject> StoryProjects => Set<StoryProject>();
 
+    public DbSet<StoryVideoRequest> StoryVideoRequests => Set<StoryVideoRequest>();
+
     public DbSet<StoryProjectCharacter> StoryProjectCharacters => Set<StoryProjectCharacter>();
 
     public DbSet<StoryScriptVersion> StoryScriptVersions => Set<StoryScriptVersion>();

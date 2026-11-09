@@ -2585,6 +2585,72 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("StoryScriptVersions", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.StoryVideoRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RaisedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RaisedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ScriptGeneratedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("VideoAttachedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("VideoFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<DateTime?>("VideoReadyAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("VideoSource")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("VideoStorageKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("VideoUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "RaisedAtUtc");
+
+                    b.HasIndex("TenantId", "RaisedAtUtc");
+
+                    b.ToTable("StoryVideoRequests", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.ContentStudio.StudioActivity", b =>
                 {
                     b.Property<Guid>("Id")
