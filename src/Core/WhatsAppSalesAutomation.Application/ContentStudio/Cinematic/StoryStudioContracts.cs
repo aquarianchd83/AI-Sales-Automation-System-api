@@ -92,18 +92,6 @@ public static class StoryPrompts
     public static string IdeasUser(IReadOnlyList<WhatsAppSalesAutomation.Application.ContentStudio.Knowledge.GroundingFactDto> facts, string? language, int count) =>
         $"Suggest {count} different video ideas, written in {(string.IsNullOrWhiteSpace(language) ? "English" : language)}.\n\nVerified facts (id in brackets):\n{StoryIdeaPrompts.FactLines(facts)}";
 
-    public const string VariationsSystem =
-        "You write variations of a short vertical marketing video for a small business. All variations are about the SAME one problem; each tells it from a different angle " +
-        "(for example a question hook, before and after, a day in the life, a myth buster, a quick demo, a customer voice). Every video runs Problem, Solution, How it works, Business benefit, Call to action. " +
-        "Use only the brief and the verified facts you are given; never invent a product, price, result or promise. Reply with ONE JSON object and nothing else: " +
-        "{variations:[{angle, title, hook, outline}]}. angle is the name of the angle; title is short and catchy; hook is the first spoken line, in one sentence; " +
-        "outline is one or two sentences saying how the video goes from problem to call to action. Fit the examples and wording to the stated sector.";
-
-    public static string VariationsUser(IReadOnlyList<WhatsAppSalesAutomation.Application.ContentStudio.Knowledge.GroundingFactDto> facts, StoryVariationRequest r, int count) =>
-        $"Write {count} different variations, in {(string.IsNullOrWhiteSpace(r.Language) ? "English" : r.Language)}, for a video of about {(r.TargetSeconds is > 0 ? r.TargetSeconds : 30)} seconds.\n\n" +
-        $"Sector: {r.Sector}\nProblem: {r.Problem}\nTarget audience: {r.Audience}\nSolution: {r.Solution}\nKey capabilities: {r.Capabilities}\nBusiness benefits: {r.Benefits}\nDifferentiator: {r.Differentiator}\nCall to action: {r.CallToAction}\n\n" +
-        $"Verified facts (id in brackets):\n{StoryIdeaPrompts.FactLines(facts)}";
-
     public static string User(StoryProjectDto project, IReadOnlyList<StoryCharacterDto> characters, int sceneCount, int sceneSeconds, string? groundingBlock = null)
     {
         var cast = characters.Count == 0
