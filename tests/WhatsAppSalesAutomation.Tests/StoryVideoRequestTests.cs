@@ -349,7 +349,7 @@ public sealed class StoryVideoRequestTests : IDisposable
     [Fact]
     public void The_status_goes_to_the_portal_as_a_word()
     {
-        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.ScriptReady, DateTime.UtcNow, null, null, null, null),
+        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.ScriptReady, DateTime.UtcNow, null, null, null, null, null, null),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Contains("\"status\":\"ScriptReady\"", json);
@@ -382,7 +382,8 @@ public sealed class StoryVideoRequestTests : IDisposable
         Assert.Equal(TenantNotificationKind.StoryVideoRejected, notice.Kind);
         Assert.Equal(_tenant, notice.TenantId);
         Assert.Contains("could not make this one", notice.Body);
-        Assert.Contains("returned", notice.Body);
+        Assert.Contains("refunded", notice.Body);
+        Assert.Equal("Your credits were refunded", notice.Title);
         Assert.Equal("The video engine could not make this one.", Assert.Single(await _requests.ListForTenantAsync(_tenant)).RejectedReason);
     }
 
@@ -418,9 +419,46 @@ public sealed class StoryVideoRequestTests : IDisposable
     [Fact]
     public void Declined_requests_go_to_the_portal_as_a_word()
     {
-        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.Rejected, DateTime.UtcNow, null, null, null, "why"),
+        var json = JsonSerializer.Serialize(new StoryVideoRequestDto(Guid.NewGuid(), Guid.NewGuid(), "t", StoryVideoRequestStatus.Rejected, DateTime.UtcNow, null, null, null, "why", null, null),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Contains("\"status\":\"Rejected\"", json);
+    }
+
+    /// <summary>The fake metering writes no activity rows, so stand one in for the charge it reported.</summary>
+    private void RecordCharge(decimal units, decimal refunded = 0)
+    {
+        _db.StudioActivities.Add(new StudioActivity
+        {
+            Id = _metering.ChargedIds.Last(), TenantId = _tenant, Kind = StudioActivityKind.VideoRender, QuotaType = QuotaType.VideoRenders,
+            Description = "Video requested in the Story studio", OperationKey = "k" + Guid.NewGuid().ToString("N"), Units = units, UnitsRefunded = refunded,
+            Status = StudioActivityStatus.Charged, RequestedAtUtc = _clock.UtcNow
+        });
+        _db.SaveChanges();
+    }
+
+    [Fact]
+    public async Task The_platform_list_and_the_tenants_own_list_show_the_prepaid_credits_and_what_was_refunded()
+    {
+        var a = await _requests.RaiseAsync(_tenant, null, Brief("Alpha"));
+        RecordCharge(1500);
+        var b = await _requests.RaiseAsync(_tenant, null, Brief("Beta"));
+        RecordCharge(1500, refunded: 1500);
+
+        var all = await _requests.ListAllAsync(new StoryVideoRequestQuery());
+        var mine = await _requests.ListForTenantAsync(_tenant);
+
+        var alpha = all.Items.Single(r => r.Title == "Alpha");
+        Assert.Equal(1500m, alpha.PrepaidCredits);
+        Assert.Equal(0m, alpha.CreditsRefunded);
+        var beta = all.Items.Single(r => r.Title == "Beta");
+        Assert.Equal(1500m, beta.PrepaidCredits);
+        Assert.Equal(1500m, beta.CreditsRefunded);
+        Assert.Equal(1500m, mine.Single(r => r.Id == a.Id).PrepaidCredits);
+        Assert.Equal(1500m, mine.Single(r => r.Id == b.Id).CreditsRefunded);
+
+        var detail = await _requests.GetAsync(a.Id);
+        Assert.Equal(1500m, detail.PrepaidCredits);
+        Assert.Equal(0m, detail.CreditsRefunded);
     }
 }

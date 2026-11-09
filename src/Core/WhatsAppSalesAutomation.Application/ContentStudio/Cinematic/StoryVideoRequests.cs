@@ -11,12 +11,15 @@ namespace WhatsAppSalesAutomation.Application.ContentStudio.Cinematic;
 /// <summary>One of the tenant's own requests, as the Story studio lists it next to the story.</summary>
 public sealed record StoryVideoRequestDto(
     Guid Id, Guid ProjectId, string Title, StoryVideoRequestStatus Status, DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, string? VideoUrl, DateTime? VideoReadyAtUtc,
-    string? RejectedReason);
+    string? RejectedReason,
+    // The credits taken when the request was raised, and how many of them went back (all of them, when the video could not be made).
+    decimal? PrepaidCredits, decimal? CreditsRefunded);
 
 /// <summary>One request in the platform admin's list, across every tenant.</summary>
 public sealed record PlatformStoryVideoRequestRowDto(
     Guid Id, Guid TenantId, string TenantName, Guid ProjectId, string Title, string Language, int TargetSeconds, StoryVideoRequestStatus Status,
-    DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, DateTime? VideoReadyAtUtc);
+    DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, DateTime? VideoReadyAtUtc,
+    decimal? PrepaidCredits, decimal? CreditsRefunded);
 
 /// <summary>A request opened by the platform admin: what the tenant asked for, the script so far, and the video if there is one.</summary>
 public sealed record PlatformStoryVideoRequestDetailDto(
@@ -27,8 +30,8 @@ public sealed record PlatformStoryVideoRequestDetailDto(
     // False until a real video engine is switched on: the admin can only upload for now.
     bool CanGenerateVideo,
     string? RejectedReason,
-    // What the tenant paid for this video, in credits (after any refund).
-    decimal? CreditsCharged);
+    // What the tenant prepaid for this video, in credits, and how much of it was refunded.
+    decimal? PrepaidCredits, decimal? CreditsRefunded);
 
 public sealed record RejectStoryVideoRequest(string Reason);
 
@@ -59,7 +62,7 @@ public interface IStoryVideoRequestService
     /// <summary>Stores the finished video under the tenant's folder, records the link, and tells the tenant in-app.</summary>
     Task<PlatformStoryVideoRequestDetailDto> AttachVideoAsync(Guid requestId, Guid? adminUserId, Stream content, string fileName, string contentType, long length, CancellationToken ct = default);
 
-    /// <summary>The video cannot be made: the credits go back to the tenant and the tenant is told why. Not possible once the video is attached.</summary>
+    /// <summary>Refunds the tenant's prepaid credits because the video cannot be made, and tells the tenant why. Not possible once the video is attached.</summary>
     Task<PlatformStoryVideoRequestDetailDto> RejectAsync(Guid requestId, Guid? adminUserId, string reason, CancellationToken ct = default);
 }
 
@@ -115,7 +118,8 @@ public class StoryVideoRequestService : IStoryVideoRequestService
             };
             _context.StoryVideoRequests.Add(raised);
             await _context.SaveChangesAsync(ct);
-            return ToDto(raised, project.Title);
+            var amounts = await AmountsAsync(new Guid?[] { raised.ChargeActivityId }, ct);
+            return ToDto(raised, project.Title, amounts);
         }
         catch
         {
@@ -132,7 +136,8 @@ public class StoryVideoRequestService : IStoryVideoRequestService
                           where r.TenantId == tenantId
                           orderby r.RaisedAtUtc descending
                           select new { Request = r, p.Title }).ToListAsync(ct);
-        return rows.Select(x => ToDto(x.Request, x.Title)).ToList();
+        var amounts = await AmountsAsync(rows.Select(x => x.Request.ChargeActivityId), ct);
+        return rows.Select(x => ToDto(x.Request, x.Title, amounts)).ToList();
     }
 
     public async Task<PagedResult<PlatformStoryVideoRequestRowDto>> ListAllAsync(StoryVideoRequestQuery query, CancellationToken ct = default)
@@ -155,9 +160,11 @@ public class StoryVideoRequestService : IStoryVideoRequestService
         var page = await rows.OrderBy(x => x.r.Status == StoryVideoRequestStatus.VideoReady || x.r.Status == StoryVideoRequestStatus.Rejected ? 1 : 0).ThenBy(x => x.r.RaisedAtUtc)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync(ct);
 
+        var amounts = await AmountsAsync(page.Select(x => x.r.ChargeActivityId), ct);
         var items = page.Select(x => new PlatformStoryVideoRequestRowDto(
             x.r.Id, x.r.TenantId, x.TenantName, x.r.ProjectId, x.p.Title, x.p.Language, x.p.TargetSeconds, x.r.Status,
-            x.r.RaisedAtUtc, x.r.ScriptGeneratedAtUtc, x.r.VideoReadyAtUtc)).ToList();
+            x.r.RaisedAtUtc, x.r.ScriptGeneratedAtUtc, x.r.VideoReadyAtUtc,
+            PaidOf(amounts, x.r), RefundedOf(amounts, x.r))).ToList();
         return new PagedResult<PlatformStoryVideoRequestRowDto>(items, total, query.Page, query.PageSize);
     }
 
@@ -248,7 +255,7 @@ public class StoryVideoRequestService : IStoryVideoRequestService
 
         await _notifier.NotifyAsync(new TenantNotificationRequest(
             request.TenantId, TenantNotificationKind.StoryVideoRejected, null, $"story-video-rejected:{request.Id:N}",
-            "Your video request was declined", $"The video for \"{project.Title}\" could not be made: {clipped} The credits for it were returned to you.", AlsoWhatsApp: false), ct);
+            "Your credits were refunded", $"The video for \"{project.Title}\" could not be made: {clipped} The credits you prepaid for it were refunded.", AlsoWhatsApp: false), ct);
 
         var script = await _stories.GetCurrentScriptAsync(request.TenantId, project.Id, ct);
         return await ToDetailAsync(request, project, tenantName, script, ct);
@@ -266,16 +273,29 @@ public class StoryVideoRequestService : IStoryVideoRequestService
     private string? LinkFor(StoryVideoRequest r) =>
         !string.IsNullOrEmpty(r.VideoStorageKey) ? _storage.GetPublicUrl(r.VideoStorageKey) : r.VideoUrl;
 
-    private StoryVideoRequestDto ToDto(StoryVideoRequest r, string title) =>
-        new(r.Id, r.ProjectId, title, r.Status, r.RaisedAtUtc, r.ScriptGeneratedAtUtc, LinkFor(r), r.VideoReadyAtUtc, r.RejectedReason);
+    /// <summary>What each request's charge took and gave back, by studio activity id. A request without a charge (none was needed) is simply absent.</summary>
+    private async Task<Dictionary<Guid, (decimal Paid, decimal Refunded)>> AmountsAsync(IEnumerable<Guid?> activityIds, CancellationToken ct)
+    {
+        var wanted = activityIds.Where(i => i.HasValue).Select(i => i!.Value).Distinct().ToList();
+        if (wanted.Count == 0) return new();
+        var rows = await _context.StudioActivities.IgnoreQueryFilters().Where(a => wanted.Contains(a.Id)).Select(a => new { a.Id, a.Units, a.UnitsRefunded }).ToListAsync(ct);
+        return rows.ToDictionary(a => a.Id, a => (a.Units, a.UnitsRefunded));
+    }
+
+    private static decimal? PaidOf(Dictionary<Guid, (decimal Paid, decimal Refunded)> amounts, StoryVideoRequest r) =>
+        r.ChargeActivityId is { } id && amounts.TryGetValue(id, out var a) ? a.Paid : null;
+
+    private static decimal? RefundedOf(Dictionary<Guid, (decimal Paid, decimal Refunded)> amounts, StoryVideoRequest r) =>
+        r.ChargeActivityId is { } id && amounts.TryGetValue(id, out var a) ? a.Refunded : null;
+
+    private StoryVideoRequestDto ToDto(StoryVideoRequest r, string title, Dictionary<Guid, (decimal Paid, decimal Refunded)> amounts) =>
+        new(r.Id, r.ProjectId, title, r.Status, r.RaisedAtUtc, r.ScriptGeneratedAtUtc, LinkFor(r), r.VideoReadyAtUtc, r.RejectedReason, PaidOf(amounts, r), RefundedOf(amounts, r));
 
     private async Task<PlatformStoryVideoRequestDetailDto> ToDetailAsync(StoryVideoRequest r, StoryProject p, string tenantName, StoryScriptVersionDto? script, CancellationToken ct)
     {
-        decimal? charged = null;
-        if (r.ChargeActivityId is { } activityId)
-            charged = await _context.StudioActivities.IgnoreQueryFilters().Where(a => a.Id == activityId).Select(a => (decimal?)(a.Units - a.UnitsRefunded)).FirstOrDefaultAsync(ct);
+        var amounts = await AmountsAsync(new Guid?[] { r.ChargeActivityId }, ct);
 
         return new(r.Id, r.TenantId, tenantName, p.Id, p.Title, p.Language, p.TargetSeconds, r.Status, r.RaisedAtUtc, r.ScriptGeneratedAtUtc, r.VideoReadyAtUtc,
-            p.Topic, p.Audience, p.Moral, script, LinkFor(r), r.VideoFileName, r.VideoSource, CanGenerateVideo: false, r.RejectedReason, charged);
+            p.Topic, p.Audience, p.Moral, script, LinkFor(r), r.VideoFileName, r.VideoSource, CanGenerateVideo: false, r.RejectedReason, PaidOf(amounts, r), RefundedOf(amounts, r));
     }
 }
