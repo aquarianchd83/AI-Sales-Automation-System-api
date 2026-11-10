@@ -57,7 +57,8 @@ public interface IStoryStudioService
 
     Task<StoryProjectDto> SetVideoProviderAsync(Guid tenantId, Guid projectId, SceneVideoProviderKind provider, CancellationToken ct = default);
 
-    Task<StoryScriptVersionDto> GenerateScriptAsync(Guid tenantId, Guid? userId, Guid projectId, CancellationToken ct = default);
+    /// <param name="chargeTenant">False when the work is already paid for (a requested video's price covers its script).</param>
+    Task<StoryScriptVersionDto> GenerateScriptAsync(Guid tenantId, Guid? userId, Guid projectId, CancellationToken ct = default, bool chargeTenant = true);
 
     Task<StoryScriptVersionDto> SaveScriptAsync(Guid tenantId, Guid projectId, SaveStoryScriptRequest request, CancellationToken ct = default);
 

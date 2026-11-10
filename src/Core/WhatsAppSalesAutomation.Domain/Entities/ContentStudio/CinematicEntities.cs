@@ -283,3 +283,49 @@ public class StoryRender : BaseEntity, ITenantOwned
 
     public string? Error { get; set; }
 }
+
+/// <summary>
+/// A tenant's request for a promotional video. The tenant fills in the brief (the <see cref="StoryProject"/>) and raises this; the platform admin
+/// writes the script, then either uploads the finished video or - later - has the system make it. The video lives in the bucket under the tenant's
+/// folder; the link is kept here.
+/// </summary>
+public class StoryVideoRequest : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid ProjectId { get; set; }
+
+    public StoryVideoRequestStatus Status { get; set; }
+
+    public Guid? RaisedBy { get; set; }
+
+    public DateTime RaisedAtUtc { get; set; }
+
+    /// <summary>When the platform admin last saved the script.</summary>
+    public DateTime? ScriptGeneratedAtUtc { get; set; }
+
+    /// <summary>The script, written by the platform admin as plain text.</summary>
+    public string? ScriptText { get; set; }
+
+    /// <summary>"Uploaded" (the system-made source is not switched on yet).</summary>
+    public string? VideoSource { get; set; }
+
+    /// <summary>Where the stored file is, in the media storage's own terms (the S3 object key, marked).</summary>
+    public string? VideoStorageKey { get; set; }
+
+    /// <summary>The link the tenant watches it at, as it was when stored. Shown links are recomputed from the key.</summary>
+    public string? VideoUrl { get; set; }
+
+    public string? VideoFileName { get; set; }
+
+    public DateTime? VideoReadyAtUtc { get; set; }
+
+    public Guid? VideoAttachedBy { get; set; }
+
+    /// <summary>The studio activity that took the video's credits when the request was raised (given back if the request is declined).</summary>
+    public Guid? ChargeActivityId { get; set; }
+
+    public string? RejectedReason { get; set; }
+
+    public DateTime? RejectedAtUtc { get; set; }
+}

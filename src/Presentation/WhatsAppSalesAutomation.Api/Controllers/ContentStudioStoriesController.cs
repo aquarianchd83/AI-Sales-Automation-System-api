@@ -27,11 +27,12 @@ public class ContentStudioStoriesController : ControllerBase
     private readonly IStoryDiagnosticsService _diagnostics;
     private readonly IStoryVideoSourcePolicy _videoSources;
     private readonly IStoryGroundingService _grounding;
+    private readonly IStoryVideoRequestService _requests;
     private readonly IStoryCharacterGenerationService _characters;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
 
-    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryVideoSourcePolicy videoSources, IStoryGroundingService grounding, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public ContentStudioStoriesController(IStoryStudioService stories, IStoryClipService clips, IStoryRenderService renders, IStoryReviewService review, IStoryVoiceService voice, IStoryPublishingService publishing, IStoryDiagnosticsService diagnostics, IStoryVideoSourcePolicy videoSources, IStoryGroundingService grounding, IStoryVideoRequestService requests, IStoryCharacterGenerationService characters, ITenantContext tenantContext, ICurrentUserService currentUser)
     {
         _stories = stories;
         _clips = clips;
@@ -42,6 +43,7 @@ public class ContentStudioStoriesController : ControllerBase
         _diagnostics = diagnostics;
         _videoSources = videoSources;
         _grounding = grounding;
+        _requests = requests;
         _characters = characters;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -82,6 +84,29 @@ public class ContentStudioStoriesController : ControllerBase
     [HttpPost("projects")]
     public async Task<ActionResult<StoryProjectDto>> CreateProject([FromBody] CreateStoryProjectRequest request, CancellationToken ct)
         => Ok(await _stories.CreateProjectAsync(RequireTenantId(), _currentUser.UserId, request, ct));
+
+    /// <summary>The tenant asks for a video: the brief becomes a story and a request the platform admin picks up. The script is written (and charged) by the platform admin.</summary>
+    [HttpPost("requests")]
+    public async Task<ActionResult<StoryVideoRequestDto>> RaiseRequest([FromBody] CreateStoryProjectRequest request, CancellationToken ct)
+        => Ok(await _requests.RaiseAsync(RequireTenantId(), _currentUser.UserId, request, ct));
+
+    /// <summary>The tenant's own requests, with where each stands and the video link once there is one.</summary>
+    [HttpGet("requests")]
+    public async Task<ActionResult<IReadOnlyList<StoryVideoRequestDto>>> ListRequests(CancellationToken ct)
+        => Ok(await _requests.ListForTenantAsync(RequireTenantId(), ct));
+
+    /// <summary>One of the tenant's own requests in full: where it stands, what was asked for, the script once written, the video, and the credits.</summary>
+    [HttpGet("requests/{id:guid}")]
+    public async Task<ActionResult<StoryVideoRequestDetailDto>> GetRequest(Guid id, CancellationToken ct)
+        => Ok(await _requests.GetForTenantAsync(RequireTenantId(), id, ct));
+
+    /// <summary>The finished video of one of the tenant's own requests, as a file to save. The request carries the sign-in, so it cannot be a plain link.</summary>
+    [HttpGet("requests/{id:guid}/video")]
+    public async Task<IActionResult> DownloadRequestVideo(Guid id, CancellationToken ct)
+    {
+        var video = await _requests.OpenVideoAsync(RequireTenantId(), id, ct);
+        return File(video.Content, video.ContentType, video.FileName);
+    }
 
     [HttpGet("projects/{id:guid}")]
     public async Task<ActionResult<StoryProjectDto>> GetProject(Guid id, CancellationToken ct)
