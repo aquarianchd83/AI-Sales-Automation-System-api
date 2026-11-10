@@ -37,12 +37,12 @@ public class PlatformStoryVideoRequestsController : ControllerBase
     public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> Get(Guid id, CancellationToken ct)
         => Ok(await _requests.GetAsync(id, ct));
 
-    /// <summary>Writes the script for the tenant. Not charged again: the video's price, taken when the request was raised, covers it.</summary>
-    [HttpPost("{id:guid}/script")]
-    public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> GenerateScript(Guid id, CancellationToken ct)
+    /// <summary>Saves the script the platform admin wrote, as plain text. Not charged: the video's price, taken when the request was raised, covers it.</summary>
+    [HttpPut("{id:guid}/script")]
+    public async Task<ActionResult<PlatformStoryVideoRequestDetailDto>> SaveScript(Guid id, [FromBody] SaveStoryVideoScriptRequest request, CancellationToken ct)
     {
-        var result = await _requests.GenerateScriptAsync(id, _currentUser.UserId, ct);
-        await LogAsync(PlatformAuditActions.StoryScriptGenerated, $"Wrote the script for \"{result.Title}\" ({result.TenantName})", ct);
+        var result = await _requests.SaveScriptTextAsync(id, _currentUser.UserId, request.Text, ct);
+        await LogAsync(PlatformAuditActions.StoryScriptSaved, $"Saved the script for \"{result.Title}\" ({result.TenantName})", ct);
         return Ok(result);
     }
 

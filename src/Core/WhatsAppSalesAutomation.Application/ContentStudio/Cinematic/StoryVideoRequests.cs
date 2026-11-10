@@ -21,11 +21,19 @@ public sealed record PlatformStoryVideoRequestRowDto(
     DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, DateTime? VideoReadyAtUtc,
     decimal? PrepaidCredits, decimal? CreditsRefunded);
 
+/// <summary>A request opened by the tenant: where it stands, what was asked for, the script once the platform team has written it, and the video.</summary>
+public sealed record StoryVideoRequestDetailDto(
+    Guid Id, Guid ProjectId, string Title, string Language, int TargetSeconds, StoryVideoRequestStatus Status,
+    DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, DateTime? VideoReadyAtUtc,
+    string Topic, string? Audience, string? CallToAction, string? ScriptText,
+    string? VideoUrl, string? VideoFileName, string? RejectedReason,
+    decimal? PrepaidCredits, decimal? CreditsRefunded);
+
 /// <summary>A request opened by the platform admin: what the tenant asked for, the script so far, and the video if there is one.</summary>
 public sealed record PlatformStoryVideoRequestDetailDto(
     Guid Id, Guid TenantId, string TenantName, Guid ProjectId, string Title, string Language, int TargetSeconds, StoryVideoRequestStatus Status,
     DateTime RaisedAtUtc, DateTime? ScriptGeneratedAtUtc, DateTime? VideoReadyAtUtc,
-    string Topic, string? Audience, string? CallToAction, StoryScriptVersionDto? Script,
+    string Topic, string? Audience, string? CallToAction, string? ScriptText,
     string? VideoUrl, string? VideoFileName, string? VideoSource,
     // False until a real video engine is switched on: the admin can only upload for now.
     bool CanGenerateVideo,
@@ -34,6 +42,8 @@ public sealed record PlatformStoryVideoRequestDetailDto(
     decimal? PrepaidCredits, decimal? CreditsRefunded);
 
 public sealed record RejectStoryVideoRequest(string Reason);
+
+public sealed record SaveStoryVideoScriptRequest(string Text);
 
 /// <summary>The tenant's finished video, opened for reading: the file, the name to save it under, and its type.</summary>
 public sealed record StoryVideoDownload(Stream Content, string FileName, string ContentType);
@@ -58,12 +68,15 @@ public interface IStoryVideoRequestService
     /// <summary>Opens the finished video of one of the tenant's own requests so the tenant can save it. Not found for another tenant's request; a conflict until the video is ready.</summary>
     Task<StoryVideoDownload> OpenVideoAsync(Guid tenantId, Guid requestId, CancellationToken ct = default);
 
+    /// <summary>One of the tenant's own requests in full. Not found for another tenant's.</summary>
+    Task<StoryVideoRequestDetailDto> GetForTenantAsync(Guid tenantId, Guid requestId, CancellationToken ct = default);
+
     Task<PagedResult<PlatformStoryVideoRequestRowDto>> ListAllAsync(StoryVideoRequestQuery query, CancellationToken ct = default);
 
     Task<PlatformStoryVideoRequestDetailDto> GetAsync(Guid requestId, CancellationToken ct = default);
 
-    /// <summary>The platform admin has the script written for the tenant. Not charged again: the video's price covers it.</summary>
-    Task<PlatformStoryVideoRequestDetailDto> GenerateScriptAsync(Guid requestId, Guid? adminUserId, CancellationToken ct = default);
+    /// <summary>The platform admin saves the script as plain text (it can be changed until the video is attached). Not charged: the video's price covers it.</summary>
+    Task<PlatformStoryVideoRequestDetailDto> SaveScriptTextAsync(Guid requestId, Guid? adminUserId, string text, CancellationToken ct = default);
 
     /// <summary>Stores the finished video under the tenant's folder, records the link, and tells the tenant in-app.</summary>
     Task<PlatformStoryVideoRequestDetailDto> AttachVideoAsync(Guid requestId, Guid? adminUserId, Stream content, string fileName, string contentType, long length, CancellationToken ct = default);
@@ -75,6 +88,7 @@ public interface IStoryVideoRequestService
 public class StoryVideoRequestService : IStoryVideoRequestService
 {
     public const long MaxVideoBytes = 300L * 1024 * 1024;
+    public const int MaxScriptChars = 20000;
 
     private static readonly string[] AllowedExtensions = { ".mp4", ".webm", ".mov", ".m4v" };
 
@@ -146,6 +160,22 @@ public class StoryVideoRequestService : IStoryVideoRequestService
         return rows.Select(x => ToDto(x.Request, x.Title, amounts)).ToList();
     }
 
+    public async Task<StoryVideoRequestDetailDto> GetForTenantAsync(Guid tenantId, Guid requestId, CancellationToken ct = default)
+    {
+        var row = await (from r in _context.StoryVideoRequests.IgnoreQueryFilters()
+                         join p in _context.StoryProjects.IgnoreQueryFilters() on r.ProjectId equals p.Id
+                         where r.Id == requestId && r.TenantId == tenantId
+                         select new { Request = r, Project = p }).FirstOrDefaultAsync(ct)
+                  ?? throw new NotFoundException("That request was not found.");
+
+        var amounts = await AmountsAsync(new Guid?[] { row.Request.ChargeActivityId }, ct);
+        var r0 = row.Request;
+        var p0 = row.Project;
+        return new StoryVideoRequestDetailDto(
+            r0.Id, p0.Id, p0.Title, p0.Language, p0.TargetSeconds, r0.Status, r0.RaisedAtUtc, r0.ScriptGeneratedAtUtc, r0.VideoReadyAtUtc,
+            p0.Topic, p0.Audience, p0.Moral, r0.ScriptText, LinkFor(r0), r0.VideoFileName, r0.RejectedReason, PaidOf(amounts, r0), RefundedOf(amounts, r0));
+    }
+
     public async Task<StoryVideoDownload> OpenVideoAsync(Guid tenantId, Guid requestId, CancellationToken ct = default)
     {
         var row = await (from r in _context.StoryVideoRequests.IgnoreQueryFilters()
@@ -204,23 +234,24 @@ public class StoryVideoRequestService : IStoryVideoRequestService
     public async Task<PlatformStoryVideoRequestDetailDto> GetAsync(Guid requestId, CancellationToken ct = default)
     {
         var (request, project, tenantName) = await LoadAsync(requestId, ct);
-        var script = await _stories.GetCurrentScriptAsync(request.TenantId, project.Id, ct);
-        return await ToDetailAsync(request, project, tenantName, script, ct);
+        return await ToDetailAsync(request, project, tenantName, ct);
     }
 
-    public async Task<PlatformStoryVideoRequestDetailDto> GenerateScriptAsync(Guid requestId, Guid? adminUserId, CancellationToken ct = default)
+    public async Task<PlatformStoryVideoRequestDetailDto> SaveScriptTextAsync(Guid requestId, Guid? adminUserId, string text, CancellationToken ct = default)
     {
+        var clean = (text ?? string.Empty).Trim();
+        if (clean.Length == 0) throw new ArgumentException("Write the script first.");
+        if (clean.Length > MaxScriptChars) throw new ArgumentException($"The script is longer than {MaxScriptChars:N0} characters.");
+
         var (request, project, tenantName) = await LoadAsync(requestId, ct);
-        if (request.Status == StoryVideoRequestStatus.VideoReady) throw new ConflictException("The video is already attached; the script cannot be rewritten now.");
-        if (request.Status == StoryVideoRequestStatus.Rejected) throw new ConflictException("This request was declined.");
+        if (request.Status == StoryVideoRequestStatus.VideoReady) throw new ConflictException("The video is already attached; the script cannot be changed now.");
+        if (request.Status == StoryVideoRequestStatus.Rejected) throw new ConflictException("This request was refunded.");
 
-        // Not charged again: what the tenant paid when raising the request covers the script (and what the platform pays the AI for it).
-        var script = await _stories.GenerateScriptAsync(request.TenantId, adminUserId, project.Id, ct, chargeTenant: false);
-
-        request.Status = StoryVideoRequestStatus.ScriptReady;
+        request.ScriptText = clean;
         request.ScriptGeneratedAtUtc = _clock.UtcNow;
+        if (request.Status == StoryVideoRequestStatus.Raised) request.Status = StoryVideoRequestStatus.ScriptReady;
         await _context.SaveChangesAsync(ct);
-        return await ToDetailAsync(request, project, tenantName, script, ct);
+        return await ToDetailAsync(request, project, tenantName, ct);
     }
 
     public async Task<PlatformStoryVideoRequestDetailDto> AttachVideoAsync(
@@ -264,8 +295,7 @@ public class StoryVideoRequestService : IStoryVideoRequestService
             request.TenantId, TenantNotificationKind.StoryVideoReady, null, $"story-video:{request.Id:N}:{now.Ticks}",
             "Your video is ready", $"The video for \"{project.Title}\" is ready. Open Story studio to watch it.", AlsoWhatsApp: false), ct);
 
-        var script = await _stories.GetCurrentScriptAsync(request.TenantId, project.Id, ct);
-        return await ToDetailAsync(request, project, tenantName, script, ct);
+        return await ToDetailAsync(request, project, tenantName, ct);
     }
 
     public async Task<PlatformStoryVideoRequestDetailDto> RejectAsync(Guid requestId, Guid? adminUserId, string reason, CancellationToken ct = default)
@@ -290,8 +320,7 @@ public class StoryVideoRequestService : IStoryVideoRequestService
             request.TenantId, TenantNotificationKind.StoryVideoRejected, null, $"story-video-rejected:{request.Id:N}",
             "Your credits were refunded", $"The video for \"{project.Title}\" could not be made: {clipped} The credits you prepaid for it were refunded.", AlsoWhatsApp: false), ct);
 
-        var script = await _stories.GetCurrentScriptAsync(request.TenantId, project.Id, ct);
-        return await ToDetailAsync(request, project, tenantName, script, ct);
+        return await ToDetailAsync(request, project, tenantName, ct);
     }
 
     private async Task<(StoryVideoRequest Request, StoryProject Project, string TenantName)> LoadAsync(Guid requestId, CancellationToken ct)
@@ -324,11 +353,11 @@ public class StoryVideoRequestService : IStoryVideoRequestService
     private StoryVideoRequestDto ToDto(StoryVideoRequest r, string title, Dictionary<Guid, (decimal Paid, decimal Refunded)> amounts) =>
         new(r.Id, r.ProjectId, title, r.Status, r.RaisedAtUtc, r.ScriptGeneratedAtUtc, LinkFor(r), r.VideoReadyAtUtc, r.RejectedReason, PaidOf(amounts, r), RefundedOf(amounts, r));
 
-    private async Task<PlatformStoryVideoRequestDetailDto> ToDetailAsync(StoryVideoRequest r, StoryProject p, string tenantName, StoryScriptVersionDto? script, CancellationToken ct)
+    private async Task<PlatformStoryVideoRequestDetailDto> ToDetailAsync(StoryVideoRequest r, StoryProject p, string tenantName, CancellationToken ct)
     {
         var amounts = await AmountsAsync(new Guid?[] { r.ChargeActivityId }, ct);
 
         return new(r.Id, r.TenantId, tenantName, p.Id, p.Title, p.Language, p.TargetSeconds, r.Status, r.RaisedAtUtc, r.ScriptGeneratedAtUtc, r.VideoReadyAtUtc,
-            p.Topic, p.Audience, p.Moral, script, LinkFor(r), r.VideoFileName, r.VideoSource, CanGenerateVideo: false, r.RejectedReason, PaidOf(amounts, r), RefundedOf(amounts, r));
+            p.Topic, p.Audience, p.Moral, r.ScriptText, LinkFor(r), r.VideoFileName, r.VideoSource, CanGenerateVideo: false, r.RejectedReason, PaidOf(amounts, r), RefundedOf(amounts, r));
     }
 }

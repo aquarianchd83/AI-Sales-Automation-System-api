@@ -84,7 +84,7 @@ public static class PlatformAuditActions
     public const string SetupVersionDeleted = "SetupVersionDeleted";
     public const string SetupRequirementSaved = "SetupRequirementSaved";
     public const string SetupRequirementDeleted = "SetupRequirementDeleted";
-    public const string StoryScriptGenerated = "StoryScriptGenerated";
+    public const string StoryScriptSaved = "StoryScriptSaved";
     public const string StoryVideoAttached = "StoryVideoAttached";
     public const string StoryVideoRejected = "StoryVideoRejected";
 }

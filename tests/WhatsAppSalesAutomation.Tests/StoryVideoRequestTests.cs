@@ -241,8 +241,7 @@ public sealed class StoryVideoRequestTests : IDisposable
     {
         var a = await _requests.RaiseAsync(_tenant, null, Brief("Alpha"));
         await _requests.RaiseAsync(_other, null, Brief("Beta"));
-        Fact(_tenant, "We find leads.");
-        await _requests.GenerateScriptAsync(a.Id, _admin);
+        await _requests.SaveScriptTextAsync(a.Id, _admin, "Scene 1: the owner searches for leads.");
 
         var all = await _requests.ListAllAsync(new StoryVideoRequestQuery());
         var waiting = await _requests.ListAllAsync(new StoryVideoRequestQuery { Status = StoryVideoRequestStatus.Raised });
@@ -255,32 +254,74 @@ public sealed class StoryVideoRequestTests : IDisposable
     }
 
     [Fact]
-    public async Task The_script_is_written_for_the_tenant_without_charging_again()
+    public async Task The_admin_writes_the_script_as_plain_text_without_charging_again()
     {
-        Fact(_tenant, "We find leads.");
         var raised = await _requests.RaiseAsync(_tenant, null, Brief());
 
-        var detail = await _requests.GenerateScriptAsync(raised.Id, _admin);
+        var detail = await _requests.SaveScriptTextAsync(raised.Id, _admin, "  Scene 1: Still searching for leads?\nScene 2: Not any more.  ");
 
         Assert.Equal(StoryVideoRequestStatus.ScriptReady, detail.Status);
+        Assert.Equal("Scene 1: Still searching for leads?\nScene 2: Not any more.", detail.ScriptText);
         Assert.NotNull(detail.ScriptGeneratedAtUtc);
-        Assert.NotNull(detail.Script);
-        Assert.Single(_metering.Charges);                 // only the video price taken when it was raised: the script is covered by it
-        Assert.Equal(new[] { "charge" }, _metering.Log);
+        Assert.Equal(new[] { "charge" }, _metering.Log);       // only the video price taken when it was raised: the script costs the tenant nothing more
         Assert.Equal("Bansal Corp", detail.TenantName);
         Assert.Equal("Book a free demo", detail.CallToAction);
         Assert.False(detail.CanGenerateVideo);
     }
 
     [Fact]
-    public async Task A_script_is_not_written_for_a_tenant_without_verified_facts_and_the_request_stays_raised()
+    public async Task The_script_can_be_changed_until_the_video_is_attached()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.SaveScriptTextAsync(raised.Id, _admin, "First draft.");
+
+        var again = await _requests.SaveScriptTextAsync(raised.Id, _admin, "Second draft.");
+
+        Assert.Equal("Second draft.", again.ScriptText);
+        Assert.Equal(StoryVideoRequestStatus.ScriptReady, again.Status);
+
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.SaveScriptTextAsync(raised.Id, _admin, "Too late."));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n ")]
+    public async Task An_empty_script_is_refused_and_nothing_changes(string text)
     {
         var raised = await _requests.RaiseAsync(_tenant, null, Brief());
 
-        await Assert.ThrowsAsync<ConflictException>(() => _requests.GenerateScriptAsync(raised.Id, _admin));
+        await Assert.ThrowsAsync<ArgumentException>(() => _requests.SaveScriptTextAsync(raised.Id, _admin, text));
 
-        Assert.Equal(StoryVideoRequestStatus.Raised, (await _requests.GetAsync(raised.Id)).Status);
-        Assert.Single(_metering.Charges);   // still just the video price from raising
+        var detail = await _requests.GetAsync(raised.Id);
+        Assert.Equal(StoryVideoRequestStatus.Raised, detail.Status);
+        Assert.Null(detail.ScriptText);
+    }
+
+    [Fact]
+    public async Task A_script_longer_than_the_limit_is_refused()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _requests.SaveScriptTextAsync(raised.Id, _admin, new string('x', StoryVideoRequestService.MaxScriptChars + 1)));
+        await _requests.SaveScriptTextAsync(raised.Id, _admin, new string('x', StoryVideoRequestService.MaxScriptChars));
+    }
+
+    [Fact]
+    public async Task The_tenant_opens_its_own_request_with_the_script_the_admin_wrote_and_nobody_elses()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.SaveScriptTextAsync(raised.Id, _admin, "Scene 1: hello.");
+
+        var mine = await _requests.GetForTenantAsync(_tenant, raised.Id);
+
+        Assert.Equal("Question hook", mine.Title);
+        Assert.Equal(StoryVideoRequestStatus.ScriptReady, mine.Status);
+        Assert.Equal("Scene 1: hello.", mine.ScriptText);
+        Assert.Equal("Book a free demo", mine.CallToAction);
+        Assert.Contains("Sector: Real estate", mine.Topic);
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.GetForTenantAsync(_other, raised.Id));
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.GetForTenantAsync(_tenant, Guid.NewGuid()));
     }
 
     [Fact]
@@ -408,11 +449,10 @@ public sealed class StoryVideoRequestTests : IDisposable
     [Fact]
     public async Task A_declined_request_gets_no_script_and_no_video()
     {
-        Fact(_tenant, "We find leads.");
         var raised = await _requests.RaiseAsync(_tenant, null, Brief());
         await _requests.RejectAsync(raised.Id, _admin, "Cannot be made.");
 
-        await Assert.ThrowsAsync<ConflictException>(() => _requests.GenerateScriptAsync(raised.Id, _admin));
+        await Assert.ThrowsAsync<ConflictException>(() => _requests.SaveScriptTextAsync(raised.Id, _admin, "A script."));
         await Assert.ThrowsAsync<ConflictException>(() => _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4));
 
         Assert.Empty(_bucket.Stored);

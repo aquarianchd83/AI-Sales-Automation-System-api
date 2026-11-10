@@ -301,7 +301,11 @@ public class StoryVideoRequest : BaseEntity, ITenantOwned
 
     public DateTime RaisedAtUtc { get; set; }
 
+    /// <summary>When the platform admin last saved the script.</summary>
     public DateTime? ScriptGeneratedAtUtc { get; set; }
+
+    /// <summary>The script, written by the platform admin as plain text.</summary>
+    public string? ScriptText { get; set; }
 
     /// <summary>"Uploaded" (the system-made source is not switched on yet).</summary>
     public string? VideoSource { get; set; }

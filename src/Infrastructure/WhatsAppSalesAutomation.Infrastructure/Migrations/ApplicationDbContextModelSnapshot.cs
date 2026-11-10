@@ -2616,6 +2616,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("ScriptGeneratedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ScriptText")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(15)
