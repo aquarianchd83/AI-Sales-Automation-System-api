@@ -130,6 +130,8 @@ public static class DependencyInjection
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAccountRecoveryService, AccountRecoveryService>();
+        services.Configure<PlatformSetupOptions>(configuration.GetSection("Setup"));
+        services.AddScoped<IPlatformSetupService, PlatformSetupService>();
         services.AddScoped<IAuditTrailWriter, AuditTrailWriter>();
         services.AddScoped<IAccountProfileService, AccountProfileService>();
         services.AddScoped<ITenantService, TenantService>();
