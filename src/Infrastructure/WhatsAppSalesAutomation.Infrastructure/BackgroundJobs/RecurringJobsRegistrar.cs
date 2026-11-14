@@ -49,6 +49,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<DataRetentionJob>(
             "data-retention", job => job.RunAsync(), "20 3 * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Daily at 05:00 UTC: measures how full the database is and emails the platform operators once it reaches the alert level
+        // (DatabaseSizeMonitor:ThresholdPercent, default 80%). Read-only, and the alert is deduped per day.
+        recurringJobs.AddOrUpdate<DatabaseSizeMonitorJob>(
+            "database-size-monitor", job => job.RunAsync(), "0 5 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Daily at 04:10 UTC (after the data-retention pass at 03:20): refreshes every connected tenant's Facebook / Instagram
         // ad spend for the Revenue report. Idempotent - it re-reads the last 35 days and overwrites them - so a repeat is harmless.
         recurringJobs.AddOrUpdate<SocialAdSyncJob>(

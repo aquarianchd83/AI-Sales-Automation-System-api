@@ -5946,6 +5946,50 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("Announcements", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Platform.DatabaseCleanupLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("KeepDays")
+                        .HasColumnType("int");
+
+                    b.Property<double>("PercentUsedBefore")
+                        .HasColumnType("float");
+
+                    b.Property<int>("RowsDeleted")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TableKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double>("UsedMbAfter")
+                        .HasColumnType("float");
+
+                    b.Property<double>("UsedMbBefore")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("RunId");
+
+                    b.ToTable("DatabaseCleanupLogs", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Platform.FaqEntry", b =>
                 {
                     b.Property<Guid>("Id")

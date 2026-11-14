@@ -410,6 +410,9 @@ public static class DependencyInjection
         services.AddScoped<SubscriptionMaintenanceJob>();
         services.AddScoped<QuotaAlertJob>();
         services.AddScoped<DataRetentionJob>();
+        services.AddScoped<DatabaseSizeMonitorJob>();
+        services.AddScoped<WhatsAppSalesAutomation.Infrastructure.Maintenance.DatabaseSizeMonitorService>();
+        services.Configure<WhatsAppSalesAutomation.Infrastructure.Maintenance.DatabaseSizeMonitorOptions>(configuration.GetSection("DatabaseSizeMonitor"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Common.Interfaces.IDataRetentionService, WhatsAppSalesAutomation.Infrastructure.Maintenance.DataRetentionService>();
 
         services.Configure<WhatsAppSalesAutomation.Infrastructure.Notifications.SmtpOptions>(configuration.GetSection("Email:Smtp"));

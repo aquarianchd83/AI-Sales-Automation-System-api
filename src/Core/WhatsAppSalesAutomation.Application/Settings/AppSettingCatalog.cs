@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Application.Common.Options;
+
 namespace WhatsAppSalesAutomation.Application.Settings;
 
 /// <summary>
@@ -45,7 +47,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio", "DatabaseSizeMonitor"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -284,5 +286,12 @@ public static class AppSettingCatalog
         new("Retention:AiInteractionDays", "Retention", IsSecret: false, Description: "Days to keep AI turn records. 0 = forever."),
         new("Retention:AuditLogDays", "Retention", IsSecret: false, Description: "Days to keep audit trail entries. 0 = forever."),
         new("Retention:BatchSize", "Retention", IsSecret: false, Description: "Rows removed per statement (100-5000)."),
+
+        // DatabaseSizeMonitor - the daily database size check. Live (read through IOptionsSnapshot). Edited from the Database Size screen.
+        new("DatabaseSizeMonitor:CapacityMb", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "0", Description: "The database size quota in MB. 0 = detect from the server (Azure SQL max size or a capped data file)."),
+        new("DatabaseSizeMonitor:ThresholdPercent", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "80", Description: "Email the platform operators once usage reaches this percentage of the quota."),
+        new("DatabaseSizeMonitor:AutoCleanup", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "false", Options: new[] { "true", "false" }, Description: "\"true\" also erases old rows from the tables listed in CleanupTables when usage reaches the alert level."),
+        new("DatabaseSizeMonitor:CleanupRetentionDays", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "30", Description: "Days of each selected table the automatic clean-up keeps (minimum 7; the audit trail keeps at least 90, customer messages 180)."),
+        new("DatabaseSizeMonitor:CleanupTables", "DatabaseSizeMonitor", IsSecret: false, IsList: true, DefaultValue: string.Join(",", CleanableTableCatalog.DefaultSelection), Description: "Comma-separated table keys the automatic clean-up may erase from. Only keys in the clean-up catalog are honoured."),
     };
 }
