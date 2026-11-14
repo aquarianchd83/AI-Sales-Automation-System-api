@@ -24,7 +24,10 @@ public enum PlatformNotificationKind
     PlanRenewalFailed = 5,
 
     /// <summary>Something only the platform can change (e.g. a Simulated AI provider) affected a tenant; a ticket was raised for the product owner.</summary>
-    ConfigurationNeeded = 6
+    ConfigurationNeeded = 6,
+
+    /// <summary>The database is using at least the configured share (default 80%) of its capacity.</summary>
+    DatabaseCapacity = 7
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
