@@ -136,6 +136,7 @@ public sealed class StoryVideoRequestTests : IDisposable
     private readonly Bucket _bucket;
     private readonly Clock _clock = new();
     private readonly StoryVideoRequestService _requests;
+    private readonly StoryStudioService _studio;
     private readonly Guid _tenant = Guid.NewGuid();
     private readonly Guid _other = Guid.NewGuid();
     private readonly Guid _admin = Guid.NewGuid();
@@ -158,10 +159,10 @@ public sealed class StoryVideoRequestTests : IDisposable
         var ai = new Ai();
         var knowledge = new KnowledgeService(_db, config, _clock);
         var grounding = new StoryGroundingService(knowledge, knowledge, ai, _metering);
-        var studio = new StoryStudioService(_db, config, ai, _metering, new DocStore(),
+        _studio = new StoryStudioService(_db, config, ai, _metering, new DocStore(),
             new SceneVideoProviderFactory(new ISceneVideoProvider[] { new FlowImportSceneVideoProvider() }), _clock, null, grounding);
         _bucket = new Bucket(context);
-        _requests = new StoryVideoRequestService(_db, studio, _bucket, context, _notifier, _clock, _metering);
+        _requests = new StoryVideoRequestService(_db, _studio, _bucket, context, _notifier, _clock, _metering);
     }
 
     public void Dispose()
@@ -540,5 +541,80 @@ public sealed class StoryVideoRequestTests : IDisposable
         var ex = await Assert.ThrowsAsync<NotFoundException>(() => _requests.OpenVideoAsync(_tenant, raised.Id));
 
         Assert.Contains("no longer available", ex.Message);
+    }
+
+    // ---------- drafts and deleting ----------
+
+    [Fact]
+    public async Task A_draft_can_be_saved_again_with_more_filled_in()
+    {
+        var draft = await _studio.CreateProjectAsync(_tenant, null, Brief());
+
+        var saved = await _studio.UpdateDraftAsync(_tenant, draft.Id, Brief() with { Topic = "Sector: Real estate\nProblem: Finding customers is slow\nSolution: Lead Discovery" });
+
+        Assert.Contains("Lead Discovery", saved.Topic);
+        Assert.Equal(StoryProjectStatus.Draft, saved.Status);
+    }
+
+    [Fact]
+    public async Task A_story_that_was_requested_can_no_longer_be_saved_as_a_draft()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<ConflictException>(() => _studio.UpdateDraftAsync(_tenant, raised.ProjectId, Brief()));
+    }
+
+    [Fact]
+    public async Task A_draft_can_be_deleted()
+    {
+        var draft = await _studio.CreateProjectAsync(_tenant, null, Brief());
+
+        await _requests.DeleteStoryAsync(_tenant, draft.Id);
+
+        Assert.Empty(await _db.StoryProjects.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_story_the_platform_team_is_still_making_cannot_be_deleted()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => _requests.DeleteStoryAsync(_tenant, raised.ProjectId));
+
+        Assert.Contains("still being made", ex.Message);
+        Assert.Single(await _db.StoryVideoRequests.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_finished_story_is_deleted_with_its_request_and_its_stored_video()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.AttachVideoAsync(raised.Id, _admin, Video(), "promo.mp4", "video/mp4", 4);
+
+        await _requests.DeleteStoryAsync(_tenant, raised.ProjectId);
+
+        Assert.Empty(await _db.StoryProjects.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(await _db.StoryVideoRequests.IgnoreQueryFilters().ToListAsync());
+        Assert.Equal(_bucket.Stored.Single(), Assert.Single(_bucket.Deleted));
+    }
+
+    [Fact]
+    public async Task A_declined_story_can_be_deleted()
+    {
+        var raised = await _requests.RaiseAsync(_tenant, null, Brief());
+        await _requests.RejectAsync(raised.Id, _admin, "Not possible");
+
+        await _requests.DeleteStoryAsync(_tenant, raised.ProjectId);
+
+        Assert.Empty(await _db.StoryProjects.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Another_tenants_story_cannot_be_deleted()
+    {
+        var draft = await _studio.CreateProjectAsync(_tenant, null, Brief());
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _requests.DeleteStoryAsync(_other, draft.Id));
+        Assert.Single(await _db.StoryProjects.IgnoreQueryFilters().ToListAsync());
     }
 }
