@@ -17,4 +17,16 @@ public class AutoPayOptions
 
     /// <summary>How long the tenant has to authorise a mandate before Razorpay expires it. 0 leaves it to Razorpay.</summary>
     public int AuthorizationExpiryHours { get; set; } = 48;
+
+    /// <summary>How many times applying one stored webhook event is tried before it is left as Failed for a person to look at. The waits
+    /// between tries grow (5 minutes, 10, 20 ... capped at 6 hours), so the default covers about a day.</summary>
+    public int WebhookMaxAttempts { get; set; } = 10;
+
+    /// <summary>A stored event nothing has picked up after this many minutes is taken by the retry pass - the job that should have
+    /// applied it was lost (a restart, the queue being down).</summary>
+    public int WebhookPickupMinutes { get; set; } = 2;
+
+    /// <summary>A mandate nobody authorised is cancelled at Razorpay this many hours after it was started, when Razorpay has not
+    /// already expired it. Longer than <see cref="AuthorizationExpiryHours"/> on purpose: Razorpay gets to say so first.</summary>
+    public int AbandonedAuthorizationHours { get; set; } = 72;
 }

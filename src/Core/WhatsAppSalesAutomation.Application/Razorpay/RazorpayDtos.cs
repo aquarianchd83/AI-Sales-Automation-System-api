@@ -87,6 +87,10 @@ public enum RazorpayWebhookOutcome
     /// <summary>Signed and stored, but not about any order of ours (or an event we do not act on).</summary>
     Ignored,
 
+    /// <summary>Signed and stored, to be applied by the background job: a subscription event. Storing it is what is acknowledged to
+    /// Razorpay - a failure while applying it afterwards loses nothing.</summary>
+    Queued,
+
     /// <summary>The same event id was already received - Razorpay redelivers until it gets a 2xx.</summary>
     Duplicate,
 

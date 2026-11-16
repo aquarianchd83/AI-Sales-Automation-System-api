@@ -34,6 +34,16 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<SubscriptionMaintenanceJob>(
             "subscription-maintenance", job => job.RunAsync(), "5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Every 5 minutes: applies stored Razorpay subscription webhooks that no job picked up or that failed and are due another try
+        // (the wait between tries grows, so this is cheap when there is nothing to do). A no-op until AutoPay has mandates.
+        recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(
+            "razorpay-webhook-retry", job => job.RetryWebhooksAsync(), "*/5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
+        // Daily at 01:45 UTC, clear of the passes at 00:30 and 03:20: compares every live AutoPay mandate with Razorpay's own record, so a
+        // webhook that never arrived cannot leave a mandate wrong for more than a day. Read-mostly at Razorpay; it never starts a debit.
+        recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(
+            "autopay-reconciliation", job => job.ReconcileAsync(), "45 1 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 5 minutes: re-reads each tenant's QR connection from the bridge itself, so a missed connection event (a webhook that never arrived) cannot leave a
         // channel showing Connected - which would let sends go out - after the bridge has dropped it. Read-only on the bridge, idempotent, and a no-op when no tenant has a channel.
         recurringJobs.AddOrUpdate<WhatsAppBridgeHealthJob>(

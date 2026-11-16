@@ -44,9 +44,7 @@ public interface IAutoPayService
 
 public class AutoPayService : IAutoPayService
 {
-    /// <summary>The operator's switch, kept with the Razorpay keys. Off until someone turns it on: keys alone (the test page has them) must
-    /// not start routing tenants to a mandate.</summary>
-    public const string EnabledKey = "Razorpay:AutoPayEnabled";
+    public const string EnabledKey = AutoPaySettings.EnabledKey;
 
     /// <summary>UPI AutoPay debits rupees only.</summary>
     public const string Currency = "INR";
@@ -60,10 +58,7 @@ public class AutoPayService : IAutoPayService
         RazorpaySubscriptionStatus.Halted, RazorpaySubscriptionStatus.Paused
     };
 
-    private static readonly RazorpaySubscriptionStatus[] Ended =
-    {
-        RazorpaySubscriptionStatus.Cancelled, RazorpaySubscriptionStatus.Completed, RazorpaySubscriptionStatus.Expired
-    };
+    private static IReadOnlyList<RazorpaySubscriptionStatus> Ended => RazorpayMandateState.Ended;
 
     private readonly IApplicationDbContext _context;
     private readonly IAppSettingsStore _store;
@@ -384,63 +379,15 @@ public class AutoPayService : IAutoPayService
 
     // ── Razorpay's state onto ours ──────────────────────────────────────────────────────
 
-    /// <summary>Copies what Razorpay reports onto the row. Used for anything read straight from Razorpay's API, which is its state at that
-    /// moment. It moves the mandate record only: plan access and credits follow confirmed payments, not this.</summary>
-    internal void Apply(RazorpaySubscription row, RazorpaySubscriptionInfo info)
+    private void Apply(RazorpaySubscription row, RazorpaySubscriptionInfo info)
     {
-        var now = _clock.UtcNow;
-
-        if (ParseStatus(info.Status) is { } status)
-            row.Status = status;
-        else
+        if (!RazorpayMandateState.Apply(row, info, _clock.UtcNow))
             _logger.LogWarning("Razorpay subscription {SubscriptionId} reported an unknown status '{Status}'; kept {Current}", info.Id, info.Status, row.Status);
-
-        if (!string.IsNullOrEmpty(info.ShortUrl))
-            row.ShortUrl = info.ShortUrl;
-        if (info.TotalCount > 0)
-            row.TotalCount = info.TotalCount;
-        row.PaidCount = Math.Max(row.PaidCount, info.PaidCount);
-        row.CurrentStartUtc = FromUnix(info.CurrentStart) ?? row.CurrentStartUtc;
-        row.CurrentEndUtc = FromUnix(info.CurrentEnd) ?? row.CurrentEndUtc;
-        row.ChargeAtUtc = FromUnix(info.ChargeAt);
-        row.CustomerId = info.CustomerId ?? row.CustomerId;
-        row.PaymentMethod = info.PaymentMethod ?? row.PaymentMethod;
-
-        if (row.Status != RazorpaySubscriptionStatus.Created && row.Status != RazorpaySubscriptionStatus.Expired)
-            row.AuthenticatedAtUtc ??= now;
-        if (row.Status == RazorpaySubscriptionStatus.Active)
-            row.ActivatedAtUtc ??= now;
-        if (Ended.Contains(row.Status))
-        {
-            row.EndedAtUtc ??= FromUnix(info.EndedAt) ?? now;
-            row.ChargeAtUtc = null;
-            if (row.Status == RazorpaySubscriptionStatus.Cancelled)
-                row.CancelledAtUtc ??= row.EndedAtUtc;
-        }
     }
 
-    private void MarkEnded(RazorpaySubscription row, RazorpaySubscriptionStatus status)
-    {
-        row.Status = status;
-        row.EndedAtUtc ??= _clock.UtcNow;
-        row.ChargeAtUtc = null;
-        if (status == RazorpaySubscriptionStatus.Cancelled)
-            row.CancelledAtUtc ??= row.EndedAtUtc;
-    }
+    private void MarkEnded(RazorpaySubscription row, RazorpaySubscriptionStatus status) => RazorpayMandateState.MarkEnded(row, status, _clock.UtcNow);
 
-    public static RazorpaySubscriptionStatus? ParseStatus(string? status) => status?.Trim().ToLowerInvariant() switch
-    {
-        "created" => RazorpaySubscriptionStatus.Created,
-        "authenticated" => RazorpaySubscriptionStatus.Authenticated,
-        "active" => RazorpaySubscriptionStatus.Active,
-        "pending" => RazorpaySubscriptionStatus.Pending,
-        "halted" => RazorpaySubscriptionStatus.Halted,
-        "cancelled" => RazorpaySubscriptionStatus.Cancelled,
-        "completed" => RazorpaySubscriptionStatus.Completed,
-        "expired" => RazorpaySubscriptionStatus.Expired,
-        "paused" => RazorpaySubscriptionStatus.Paused,
-        _ => null
-    };
+    public static RazorpaySubscriptionStatus? ParseStatus(string? status) => RazorpayMandateState.ParseStatus(status);
 
     /// <summary>What the billing screen shows for a mandate. "Active" needs a debit Razorpay has counted: an authorised mandate with nothing
     /// paid yet is still waiting for its first payment.</summary>
@@ -456,9 +403,6 @@ public class AutoPayService : IAutoPayService
         RazorpaySubscriptionStatus.Cancelled => AutoPayDisplayStatus.Cancelled,
         _ => AutoPayDisplayStatus.Expired
     };
-
-    private static DateTime? FromUnix(long? seconds) =>
-        seconds is { } s and > 0 ? DateTimeOffset.FromUnixTimeSeconds(s).UtcDateTime : null;
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────
 
@@ -487,17 +431,5 @@ public class AutoPayService : IAutoPayService
         row.Id, row.RazorpaySubscriptionId, AutoPayDisplayStatus.PendingAuthorization, row.ShortUrl ?? string.Empty,
         credentials.KeyId, row.Mode, row.AmountMinor, row.Currency, planName);
 
-    private record Settings(bool Enabled, RazorpayCredentials? Credentials);
-
-    private async Task<Settings> ReadSettingsAsync(CancellationToken cancellationToken)
-    {
-        var stored = await _store.GetAllAsync(cancellationToken);
-        string Get(string key) => stored.TryGetValue(key, out var value) ? value?.Trim() ?? string.Empty : string.Empty;
-
-        var keyId = Get(RazorpayService.KeyIdKey);
-        var secret = Get(RazorpayService.KeySecretKey);
-        return new Settings(
-            string.Equals(Get(EnabledKey), "true", StringComparison.OrdinalIgnoreCase),
-            keyId.Length > 0 && secret.Length > 0 ? new RazorpayCredentials(keyId, secret) : null);
-    }
+    private Task<AutoPaySettings> ReadSettingsAsync(CancellationToken cancellationToken) => AutoPaySettings.ReadAsync(_store, cancellationToken);
 }

@@ -55,7 +55,6 @@ public class RazorpayService : IRazorpayService
     public const decimal MaxAmount = 500_000m;
     public static readonly IReadOnlyList<string> Currencies = new[] { "INR", "USD" };
 
-    private const int MaxPayloadLength = 8000;
     private const int ListSize = 50;
 
     private readonly IApplicationDbContext _context;
@@ -63,9 +62,13 @@ public class RazorpayService : IRazorpayService
     private readonly IRazorpayGateway _gateway;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<RazorpayService> _logger;
+    /// <summary>Optional so the test page can be exercised without a job server; DI always supplies one.</summary>
+    private readonly IRazorpayWebhookQueue? _queue;
 
-    public RazorpayService(IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IDateTimeProvider clock, ILogger<RazorpayService> logger)
+    public RazorpayService(IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IDateTimeProvider clock, ILogger<RazorpayService> logger,
+        IRazorpayWebhookQueue? queue = null)
     {
+        _queue = queue;
         _context = context;
         _store = store;
         _gateway = gateway;
@@ -331,8 +334,14 @@ public class RazorpayService : IRazorpayService
             Event = parsed.Event,
             OrderId = parsed.OrderId,
             PaymentId = parsed.PaymentId,
-            Payload = Truncate(Encoding.UTF8.GetString(body), MaxPayloadLength)
+            SubscriptionId = parsed.SubscriptionId,
+            EventCreatedAtUtc = parsed.CreatedAtUtc,
+            // The whole body (the endpoint caps its size): a subscription event is applied from this column, now or on a retry.
+            Payload = Encoding.UTF8.GetString(body)
         };
+
+        if (parsed.Event.StartsWith(SubscriptionEventPrefix, StringComparison.Ordinal))
+            return await StoreForProcessingAsync(record, cancellationToken);
 
         var order = parsed.OrderId is not null
             ? await _context.RazorpayOrders.FirstOrDefaultAsync(o => o.OrderId == parsed.OrderId, cancellationToken)
@@ -369,6 +378,40 @@ public class RazorpayService : IRazorpayService
 
         _logger.LogInformation("Razorpay webhook {Event} ({EventId}) for order {OrderId}: {Note}", parsed.Event, key, parsed.OrderId, record.Note);
         return record.Applied ? RazorpayWebhookOutcome.Applied : RazorpayWebhookOutcome.Ignored;
+    }
+
+    public const string SubscriptionEventPrefix = "subscription.";
+
+    /// <summary>A subscription event is only stored here - durably, before Razorpay is told it arrived - and applied afterwards by the
+    /// background job. Plans and credits hang on these events, so one must never be lost because applying it failed.</summary>
+    private async Task<RazorpayWebhookOutcome> StoreForProcessingAsync(RazorpayWebhookEvent record, CancellationToken cancellationToken)
+    {
+        record.ProcessingStatus = RazorpayWebhookProcessingStatus.Received;
+        record.Note = "Stored; waiting to be applied.";
+        _context.RazorpayWebhookEvents.Add(record);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Lost a race with a parallel redelivery of the same event.
+            _context.ResetChangeTracker();
+            return RazorpayWebhookOutcome.Duplicate;
+        }
+
+        try
+        {
+            _queue?.Enqueue(record.Id);
+        }
+        catch (Exception ex)
+        {
+            // It is stored, which is what matters: the retry pass applies anything the queue never took.
+            _logger.LogWarning(ex, "Razorpay webhook {Event} ({EventId}) was stored but could not be queued; the retry pass will apply it", record.Event, record.EventId);
+        }
+
+        _logger.LogInformation("Razorpay webhook {Event} ({EventId}) for subscription {SubscriptionId} stored for processing", record.Event, record.EventId, record.SubscriptionId);
+        return RazorpayWebhookOutcome.Queued;
     }
 
     private (bool Applied, string Note) Apply(RazorpayOrder order, ParsedWebhook w)
@@ -420,7 +463,8 @@ public class RazorpayService : IRazorpayService
 
     private record ParsedWebhook(
         string Event, string? OrderId, string? PaymentId, string? Method, string? ErrorDescription,
-        string? RefundId, long? RefundAmount, long? PaymentAmountRefunded);
+        string? RefundId, long? RefundAmount, long? PaymentAmountRefunded,
+        string? SubscriptionId = null, DateTime? CreatedAtUtc = null);
 
     private static ParsedWebhook Parse(byte[] body)
     {
@@ -437,6 +481,7 @@ public class RazorpayService : IRazorpayService
             var payment = Entity("payment");
             var order = Entity("order");
             var refund = Entity("refund");
+            var subscription = Entity("subscription");
 
             return new ParsedWebhook(
                 Truncate(name, 60),
@@ -446,7 +491,9 @@ public class RazorpayService : IRazorpayService
                 payment is { } pay4 ? Str(pay4, "error_description") : null,
                 refund is { } rf2 ? Str(rf2, "id") : null,
                 refund is { } rf3 ? Long(rf3, "amount") : null,
-                payment is { } pay5 ? Long(pay5, "amount_refunded") : null);
+                payment is { } pay5 ? Long(pay5, "amount_refunded") : null,
+                subscription is { } sub ? Str(sub, "id") is { } subId ? Truncate(subId, 40) : null : null,
+                Long(root, "created_at") is { } createdAt and > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAt).UtcDateTime : null);
         }
         catch (JsonException)
         {

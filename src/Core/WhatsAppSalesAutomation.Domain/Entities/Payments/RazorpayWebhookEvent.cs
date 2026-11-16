@@ -31,6 +31,7 @@ public class RazorpayWebhookEvent : BaseEntity
     /// while applying it loses nothing: the row is still here to try again.</summary>
     public RazorpayWebhookProcessingStatus ProcessingStatus { get; set; } = RazorpayWebhookProcessingStatus.Received;
 
+    /// <summary>When it was applied - or, while it is Failed, when it was last tried: the retry pass waits from this.</summary>
     public DateTime? ProcessedAtUtc { get; set; }
 
     /// <summary>How many times applying it has failed.</summary>
@@ -47,8 +48,6 @@ public enum RazorpayWebhookProcessingStatus
 {
     /// <summary>Signed and stored; not yet applied.</summary>
     Received = 0,
-
-    Processing = 1,
 
     Completed = 2,
 

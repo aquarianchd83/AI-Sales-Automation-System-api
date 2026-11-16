@@ -183,6 +183,10 @@ public static class DependencyInjection
         services.Configure<BillingAlertOptions>(configuration.GetSection("Billing:Alerts"));
         services.Configure<AutoPayOptions>(configuration.GetSection("Billing:AutoPay"));
         services.AddScoped<WhatsAppSalesAutomation.Application.Billing.AutoPay.IAutoPayService, WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPayService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Billing.AutoPay.IRazorpaySubscriptionEventProcessor, WhatsAppSalesAutomation.Application.Billing.AutoPay.RazorpaySubscriptionEventProcessor>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Billing.AutoPay.IAutoPayMaintenanceService, WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPayMaintenanceService>();
+        // Until the wallet-and-billing phase: payments are refused loudly, so their events wait in the table instead of being lost.
+        services.AddScoped<WhatsAppSalesAutomation.Application.Billing.AutoPay.IAutoPayEntitlements, WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPayEntitlementsNotBuilt>();
         services.AddScoped<IRefundGateway, SimulatedRefundGateway>();
         services.AddScoped<IRefundService, RefundService>();
         services.AddScoped<ITenantNotifier, TenantNotifier>();
