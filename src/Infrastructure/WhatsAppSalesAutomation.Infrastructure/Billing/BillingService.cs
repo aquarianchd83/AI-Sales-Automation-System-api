@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Billing.AutoPay;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Notifications;
@@ -32,6 +33,8 @@ public class BillingService : IBillingService
     private readonly IPricingService _pricing;
     /// <summary>Optional so a caller that only exercises pricing/plans need not supply one; DI always does.</summary>
     private readonly ITenantNotifier? _notifier;
+    /// <summary>Optional like the notifier. Without it nothing is ever sent to AutoPay and every purchase is simulated, as before.</summary>
+    private readonly IAutoPayService? _autoPay;
 
     public BillingService(
         IApplicationDbContext context,
@@ -41,8 +44,10 @@ public class BillingService : IBillingService
         IQuotaLedgerService quota,
         IPricingService pricing,
         ICreditAllocationService credits,
-        ITenantNotifier? notifier = null)
+        ITenantNotifier? notifier = null,
+        IAutoPayService? autoPay = null)
     {
+        _autoPay = autoPay;
         _credits = credits;
         _notifier = notifier;
         _pricing = pricing;
@@ -144,6 +149,18 @@ public class BillingService : IBillingService
         var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
             ?? throw new NotFoundException(nameof(Tenant), tenantId);
 
+        var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+        var planPrice = CatalogPricing.PriceFor(
+            (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken)).GetValueOrDefault(plan.Id),
+            region.CountryCode);
+        var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode, allowFree: true)
+            ?? throw new ConflictException("This plan isn't available in your country.");
+
+        // A paid plan is not handed out here once real billing is on: the tenant authorises a Razorpay mandate instead, and the plan
+        // follows the confirmed payment. Free plans (going back to Trial) still switch here. Checked before anything is changed.
+        if (quote.Total > 0 && _autoPay is not null && await _autoPay.IsRequiredAsync(quote.CurrencyCode, cancellationToken))
+            throw new ConflictException("This plan is paid for by automatic payment. Use Subscribe to set it up.");
+
         var subscription = await _context.Subscriptions.IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
         if (subscription is null)
@@ -160,13 +177,6 @@ public class BillingService : IBillingService
 
         tenant.Status = TenantStatus.Active;
         tenant.TrialEndsAtUtc = null;
-
-        var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
-        var planPrice = CatalogPricing.PriceFor(
-            (await CatalogPricing.LoadPlanPricesAsync(_context, new[] { plan.Id }, cancellationToken)).GetValueOrDefault(plan.Id),
-            region.CountryCode);
-        var quote = _pricing.Quote(planPrice, tenant.CountryCode, tenant.StateCode, allowFree: true)
-            ?? throw new ConflictException("This plan isn't available in your country.");
 
         // A free plan charges nothing, so there is no payment to record (and nothing to refund).
         Payment? payment = null;

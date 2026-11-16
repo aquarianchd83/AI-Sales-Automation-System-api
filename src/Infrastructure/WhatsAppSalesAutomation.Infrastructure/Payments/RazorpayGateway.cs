@@ -64,6 +64,45 @@ public class RazorpayGateway : IRazorpayGateway
             : RazorpayResult<RazorpayRefundInfo>.Fail(result.Error ?? "Razorpay returned no refund id.");
     }
 
+    public async Task<RazorpayResult<RazorpayPlanInfo>> CreatePlanAsync(
+        RazorpayCredentials credentials, string period, int interval, string name, long amountMinor, string currency,
+        IReadOnlyDictionary<string, string> notes, CancellationToken cancellationToken = default)
+    {
+        var body = new { period, interval, item = new { name, amount = amountMinor, currency }, notes };
+        var result = await SendAsync<PlanBody>(credentials, HttpMethod.Post, "plans", body, cancellationToken);
+        return result.Success && result.Value?.Id is { } id
+            ? RazorpayResult<RazorpayPlanInfo>.Ok(new RazorpayPlanInfo(
+                id, result.Value.Period ?? period, result.Value.Interval ?? interval, result.Value.Item?.Amount ?? amountMinor, result.Value.Item?.Currency ?? currency))
+            : RazorpayResult<RazorpayPlanInfo>.Fail(result.Error ?? "Razorpay returned no plan id.");
+    }
+
+    public async Task<RazorpayResult<RazorpaySubscriptionInfo>> CreateSubscriptionAsync(
+        RazorpayCredentials credentials, string planId, int totalCount, bool customerNotify, long? expireByUnix,
+        IReadOnlyDictionary<string, string> notes, CancellationToken cancellationToken = default)
+    {
+        // expire_by is left out when null (the serializer drops nulls), so Razorpay applies its own default.
+        var body = new { plan_id = planId, total_count = totalCount, quantity = 1, customer_notify = customerNotify, expire_by = expireByUnix, notes };
+        return ToSubscription(await SendAsync<SubscriptionBody>(credentials, HttpMethod.Post, "subscriptions", body, cancellationToken));
+    }
+
+    public async Task<RazorpayResult<RazorpaySubscriptionInfo>> FetchSubscriptionAsync(
+        RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default) =>
+        ToSubscription(await SendAsync<SubscriptionBody>(credentials, HttpMethod.Get, $"subscriptions/{Uri.EscapeDataString(subscriptionId)}", null, cancellationToken));
+
+    public async Task<RazorpayResult<RazorpaySubscriptionInfo>> CancelSubscriptionAsync(
+        RazorpayCredentials credentials, string subscriptionId, bool cancelAtCycleEnd, CancellationToken cancellationToken = default) =>
+        ToSubscription(await SendAsync<SubscriptionBody>(
+            credentials, HttpMethod.Post, $"subscriptions/{Uri.EscapeDataString(subscriptionId)}/cancel", new { cancel_at_cycle_end = cancelAtCycleEnd }, cancellationToken));
+
+    private static RazorpayResult<RazorpaySubscriptionInfo> ToSubscription(RazorpayResult<SubscriptionBody> result) =>
+        result.Success && result.Value?.Id is { } id
+            ? RazorpayResult<RazorpaySubscriptionInfo>.Ok(new RazorpaySubscriptionInfo(
+                id, result.Value.PlanId, result.Value.Status ?? "unknown", result.Value.ShortUrl,
+                result.Value.TotalCount ?? 0, result.Value.PaidCount ?? 0, result.Value.RemainingCount ?? 0,
+                result.Value.CurrentStart, result.Value.CurrentEnd, result.Value.ChargeAt, result.Value.StartAt, result.Value.EndAt, result.Value.EndedAt,
+                result.Value.CustomerId, result.Value.PaymentMethod))
+            : RazorpayResult<RazorpaySubscriptionInfo>.Fail(result.Error ?? "Razorpay returned no subscription.");
+
     private static RazorpayResult<RazorpayPaymentInfo> ToPayment(RazorpayResult<PaymentBody> result) =>
         result.Success && result.Value?.Id is { } id
             ? RazorpayResult<RazorpayPaymentInfo>.Ok(new RazorpayPaymentInfo(
@@ -135,6 +174,40 @@ public class RazorpayGateway : IRazorpayGateway
         public string? Method { get; set; }
         public long AmountRefunded { get; set; }
         public string? ErrorDescription { get; set; }
+    }
+
+    private sealed class PlanBody
+    {
+        public string? Id { get; set; }
+        public string? Period { get; set; }
+        public int? Interval { get; set; }
+        public PlanItemBody? Item { get; set; }
+    }
+
+    private sealed class PlanItemBody
+    {
+        public long? Amount { get; set; }
+        public string? Currency { get; set; }
+    }
+
+    /// <summary>Counts and times are nullable: Razorpay sends null for the ones that do not apply yet (no cycle before the mandate is authorised).</summary>
+    private sealed class SubscriptionBody
+    {
+        public string? Id { get; set; }
+        public string? PlanId { get; set; }
+        public string? Status { get; set; }
+        public string? ShortUrl { get; set; }
+        public int? TotalCount { get; set; }
+        public int? PaidCount { get; set; }
+        public int? RemainingCount { get; set; }
+        public long? CurrentStart { get; set; }
+        public long? CurrentEnd { get; set; }
+        public long? ChargeAt { get; set; }
+        public long? StartAt { get; set; }
+        public long? EndAt { get; set; }
+        public long? EndedAt { get; set; }
+        public string? CustomerId { get; set; }
+        public string? PaymentMethod { get; set; }
     }
 
     private sealed class RefundBody

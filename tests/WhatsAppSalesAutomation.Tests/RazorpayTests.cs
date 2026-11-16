@@ -477,6 +477,21 @@ public sealed class RazorpayServiceTests : IDisposable
             Payments[paymentId] = payment with { AmountRefunded = payment.AmountRefunded + amount };
             return Task.FromResult(RazorpayResult<RazorpayRefundInfo>.Ok(new RazorpayRefundInfo($"rfnd_{Guid.NewGuid():N}"[..14], paymentId, amount, "processed")));
         }
+
+        // The test page never touches plans or subscriptions - see AutoPayServiceTests for those.
+        public Task<RazorpayResult<RazorpayPlanInfo>> CreatePlanAsync(
+            RazorpayCredentials credentials, string period, int interval, string name, long amountMinor, string currency,
+            IReadOnlyDictionary<string, string> notes, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<RazorpayResult<RazorpaySubscriptionInfo>> CreateSubscriptionAsync(
+            RazorpayCredentials credentials, string planId, int totalCount, bool customerNotify, long? expireByUnix,
+            IReadOnlyDictionary<string, string> notes, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<RazorpayResult<RazorpaySubscriptionInfo>> FetchSubscriptionAsync(
+            RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<RazorpayResult<RazorpaySubscriptionInfo>> CancelSubscriptionAsync(
+            RazorpayCredentials credentials, string subscriptionId, bool cancelAtCycleEnd, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }
 
