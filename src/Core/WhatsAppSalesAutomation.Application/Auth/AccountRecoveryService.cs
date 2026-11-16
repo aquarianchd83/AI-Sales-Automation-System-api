@@ -26,6 +26,10 @@ public interface IAccountRecoveryService
     /// <summary>Emails a link to confirm the account's address. Never throws: a mail problem must not fail signup.</summary>
     Task SendVerificationEmailAsync(Guid userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Same, for a user the caller already holds. A platform operator has no ambient tenant, so the user query
+    /// filter hides every tenant user from a lookup by id; this skips the lookup. Returns true when a message went out.</summary>
+    Task<bool> SendVerificationEmailAsync(ApplicationUser user, CancellationToken cancellationToken = default);
+
     Task VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Texts a code to the phone number on the user's profile. Unlike a reset, the caller is signed in, so it
@@ -189,22 +193,39 @@ public class AccountRecoveryService : IAccountRecoveryService
         try
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
-            if (user is null || user.EmailConfirmed || string.IsNullOrWhiteSpace(user.Email))
-                return;
-
-            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-            var link = BuildLink("verify-email", user.Email, token);
-            if (link is null)
-                return;
-
-            await SendEmailAsync(user.Email, "Confirm your email address",
-                $"Hi {user.FullName},\n\nPlease confirm this is your email address:\n\n{link}\n\n" +
-                "If you did not create an account, ignore this email.",
-                cancellationToken);
+            if (user is not null)
+                await SendVerificationEmailAsync(user, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Could not send a verification email to user {UserId}", userId);
+        }
+    }
+
+    public async Task<bool> SendVerificationEmailAsync(ApplicationUser user, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (user.EmailConfirmed || string.IsNullOrWhiteSpace(user.Email))
+                return false;
+
+            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+            var link = BuildLink("verify-email", user.Email, token);
+            if (link is null)
+                return false;
+
+            var result = await _email.SendAsync(user.Email, "Confirm your email address",
+                $"Hi {user.FullName},\n\nPlease confirm this is your email address:\n\n{link}\n\n" +
+                "If you did not create an account, ignore this email.",
+                cancellationToken);
+            if (!result.Success)
+                _logger.LogWarning("Verification email to {To} was not sent: {Reason}", user.Email, result.Note);
+            return result.Success;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not send a verification email to user {UserId}", user.Id);
+            return false;
         }
     }
 

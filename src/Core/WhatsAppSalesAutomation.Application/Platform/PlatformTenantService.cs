@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Auth;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -35,6 +36,7 @@ public class PlatformTenantService : IPlatformTenantService
     private readonly IAiSpendEstimator _aiSpend;
     private readonly ICountryAvailability _countries;
     private readonly ITenantDataPurger _purger;
+    private readonly IAccountRecoveryService _recovery;
 
     public PlatformTenantService(
         IApplicationDbContext context,
@@ -52,8 +54,10 @@ public class PlatformTenantService : IPlatformTenantService
         ICreditAllocationService credits,
         IAiSpendEstimator aiSpend,
         ICountryAvailability countries,
-        ITenantDataPurger purger)
+        ITenantDataPurger purger,
+        IAccountRecoveryService recovery)
     {
+        _recovery = recovery;
         _purger = purger;
         _countries = countries;
         _aiSpend = aiSpend;
@@ -125,9 +129,10 @@ public class PlatformTenantService : IPlatformTenantService
         // bug this codebase already fixed once on ApplicationUser (see ApplyTenantQueryFilters' own
         // doc comment) - IgnoreQueryFilters() is the deliberate, audited exception, same as every
         // other cross-tenant read in this service.
-        var ownerEmail = tenant.OwnerUserId is { } ownerId
-            ? (await _userManager.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == ownerId, cancellationToken))?.Email
+        var owner = tenant.OwnerUserId is { } ownerId
+            ? await _userManager.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == ownerId, cancellationToken)
             : null;
+        var ownerEmail = owner?.Email;
 
         var userCount = await _userManager.Users.IgnoreQueryFilters()
             .CountAsync(u => u.TenantId == tenantId, cancellationToken);
@@ -174,7 +179,8 @@ public class PlatformTenantService : IPlatformTenantService
             tenant.RefundRequestsEnabled,
             tenant.StateCode,
             tenant.WhatsAppNumber,
-            tenant.BillingAlertEmail);
+            tenant.BillingAlertEmail,
+            owner?.EmailConfirmed ?? true);
     }
 
     public async Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
@@ -221,7 +227,8 @@ public class PlatformTenantService : IPlatformTenantService
             Email = request.AdminEmail,
             FullName = request.AdminFullName.Trim(),
             IsActive = true,
-            EmailConfirmed = true,
+            // Not confirmed: the owner proves the address is theirs through the link emailed once the tenant exists.
+            EmailConfirmed = false,
             CreatedAt = _dateTime.UtcNow
         };
 
@@ -248,7 +255,34 @@ public class PlatformTenantService : IPlatformTenantService
         // registered from the moment it does. After the commit: job registration lives outside this database transaction.
         await _jobProvisioner.SyncTenantAsync(tenant.Id, cancellationToken);
 
+        // After the commit, and never throws: a mail problem must not undo a tenant that now exists. The operator can resend.
+        await _recovery.SendVerificationEmailAsync(user, cancellationToken);
+
         return await GetDetailAsync(tenant.Id, cancellationToken);
+    }
+
+    public async Task<ResendVerificationResultDto> ResendOwnerVerificationAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)
+    {
+        var tenant = await GetTenantOrThrowAsync(tenantId, cancellationToken);
+        var owner = tenant.OwnerUserId is { } ownerId
+            ? await _userManager.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == ownerId, cancellationToken)
+            : null;
+        owner ??= await FindFallbackAdminAsync(tenantId, cancellationToken)
+            ?? throw new ValidationException(new[] { new FluentValidation.Results.ValidationFailure("Owner", "This tenant has no admin to email.") });
+
+        if (owner.EmailConfirmed)
+            throw new ValidationException(new[] { new FluentValidation.Results.ValidationFailure("Owner", $"{owner.Email} has already verified their email address.") });
+
+        var sent = await _recovery.SendVerificationEmailAsync(owner, cancellationToken);
+
+        await _auditService.LogAsync(
+            actorUserId, actorEmail, PlatformAuditActions.TenantVerificationEmailSent, tenant.Id, owner.Id,
+            details: sent ? $"Sent a verification email to {owner.Email}" : $"Tried to send a verification email to {owner.Email}; it was not delivered",
+            cancellationToken: cancellationToken);
+
+        return sent
+            ? new ResendVerificationResultDto(true, null)
+            : new ResendVerificationResultDto(false, "The email could not be sent. Check the email delivery settings and that the public app address is set.");
     }
 
     public async Task SuspendAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default)

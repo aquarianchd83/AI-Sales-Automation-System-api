@@ -7,6 +7,7 @@ namespace WhatsAppSalesAutomation.Application.Platform;
 public static class PlatformAuditActions
 {
     public const string TenantCreated = "TenantCreated";
+    public const string TenantVerificationEmailSent = "TenantVerificationEmailSent";
     public const string TenantSuspended = "TenantSuspended";
     public const string TenantQualityWarning = "TenantQualityWarning";
     public const string TenantQualityRecovered = "TenantQualityRecovered";

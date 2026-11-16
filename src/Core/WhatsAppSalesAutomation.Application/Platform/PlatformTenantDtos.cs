@@ -51,7 +51,13 @@ public record PlatformTenantDetailDto(
     // The WhatsApp number the tenant gave during onboarding - what the operator connects to WhatsApp for it.
     string? WhatsAppNumber = null,
     // Where the tenant's own notices are emailed. Null means they go to the owner's address (OwnerEmail).
-    string? BillingAlertEmail = null);
+    string? BillingAlertEmail = null,
+    // Whether the owner has confirmed their email address; false means the operator can resend the verification link.
+    bool OwnerEmailConfirmed = true);
+
+/// <summary>Outcome of asking for the owner's verification email again. Sent is false when it was not delivered
+/// (no mail server set up, or no public app address configured) - the operator is told, not left to assume.</summary>
+public record ResendVerificationResultDto(bool Sent, string? Reason);
 
 public record ImpersonationSessionDto(
     string AccessToken,
