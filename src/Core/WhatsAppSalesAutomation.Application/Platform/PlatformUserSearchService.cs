@@ -11,6 +11,7 @@ public class PlatformUserSearchService : IPlatformUserSearchService
     // rather than paged: if a search term matches more than this many accounts it's too broad to be
     // useful as a "which org is this email in" lookup, and the caller should narrow it instead.
     private const int MaxResults = 25;
+    private const int MaxTenantResults = 200;
 
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IApplicationDbContext _context;
@@ -21,17 +22,25 @@ public class PlatformUserSearchService : IPlatformUserSearchService
         _context = context;
     }
 
-    public async Task<IReadOnlyList<PlatformUserSearchResultDto>> SearchAsync(string? search, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PlatformUserSearchResultDto>> SearchAsync(string? search, Guid? tenantId = null, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(search))
+        if (string.IsNullOrWhiteSpace(search) && tenantId is null)
             return Array.Empty<PlatformUserSearchResultDto>();
 
-        var term = search.Trim();
+        var query = _userManager.Users.IgnoreQueryFilters().AsQueryable();
+        if (tenantId is { } scopedTenantId)
+            query = query.Where(u => u.TenantId == scopedTenantId);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(u => u.Email!.Contains(term) || u.FullName.Contains(term));
+        }
 
-        var matches = await _userManager.Users.IgnoreQueryFilters()
-            .Where(u => u.Email!.Contains(term) || u.FullName.Contains(term))
+        // One tenant's own user list is bounded by its plan, so it gets a larger cap than a
+        // cross-tenant lookup.
+        var matches = await query
             .OrderBy(u => u.Email)
-            .Take(MaxResults)
+            .Take(tenantId is null ? MaxResults : MaxTenantResults)
             .ToListAsync(cancellationToken);
 
         if (matches.Count == 0)
@@ -48,7 +57,7 @@ public class PlatformUserSearchService : IPlatformUserSearchService
             var roles = await _userManager.GetRolesAsync(user);
             results.Add(new PlatformUserSearchResultDto(
                 user.Id, user.Email ?? string.Empty, user.FullName,
-                user.TenantId, user.TenantId is { } tenantId ? tenantNames.GetValueOrDefault(tenantId) : null,
+                user.TenantId, user.TenantId is { } userTenantId ? tenantNames.GetValueOrDefault(userTenantId) : null,
                 roles as IReadOnlyList<string> ?? roles.ToList(),
                 user.IsActive, user.CreatedAt, user.LastLoginAt));
         }

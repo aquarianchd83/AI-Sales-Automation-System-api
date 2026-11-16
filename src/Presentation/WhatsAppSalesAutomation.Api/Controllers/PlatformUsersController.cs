@@ -21,6 +21,6 @@ public class PlatformUsersController : ControllerBase
     }
 
     [HttpGet("search")]
-    public async Task<ActionResult<IReadOnlyList<PlatformUserSearchResultDto>>> Search([FromQuery] string? search, CancellationToken cancellationToken)
-        => Ok(await _userSearchService.SearchAsync(search, cancellationToken));
+    public async Task<ActionResult<IReadOnlyList<PlatformUserSearchResultDto>>> Search([FromQuery] string? search, [FromQuery] Guid? tenantId, CancellationToken cancellationToken)
+        => Ok(await _userSearchService.SearchAsync(search, tenantId, cancellationToken));
 }

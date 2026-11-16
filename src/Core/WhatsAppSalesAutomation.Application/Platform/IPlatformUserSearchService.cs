@@ -10,5 +10,7 @@ public interface IPlatformUserSearchService
     /// <summary>Matches on email or full name, case-insensitive substring. Returns empty for a blank
     /// <paramref name="search"/> rather than every user on the platform - this endpoint is a targeted
     /// lookup, not a way to enumerate every tenant's users at once.</summary>
-    Task<IReadOnlyList<PlatformUserSearchResultDto>> SearchAsync(string? search, CancellationToken cancellationToken = default);
+    /// <remarks>When <paramref name="tenantId"/> is set the lookup is scoped to that one tenant, so a blank
+    /// <paramref name="search"/> lists that tenant's users (the tenant list's user-count link).</remarks>
+    Task<IReadOnlyList<PlatformUserSearchResultDto>> SearchAsync(string? search, Guid? tenantId = null, CancellationToken cancellationToken = default);
 }
