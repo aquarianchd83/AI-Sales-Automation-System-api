@@ -52,6 +52,14 @@ public sealed class RecordingEntitlements : IAutoPayEntitlements
         Changes.Add((mandate.RazorpaySubscriptionId, previous, mandate.Status));
         return Task.CompletedTask;
     }
+
+    public List<string> Ended { get; } = new();
+
+    public Task<bool> EndPaidAccessAsync(RazorpaySubscription mandate, CancellationToken cancellationToken = default)
+    {
+        Ended.Add(mandate.RazorpaySubscriptionId);
+        return Task.FromResult(true);
+    }
 }
 
 public sealed class RecordingWebhookQueue : IRazorpayWebhookQueue
@@ -642,22 +650,6 @@ public sealed class RazorpaySubscriptionWebhookTests : IDisposable
         Assert.Equal(1000, (await EventAsync(id)).ErrorMessage!.Length);
     }
 
-    [Fact]
-    public async Task Until_payments_can_be_recorded_a_charge_waits_in_the_table_rather_than_vanishing()
-    {
-        Mandate();
-        var notBuilt = new RazorpaySubscriptionEventProcessor(_db, _store, _gateway, new AutoPayEntitlementsNotBuilt(), _clock, NullLogger<RazorpaySubscriptionEventProcessor>.Instance);
-        var charged = Stored(Body("subscription.charged", 20, "active", paid: 1, payment: Payment()));
-        // A second mandate for the tenant has to be past "waiting": the database allows only one of those.
-        var authenticated = Stored(Body("subscription.paused", 10, "paused", id: "sub_T000002"));
-        Mandate("sub_T000002", RazorpaySubscriptionStatus.Active);
-
-        Assert.Equal(RazorpayEventOutcome.Failed, await notBuilt.ProcessAsync(charged));
-        Assert.Equal(RazorpayWebhookProcessingStatus.Failed, (await EventAsync(charged)).ProcessingStatus);
-        // An event with no payment loses nothing by being applied now.
-        Assert.Equal(RazorpayEventOutcome.Completed, await notBuilt.ProcessAsync(authenticated));
-    }
-
     // ── The retry pass ──────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -779,7 +771,7 @@ public sealed class RazorpaySubscriptionWebhookTests : IDisposable
     }
 
     [Fact]
-    public async Task Reconciliation_never_records_a_payment_itself_it_reports_the_gap()
+    public async Task When_razorpays_invoices_do_not_account_for_a_missing_payment_the_gap_is_reported()
     {
         Mandate(status: RazorpaySubscriptionStatus.Active);
         _gateway.Subscriptions[Sub] = _gateway.Subscriptions[Sub] with { PaidCount = 2 };

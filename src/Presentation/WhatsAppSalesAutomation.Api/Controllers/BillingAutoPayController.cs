@@ -61,6 +61,11 @@ public class BillingAutoPayController : ControllerBase
     public async Task<ActionResult<AutoPaySubscriptionDto>> Cancel(Guid id, [FromBody] CancelAutoPayRequest? request, CancellationToken cancellationToken)
         => Ok(await _autoPay.CancelAsync(RequireTenantId(), id, request?.CancelAtCycleEnd ?? true, cancellationToken));
 
+    /// <summary>The invoices Razorpay raised for the mandate, newest first. 404 for a mandate that is not this tenant's.</summary>
+    [HttpGet("subscriptions/{id:guid}/invoices")]
+    public async Task<ActionResult<IReadOnlyList<AutoPayInvoiceDto>>> GetInvoices(Guid id, CancellationToken cancellationToken)
+        => Ok(await _autoPay.GetInvoicesAsync(RequireTenantId(), id, cancellationToken));
+
     private Guid RequireTenantId() =>
         _tenantContext.TenantId ?? throw new InvalidOperationException("Authenticated billing request has no tenant in scope.");
 }

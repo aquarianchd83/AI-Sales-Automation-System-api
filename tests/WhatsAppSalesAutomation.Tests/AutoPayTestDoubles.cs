@@ -35,6 +35,12 @@ public sealed class FakeSubscriptionGateway : IRazorpayGateway
     public Dictionary<string, RazorpayPlanInfo> Plans { get; } = new();
     public Dictionary<string, RazorpaySubscriptionInfo> Subscriptions { get; } = new();
 
+    /// <summary>Razorpay's invoices, by invoice id. One per billing cycle of a subscription.</summary>
+    public Dictionary<string, RazorpayInvoiceInfo> Invoices { get; } = new();
+    public string? InvoiceError { get; set; }
+    public List<string> InvoiceListCalls { get; } = new();
+    public List<string> InvoiceCalls { get; } = new();
+
     public string? CreatePlanError { get; set; }
     public string? CreateSubscriptionError { get; set; }
     public string? FetchError { get; set; }
@@ -105,6 +111,26 @@ public sealed class FakeSubscriptionGateway : IRazorpayGateway
             s = s with { Status = "cancelled", EndedAt = 1_800_000_000, ChargeAt = null };
         Subscriptions[subscriptionId] = s;
         return Task.FromResult(RazorpayResult<RazorpaySubscriptionInfo>.Ok(s));
+    }
+
+    public Task<RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>> FetchSubscriptionInvoicesAsync(
+        RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default)
+    {
+        InvoiceListCalls.Add(subscriptionId);
+        return Task.FromResult(InvoiceError is not null
+            ? RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>.Fail(InvoiceError)
+            : RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>.Ok(Invoices.Values.Where(i => i.SubscriptionId == subscriptionId).ToList()));
+    }
+
+    public Task<RazorpayResult<RazorpayInvoiceInfo>> FetchInvoiceAsync(
+        RazorpayCredentials credentials, string invoiceId, CancellationToken cancellationToken = default)
+    {
+        InvoiceCalls.Add(invoiceId);
+        if (InvoiceError is not null)
+            return Task.FromResult(RazorpayResult<RazorpayInvoiceInfo>.Fail(InvoiceError));
+        return Task.FromResult(Invoices.TryGetValue(invoiceId, out var i)
+            ? RazorpayResult<RazorpayInvoiceInfo>.Ok(i)
+            : RazorpayResult<RazorpayInvoiceInfo>.Fail("The id provided does not exist"));
     }
 
     // Orders, payments and refunds belong to the test page - see RazorpayServiceTests.

@@ -349,6 +349,10 @@ public class RazorpayService : IRazorpayService
                 ? await _context.RazorpayOrders.FirstOrDefaultAsync(o => o.PaymentId == parsed.PaymentId, cancellationToken)
                 : null;
 
+        // A failed payment that belongs to an invoice, not to a test order, is a subscription's debit failing: stored and applied by the job.
+        if (order is null && parsed.Event == PaymentFailedEvent && parsed.InvoiceId is not null)
+            return await StoreForProcessingAsync(record, cancellationToken);
+
         if (order is null)
             record.Note = "Not one of the test page's orders.";
         else
@@ -381,6 +385,7 @@ public class RazorpayService : IRazorpayService
     }
 
     public const string SubscriptionEventPrefix = "subscription.";
+    public const string PaymentFailedEvent = "payment.failed";
 
     /// <summary>A subscription event is only stored here - durably, before Razorpay is told it arrived - and applied afterwards by the
     /// background job. Plans and credits hang on these events, so one must never be lost because applying it failed.</summary>
@@ -464,7 +469,7 @@ public class RazorpayService : IRazorpayService
     private record ParsedWebhook(
         string Event, string? OrderId, string? PaymentId, string? Method, string? ErrorDescription,
         string? RefundId, long? RefundAmount, long? PaymentAmountRefunded,
-        string? SubscriptionId = null, DateTime? CreatedAtUtc = null);
+        string? SubscriptionId = null, DateTime? CreatedAtUtc = null, string? InvoiceId = null);
 
     private static ParsedWebhook Parse(byte[] body)
     {
@@ -493,7 +498,8 @@ public class RazorpayService : IRazorpayService
                 refund is { } rf3 ? Long(rf3, "amount") : null,
                 payment is { } pay5 ? Long(pay5, "amount_refunded") : null,
                 subscription is { } sub ? Str(sub, "id") is { } subId ? Truncate(subId, 40) : null : null,
-                Long(root, "created_at") is { } createdAt and > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAt).UtcDateTime : null);
+                Long(root, "created_at") is { } createdAt and > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAt).UtcDateTime : null,
+                payment is { } pay6 ? Str(pay6, "invoice_id") : null);
         }
         catch (JsonException)
         {

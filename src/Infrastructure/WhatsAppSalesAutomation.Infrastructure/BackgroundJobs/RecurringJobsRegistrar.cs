@@ -44,6 +44,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(
             "autopay-reconciliation", job => job.ReconcileAsync(), "45 1 * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Hourly: a plan whose mandate has stopped paying (halted, paused, cancelled) and whose paid period plus the grace days is over goes
+        // back to the Trial plan. Never touches a plan whose mandate is still running.
+        recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(
+            "autopay-lapsed-plans", job => job.EndLapsedPlansAsync(), "25 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 5 minutes: re-reads each tenant's QR connection from the bridge itself, so a missed connection event (a webhook that never arrived) cannot leave a
         // channel showing Connected - which would let sends go out - after the bridge has dropped it. Read-only on the bridge, idempotent, and a no-op when no tenant has a channel.
         recurringJobs.AddOrUpdate<WhatsAppBridgeHealthJob>(

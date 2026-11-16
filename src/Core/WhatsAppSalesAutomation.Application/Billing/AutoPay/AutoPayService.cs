@@ -40,6 +40,9 @@ public interface IAutoPayService
     /// <summary>Cancels the mandate at Razorpay. Access already paid for is kept until its period ends. Nothing changes here unless
     /// Razorpay accepted the cancellation.</summary>
     Task<AutoPaySubscriptionDto> CancelAsync(Guid tenantId, Guid id, bool cancelAtCycleEnd, CancellationToken cancellationToken = default);
+
+    /// <summary>The invoices Razorpay raised for the mandate, newest first - read from Razorpay each time, not kept here.</summary>
+    Task<IReadOnlyList<AutoPayInvoiceDto>> GetInvoicesAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default);
 }
 
 public class AutoPayService : IAutoPayService
@@ -331,6 +334,29 @@ public class AutoPayService : IAutoPayService
         Apply(row, fetched.Value);
         await _context.SaveChangesAsync(cancellationToken);
         return await ToDtoAsync(row, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AutoPayInvoiceDto>> GetInvoicesAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
+    {
+        var row = await FindAsync(tenantId, id, cancellationToken);
+        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+            ?? throw new ConflictException("Razorpay is not set up, so the invoices cannot be read.");
+        if (credentials.Mode != row.Mode)
+            return Array.Empty<AutoPayInvoiceDto>();
+
+        var invoices = await _gateway.FetchSubscriptionInvoicesAsync(credentials, row.RazorpaySubscriptionId, cancellationToken);
+        if (!invoices.Success || invoices.Value is null)
+            throw new ConflictException($"Razorpay could not be reached to read the invoices: {invoices.Error}");
+
+        return invoices.Value
+            // Asked for by subscription, and checked again here: an invoice that is not this mandate's is never shown.
+            .Where(i => i.SubscriptionId is null || i.SubscriptionId == row.RazorpaySubscriptionId)
+            .OrderByDescending(i => i.IssuedAt ?? i.PaidAt ?? 0)
+            .Select(i => new AutoPayInvoiceDto(
+                i.Id, i.InvoiceNumber, i.Status, i.Amount / 100m, i.AmountPaid / 100m, i.Currency,
+                RazorpayMandateState.FromUnix(i.IssuedAt), RazorpayMandateState.FromUnix(i.PaidAt),
+                RazorpayMandateState.FromUnix(i.BillingStart), RazorpayMandateState.FromUnix(i.BillingEnd), i.PaymentId, i.ShortUrl))
+            .ToList();
     }
 
     // ── Cancelling ──────────────────────────────────────────────────────────────────────

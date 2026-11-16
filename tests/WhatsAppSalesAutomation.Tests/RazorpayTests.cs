@@ -492,6 +492,12 @@ public sealed class RazorpayServiceTests : IDisposable
 
         public Task<RazorpayResult<RazorpaySubscriptionInfo>> CancelSubscriptionAsync(
             RazorpayCredentials credentials, string subscriptionId, bool cancelAtCycleEnd, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>> FetchSubscriptionInvoicesAsync(
+            RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<RazorpayResult<RazorpayInvoiceInfo>> FetchInvoiceAsync(
+            RazorpayCredentials credentials, string invoiceId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }
 

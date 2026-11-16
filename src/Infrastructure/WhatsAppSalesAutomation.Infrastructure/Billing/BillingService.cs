@@ -168,6 +168,17 @@ public class BillingService : IBillingService
             subscription = new TenantSubscription { TenantId = tenantId };
             _context.Subscriptions.Add(subscription);
         }
+        else if (subscription.RazorpaySubscriptionRowId is { } mandateId)
+        {
+            // Switching plan here would leave the mandate debiting for a plan the tenant is no longer on.
+            var mandateStatus = await _context.RazorpaySubscriptions.IgnoreQueryFilters()
+                .Where(m => m.Id == mandateId).Select(m => (WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscriptionStatus?)m.Status).FirstOrDefaultAsync(cancellationToken);
+            if (mandateStatus is { } status && !RazorpayMandateState.IsEnded(status))
+                throw new ConflictException("Your plan is paid for automatically. Cancel the automatic payment before changing plan.");
+
+            subscription.RazorpaySubscriptionRowId = null;
+            subscription.CancelAtPeriodEnd = false;
+        }
 
         var now = _dateTime.UtcNow;
         subscription.PlanId = plan.Id;

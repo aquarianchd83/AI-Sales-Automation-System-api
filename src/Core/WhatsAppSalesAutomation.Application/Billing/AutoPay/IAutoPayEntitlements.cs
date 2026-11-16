@@ -8,8 +8,8 @@ namespace WhatsAppSalesAutomation.Application.Billing.AutoPay;
 /// deciding what the tenant is owed for it is another.
 ///
 /// Every method here may be called more than once for the same thing - a redelivered webhook, a second kind of event about the same
-/// payment, a retry after a failure half-way, the reconciliation pass - and must do its work exactly once. A method that throws is
-/// retried later; one that returns is taken to have finished.
+/// payment, a retry after a failure half-way, the reconciliation pass, two workers at the same moment - and must do its work exactly
+/// once. A method that throws is retried later; one that returns is taken to have finished.
 /// </summary>
 public interface IAutoPayEntitlements
 {
@@ -21,21 +21,9 @@ public interface IAutoPayEntitlements
 
     /// <summary>The mandate moved from <paramref name="previous"/> to its current status - halted, cancelled, paused, running again.</summary>
     Task MandateChangedAsync(RazorpaySubscription mandate, RazorpaySubscriptionStatus previous, CancellationToken cancellationToken = default);
-}
 
-/// <summary>
-/// Stands in until the wallet-and-billing phase supplies the real one. A payment is refused loudly rather than swallowed: the event that
-/// carried it stays Failed in the webhook table and is applied once the real implementation exists, so no payment can be acknowledged and
-/// then forgotten. A change of state loses nothing by waiting - the mandate row already holds it - so that one is let through.
-/// </summary>
-public class AutoPayEntitlementsNotBuilt : IAutoPayEntitlements
-{
-    public Task ChargeSucceededAsync(RazorpaySubscription mandate, RazorpayWebhookPayment payment, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException($"Recording AutoPay payments is not built yet; payment {payment.Id} on {mandate.RazorpaySubscriptionId} stays queued.");
-
-    public Task ChargeFailedAsync(RazorpaySubscription mandate, RazorpayWebhookPayment payment, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException($"Recording AutoPay payments is not built yet; failed payment {payment.Id} on {mandate.RazorpaySubscriptionId} stays queued.");
-
-    public Task MandateChangedAsync(RazorpaySubscription mandate, RazorpaySubscriptionStatus previous, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    /// <summary>The mandate has stopped paying and what was paid for (and the grace after it) is over: the tenant leaves the paid plan.
+    /// Does nothing when this mandate is not the one behind the tenant's plan.</summary>
+    /// <returns>Whether a plan was ended.</returns>
+    Task<bool> EndPaidAccessAsync(RazorpaySubscription mandate, CancellationToken cancellationToken = default);
 }

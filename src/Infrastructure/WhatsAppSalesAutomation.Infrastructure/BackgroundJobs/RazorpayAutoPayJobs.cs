@@ -81,6 +81,21 @@ public class AutoPayMaintenanceJob
         }
     }
 
+    /// <summary>Moves plans whose mandate stopped paying, and whose paid period and grace are over, back to the Trial plan.</summary>
+    public async Task EndLapsedPlansAsync()
+    {
+        try
+        {
+            var ended = await _maintenance.EndLapsedPlansAsync();
+            if (ended > 0)
+                _logger.LogInformation("AutoPay: {Ended} lapsed plans ended", ended);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AutoPay lapsed-plan pass failed");
+        }
+    }
+
     /// <summary>Compares every live mandate with Razorpay's own record and repairs what a missed webhook left behind.</summary>
     public async Task ReconcileAsync()
     {

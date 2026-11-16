@@ -90,6 +90,9 @@ public class RazorpaySubscriptionEventProcessor : IRazorpaySubscriptionEventProc
         {
             var (applied, note) = await ApplyAsync(record, cancellationToken);
 
+            // The work above may have reset the change tracker (the ledger does, when it retries a clash), which would leave this row
+            // detached and its new status unsaved. Fetching it again costs nothing when it is still tracked.
+            record = await _context.RazorpayWebhookEvents.FirstAsync(e => e.Id == webhookEventRowId, cancellationToken);
             record.ProcessingStatus = applied ? RazorpayWebhookProcessingStatus.Completed : RazorpayWebhookProcessingStatus.Ignored;
             record.Applied = applied;
             record.Note = Truncate(note, MaxNoteLength);
@@ -111,6 +114,8 @@ public class RazorpaySubscriptionEventProcessor : IRazorpaySubscriptionEventProc
         var hook = RazorpaySubscriptionWebhook.Parse(record.Payload);
         if (hook is null)
             return (false, "The stored body could not be read.");
+        if (hook.Event == RazorpayService.PaymentFailedEvent)
+            return await ApplyFailedPaymentAsync(hook, cancellationToken);
         if (!hook.Event.StartsWith(RazorpayService.SubscriptionEventPrefix, StringComparison.Ordinal) || hook.Subscription is null)
             return (false, "Not a subscription event.");
 
@@ -149,6 +154,40 @@ public class RazorpaySubscriptionEventProcessor : IRazorpaySubscriptionEventProc
             await _entitlements.MandateChangedAsync(mandate, previous, cancellationToken);
 
         return (true, $"{hook.Event}: {previous} -> {mandate.Status} ({how}).");
+    }
+
+    /// <summary>
+    /// A payment.failed event says which payment failed and why, but not which subscription it was for - only which invoice. Razorpay raises
+    /// one invoice per billing cycle of a subscription, so the invoice is asked for and names the subscription. A failed payment on an
+    /// invoice that is not one of our mandates' is none of our business.
+    /// </summary>
+    private async Task<(bool Applied, string Note)> ApplyFailedPaymentAsync(RazorpaySubscriptionWebhook hook, CancellationToken cancellationToken)
+    {
+        if (hook.Payment is not { InvoiceId: { Length: > 0 } invoiceId } payment)
+            return (false, "A failed payment with no invoice: not a subscription's.");
+
+        var credentials = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).Credentials
+            ?? throw new InvalidOperationException("Razorpay is not set up, so the failed payment's invoice could not be looked up.");
+        var invoice = await _gateway.FetchInvoiceAsync(credentials, invoiceId, cancellationToken);
+        if (!invoice.Success || invoice.Value is null)
+            throw new InvalidOperationException($"The invoice {invoiceId} of failed payment {payment.Id} could not be read from Razorpay: {invoice.Error}");
+        if (string.IsNullOrEmpty(invoice.Value.SubscriptionId))
+            return (false, "The failed payment's invoice is not a subscription's.");
+
+        var mandate = await _context.RazorpaySubscriptions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.RazorpaySubscriptionId == invoice.Value.SubscriptionId, cancellationToken);
+        if (mandate is null)
+            return (false, "The failed payment is for a subscription this platform did not create.");
+
+        await _entitlements.ChargeFailedAsync(
+            mandate,
+            payment with
+            {
+                PeriodStartUtc = RazorpayMandateState.FromUnix(invoice.Value.BillingStart),
+                PeriodEndUtc = RazorpayMandateState.FromUnix(invoice.Value.BillingEnd)
+            },
+            cancellationToken);
+        return (true, $"payment.failed: {payment.Id} on {mandate.RazorpaySubscriptionId} recorded as failed.");
     }
 
     /// <summary>Brings the mandate row up to date from the event, or from Razorpay itself when the event cannot be trusted to be the latest.</summary>

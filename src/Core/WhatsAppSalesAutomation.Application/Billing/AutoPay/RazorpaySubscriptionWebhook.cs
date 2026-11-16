@@ -8,6 +8,7 @@ namespace WhatsAppSalesAutomation.Application.Billing.AutoPay;
 /// <param name="Status">created, authorized, captured, refunded or failed.</param>
 /// <param name="InvoiceId">Razorpay's invoice for the billing cycle (inv_...).</param>
 /// <param name="CreatedAtUtc">When the payment was made at Razorpay.</param>
+/// <param name="PeriodStartUtc">The billing cycle it paid for, when known from Razorpay's invoice. Otherwise the mandate's current cycle is used.</param>
 public record RazorpayWebhookPayment(
     string Id,
     long Amount,
@@ -17,7 +18,9 @@ public record RazorpayWebhookPayment(
     string? InvoiceId,
     string? OrderId,
     string? ErrorDescription,
-    DateTime? CreatedAtUtc);
+    DateTime? CreatedAtUtc,
+    DateTime? PeriodStartUtc = null,
+    DateTime? PeriodEndUtc = null);
 
 /// <summary>
 /// A stored subscription webhook, read back from its raw body: which event, when Razorpay raised it, the subscription as it stood at that

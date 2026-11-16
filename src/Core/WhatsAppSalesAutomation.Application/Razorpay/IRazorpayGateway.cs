@@ -100,4 +100,31 @@ public interface IRazorpayGateway
     /// <param name="cancelAtCycleEnd">True stops it after the cycle already paid for; false stops it now.</param>
     Task<RazorpayResult<RazorpaySubscriptionInfo>> CancelSubscriptionAsync(
         RazorpayCredentials credentials, string subscriptionId, bool cancelAtCycleEnd, CancellationToken cancellationToken = default);
+
+    /// <summary>The invoices Razorpay raised for a subscription - one per billing cycle, each naming the payment that settled it.</summary>
+    Task<RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>> FetchSubscriptionInvoicesAsync(
+        RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default);
+
+    Task<RazorpayResult<RazorpayInvoiceInfo>> FetchInvoiceAsync(
+        RazorpayCredentials credentials, string invoiceId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>An invoice as Razorpay reports it. Amounts in paise, times in Unix seconds.</summary>
+/// <param name="Status">draft, issued, partially_paid, paid, expired, cancelled or deleted.</param>
+/// <param name="BillingStart">Start of the billing cycle the invoice is for.</param>
+/// <param name="ShortUrl">Razorpay's hosted page for the invoice.</param>
+public record RazorpayInvoiceInfo(
+    string Id,
+    string? SubscriptionId,
+    string? PaymentId,
+    string? OrderId,
+    string Status,
+    long Amount,
+    long AmountPaid,
+    string Currency,
+    long? PaidAt,
+    long? IssuedAt,
+    long? BillingStart,
+    long? BillingEnd,
+    string? ShortUrl,
+    string? InvoiceNumber);

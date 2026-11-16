@@ -82,7 +82,9 @@ public class PlatformPaymentService : IPlatformPaymentService
             ? await GetUpcomingAsync(query, cancellationToken)
             : new List<PlatformPaymentListItemDto>();
 
+        // Payments received: an attempt the gateway could not complete is not one.
         var payments = _context.Payments.IgnoreQueryFilters()
+            .Where(p => p.Status == PaymentStatus.Succeeded)
             .Join(_context.Tenants, p => p.TenantId, t => t.Id, (p, t) => new { p, t });
 
         if (query.Kind is { } kind)

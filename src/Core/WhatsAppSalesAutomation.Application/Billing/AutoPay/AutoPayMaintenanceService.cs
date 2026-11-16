@@ -13,9 +13,10 @@ namespace WhatsAppSalesAutomation.Application.Billing.AutoPay;
 /// <param name="Checked">Mandates compared with Razorpay.</param>
 /// <param name="Repaired">Mandates whose status here was behind Razorpay's - a webhook was missed or is still on its way.</param>
 /// <param name="AbandonedCancelled">Authorisations nobody completed, cancelled at Razorpay.</param>
-/// <param name="PaymentsMissing">Mandates where Razorpay counts more payments than are recorded here.</param>
+/// <param name="PaymentsMissing">Mandates where Razorpay still counts more payments than are recorded here, after trying to recover them.</param>
 /// <param name="Errors">Mandates that could not be checked this time.</param>
-public record AutoPayReconciliationResult(int Checked, int Repaired, int AbandonedCancelled, int PaymentsMissing, int Errors);
+/// <param name="PaymentsRecovered">Payments Razorpay took that were not on record here - a charge event never arrived - and now are, with their credits.</param>
+public record AutoPayReconciliationResult(int Checked, int Repaired, int AbandonedCancelled, int PaymentsMissing, int Errors, int PaymentsRecovered = 0);
 
 /// <summary>The housekeeping AutoPay needs because webhooks are not a guaranteed delivery: retrying events that could not be applied, and
 /// comparing every live mandate with Razorpay's own record. Neither ever starts a debit - Razorpay alone does that.</summary>
@@ -26,6 +27,10 @@ public interface IAutoPayMaintenanceService
     Task<int> RetryWebhooksAsync(CancellationToken cancellationToken = default);
 
     Task<AutoPayReconciliationResult> ReconcileAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Ends the paid plan of every tenant whose mandate has stopped paying and whose paid period, plus the grace days, is over.</summary>
+    /// <returns>How many plans were ended.</returns>
+    Task<int> EndLapsedPlansAsync(CancellationToken cancellationToken = default);
 }
 
 public class AutoPayMaintenanceService : IAutoPayMaintenanceService
@@ -135,7 +140,7 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
             .Select(s => s.Id)
             .ToListAsync(cancellationToken);
 
-        int checkedCount = 0, repaired = 0, abandoned = 0, missing = 0, errors = 0;
+        int checkedCount = 0, repaired = 0, abandoned = 0, missing = 0, errors = 0, recovered = 0;
         foreach (var id in ids)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -147,6 +152,7 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
                 if (outcome.Repaired) repaired++;
                 if (outcome.AbandonedCancelled) abandoned++;
                 if (outcome.PaymentsMissing) missing++;
+                recovered += outcome.PaymentsRecovered;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -157,17 +163,17 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
         }
 
         _logger.LogInformation(
-            "AutoPay reconciliation: {Checked} mandates checked, {Repaired} brought up to date, {Abandoned} abandoned authorisations cancelled, {Missing} with payments missing, {Errors} errors",
-            checkedCount, repaired, abandoned, missing, errors);
-        return new AutoPayReconciliationResult(checkedCount, repaired, abandoned, missing, errors);
+            "AutoPay reconciliation: {Checked} mandates checked, {Repaired} brought up to date, {Abandoned} abandoned authorisations cancelled, {Recovered} missed payments recovered, {Missing} still with payments missing, {Errors} errors",
+            checkedCount, repaired, abandoned, recovered, missing, errors);
+        return new AutoPayReconciliationResult(checkedCount, repaired, abandoned, missing, errors, recovered);
     }
 
-    private async Task<(bool Repaired, bool AbandonedCancelled, bool PaymentsMissing)> ReconcileOneAsync(
+    private async Task<(bool Repaired, bool AbandonedCancelled, bool PaymentsMissing, int PaymentsRecovered)> ReconcileOneAsync(
         Guid id, RazorpayCredentials credentials, CancellationToken cancellationToken)
     {
         var mandate = await _context.RazorpaySubscriptions.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
         if (mandate is null || RazorpayMandateState.IsEnded(mandate.Status))
-            return (false, false, false);
+            return (false, false, false, 0);
 
         var fetched = await _gateway.FetchSubscriptionAsync(credentials, mandate.RazorpaySubscriptionId, cancellationToken);
         if (!fetched.Success || fetched.Value is null)
@@ -202,15 +208,99 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
             await _entitlements.MandateChangedAsync(mandate, previous, cancellationToken);
 
         // Razorpay has counted payments that are not on record here: a charge event never arrived or never applied.
-        var recorded = await _context.Payments.IgnoreQueryFilters()
-            .CountAsync(p => p.ProviderSubscriptionId == mandate.RazorpaySubscriptionId && p.Status == PaymentStatus.Succeeded && p.Kind == PaymentKind.Subscription, cancellationToken);
-        var paymentsMissing = fetched.Value.PaidCount > recorded;
+        var recovered = 0;
+        var paymentsMissing = fetched.Value.PaidCount > await RecordedPaymentsAsync(mandate.RazorpaySubscriptionId, cancellationToken);
         if (paymentsMissing)
-            _logger.LogError(
-                "AutoPay reconciliation: Razorpay counts {Paid} payments on {SubscriptionId} but {Recorded} are recorded here",
-                fetched.Value.PaidCount, mandate.RazorpaySubscriptionId, recorded);
+        {
+            recovered = await RecoverPaymentsAsync(mandate, credentials, cancellationToken);
+            var recorded = await RecordedPaymentsAsync(mandate.RazorpaySubscriptionId, cancellationToken);
+            paymentsMissing = fetched.Value.PaidCount > recorded;
+            if (paymentsMissing)
+                _logger.LogError(
+                    "AutoPay reconciliation: Razorpay counts {Paid} payments on {SubscriptionId} but {Recorded} are recorded here, and its invoices did not account for the rest",
+                    fetched.Value.PaidCount, mandate.RazorpaySubscriptionId, recorded);
+        }
 
-        return (repaired, abandoned, paymentsMissing);
+        return (repaired, abandoned, paymentsMissing, recovered);
+    }
+
+    private Task<int> RecordedPaymentsAsync(string razorpaySubscriptionId, CancellationToken cancellationToken) =>
+        _context.Payments.IgnoreQueryFilters()
+            .CountAsync(p => p.ProviderSubscriptionId == razorpaySubscriptionId && p.Status == PaymentStatus.Succeeded && p.Kind == PaymentKind.Subscription, cancellationToken);
+
+    /// <summary>
+    /// Records the payments Razorpay took that never reached us. Razorpay raises an invoice for each billing cycle and a paid one names its
+    /// payment, so each paid invoice whose payment is not on record is handed to the same code a charge webhook reaches - which records a
+    /// payment and grants its credits exactly once, so a payment whose webhook is merely late, and arrives afterwards, is not counted twice.
+    /// </summary>
+    private async Task<int> RecoverPaymentsAsync(RazorpaySubscription mandate, RazorpayCredentials credentials, CancellationToken cancellationToken)
+    {
+        var invoices = await _gateway.FetchSubscriptionInvoicesAsync(credentials, mandate.RazorpaySubscriptionId, cancellationToken);
+        if (!invoices.Success || invoices.Value is null)
+            throw new InvalidOperationException($"The invoices of {mandate.RazorpaySubscriptionId} could not be read from Razorpay: {invoices.Error}");
+
+        var known = await _context.Payments.IgnoreQueryFilters()
+            .Where(p => p.ProviderSubscriptionId == mandate.RazorpaySubscriptionId && p.Status == PaymentStatus.Succeeded && p.ProviderPaymentId != null)
+            .Select(p => p.ProviderPaymentId!)
+            .ToListAsync(cancellationToken);
+
+        var recovered = 0;
+        foreach (var invoice in invoices.Value.Where(i => i.Status == "paid" && !string.IsNullOrEmpty(i.PaymentId)).OrderBy(i => i.PaidAt ?? 0))
+        {
+            if (known.Contains(invoice.PaymentId!))
+                continue;
+
+            var payment = new RazorpayWebhookPayment(
+                invoice.PaymentId!, invoice.AmountPaid, invoice.Currency, "captured", null, invoice.Id, invoice.OrderId, null,
+                RazorpayMandateState.FromUnix(invoice.PaidAt), RazorpayMandateState.FromUnix(invoice.BillingStart), RazorpayMandateState.FromUnix(invoice.BillingEnd));
+            await _entitlements.ChargeSucceededAsync(mandate, payment, cancellationToken);
+            recovered++;
+            _logger.LogWarning(
+                "AutoPay reconciliation: payment {PaymentId} on {SubscriptionId} had never been recorded; recovered from invoice {InvoiceId}",
+                invoice.PaymentId, mandate.RazorpaySubscriptionId, invoice.Id);
+        }
+
+        return recovered;
+    }
+
+    // ── Lapsed plans ────────────────────────────────────────────────────────────────────
+
+    /// <summary>The states in which a mandate is not going to pay: a plan resting on one of these ends once what was paid for runs out.
+    /// A running mandate is never here - if its payment seems late, that is for reconciliation to look into, not a reason to end the plan.</summary>
+    private static readonly RazorpaySubscriptionStatus[] NotPaying =
+    {
+        RazorpaySubscriptionStatus.Pending, RazorpaySubscriptionStatus.Halted, RazorpaySubscriptionStatus.Paused,
+        RazorpaySubscriptionStatus.Cancelled, RazorpaySubscriptionStatus.Completed, RazorpaySubscriptionStatus.Expired
+    };
+
+    public async Task<int> EndLapsedPlansAsync(CancellationToken cancellationToken = default)
+    {
+        var cutoff = _clock.UtcNow.AddDays(-AutoPayOptions.GraceDays);
+        var mandateIds = await (
+                from s in _context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
+                join m in _context.RazorpaySubscriptions.IgnoreQueryFilters().AsNoTracking() on s.RazorpaySubscriptionRowId equals m.Id
+                where s.CurrentPeriodEndUtc != null && s.CurrentPeriodEndUtc <= cutoff && NotPaying.Contains(m.Status)
+                select m.Id)
+            .ToListAsync(cancellationToken);
+
+        var ended = 0;
+        foreach (var id in mandateIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _context.ResetChangeTracker();
+            try
+            {
+                var mandate = await _context.RazorpaySubscriptions.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+                if (mandate is not null && await _entitlements.EndPaidAccessAsync(mandate, cancellationToken))
+                    ended++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "AutoPay: the lapsed plan behind mandate {MandateId} could not be ended", id);
+            }
+        }
+
+        return ended;
     }
 
     private void Apply(RazorpaySubscription mandate, RazorpaySubscriptionInfo info, DateTime now)

@@ -59,6 +59,25 @@ public record AutoPaySubscriptionDto(
     string Mode,
     DateTime CreatedAt);
 
+/// <summary>One invoice Razorpay raised for a billing cycle of the mandate.</summary>
+/// <param name="Status">Razorpay's own: draft, issued, partially_paid, paid, expired, cancelled.</param>
+/// <param name="Amount">In rupees.</param>
+/// <param name="TransactionId">The Razorpay payment that settled it, once paid.</param>
+/// <param name="Url">Razorpay's hosted page for the invoice.</param>
+public record AutoPayInvoiceDto(
+    string InvoiceId,
+    string? InvoiceNumber,
+    string Status,
+    decimal Amount,
+    decimal AmountPaid,
+    string CurrencyCode,
+    DateTime? IssuedAtUtc,
+    DateTime? PaidAtUtc,
+    DateTime? PeriodStartUtc,
+    DateTime? PeriodEndUtc,
+    string? TransactionId,
+    string? Url);
+
 /// <summary>The states the billing screen shows. Derived from Razorpay's state - never from anything the browser reported.</summary>
 public static class AutoPayDisplayStatus
 {

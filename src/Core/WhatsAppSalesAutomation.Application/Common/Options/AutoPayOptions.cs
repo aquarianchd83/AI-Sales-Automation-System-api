@@ -7,6 +7,12 @@ namespace WhatsAppSalesAutomation.Application.Common.Options;
 /// </summary>
 public class AutoPayOptions
 {
+    /// <summary>How many days a plan paid for automatically keeps working after its paid period ends. Razorpay debits on the day the period
+    /// ends and, when that fails, tries again on each of the next three days - so a plan must not stop the moment the period is over, or
+    /// every tenant would lose service for the hours before the debit lands. A constant, not a setting: the AI gate and the pass that
+    /// ends lapsed plans must agree on it.</summary>
+    public const int GraceDays = 4;
+
     /// <summary>The most one recurring debit may be, in rupees, tax included. UPI AutoPay allows 15,000 per debit for most merchant
     /// categories; a plan that costs more cannot be sold through it and is refused before anything is created at Razorpay.</summary>
     public decimal MaxRecurringAmountInr { get; set; } = 15_000m;

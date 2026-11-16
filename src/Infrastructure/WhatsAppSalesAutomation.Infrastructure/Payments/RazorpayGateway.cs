@@ -94,6 +94,32 @@ public class RazorpayGateway : IRazorpayGateway
         ToSubscription(await SendAsync<SubscriptionBody>(
             credentials, HttpMethod.Post, $"subscriptions/{Uri.EscapeDataString(subscriptionId)}/cancel", new { cancel_at_cycle_end = cancelAtCycleEnd }, cancellationToken));
 
+    public async Task<RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>> FetchSubscriptionInvoicesAsync(
+        RazorpayCredentials credentials, string subscriptionId, CancellationToken cancellationToken = default)
+    {
+        // 100 is Razorpay's largest page: more than eight years of monthly invoices.
+        var result = await SendAsync<InvoiceCollectionBody>(
+            credentials, HttpMethod.Get, $"invoices?subscription_id={Uri.EscapeDataString(subscriptionId)}&count=100", null, cancellationToken);
+        if (!result.Success || result.Value is null)
+            return RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>.Fail(result.Error ?? "Razorpay returned no invoices.");
+
+        var invoices = (result.Value.Items ?? new List<InvoiceBody>()).Where(i => i.Id is not null).Select(ToInvoice).ToList();
+        return RazorpayResult<IReadOnlyList<RazorpayInvoiceInfo>>.Ok(invoices);
+    }
+
+    public async Task<RazorpayResult<RazorpayInvoiceInfo>> FetchInvoiceAsync(
+        RazorpayCredentials credentials, string invoiceId, CancellationToken cancellationToken = default)
+    {
+        var result = await SendAsync<InvoiceBody>(credentials, HttpMethod.Get, $"invoices/{Uri.EscapeDataString(invoiceId)}", null, cancellationToken);
+        return result.Success && result.Value?.Id is not null
+            ? RazorpayResult<RazorpayInvoiceInfo>.Ok(ToInvoice(result.Value))
+            : RazorpayResult<RazorpayInvoiceInfo>.Fail(result.Error ?? "Razorpay returned no invoice.");
+    }
+
+    private static RazorpayInvoiceInfo ToInvoice(InvoiceBody i) => new(
+        i.Id!, i.SubscriptionId, i.PaymentId, i.OrderId, i.Status ?? "unknown", i.Amount ?? 0, i.AmountPaid ?? 0, i.Currency ?? "INR",
+        i.PaidAt, i.IssuedAt, i.BillingStart, i.BillingEnd, i.ShortUrl, i.InvoiceNumber);
+
     private static RazorpayResult<RazorpaySubscriptionInfo> ToSubscription(RazorpayResult<SubscriptionBody> result) =>
         result.Success && result.Value?.Id is { } id
             ? RazorpayResult<RazorpaySubscriptionInfo>.Ok(new RazorpaySubscriptionInfo(
@@ -208,6 +234,29 @@ public class RazorpayGateway : IRazorpayGateway
         public long? EndedAt { get; set; }
         public string? CustomerId { get; set; }
         public string? PaymentMethod { get; set; }
+    }
+
+    private sealed class InvoiceCollectionBody
+    {
+        public List<InvoiceBody>? Items { get; set; }
+    }
+
+    private sealed class InvoiceBody
+    {
+        public string? Id { get; set; }
+        public string? SubscriptionId { get; set; }
+        public string? PaymentId { get; set; }
+        public string? OrderId { get; set; }
+        public string? Status { get; set; }
+        public long? Amount { get; set; }
+        public long? AmountPaid { get; set; }
+        public string? Currency { get; set; }
+        public long? PaidAt { get; set; }
+        public long? IssuedAt { get; set; }
+        public long? BillingStart { get; set; }
+        public long? BillingEnd { get; set; }
+        public string? ShortUrl { get; set; }
+        public string? InvoiceNumber { get; set; }
     }
 
     private sealed class RefundBody
