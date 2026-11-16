@@ -41,6 +41,11 @@ public class PlatformTenantsController : ControllerBase
         return CreatedAtAction(nameof(GetDetail), new { id = result.Id }, result);
     }
 
+    /// <summary>Emails the tenant owner a fresh verification link.</summary>
+    [HttpPost("{id:guid}/resend-verification")]
+    public async Task<ActionResult<ResendVerificationResultDto>> ResendVerification(Guid id, CancellationToken cancellationToken)
+        => Ok(await _tenantService.ResendOwnerVerificationAsync(id, ActorUserId, ActorEmail, cancellationToken));
+
     [HttpPost("{id:guid}/suspend")]
     public async Task<IActionResult> Suspend(Guid id, CancellationToken cancellationToken)
     {

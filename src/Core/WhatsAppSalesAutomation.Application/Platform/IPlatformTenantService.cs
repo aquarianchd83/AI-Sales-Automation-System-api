@@ -19,6 +19,10 @@ public interface IPlatformTenantService
     /// already taken, the same as self-serve signup.</summary>
     Task<PlatformTenantDetailDto> CreateAsync(CreatePlatformTenantRequest request, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
 
+    /// <summary>Emails the tenant owner a fresh link to verify their address. Throws a validation error if the owner has
+    /// already verified. Audited.</summary>
+    Task<ResendVerificationResultDto> ResendOwnerVerificationAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
+
     /// <summary>Locks the tenant out (login already refuses Suspended tenants - see
     /// AuthService.LoginAsync) without touching any of its data.</summary>
     Task SuspendAsync(Guid tenantId, Guid actorUserId, string actorEmail, CancellationToken cancellationToken = default);
