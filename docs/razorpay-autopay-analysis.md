@@ -1,5 +1,9 @@
 # Razorpay UPI AutoPay - Phase 1: Repository Analysis
 
+This is the assessment made before any code was written. Several details changed during the build; for what exists
+now, read [razorpay-autopay-architecture.md](razorpay-autopay-architecture.md),
+[razorpay-autopay-api.md](razorpay-autopay-api.md) and [razorpay-autopay-webhooks.md](razorpay-autopay-webhooks.md).
+
 Date: 2026-11-16. Branches inspected: `PROD` in both repositories (API at `a50aee2`, Angular at `c0b6106`).
 No code was changed to produce this document.
 
