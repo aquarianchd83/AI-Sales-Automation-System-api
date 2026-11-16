@@ -112,6 +112,19 @@ public class ContentStudioStoriesController : ControllerBase
     public async Task<ActionResult<StoryProjectDto>> GetProject(Guid id, CancellationToken ct)
         => Ok(await _stories.GetProjectAsync(RequireTenantId(), id, ct));
 
+    /// <summary>Saves a story the tenant has not raised yet, with whatever is filled in so far.</summary>
+    [HttpPut("projects/{id:guid}")]
+    public async Task<ActionResult<StoryProjectDto>> UpdateDraft(Guid id, [FromBody] CreateStoryProjectRequest request, CancellationToken ct)
+        => Ok(await _stories.UpdateDraftAsync(RequireTenantId(), id, request, ct));
+
+    /// <summary>Deletes one of the tenant's own stories (a draft, a declined request or a finished video), not one the platform team is still making.</summary>
+    [HttpDelete("projects/{id:guid}")]
+    public async Task<IActionResult> DeleteProject(Guid id, CancellationToken ct)
+    {
+        await _requests.DeleteStoryAsync(RequireTenantId(), id, ct);
+        return NoContent();
+    }
+
     [HttpPut("projects/{id:guid}/video-provider")]
     public async Task<ActionResult<StoryProjectDto>> SetVideoProvider(Guid id, [FromBody] SetVideoProviderRequest request, CancellationToken ct)
         => Ok(await _stories.SetVideoProviderAsync(RequireTenantId(), id, request.Provider, ct));

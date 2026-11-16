@@ -55,6 +55,9 @@ public interface IStoryStudioService
 
     Task<StoryProjectDto> GetProjectAsync(Guid tenantId, Guid projectId, CancellationToken ct = default);
 
+    /// <summary>Saves a story the tenant has not raised yet (a draft) with whatever they have filled in so far. Only a draft that was never requested can be changed.</summary>
+    Task<StoryProjectDto> UpdateDraftAsync(Guid tenantId, Guid projectId, CreateStoryProjectRequest request, CancellationToken ct = default);
+
     Task<StoryProjectDto> SetVideoProviderAsync(Guid tenantId, Guid projectId, SceneVideoProviderKind provider, CancellationToken ct = default);
 
     /// <param name="chargeTenant">False when the work is already paid for (a requested video's price covers its script).</param>

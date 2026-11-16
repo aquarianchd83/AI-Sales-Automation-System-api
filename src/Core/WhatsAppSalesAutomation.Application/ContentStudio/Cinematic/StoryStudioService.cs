@@ -199,6 +199,26 @@ public class StoryStudioService : IStoryStudioService
         return ToDto(project, usable);
     }
 
+    public async Task<StoryProjectDto> UpdateDraftAsync(Guid tenantId, Guid projectId, CreateStoryProjectRequest request, CancellationToken ct = default)
+    {
+        var project = await ProjectAsync(tenantId, projectId, ct);
+        if (project.Status != StoryProjectStatus.Draft) throw new ConflictException("Only a draft can be changed.");
+        if (await _context.StoryVideoRequests.IgnoreQueryFilters().AnyAsync(r => r.ProjectId == projectId && r.TenantId == tenantId, ct))
+            throw new ConflictException("This story has already been requested, so it can no longer be changed.");
+        if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Topic)) throw new ArgumentException("A draft needs a title and a topic.");
+        if (request.TargetSeconds is < 8 or > 40) throw new ArgumentException("The target length must be between 8 and 40 seconds.");
+
+        project.Title = request.Title.Trim();
+        project.Topic = request.Topic.Trim();
+        project.Language = string.IsNullOrWhiteSpace(request.Language) ? "Hinglish" : request.Language.Trim();
+        project.Style = Clip(request.Style, 200);
+        project.Audience = Clip(request.Audience, 200);
+        project.Moral = Clip(request.Moral, 500);
+        project.TargetSeconds = request.TargetSeconds;
+        await _context.SaveChangesAsync(ct);
+        return ToDto(project, await CharacterIdsAsync(projectId, ct));
+    }
+
     public async Task<StoryProjectDto> GetProjectAsync(Guid tenantId, Guid projectId, CancellationToken ct = default)
     {
         var project = await ProjectAsync(tenantId, projectId, ct);

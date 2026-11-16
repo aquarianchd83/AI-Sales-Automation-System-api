@@ -71,6 +71,9 @@ public interface IStoryVideoRequestService
     /// <summary>One of the tenant's own requests in full. Not found for another tenant's.</summary>
     Task<StoryVideoRequestDetailDto> GetForTenantAsync(Guid tenantId, Guid requestId, CancellationToken ct = default);
 
+    /// <summary>Deletes one of the tenant's own stories with everything under it: its request, script, scenes, clips and renders, and the stored video. A story whose request the platform team is still working on (raised, or script ready) cannot be deleted - decline it first or wait for the video. Not found for another tenant's story.</summary>
+    Task DeleteStoryAsync(Guid tenantId, Guid projectId, CancellationToken ct = default);
+
     Task<PagedResult<PlatformStoryVideoRequestRowDto>> ListAllAsync(StoryVideoRequestQuery query, CancellationToken ct = default);
 
     Task<PlatformStoryVideoRequestDetailDto> GetAsync(Guid requestId, CancellationToken ct = default);
@@ -158,6 +161,42 @@ public class StoryVideoRequestService : IStoryVideoRequestService
                           select new { Request = r, p.Title }).ToListAsync(ct);
         var amounts = await AmountsAsync(rows.Select(x => x.Request.ChargeActivityId), ct);
         return rows.Select(x => ToDto(x.Request, x.Title, amounts)).ToList();
+    }
+
+    public async Task DeleteStoryAsync(Guid tenantId, Guid projectId, CancellationToken ct = default)
+    {
+        var project = await _context.StoryProjects.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == projectId && p.TenantId == tenantId, ct)
+            ?? throw new NotFoundException("Story project", projectId);
+
+        var requests = await _context.StoryVideoRequests.IgnoreQueryFilters().Where(r => r.ProjectId == projectId && r.TenantId == tenantId).ToListAsync(ct);
+        // The platform team is working on it and the credits are prepaid: deleting now would lose both the work and the refund path.
+        if (requests.Any(r => r.Status is StoryVideoRequestStatus.Raised or StoryVideoRequestStatus.ScriptReady))
+            throw new ConflictException("This video is still being made, so it cannot be deleted yet. You can delete it once the video is ready or the request is declined.");
+        if (project.Status == StoryProjectStatus.Generating)
+            throw new ConflictException("Clips are being generated for this story; it cannot be deleted now.");
+
+        var sceneIds = await _context.StoryScenes.IgnoreQueryFilters().Where(s => s.ProjectId == projectId && s.TenantId == tenantId).Select(s => s.Id).ToListAsync(ct);
+        _context.StoryDialogueLines.RemoveRange(await _context.StoryDialogueLines.IgnoreQueryFilters().Where(d => d.TenantId == tenantId && sceneIds.Contains(d.SceneId)).ToListAsync(ct));
+        _context.StoryScenes.RemoveRange(await _context.StoryScenes.IgnoreQueryFilters().Where(s => s.ProjectId == projectId && s.TenantId == tenantId).ToListAsync(ct));
+        _context.StoryScriptVersions.RemoveRange(await _context.StoryScriptVersions.IgnoreQueryFilters().Where(s => s.ProjectId == projectId && s.TenantId == tenantId).ToListAsync(ct));
+        _context.StoryPublications.RemoveRange(await _context.StoryPublications.IgnoreQueryFilters().Where(p => p.ProjectId == projectId && p.TenantId == tenantId).ToListAsync(ct));
+        _context.StoryRenders.RemoveRange(await _context.StoryRenders.IgnoreQueryFilters().Where(r => r.ProjectId == projectId && r.TenantId == tenantId).ToListAsync(ct));
+        _context.StoryGenerationJobs.RemoveRange(await _context.StoryGenerationJobs.IgnoreQueryFilters().Where(j => j.ProjectId == projectId && j.TenantId == tenantId).ToListAsync(ct));
+        _context.StoryProjectCharacters.RemoveRange(await _context.StoryProjectCharacters.IgnoreQueryFilters().Where(c => c.ProjectId == projectId && c.TenantId == tenantId).ToListAsync(ct));
+
+        var assets = await _context.StoryMediaAssets.IgnoreQueryFilters().Where(a => a.ProjectId == projectId && a.TenantId == tenantId).ToListAsync(ct);
+        var storageKeys = assets.Select(a => a.StorageKey).Concat(requests.Select(r => r.VideoStorageKey)).Where(k => !string.IsNullOrEmpty(k)).Select(k => k!).Distinct().ToList();
+        _context.StoryMediaAssets.RemoveRange(assets);
+        _context.StoryVideoRequests.RemoveRange(requests);
+        _context.StoryProjects.Remove(project);
+        await _context.SaveChangesAsync(ct);
+
+        // The rows are gone; a file that cannot be removed is only orphaned, so it must not fail the delete.
+        foreach (var key in storageKeys)
+        {
+            try { await _storage.DeleteAsync(key, ct); }
+            catch (Exception) { /* orphaned file: nothing refers to it any more */ }
+        }
     }
 
     public async Task<StoryVideoRequestDetailDto> GetForTenantAsync(Guid tenantId, Guid requestId, CancellationToken ct = default)
