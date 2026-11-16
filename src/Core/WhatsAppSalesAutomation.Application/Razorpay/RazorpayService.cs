@@ -351,6 +351,10 @@ public class RazorpayService : IRazorpayService
             order.LastWebhookAtUtc = _clock.UtcNow;
         }
 
+        // Applied here, in the same save that stores it, so there is nothing left to process afterwards.
+        record.ProcessingStatus = record.Applied ? RazorpayWebhookProcessingStatus.Completed : RazorpayWebhookProcessingStatus.Ignored;
+        record.ProcessedAtUtc = _clock.UtcNow;
+
         _context.RazorpayWebhookEvents.Add(record);
         try
         {

@@ -684,6 +684,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
 
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<decimal>("FxRateToInr")
                         .HasColumnType("decimal(18,6)");
 
@@ -697,6 +701,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<DateTime>("PaidAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.Property<DateTime?>("PeriodEndUtc")
                         .HasColumnType("datetime2");
@@ -717,12 +725,29 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("ProviderInvoiceId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ProviderPaymentId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ProviderSubscriptionId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<Guid?>("RefundOfPaymentId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("StateCode")
                         .HasMaxLength(5)
                         .HasColumnType("nvarchar(5)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("TaxLinesJson")
                         .HasColumnType("nvarchar(max)");
@@ -741,7 +766,13 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProviderSubscriptionId");
+
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("Provider", "ProviderPaymentId")
+                        .IsUnique()
+                        .HasFilter("[ProviderPaymentId] IS NOT NULL");
 
                     b.ToTable("Payments", (string)null);
                 });
@@ -1222,6 +1253,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("CancelAtPeriodEnd")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -1232,6 +1266,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("PlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RazorpaySubscriptionRowId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Status")
@@ -1246,6 +1283,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RazorpaySubscriptionRowId");
 
                     b.HasIndex("TenantId")
                         .IsUnique();
@@ -5750,6 +5789,178 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("RazorpayOrders", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("AmountMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("Interval")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("nvarchar(4)");
+
+                    b.Property<string>("Period")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RazorpayPlanId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RazorpayPlanId")
+                        .IsUnique();
+
+                    b.HasIndex("PlanId", "Mode", "Currency", "AmountMinor", "Period", "Interval")
+                        .IsUnique();
+
+                    b.ToTable("RazorpayPlans", (string)null);
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("AmountMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("AuthenticatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("CancelAtCycleEnd")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ChargeAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("CurrentEndUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CurrentStartUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CustomerId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("EndedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastEvent")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime?>("LastEventAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastReconciledAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("nvarchar(4)");
+
+                    b.Property<int>("PaidCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RazorpayPlanRowId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RazorpaySubscriptionId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ShortUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TotalCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId");
+
+                    b.HasIndex("RazorpayPlanRowId");
+
+                    b.HasIndex("RazorpaySubscriptionId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RazorpaySubscriptions_TenantId_PendingAuthorization")
+                        .HasFilter("[Status] = 'Created'");
+
+                    b.HasIndex("Status", "LastReconciledAtUtc");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("RazorpaySubscriptions", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5762,10 +5973,17 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("Event")
                         .IsRequired()
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime?>("EventCreatedAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("EventId")
                         .IsRequired()
@@ -5782,10 +6000,24 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.Property<string>("Payload")
                         .IsRequired()
-                        .HasMaxLength(8000)
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PaymentId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<DateTime?>("ProcessedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SubscriptionId")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
@@ -5798,6 +6030,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("EventId")
                         .IsUnique();
+
+                    b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("ProcessingStatus", "CreatedAt");
 
                     b.ToTable("RazorpayWebhookEvents", (string)null);
                 });
@@ -8022,6 +8258,14 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Billing.Subscription", b =>
+                {
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscription", null)
+                        .WithMany()
+                        .HasForeignKey("RazorpaySubscriptionRowId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Campaigns.CampaignCustomer", b =>
                 {
                     b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Campaigns.Campaign", null)
@@ -8289,6 +8533,36 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Packages.SalesPackage", null)
                         .WithMany()
                         .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan", b =>
+                {
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Billing.Plan", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscription", b =>
+                {
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Billing.Plan", null)
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan", null)
+                        .WithMany()
+                        .HasForeignKey("RazorpayPlanRowId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("WhatsAppSalesAutomation.Domain.Entities.Tenancy.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

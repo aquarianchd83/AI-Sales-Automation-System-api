@@ -30,4 +30,12 @@ public class Subscription : BaseEntity, ITenantOwned
     public DateTime? CurrentPeriodStartUtc { get; set; }
 
     public DateTime? CurrentPeriodEndUtc { get; set; }
+
+    /// <summary>The <c>RazorpaySubscription</c> row (the AutoPay mandate) that pays for this access, when one does. Null for a plan nobody is
+    /// charged for automatically: the trial, a free plan, an operator's override. The gateway's own ids stay on that row and on
+    /// <see cref="Payment"/> - this is only the pointer to it.</summary>
+    public Guid? RazorpaySubscriptionRowId { get; set; }
+
+    /// <summary>The tenant asked to stop renewing. Access they have paid for runs to <see cref="CurrentPeriodEndUtc"/>.</summary>
+    public bool CancelAtPeriodEnd { get; set; }
 }

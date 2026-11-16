@@ -217,6 +217,10 @@ public interface IApplicationDbContext
 
     DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent> RazorpayWebhookEvents { get; }
 
+    DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan> RazorpayPlans { get; }
+
+    DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscription> RazorpaySubscriptions { get; }
+
     DbSet<PlatformNotification> PlatformNotifications { get; }
 
     DbSet<PlatformTicket> PlatformTickets { get; }

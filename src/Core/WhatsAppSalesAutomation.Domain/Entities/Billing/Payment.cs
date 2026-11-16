@@ -76,5 +76,24 @@ public class Payment : BaseEntity, ITenantOwned
     /// gateway is wired in - this column is what future code branches on, not a schema change.</summary>
     public string Provider { get; set; } = "Simulated";
 
+    /// <summary>The gateway's own id for this payment (Razorpay: "pay_..."). Null for simulated rows. Unique per provider, which is what
+    /// stops one gateway payment ever being recorded twice, however many times its webhook is delivered.</summary>
+    public string? ProviderPaymentId { get; set; }
+
+    /// <summary>The gateway's invoice for the billing cycle this paid (Razorpay: "inv_...").</summary>
+    public string? ProviderInvoiceId { get; set; }
+
+    /// <summary>The gateway subscription that raised it (Razorpay: "sub_...").</summary>
+    public string? ProviderSubscriptionId { get; set; }
+
+    /// <summary>upi, card, netbanking ... as the gateway reports it.</summary>
+    public string? PaymentMethod { get; set; }
+
+    public PaymentStatus Status { get; set; } = PaymentStatus.Succeeded;
+
+    /// <summary>Why it failed, in the gateway's words, when <see cref="Status"/> is Failed.</summary>
+    public string? FailureReason { get; set; }
+
+    /// <summary>When the money was taken - or, for a Failed row, when the attempt was made.</summary>
     public DateTime PaidAtUtc { get; set; }
 }
