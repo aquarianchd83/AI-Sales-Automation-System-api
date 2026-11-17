@@ -18,6 +18,10 @@ public interface IRazorpayService
 
     Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Switches UPI AutoPay on or off for tenants. Turning it on needs the key id, key secret and webhook secret saved: without them a tenant
+    /// would be sent to Razorpay to authorise a mandate whose payments this platform could never confirm. Turning it off is always allowed.</summary>
+    Task<RazorpaySettingsDto> SetAutoPayEnabledAsync(bool enabled, Guid? userId, CancellationToken cancellationToken = default);
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Never throws on a Razorpay error.</summary>
     Task<RazorpayCheckResultDto> TestKeysAsync(TestRazorpayKeysRequest request, CancellationToken cancellationToken = default);
 
@@ -84,11 +88,13 @@ public class RazorpayService : IRazorpayService
         var keyId = Get(stored, KeyIdKey);
         var secret = Get(stored, KeySecretKey);
         var webhook = Get(stored, WebhookSecretKey);
+        var autoPay = string.Equals(Get(stored, Billing.AutoPay.AutoPaySettings.EnabledKey), "true", StringComparison.OrdinalIgnoreCase);
 
         return new RazorpaySettingsDto(
             keyId, keyId.Length == 0 ? "test" : RazorpayKeys.ModeOf(keyId),
             secret.Length > 0, Mask(secret), webhook.Length > 0, Mask(webhook),
-            keyId.Length > 0 && secret.Length > 0, WebhookPath);
+            keyId.Length > 0 && secret.Length > 0, WebhookPath,
+            autoPay, autoPay && keyId.Length > 0 && secret.Length > 0 && webhook.Length > 0);
     }
 
     public async Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default)
@@ -107,6 +113,23 @@ public class RazorpayService : IRazorpayService
             values[WebhookSecretKey] = request.WebhookSecret.Trim();
 
         await _store.UpsertAsync(values, userId, cancellationToken);
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<RazorpaySettingsDto> SetAutoPayEnabledAsync(bool enabled, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        if (enabled)
+        {
+            var current = await GetSettingsAsync(cancellationToken);
+            if (!current.IsConfigured)
+                throw new ConflictException("Save the Razorpay key id and key secret first.");
+            if (!current.HasWebhookSecret)
+                throw new ConflictException("Save the webhook secret first: without it payments cannot be confirmed, so tenants would be sent to Razorpay for nothing.");
+        }
+
+        await _store.UpsertAsync(
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [Billing.AutoPay.AutoPaySettings.EnabledKey] = enabled ? "true" : "false" }, userId, cancellationToken);
+        _logger.LogInformation("UPI AutoPay switched {State} by {UserId}", enabled ? "on" : "off", userId);
         return await GetSettingsAsync(cancellationToken);
     }
 

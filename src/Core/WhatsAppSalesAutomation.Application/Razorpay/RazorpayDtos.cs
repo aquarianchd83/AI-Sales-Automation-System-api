@@ -10,11 +10,18 @@ public record RazorpaySettingsDto(
     bool HasWebhookSecret,
     string? WebhookSecretHint,
     bool IsConfigured,
-    string WebhookPath);
+    string WebhookPath,
+    // Whether tenants billed in rupees pay for a plan through UPI AutoPay. Off until an operator turns it on here.
+    bool AutoPayEnabled = false,
+    // Switched on AND able to work: keys and the webhook secret are saved. Switched on but not ready means tenants still see the old buttons.
+    bool AutoPayReady = false);
 
 /// <param name="KeySecret">null keeps the stored secret, "" clears it, anything else replaces it.</param>
 /// <param name="WebhookSecret">Same convention as <paramref name="KeySecret"/>.</param>
 public record UpdateRazorpaySettingsRequest(string KeyId, string? KeySecret, string? WebhookSecret);
+
+/// <param name="Enabled">True makes a paid plan, for a tenant billed in rupees, bought through UPI AutoPay.</param>
+public record SetRazorpayAutoPayRequest(bool Enabled);
 
 /// <param name="KeySecret">null tests with the stored secret.</param>
 public record TestRazorpayKeysRequest(string KeyId, string? KeySecret);

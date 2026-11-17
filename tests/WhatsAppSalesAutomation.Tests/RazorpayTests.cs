@@ -126,6 +126,72 @@ public sealed class RazorpayServiceTests : IDisposable
         Assert.False(kept.HasWebhookSecret);
     }
 
+    // ── The UPI AutoPay switch ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AutoPay_is_off_until_an_operator_turns_it_on()
+    {
+        var settings = await _service.GetSettingsAsync();
+
+        Assert.False(settings.AutoPayEnabled);
+        Assert.False(settings.AutoPayReady);
+    }
+
+    [Fact]
+    public async Task AutoPay_cannot_be_turned_on_before_the_keys_are_saved()
+    {
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => _service.SetAutoPayEnabledAsync(true, null));
+
+        Assert.Contains("key id and key secret", ex.Message);
+        Assert.False(_store.Rows.ContainsKey(WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPaySettings.EnabledKey));
+    }
+
+    [Fact]
+    public async Task AutoPay_cannot_be_turned_on_without_a_webhook_secret_because_payments_could_never_be_confirmed()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "abcdefgh1234", null), null);
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => _service.SetAutoPayEnabledAsync(true, null));
+
+        Assert.Contains("webhook secret", ex.Message);
+        Assert.False((await _service.GetSettingsAsync()).AutoPayEnabled);
+    }
+
+    [Fact]
+    public async Task With_keys_and_a_webhook_secret_AutoPay_turns_on_under_the_key_the_billing_code_reads()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "abcdefgh1234", "wh-9876"), null);
+
+        var on = await _service.SetAutoPayEnabledAsync(true, Guid.NewGuid());
+
+        Assert.True(on.AutoPayEnabled);
+        Assert.True(on.AutoPayReady);
+        Assert.Equal("true", _store.Rows[WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPayService.EnabledKey]);
+    }
+
+    [Fact]
+    public async Task AutoPay_can_always_be_turned_off_even_with_no_keys()
+    {
+        _store.Rows[WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPaySettings.EnabledKey] = "true";
+
+        var off = await _service.SetAutoPayEnabledAsync(false, null);
+
+        Assert.False(off.AutoPayEnabled);
+        Assert.Equal("false", _store.Rows[WhatsAppSalesAutomation.Application.Billing.AutoPay.AutoPaySettings.EnabledKey]);
+    }
+
+    [Fact]
+    public async Task Removing_the_webhook_secret_later_leaves_AutoPay_on_but_not_ready()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "abcdefgh1234", "wh-9876"), null);
+        await _service.SetAutoPayEnabledAsync(true, null);
+
+        var after = await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, null, ""), null);
+
+        Assert.True(after.AutoPayEnabled);
+        Assert.False(after.AutoPayReady);
+    }
+
     [Fact]
     public async Task A_key_id_that_is_not_razorpays_is_refused()
     {
