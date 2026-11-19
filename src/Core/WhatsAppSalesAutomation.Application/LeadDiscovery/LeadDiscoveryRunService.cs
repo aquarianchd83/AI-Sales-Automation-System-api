@@ -508,7 +508,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             // candidates - and stops only when the research stalls (two rounds in a row find nothing new), the allowance runs out, or the
             // round limit is reached, which is what keeps a run's cost bounded.
             var emptyRounds = 0;
-            var priorUnusableRate = await PriorUnusableRateAsync(tenantId, cancellationToken);
+            var priorUnusableRate = await PriorUnusableRateAsync(profile, cancellationToken);
             while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
@@ -811,17 +811,29 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _context.LeadDiscoveryExecutions.Attach(run.Execution);
     }
 
-    /// <summary>How many candidates this tenant's recent real searches threw away (rejected or duplicate), as a share of all they considered -
-    /// the starting estimate for how many to ask for. From their last few runs that really searched, so a simulated run's invented businesses
-    /// do not teach it anything; the configured starting guess when there is not enough history yet.</summary>
-    private async Task<decimal> PriorUnusableRateAsync(Guid tenantId, CancellationToken cancellationToken)
+    /// <summary>
+    /// How many candidates this profile's recent real searches threw away (rejected or duplicate), as a share of all they considered - the
+    /// starting estimate for how many to ask for. What gets thrown away depends on the profile's rules (a required contact person, a required
+    /// phone, ...), so it learns only from this profile's own runs, and only from those since the profile was last changed: a run made under
+    /// earlier rules says nothing about the current ones. Simulated runs are left out because their businesses are invented. With too little
+    /// history the configured starting guess is used.
+    /// </summary>
+    private async Task<decimal> PriorUnusableRateAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
     {
+        var since = profile.UpdatedAt ?? profile.CreatedAt;
+
         // "Simulated" is what a simulated run records as its model (SimulatedLeadDiscoveryAgent.ModelName, in Infrastructure).
-        var recent = await _context.LeadDiscoveryRuns.AsNoTracking()
-            .Where(r => r.TenantId == tenantId && r.CandidatesConsidered > 0 && r.Model != "Simulated")
-            .OrderByDescending(r => r.RanAtUtc)
+        var recent = await (
+                from r in _context.LeadDiscoveryRuns.AsNoTracking()
+                join e in _context.LeadDiscoveryExecutions.AsNoTracking() on r.ExecutionId equals e.Id
+                where r.TenantId == profile.TenantId
+                      && e.LeadDiscoveryProfileId == profile.Id
+                      && r.RanAtUtc >= since
+                      && r.CandidatesConsidered > 0
+                      && r.Model != "Simulated"
+                orderby r.RanAtUtc descending
+                select new { r.CandidatesConsidered, r.Rejected, r.Duplicates })
             .Take(RecentRunsForRejectionRate)
-            .Select(r => new { r.CandidatesConsidered, r.Rejected, r.Duplicates })
             .ToListAsync(cancellationToken);
 
         var learned = CandidateRequestPlanner.RateFromHistory(

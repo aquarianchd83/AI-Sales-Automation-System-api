@@ -12,8 +12,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 ///
 /// The invented evidence is built to behave like the real thing: each candidate's phone number and email
 /// appear in the text of its "fetched" page, so they pass LeadQualification's verification exactly as a real
-/// one would. Two deliberately flawed candidates are added to every round that asks for three or more - one
-/// whose phone is on no page, one permanently closed - so the rejection paths show up in the run summary too.
+/// one would. About 30% of what it returns is deliberately flawed (when three or more are asked for) - a phone on
+/// no page, or a permanently closed business, in turn - so the rejection paths show up in the run summary, and
+/// a simulated run hands back what a real search would: some candidates that qualify and some that do not.
 ///
 /// Everything it produces is marked: names start with "[Simulated]", and websites and emails use the
 /// reserved <c>.example</c> domain, which cannot exist on the real internet. That makes the rows easy to spot
@@ -23,6 +24,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
 {
     private const string Marker = "[Simulated]";
+
+    /// <summary>The share of the candidates it returns that fail the rules - about what a real search turns up, and what the request planner
+    /// starts from, so a simulated run behaves like a real one.</summary>
+    private const double FlawedShare = 0.3;
 
     /// <summary>Recorded as the run's model so a simulated run is unmistakable in the spend history.</summary>
     public const string ModelName = "Simulated";
@@ -44,13 +49,20 @@ public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
         var pages = new List<FetchedPage>();
         var seenUrls = new List<string> { $"https://search.example/?q={Uri.EscapeDataString(request.TargetBusinessType)}" };
 
-        for (var i = 1; i <= Math.Max(1, request.MaxCandidates); i++)
+        // As many candidates as were asked for, a realistic share of them failing the rules - like a real search, which hands back what it
+        // found, not only what qualifies. (It used to return every one qualifying plus two flawed, so asking for more always left a surplus.)
+        var asked = Math.Max(1, request.MaxCandidates);
+        var flawed = asked >= 3 ? Math.Max(1, (int)Math.Round(asked * FlawedShare, MidpointRounding.AwayFromZero)) : 0;
+
+        for (var i = 1; i <= asked - flawed; i++)
             candidates.Add(Invent(request, tag, city, i, pages, seenUrls));
 
-        if (request.MaxCandidates >= 3)
+        // The two ways a candidate fails, taken in turn: a phone on no page, and a business that has closed.
+        for (var i = 0; i < flawed; i++)
         {
-            candidates.Add(WithoutVerifiablePhone(request, tag, city, seenUrls));
-            candidates.Add(PermanentlyClosed(request, tag, city, pages, seenUrls));
+            candidates.Add(i % 2 == 0
+                ? WithoutVerifiablePhone(request, tag, city, seenUrls)
+                : PermanentlyClosed(request, tag, city, pages, seenUrls));
         }
 
         _logger.LogInformation(

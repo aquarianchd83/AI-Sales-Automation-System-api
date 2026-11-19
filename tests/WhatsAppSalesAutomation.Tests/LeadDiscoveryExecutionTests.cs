@@ -19,6 +19,7 @@ using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.LeadDiscovery;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -2146,12 +2147,30 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
     // ---- how many to ask for: learned from the tenant's own runs ----
 
-    private void RecordRealRun(int considered, int rejected, int duplicates, string model = "gpt-5-mini", DateTime? at = null) =>
+    /// <summary>An earlier run of a profile, with the execution it belongs to - the learning reads runs through their executions. By default it is
+    /// an hour from now, which is after the profile was last saved (see PriorUnusableRateAsync); a test about older runs passes its own time.</summary>
+    private void RecordRealRun(int considered, int rejected, int duplicates, string model = "gpt-5-mini", DateTime? at = null, Guid? profileId = null)
+    {
+        var ranAt = at ?? DateTime.UtcNow.AddHours(1);
+        var execution = new LeadDiscoveryExecution
+        {
+            TenantId = _tenant, LeadDiscoveryProfileId = profileId ?? _profileId, ProfileName = "Eye clinic", ProcessingDate = ranAt.Date,
+            Trigger = LeadDiscoveryTriggers.Scheduled, StartedAtUtc = ranAt, EndedAtUtc = ranAt, Status = LeadDiscoveryExecutionStatus.Completed,
+            LockKey = "earlier-run", CampaignStatus = LeadDiscoveryCampaignStatus.Skipped, TemplateStatus = LeadDiscoveryAssociationStatus.Skipped,
+            MappingStatus = LeadDiscoveryAssociationStatus.Skipped
+        };
+        execution.RootExecutionId = execution.Id;
+        _db.LeadDiscoveryExecutions.Add(execution);
         _db.LeadDiscoveryRuns.Add(new LeadDiscoveryRun
         {
-            TenantId = _tenant, RanAtUtc = at ?? DateTime.UtcNow.AddDays(-1), Model = model, Rounds = 1,
+            TenantId = _tenant, ExecutionId = execution.Id, RanAtUtc = ranAt, Model = model, Rounds = 1,
             CandidatesConsidered = considered, LeadsSaved = considered - rejected - duplicates, Rejected = rejected, Duplicates = duplicates
         });
+    }
+
+    /// <summary>When the profile's rules last changed. Written straight to the table, so saving the profile does not stamp it again.</summary>
+    private void ProfileLastChangedAt(DateTime whenUtc) =>
+        _db.LeadDiscoveryProfiles.ExecuteUpdate(p => p.SetProperty(x => x.UpdatedAt, whenUtc));
 
     private static readonly string[] Letters = Enumerable.Range('A', 20).Select(c => ((char)c).ToString()).ToArray();
 
@@ -2214,14 +2233,80 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     {
         SetBatchSize(10);
         for (var i = 0; i < 5; i++)
-            RecordRealRun(considered: 12, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-1 - i));   // the five latest: nothing thrown away
-        RecordRealRun(considered: 100, rejected: 90, duplicates: 0, at: DateTime.UtcNow.AddDays(-60));        // long ago: 90%
+            RecordRealRun(considered: 12, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddHours(5 - i));   // the five latest: nothing thrown away
+        RecordRealRun(considered: 100, rejected: 90, duplicates: 0, at: DateTime.UtcNow.AddMinutes(30));     // older than those five: 90%
         await _db.SaveChangesAsync();
         _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
 
         await Service().RunForTenantAsync(_tenant);
 
         Assert.Equal(10, _agent.Requests[0].MaxCandidates);                                // 0% from the latest five: exactly what is needed
+    }
+
+    [Fact]
+    public async Task Runs_from_before_the_profile_was_last_changed_are_ignored_because_other_rules_threw_away_other_things()
+    {
+        SetBatchSize(10);
+        // A run under the old rules threw away 74% (as the Claude run of 17 Nov did) - then the profile was edited.
+        RecordRealRun(considered: 31, rejected: 23, duplicates: 0, at: DateTime.UtcNow.AddDays(-2));
+        await _db.SaveChangesAsync();
+        ProfileLastChangedAt(DateTime.UtcNow.AddDays(-1));
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the starting guess, not 74% -> 20
+    }
+
+    [Fact]
+    public async Task A_run_after_the_profile_was_last_changed_does_teach_it()
+    {
+        SetBatchSize(10);
+        ProfileLastChangedAt(DateTime.UtcNow.AddDays(-1));
+        RecordRealRun(considered: 12, rejected: 2, duplicates: 0, at: DateTime.UtcNow.AddHours(-3));   // since the change
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(12, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task Only_this_profiles_own_runs_teach_it_not_another_profiles()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 40, rejected: 36, duplicates: 0, profileId: Guid.NewGuid());   // another profile: 90%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task The_real_case_a_profile_edited_after_an_old_high_rejection_run_asks_for_15_and_fills_a_batch_of_10_with_nothing_left_over()
+    {
+        SetBatchSize(10);
+        // Four earlier real runs of the same profile, 47 candidates and 23 thrown away (49%), all before the profile was last saved.
+        RecordRealRun(considered: 31, rejected: 23, duplicates: 0, at: DateTime.UtcNow.AddDays(-2));
+        RecordRealRun(considered: 8, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(1));
+        RecordRealRun(considered: 6, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(2));
+        RecordRealRun(considered: 2, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(3));
+        await _db.SaveChangesAsync();
+        ProfileLastChangedAt(DateTime.UtcNow.AddHours(-6));
+        var simulated = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance);
+
+        await ServiceWithChargeLog(new List<(string Key, string Note)>(), simulated).RunForTenantAsync(_tenant);
+
+        var run = await _db.LeadDiscoveryRuns.OrderByDescending(r => r.RanAtUtc).FirstAsync(r => r.Model == "Simulated");
+        Assert.Equal(15, run.CandidatesConsidered);                                        // asked for 15 - not 20 - and got 15
+        // The earlier runs recorded above are other executions (and the test clock is fixed, so this one does not sort last by date).
+        var execution = (await Executions()).Single(e => e.LockKey != "earlier-run");
+        Assert.Equal(10, execution.CustomersCreated);
+        Assert.Equal(0, await _db.LeadDiscoveryExecutionCustomers.CountAsync(c => c.ExecutionId == execution.Id && c.ErrorMessage!.Contains("batch was already full")));
+        Assert.Equal(5, execution.CustomersInvalid);                                       // the ones a real search would have thrown away
     }
 
     [Fact]
@@ -2374,7 +2459,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.Equal(consumedBefore, _quotaConsumed);                                      // ...and not charged a second time
     }
 
-    private LeadDiscoveryRunService ServiceWithChargeLog(List<(string Key, string Note)> charges)
+    private LeadDiscoveryRunService ServiceWithChargeLog(List<(string Key, string Note)> charges, ILeadDiscoveryAgent? agent = null)
     {
         var planLimits = Stub<IPlanLimitsService>.Create(new() { ["GetLeadDiscoveryBatchLimitAsync"] = _ => Task.FromResult<int?>(null) });
         var quota = Stub<IQuotaGate>.Create(new()
@@ -2388,7 +2473,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             }
         });
         return new LeadDiscoveryRunService(
-            _db, _agent, planLimits, quota, Stub<IQuotaAlertService>.Create(new()),
+            _db, agent ?? _agent, planLimits, quota, Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), Stub<ICampaignService>.Create(new()),
             _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
             new Snapshot<LeadDiscoveryOptions>(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
