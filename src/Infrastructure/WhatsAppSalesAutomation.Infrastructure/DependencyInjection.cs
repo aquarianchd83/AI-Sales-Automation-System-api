@@ -339,6 +339,10 @@ public static class DependencyInjection
             services.AddHttpClient<OpenAiLeadDiscoveryAgent>(
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
 
+            // Gemini: Google Search grounding for the research, then the same page reader as ChatGPT.
+            services.AddHttpClient<GeminiLeadDiscoveryAgent>(
+                client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
+
             services.AddScoped<SimulatedLeadDiscoveryAgent>();
             services.AddScoped<ILeadDiscoveryAgent, RoutedLeadDiscoveryAgent>();
         }

@@ -5,9 +5,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 
 /// <summary>
 /// The discovery agent the run service talks to: it hands each run to whichever engine the platform admin picked for
-/// "Discovery lead" on the Integrations page - the simulator, ChatGPT or Claude - read per run, so a save there is live
+/// "Discovery lead" on the Integrations page - the simulator, ChatGPT, Claude or Gemini - read per run, so a save there is live
 /// with no restart. The engines themselves are <see cref="SimulatedLeadDiscoveryAgent"/>, <see cref="OpenAiLeadDiscoveryAgent"/>
-/// and <see cref="AnthropicLeadDiscoveryAgent"/>; the real ones are wrapped so every call lands in the AI call log under its own provider.
+/// , <see cref="AnthropicLeadDiscoveryAgent"/> and <see cref="GeminiLeadDiscoveryAgent"/>; the real ones are wrapped so every call lands in the AI call log under its own provider.
 /// </summary>
 public sealed class RoutedLeadDiscoveryAgent : ILeadDiscoveryAgent
 {
@@ -15,6 +15,7 @@ public sealed class RoutedLeadDiscoveryAgent : ILeadDiscoveryAgent
     private readonly SimulatedLeadDiscoveryAgent _simulated;
     private readonly OpenAiLeadDiscoveryAgent _openAi;
     private readonly AnthropicLeadDiscoveryAgent _anthropic;
+    private readonly GeminiLeadDiscoveryAgent _gemini;
     private readonly AiCallRecorder _recorder;
 
     public RoutedLeadDiscoveryAgent(
@@ -22,12 +23,14 @@ public sealed class RoutedLeadDiscoveryAgent : ILeadDiscoveryAgent
         SimulatedLeadDiscoveryAgent simulated,
         OpenAiLeadDiscoveryAgent openAi,
         AnthropicLeadDiscoveryAgent anthropic,
+        GeminiLeadDiscoveryAgent gemini,
         AiCallRecorder recorder)
     {
         _routing = routing;
         _simulated = simulated;
         _openAi = openAi;
         _anthropic = anthropic;
+        _gemini = gemini;
         _recorder = recorder;
     }
 
@@ -41,6 +44,7 @@ public sealed class RoutedLeadDiscoveryAgent : ILeadDiscoveryAgent
             {
                 "OpenAI" => new RecordingLeadDiscoveryAgent(_openAi, _recorder, "OpenAI"),
                 "Anthropic" => new RecordingLeadDiscoveryAgent(_anthropic, _recorder, "Anthropic"),
+                "Google" => new RecordingLeadDiscoveryAgent(_gemini, _recorder, "Google"),
                 // A tool discovery cannot run on is never called: the simulator answers (AiFeatureRouting already guarantees this).
                 _ => _simulated,
             };

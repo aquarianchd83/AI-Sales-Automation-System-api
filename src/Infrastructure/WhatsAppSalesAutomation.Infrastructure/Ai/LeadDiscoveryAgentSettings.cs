@@ -35,6 +35,14 @@ public class LeadDiscoveryAgentSettings
     /// <summary>How much of a fetched page, in characters, the OpenAI agent reads (and is verified against).</summary>
     public int OpenAiMaxFetchChars { get; set; } = 20000;
 
+    /// <summary>Used when the engine is Gemini: the key defaults to the Google key saved under Configuration > AI Providers, so set this only
+    /// for a dedicated discovery key.</summary>
+    public string GeminiApiKey { get; set; } = string.Empty;
+
+    /// <summary>The model that does the research. It must support Google Search grounding and function calling (gemini-2.5-flash, gemini-2.5-pro ...).
+    /// Add its rates under LeadDiscovery:Pricing:Models.</summary>
+    public string GeminiModel { get; set; } = "gemini-2.5-flash";
+
     /// <summary>The platform's own Anthropic API key. Empty means lead discovery is not configured, and every
     /// tenant's run is skipped rather than failed.</summary>
     public string ApiKey { get; set; } = string.Empty;

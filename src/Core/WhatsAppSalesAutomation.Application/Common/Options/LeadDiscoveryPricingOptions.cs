@@ -12,6 +12,10 @@ public class LeadDiscoveryModelRates
 
     /// <summary>Writing input into the cache - typically a quarter dearer than plain input.</summary>
     public decimal CacheWritePerMillion { get; set; }
+
+    /// <summary>What a web search costs per thousand on this model, when it differs from <see cref="LeadDiscoveryPricingOptions.WebSearchPerThousand"/>
+    /// (Gemini bills grounded prompts at its own price). Null uses the general rate.</summary>
+    public decimal? SearchPerThousand { get; set; }
 }
 
 /// <summary>
@@ -42,6 +46,10 @@ public class LeadDiscoveryPricingOptions
         ["gpt-5-nano"] = new() { InputPerMillion = 0.05m, OutputPerMillion = 0.4m, CacheReadPerMillion = 0.005m, CacheWritePerMillion = 0m },
         ["gpt-5-mini"] = new() { InputPerMillion = 0.25m, OutputPerMillion = 2m, CacheReadPerMillion = 0.025m, CacheWritePerMillion = 0m },
         ["gpt-5"] = new() { InputPerMillion = 1.25m, OutputPerMillion = 10m, CacheReadPerMillion = 0.125m, CacheWritePerMillion = 0m },
+        // Gemini, for LeadDiscovery:Agent:GeminiModel. Google bills no cache write, and bills Google Search grounding per grounded prompt (one per research step).
+        ["gemini-2.5-flash-lite"] = new() { InputPerMillion = 0.1m, OutputPerMillion = 0.4m, CacheReadPerMillion = 0.01m, CacheWritePerMillion = 0m, SearchPerThousand = 35m },
+        ["gemini-2.5-flash"] = new() { InputPerMillion = 0.3m, OutputPerMillion = 2.5m, CacheReadPerMillion = 0.03m, CacheWritePerMillion = 0m, SearchPerThousand = 35m },
+        ["gemini-2.5-pro"] = new() { InputPerMillion = 1.25m, OutputPerMillion = 10m, CacheReadPerMillion = 0.125m, CacheWritePerMillion = 0m, SearchPerThousand = 35m },
         // A simulated run reports no usage at all, so this only makes its zero cost explicit.
         ["Simulated"] = new()
     };

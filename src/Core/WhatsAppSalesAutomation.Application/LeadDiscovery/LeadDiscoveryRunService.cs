@@ -1907,7 +1907,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 WebSearches = stats.Usage.WebSearches,
                 WebFetches = stats.Usage.WebFetches,
                 EstimatedCostUsd = LeadDiscoveryCost.Estimate(stats.Usage, stats.Model, _pricing),
-                SearchCostUsd = LeadDiscoveryCost.SearchCost(stats.Usage, _pricing),
+                SearchCostUsd = LeadDiscoveryCost.SearchCost(stats.Usage, _pricing, stats.Model),
                 ResearchNote = Truncate(stats.NotesText(), 2000)
             });
 

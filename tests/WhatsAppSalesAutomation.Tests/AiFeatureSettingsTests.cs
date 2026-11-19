@@ -75,7 +75,7 @@ public class AiFeatureSettingsTests
     [Fact]
     public void Each_feature_lists_only_the_tools_its_code_can_call()
     {
-        Assert.Equal(new[] { "Anthropic", "OpenAI" }, AiFeatures.SupportedProviders(AiFeatures.DiscoveryLead));
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, AiFeatures.SupportedProviders(AiFeatures.DiscoveryLead));
         Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, AiFeatures.SupportedProviders(AiFeatures.Conversation));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.KnowledgeBase));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.ContentGeneration));
@@ -90,7 +90,7 @@ public class AiFeatureSettingsTests
     {
         var dto = await Service(new MemoryStore()).GetAsync();
 
-        Assert.Equal(new[] { "Anthropic", "OpenAI" }, dto.DiscoveryLead.SupportedProviders);
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, dto.DiscoveryLead.SupportedProviders);
         Assert.Empty(dto.KnowledgeBase.SupportedProviders);
         Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, dto.Conversation.SupportedProviders);
         Assert.Equal(new[] { "OpenAI", "Google" }, dto.Conversation.SupportedEmbeddingProviders);
@@ -131,7 +131,7 @@ public class AiFeatureSettingsTests
         Assert.Equal("OpenAI", store.Rows["Integrations:Ai:DiscoveryKeywords:Provider"]);
         Assert.Equal("OpenAI", dto.DiscoveryKeywords.Provider);
         Assert.Equal("Anthropic", dto.DiscoveryLead.Provider); // the agent is untouched
-        Assert.Equal(new[] { "Anthropic", "OpenAI" }, dto.DiscoveryLead.SupportedProviders);
+        Assert.Equal(new[] { "Anthropic", "OpenAI", "Google" }, dto.DiscoveryLead.SupportedProviders);
     }
 
     [Fact]
@@ -215,16 +215,15 @@ public class AiFeatureSettingsTests
     }
 
     [Fact]
-    public async Task Refuses_a_tool_the_feature_does_not_support_even_with_its_key_saved_and_saves_nothing()
+    public async Task Discovery_leads_can_be_put_on_Gemini()
     {
         var store = new MemoryStore();
 
-        // Gemini has a key, but discovery leads cannot call it: a request that skipped the page must not get through.
-        var error = await Assert.ThrowsAsync<ValidationException>(() =>
-            Service(store).UpdateAsync(Valid() with { DiscoveryLead = Api("Google") }, null));
+        var dto = await Service(store).UpdateAsync(Valid() with { DiscoveryLead = Api("Google") }, null);
 
-        Assert.Contains(error.Errors, e => e.PropertyName == "DiscoveryLead.Provider" && e.ErrorMessage.Contains("not available for this feature") && e.ErrorMessage.Contains("Claude"));
-        Assert.Empty(store.Rows);
+        Assert.Equal("Google", store.Rows["Integrations:Ai:DiscoveryLead:Provider"]);
+        Assert.Equal("Google", dto.DiscoveryLead.Provider);
+        Assert.True(dto.DiscoveryLead.SavedProviderSupported);
     }
 
     [Fact]
@@ -278,19 +277,13 @@ public class AiFeatureSettingsTests
     public async Task A_saved_tool_the_feature_no_longer_supports_is_reported_and_left_untouched()
     {
         var store = new MemoryStore();
-        store.Rows["Integrations:Ai:DiscoveryLead:Mode"] = "Api";
-        store.Rows["Integrations:Ai:DiscoveryLead:Provider"] = "Google";
         store.Rows["Integrations:Ai:KnowledgeBase:Mode"] = "Api";
         store.Rows["Integrations:Ai:KnowledgeBase:Provider"] = "Google";
 
         var dto = await Service(store).GetAsync();
 
-        Assert.False(dto.DiscoveryLead.SavedProviderSupported);
-        Assert.False(dto.DiscoveryLead.IsLive);
-        Assert.Equal("Google", dto.DiscoveryLead.Provider);
         Assert.False(dto.KnowledgeBase.SavedProviderSupported);
         Assert.False(dto.KnowledgeBase.IsLive);
-        Assert.Equal("Google", store.Rows["Integrations:Ai:DiscoveryLead:Provider"]);
         Assert.Equal("Google", store.Rows["Integrations:Ai:KnowledgeBase:Provider"]);
     }
 
@@ -393,7 +386,7 @@ public class AiFeatureSettingsTests
         var ai = new FakeAi();
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            Service(new MemoryStore(), ai: ai).TestAsync(AiFeatures.DiscoveryLead, new TestAiFeatureRequest(Api("Google"))));
+            Service(new MemoryStore(), ai: ai).TestAsync(AiFeatures.KnowledgeBase, new TestAiFeatureRequest(Api("Google"))));
 
         Assert.Null(ai.LastProvider);
     }
@@ -495,11 +488,11 @@ public class AiFeatureSettingsTests
     {
         var routing = new AiFeatureRouting(new Snapshot(new AiFeatureOptions
         {
-            DiscoveryLead = new AiFeatureOption { Mode = "Api", Provider = "Google" },
+            DiscoveryLead = new AiFeatureOption { Mode = "Api", Provider = "Google" }, // Gemini now runs discovery
             VideoRenders = new AiFeatureOption { Mode = "Api", Provider = "anthropic" },
         }));
 
-        Assert.False(routing.Resolve(AiFeatures.DiscoveryLead).UsesThirdParty);
+        Assert.True(routing.Resolve(AiFeatures.DiscoveryLead).UsesThirdParty);
         Assert.False(routing.Resolve(AiFeatures.VideoRenders).UsesThirdParty);
     }
 }

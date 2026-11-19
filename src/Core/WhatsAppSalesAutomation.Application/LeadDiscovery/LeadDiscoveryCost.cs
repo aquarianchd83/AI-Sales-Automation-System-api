@@ -28,11 +28,11 @@ public static class LeadDiscoveryCost
                          + usage.CacheCreationInputTokens * rates.CacheWritePerMillion)
                         / 1_000_000m;
 
-        return Math.Round(tokenCost + SearchCost(usage, pricing), 6, MidpointRounding.AwayFromZero);
+        return Math.Round(tokenCost + SearchCost(usage, pricing, model), 6, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>The web-search part of <see cref="Estimate"/>, on its own: searches are billed per search, on top of the tokens. Stored
     /// with the run so its cost can be shown as tokens plus searches without recomputing at later rates.</summary>
-    public static decimal SearchCost(LeadDiscoveryUsage usage, LeadDiscoveryPricingOptions pricing) =>
-        Math.Round(usage.WebSearches * pricing.WebSearchPerThousand / 1_000m, 6, MidpointRounding.AwayFromZero);
+    public static decimal SearchCost(LeadDiscoveryUsage usage, LeadDiscoveryPricingOptions pricing, string? model = null) =>
+        Math.Round(usage.WebSearches * (pricing.RatesFor(model).SearchPerThousand ?? pricing.WebSearchPerThousand) / 1_000m, 6, MidpointRounding.AwayFromZero);
 }
