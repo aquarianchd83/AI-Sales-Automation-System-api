@@ -35,7 +35,8 @@ public class AiServiceFactory : IAiService
 
     public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
     {
-        var credentials = _configProvider.Get();
+        // Customer replies run on the model chosen for them under "Model by task", else on the provider's chat model.
+        var credentials = _configProvider.Get()?.ForGroup(Application.Ai.AiModelGroups.CustomerReplies);
 
         if (credentials is null)
             return await _simulatedClient.GetResponseAsync(context, cancellationToken);

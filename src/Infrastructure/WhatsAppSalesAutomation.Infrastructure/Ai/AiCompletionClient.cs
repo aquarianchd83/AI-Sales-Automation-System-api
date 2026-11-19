@@ -34,7 +34,8 @@ public sealed class AiCompletionClient : IAiCompletionClient
     public async Task<AiCompletionResult> CompleteAsync(AiCompletionRequest request, CancellationToken cancellationToken = default)
     {
         var watch = Stopwatch.StartNew();
-        var credentials = _config.Get();
+        // A product-knowledge task runs on the model chosen for that group; a check or benchmark carries no task and tests the chat model.
+        var credentials = _config.Get().ForGroup(Application.Ai.AiModelGroups.ForTask(request.Task));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(request.TimeoutSeconds, 5, 300)));

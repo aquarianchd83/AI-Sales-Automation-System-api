@@ -75,7 +75,7 @@ public class AiUsageService : IAiUsageService
             return await BlockAsync(tenantId, subscription?.Id, operation, referenceId, source, reason, consumed.BalanceAfter, now, cancellationToken);
         }
 
-        var config = _aiConfig.Get();
+        var config = _aiConfig.Get().ForGroup(AiModelGroups.ForTask(operation));
         try
         {
             _context.AiTransactions.Add(new AiTransaction
@@ -211,7 +211,7 @@ public class AiUsageService : IAiUsageService
         Guid tenantId, Guid? subscriptionId, string operation, string referenceId, AiUsageSource source,
         AiDenialReason reason, decimal balance, DateTime now, CancellationToken cancellationToken)
     {
-        var config = _aiConfig.Get();
+        var config = _aiConfig.Get().ForGroup(AiModelGroups.ForTask(operation));
         var message = MessageFor(reason);
 
         _context.AiTransactions.Add(new AiTransaction

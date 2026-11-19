@@ -138,7 +138,7 @@ public sealed class AiTaskRunner : IAiTaskRunner
             {
                 attemptNumber++;
                 var call = await _client.CompleteAsync(
-                    new AiCompletionRequest(provider, request.System, request.User, request.MaxTokens, request.ExpectJson, policy.TimeoutSeconds, request.ImageBase64, request.ImageMediaType),
+                    new AiCompletionRequest(provider, request.System, request.User, request.MaxTokens, request.ExpectJson, policy.TimeoutSeconds, request.ImageBase64, request.ImageMediaType, request.Task),
                     ct);
 
                 string? text = call.Text;
