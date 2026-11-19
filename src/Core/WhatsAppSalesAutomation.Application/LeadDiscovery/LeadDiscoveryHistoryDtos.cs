@@ -59,7 +59,9 @@ public record LeadDiscoveryExecutionSummaryDto(
     bool CanRetry,
     decimal EstimatedCostLocal,
     string CurrencyCode,
-    string CurrencySymbol);
+    string CurrencySymbol,
+    string? AiProvider = null,
+    string? AiModel = null);
 
 /// <summary>One processing date and every execution that belongs to it, newest first.</summary>
 public record LeadDiscoveryHistoryDayDto(DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);

@@ -102,6 +102,16 @@ public class OpenAiLeadDiscoveryAgent : ILeadDiscoveryAgent
             if (previousResponseId is null || nudged)
                 break;
 
+            // The model ended a turn with no tool call at all: say why (status, incomplete reason, what it did emit), because
+            // the nudge below makes it write a submission note that blames 'the user'.
+            _logger.LogWarning(
+                "OpenAI lead discovery turn {Turn} ended with no tool call: status {Status}, incomplete reason {IncompleteReason}, output items [{OutputTypes}], output tokens {OutputTokens}",
+                turn,
+                Str(response["status"]),
+                Str(response["incomplete_details"]?["reason"]),
+                string.Join(", ", output.OfType<JsonObject>().Select(item => Str(item["type"]))),
+                Str(response["usage"]?["output_tokens"]));
+
             nudged = true;
             input = new JsonArray { UserMessage(LeadDiscoveryPrompts.SubmitNudge) };
         }
