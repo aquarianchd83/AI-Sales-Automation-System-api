@@ -54,8 +54,19 @@ public sealed class AiTaskModelsTests
         public T Get(string? name) => Value;
     }
 
+    private sealed class Defaults : ILeadDiscoveryDefaultModels
+    {
+        public string ModelFor(string provider) => provider switch
+        {
+            "Anthropic" => "claude-haiku-4-5-20251001",
+            "OpenAI" => "gpt-5-mini",
+            _ => "gemini-2.5-flash",
+        };
+    }
+
     private static PlatformAiTaskModelsService Service(MemoryStore store, AiCredentials? credentials = null, AiPricingOptions? pricing = null) =>
-        new(store, new FixedConfig(credentials ?? Credentials()), new FixedSnapshot<AiPricingOptions>(pricing ?? new AiPricingOptions()));
+        new(store, new FixedConfig(credentials ?? Credentials()), new FixedSnapshot<AiPricingOptions>(pricing ?? new AiPricingOptions()),
+            new FixedSnapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), new Defaults());
 
     // ---- which group a task belongs to ----
 
@@ -135,12 +146,13 @@ public sealed class AiTaskModelsTests
     {
         var dto = await Service(new MemoryStore()).GetAsync();
 
-        Assert.Equal(new[] { "CustomerReplies", "ProductKnowledge", "KeywordsAndRewrites" }, dto.Groups.Select(g => g.Key));
+        Assert.Equal(new[] { "CustomerReplies", "ProductKnowledge", "KeywordsAndRewrites", "LeadDiscovery" }, dto.Groups.Select(g => g.Key));
         Assert.All(dto.Groups.SelectMany(g => g.Providers), cell =>
         {
             Assert.Null(cell.Selected);
             Assert.Equal(cell.ChatModel, cell.EffectiveModel);
         });
+        Assert.All(dto.Groups.Where(g => g.Key != "LeadDiscovery"), g => Assert.Equal("Same as chat model", g.DefaultLabel));
         var claude = dto.Groups[0].Providers.Single(p => p.Provider == "Anthropic");
         Assert.Equal("Claude", claude.ProviderLabel);
         Assert.Equal("claude-haiku-4-5-20251001", claude.EffectiveModel);
@@ -200,6 +212,104 @@ public sealed class AiTaskModelsTests
 
         Assert.False(dto.Groups[0].Providers.Single(p => p.Provider == "Google").Available);
         Assert.True(dto.Groups[0].Providers.Single(p => p.Provider == "Anthropic").Available);
+    }
+
+    // ---- lead discovery: the fourth group ----
+
+    [Fact]
+    public async Task Lead_discovery_defaults_to_the_discovery_model_not_the_chat_model()
+    {
+        var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+
+        Assert.Equal("Default", group.DefaultLabel);
+        var claude = group.Providers.Single(p => p.Provider == "Anthropic");
+        Assert.Equal("claude-haiku-4-5-20251001", claude.EffectiveModel);
+        Assert.Equal("gpt-5-mini", group.Providers.Single(p => p.Provider == "OpenAI").EffectiveModel);
+        Assert.Equal("gemini-2.5-flash", group.Providers.Single(p => p.Provider == "Google").EffectiveModel);
+    }
+
+    [Fact]
+    public async Task Lead_discovery_is_priced_from_its_own_table_with_dated_ids_read_from_their_undated_row()
+    {
+        var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+
+        var claude = group.Providers.Single(p => p.Provider == "Anthropic");
+        Assert.True(claude.HasPrice);
+        Assert.Equal(1m, claude.InputPer1M);
+        Assert.Equal(5m, claude.OutputPer1M);
+
+        var openAi = group.Providers.Single(p => p.Provider == "OpenAI");
+        Assert.Equal(0.25m, openAi.InputPer1M);
+        Assert.Equal(2m, openAi.OutputPer1M);
+
+        var gemini = group.Providers.Single(p => p.Provider == "Google");
+        Assert.Equal(0.3m, gemini.InputPer1M);
+        Assert.Equal(2.5m, gemini.OutputPer1M);
+    }
+
+    [Fact]
+    public async Task Lead_discovery_offers_each_provider_only_its_own_priced_models()
+    {
+        var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+
+        Assert.Equal(new[] { "gpt-5", "gpt-5-mini", "gpt-5-nano" }, group.Providers.Single(p => p.Provider == "OpenAI").Options.Select(o => o.Model));
+        Assert.DoesNotContain(group.Providers.Single(p => p.Provider == "Anthropic").Options, o => o.Model == "Simulated");
+        Assert.Contains(group.Providers.Single(p => p.Provider == "Google").Options, o => o.Model == "gemini-2.5-pro");
+    }
+
+    [Fact]
+    public async Task A_lead_discovery_choice_is_saved_and_shown_like_any_other()
+    {
+        var store = new MemoryStore();
+
+        var dto = await Service(store).UpdateAsync(new UpdateAiTaskModelsRequest(new[] { new AiTaskModelChoiceRequest("LeadDiscovery", "OpenAI", "gpt-5") }), null);
+
+        Assert.Equal("gpt-5", store.Rows["AiProviders:TaskModels:LeadDiscovery:OpenAI"]);
+        var cell = dto.Groups.Single(g => g.Key == "LeadDiscovery").Providers.Single(p => p.Provider == "OpenAI");
+        Assert.Equal("gpt-5", cell.Selected);
+        Assert.Equal(1.25m, cell.InputPer1M);
+    }
+
+    [Fact]
+    public async Task Lead_discovery_offers_no_blank_while_the_other_groups_do()
+    {
+        var dto = await Service(new MemoryStore()).GetAsync();
+
+        Assert.False(dto.Groups.Single(g => g.Key == "LeadDiscovery").AllowDefault);
+        Assert.All(dto.Groups.Where(g => g.Key != "LeadDiscovery"), g => Assert.True(g.AllowDefault));
+    }
+
+    [Fact]
+    public async Task A_blank_lead_discovery_model_is_refused_and_nothing_is_saved()
+    {
+        var store = new MemoryStore();
+
+        var error = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(store).UpdateAsync(new UpdateAiTaskModelsRequest(new[] { new AiTaskModelChoiceRequest("LeadDiscovery", "OpenAI", "") }), null));
+
+        Assert.Contains(error.Errors, e => e.ErrorMessage.Contains("Choose a model for Lead discovery"));
+        Assert.Empty(store.Rows);
+    }
+
+    [Fact]
+    public void The_lead_discovery_models_are_seeded_into_the_database_from_the_current_config_then_the_default()
+    {
+        var rows = new[] { "Anthropic", "OpenAI", "Google" }
+            .Select(p => WhatsAppSalesAutomation.Application.Settings.AppSettingCatalog.All.Single(d => d.Key == $"AiProviders:TaskModels:LeadDiscovery:{p}"))
+            .ToList();
+
+        Assert.Equal(new[] { "claude-haiku-4-5-20251001", "gpt-5-mini", "gemini-2.5-flash" }, rows.Select(r => r.DefaultValue));
+        Assert.Equal(new[] { "LeadDiscovery:Agent:Model", "LeadDiscovery:Agent:OpenAiModel", "LeadDiscovery:Agent:GeminiModel" }, rows.Select(r => r.SeedFromKey));
+    }
+
+    [Fact]
+    public void The_credentials_say_which_model_was_chosen_for_lead_discovery_and_null_when_none_was()
+    {
+        var credentials = Credentials(new() { ["LeadDiscovery/OpenAI"] = "gpt-5" });
+
+        Assert.Equal("gpt-5", credentials.ModelChosenFor(AiModelGroups.LeadDiscovery, "OpenAI"));
+        Assert.Null(credentials.ModelChosenFor(AiModelGroups.LeadDiscovery, "Anthropic"));
+        Assert.Null(Credentials().ModelChosenFor(AiModelGroups.LeadDiscovery, "OpenAI"));
     }
 
     // ---- saving ----

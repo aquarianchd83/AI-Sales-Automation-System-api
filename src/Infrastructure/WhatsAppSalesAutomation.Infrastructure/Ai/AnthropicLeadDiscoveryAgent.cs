@@ -67,13 +67,16 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
                 "lead discovery has no Anthropic API key - save one under Configuration > AI Providers (Claude), or set LeadDiscovery:Agent:ApiKey (environment variable LeadDiscovery__Agent__ApiKey).");
         }
 
+        // The model chosen for lead discovery on the AI Providers page, else the discovery default.
+        var model = _aiConfig.Get().ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "Anthropic") ?? _settings.Model;
+
         var evidence = new EvidenceCollector();
         var messages = new JsonArray { UserMessage(LeadDiscoveryPrompts.BuildUserMessage(request)) };
         var nudged = false;
 
         for (var turn = 1; turn <= _settings.MaxTurns; turn++)
         {
-            var response = await SendAsync(apiKey, messages, cancellationToken);
+            var response = await SendAsync(apiKey, model, messages, cancellationToken);
             var content = response["content"] as JsonArray ?? new JsonArray();
             var stopReason = Str(response["stop_reason"]);
 
@@ -92,7 +95,7 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
             {
                 var candidates = LeadSubmission.Parse(submission["input"]);
                 LeadSubmission.LogOutcome(_logger, "Anthropic", candidates.Count, request.MaxCandidates, submission["input"]);
-                return evidence.ToResult(candidates, _settings.Model, LeadSubmission.NoteOf(submission["input"]));
+                return evidence.ToResult(candidates, model, LeadSubmission.NoteOf(submission["input"]));
             }
 
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = content.DeepClone() });
@@ -109,16 +112,16 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
         }
 
         _logger.LogWarning("Lead discovery round ended without a {ToolName} call after {MaxTurns} turns", LeadDiscoveryPrompts.SubmitToolName, _settings.MaxTurns);
-        return evidence.ToResult(Array.Empty<DiscoveredBusinessCandidate>(), _settings.Model, LeadSubmission.NoSubmissionNote);
+        return evidence.ToResult(Array.Empty<DiscoveredBusinessCandidate>(), model, LeadSubmission.NoSubmissionNote);
     }
 
-    private async Task<JsonObject> SendAsync(string apiKey, JsonArray messages, CancellationToken cancellationToken)
+    private async Task<JsonObject> SendAsync(string apiKey, string model, JsonArray messages, CancellationToken cancellationToken)
     {
-        var useFallbacks = SupportsDefaultFallbacks(_settings.Model);
+        var useFallbacks = SupportsDefaultFallbacks(model);
 
         var payload = new JsonObject
         {
-            ["model"] = _settings.Model,
+            ["model"] = model,
             ["max_tokens"] = _settings.MaxTokens,
             // Automatic prompt caching: pause_turn continuations and the submit nudge resend the whole
             // conversation so far, which is exactly the prefix this lets the API reuse.

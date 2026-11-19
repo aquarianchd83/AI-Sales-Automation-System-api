@@ -312,6 +312,7 @@ public static class DependencyInjection
         // anything, and every tenant's run uses whichever is configured.
         var leadDiscoverySection = configuration.GetSection("LeadDiscovery:Agent");
         services.Configure<LeadDiscoveryAgentSettings>(leadDiscoverySection);
+        services.AddScoped<WhatsAppSalesAutomation.Application.Platform.ILeadDiscoveryDefaultModels, LeadDiscoveryDefaultModels>();
         var leadDiscoverySettings = leadDiscoverySection.Get<LeadDiscoveryAgentSettings>() ?? new LeadDiscoveryAgentSettings();
 
         if (string.Equals(leadDiscoverySettings.Provider, "Simulated", StringComparison.OrdinalIgnoreCase))

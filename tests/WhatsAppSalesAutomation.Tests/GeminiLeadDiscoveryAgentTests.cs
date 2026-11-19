@@ -22,15 +22,17 @@ public sealed class GeminiLeadDiscoveryAgentTests
     {
         private readonly string? _googleKey;
         private readonly bool _enabled;
+        private readonly Dictionary<string, string>? _taskModels;
 
-        public Keys(string? googleKey, bool enabled = true)
+        public Keys(string? googleKey, bool enabled = true, Dictionary<string, string>? taskModels = null)
         {
             _googleKey = googleKey;
             _enabled = enabled;
+            _taskModels = taskModels;
         }
 
         public AiCredentials Get() => new("Simulated", "Simulated", null, "m", "v", "https://api.anthropic.com/v1/",
-            null, "m", "e", "https://api.openai.com/v1/", _googleKey, "m", "e", "https://generativelanguage.googleapis.com/v1beta/", GoogleEnabled: _enabled);
+            null, "m", "e", "https://api.openai.com/v1/", _googleKey, "m", "e", "https://generativelanguage.googleapis.com/v1beta/", GoogleEnabled: _enabled, TaskModels: _taskModels);
     }
 
     private sealed class FixedSnapshot<T> : IOptionsSnapshot<T> where T : class
@@ -59,9 +61,9 @@ public sealed class GeminiLeadDiscoveryAgentTests
         }
     }
 
-    private static GeminiLeadDiscoveryAgent Agent(ScriptedGemini handler, string? key = "AIza-test", bool enabled = true, LeadDiscoveryAgentSettings? settings = null) =>
+    private static GeminiLeadDiscoveryAgent Agent(ScriptedGemini handler, string? key = "AIza-test", bool enabled = true, LeadDiscoveryAgentSettings? settings = null, Dictionary<string, string>? taskModels = null) =>
         new(new HttpClient(handler), new FixedSnapshot<LeadDiscoveryAgentSettings>(settings ?? new LeadDiscoveryAgentSettings()),
-            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys(key, enabled),
+            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys(key, enabled, taskModels),
             new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler())));
 
     private static string Research(string text = "1. Smile Dental, Pune - https://smile.example/contact", int prompt = 1000, int output = 200) =>
@@ -167,6 +169,17 @@ public sealed class GeminiLeadDiscoveryAgentTests
         var message = (string)handler.Sent[1]["contents"]![0]!["parts"]![0]!["text"]!;
         Assert.Contains("1. Smile Dental, Pune", message);
         Assert.Contains("- https://smile.example/contact", message);
+    }
+
+    [Fact]
+    public async Task The_model_chosen_for_lead_discovery_on_the_AI_Providers_page_wins_over_the_server_default()
+    {
+        var handler = new ScriptedGemini(Research(), Call("submit_leads", Submission()));
+
+        var result = await Agent(handler, taskModels: new() { ["LeadDiscovery/Google"] = "gemini-2.5-pro" }).DiscoverAsync(Request);
+
+        Assert.Equal("gemini-2.5-pro", result.Model);
+        Assert.All(handler.Uris, uri => Assert.EndsWith("models/gemini-2.5-pro:generateContent", uri.AbsolutePath));
     }
 
     [Fact]

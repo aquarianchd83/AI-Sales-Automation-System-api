@@ -12,7 +12,7 @@ public record AiTaskModelOptionDto(string Model, bool HasPrice, decimal? InputPe
 
 /// <summary>One provider's column for a group: what it runs on today and what can be chosen instead.</summary>
 /// <param name="Available">The provider is switched on and has a key, so a choice made for it can take effect.</param>
-/// <param name="ChatModel">The provider's chat model, which the group runs on when nothing is chosen.</param>
+/// <param name="ChatModel">The model the group runs on when nothing is chosen: the provider's chat model, or the discovery default for lead discovery.</param>
 /// <param name="Selected">The model chosen for this group, or null for "Same as chat model".</param>
 /// <param name="EffectiveModel">The model the group really runs on: the choice, else the chat model.</param>
 public record AiTaskModelCellDto(
@@ -27,7 +27,10 @@ public record AiTaskModelCellDto(
     decimal? OutputPer1M,
     IReadOnlyList<AiTaskModelOptionDto> Options);
 
-public record AiTaskModelGroupDto(string Key, string Title, string Description, IReadOnlyList<string> Tasks, IReadOnlyList<AiTaskModelCellDto> Providers);
+/// <param name="DefaultLabel">What "nothing chosen" is called: "Same as chat model", or "Default" for lead discovery.</param>
+/// <param name="AllowDefault">False when the group always has a model saved (lead discovery), so a blank cannot be chosen.</param>
+public record AiTaskModelGroupDto(
+    string Key, string Title, string Description, IReadOnlyList<string> Tasks, string DefaultLabel, bool AllowDefault, IReadOnlyList<AiTaskModelCellDto> Providers);
 
 public record AiTaskModelsDto(IReadOnlyList<AiTaskModelGroupDto> Groups);
 
@@ -61,12 +64,18 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
     private readonly IAppSettingsStore _store;
     private readonly IPlatformAiConfigProvider _credentials;
     private readonly IOptionsSnapshot<AiPricingOptions> _pricing;
+    private readonly IOptionsSnapshot<LeadDiscoveryPricingOptions> _leadPricing;
+    private readonly ILeadDiscoveryDefaultModels _leadDefaults;
 
-    public PlatformAiTaskModelsService(IAppSettingsStore store, IPlatformAiConfigProvider credentials, IOptionsSnapshot<AiPricingOptions> pricing)
+    public PlatformAiTaskModelsService(
+        IAppSettingsStore store, IPlatformAiConfigProvider credentials, IOptionsSnapshot<AiPricingOptions> pricing,
+        IOptionsSnapshot<LeadDiscoveryPricingOptions> leadPricing, ILeadDiscoveryDefaultModels leadDefaults)
     {
         _store = store;
         _credentials = credentials;
         _pricing = pricing;
+        _leadPricing = leadPricing;
+        _leadDefaults = leadDefaults;
     }
 
     public async Task<AiTaskModelsDto> GetAsync(CancellationToken cancellationToken = default)
@@ -90,6 +99,8 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
                 errors.Add(new ValidationFailure("Group", $"'{choice.Group}' is not a task group."));
             else if (provider is null)
                 errors.Add(new ValidationFailure($"{group}.Provider", $"'{choice.Provider}' is not a provider. Choose ChatGPT, Claude or Gemini."));
+            else if (model.Length == 0 && !AiModelGroups.All.First(g => g.Key == group).AllowDefault)
+                errors.Add(new ValidationFailure($"{group}.{provider}", $"Choose a model for {AiModelGroups.All.First(g => g.Key == group).Title}."));
             else if (model.Length > MaxModelLength || model.Any(char.IsWhiteSpace))
                 errors.Add(new ValidationFailure($"{group}.{provider}", "A model name has no spaces and is at most 100 characters."));
             else
@@ -109,37 +120,61 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
     {
         var credentials = _credentials.Get();
         var pricing = _pricing.Value;
+        var leadPricing = _leadPricing.Value;
 
         return new AiTaskModelsDto(AiModelGroups.All.Select(group => new AiTaskModelGroupDto(
-            group.Key, group.Title, group.Description, group.Tasks,
-            Providers.Select(p => Cell(group, p.Provider, p.Label, credentials, stored, pricing)).ToList())).ToList());
+            group.Key, group.Title, group.Description, group.Tasks, group.DefaultLabel, group.AllowDefault,
+            Providers.Select(p => Cell(group, p.Provider, p.Label, credentials, stored, pricing, leadPricing)).ToList())).ToList());
     }
 
-    private static AiTaskModelCellDto Cell(
-        AiModelGroup group, string provider, string label, AiCredentials credentials, IReadOnlyDictionary<string, string?> stored, AiPricingOptions pricing)
+    private AiTaskModelCellDto Cell(
+        AiModelGroup group, string provider, string label, AiCredentials credentials, IReadOnlyDictionary<string, string?> stored, AiPricingOptions pricing,
+        LeadDiscoveryPricingOptions leadPricing)
     {
-        var chat = ChatModelOf(credentials, provider);
+        // Lead discovery is priced on its own table (LeadDiscovery:Pricing) and defaults to the discovery model, not the chat model.
+        var discovery = group.Key == AiModelGroups.LeadDiscovery;
+        var chat = discovery ? _leadDefaults.ModelFor(provider) : ChatModelOf(credentials, provider);
         stored.TryGetValue(AiModelGroups.SettingKey(group.Key, provider), out var raw);
         var selected = string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
         var effective = selected ?? chat;
 
-        var priced = pricing.Models
-            .Where(m => m.Key.StartsWith(provider + "/", StringComparison.OrdinalIgnoreCase))
-            .Select(m => new AiTaskModelOptionDto(m.Key[(provider.Length + 1)..], true, PerMillion(m.Value.PromptPer1K), PerMillion(m.Value.CompletionPer1K)))
-            .ToList();
+        var priced = discovery
+            ? leadPricing.Models
+                .Where(m => PlatformProviderOf(m.Key) == provider)
+                .Select(m => new AiTaskModelOptionDto(m.Key, true, m.Value.InputPerMillion, m.Value.OutputPerMillion))
+                .ToList()
+            : pricing.Models
+                .Where(m => m.Key.StartsWith(provider + "/", StringComparison.OrdinalIgnoreCase))
+                .Select(m => new AiTaskModelOptionDto(m.Key[(provider.Length + 1)..], true, PerMillion(m.Value.PromptPer1K), PerMillion(m.Value.CompletionPer1K)))
+                .ToList();
 
         // The models the operator can choose from are the priced ones, plus whatever is chosen or configured now, so a current choice is never missing.
         foreach (var model in new[] { selected, chat }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!))
         {
             if (!priced.Any(o => string.Equals(o.Model, model, StringComparison.OrdinalIgnoreCase)))
-                priced.Add(PriceOf(pricing, provider, model));
+                priced.Add(discovery ? LeadPriceOf(leadPricing, model) : PriceOf(pricing, provider, model));
         }
 
-        var current = PriceOf(pricing, provider, effective);
+        var current = discovery ? LeadPriceOf(leadPricing, effective) : PriceOf(pricing, provider, effective);
         return new AiTaskModelCellDto(
             provider, label, credentials.IsEnabled(provider) && !string.IsNullOrWhiteSpace(KeyOf(credentials, provider)),
             chat, selected, effective, current.HasPrice, current.InputPer1M, current.OutputPer1M,
             priced.OrderBy(o => o.Model, StringComparer.OrdinalIgnoreCase).ToList());
+    }
+
+    /// <summary>The provider a discovery model belongs to, read from its name (a discovery price row is keyed by model alone).</summary>
+    private static string? PlatformProviderOf(string model) => LeadDiscovery.LeadDiscoveryHistoryService.ProviderOf(model);
+
+    private static AiTaskModelOptionDto LeadPriceOf(LeadDiscoveryPricingOptions pricing, string model)
+    {
+        // A model with a row of its own is priced from it; a dated id ("claude-haiku-4-5-20251001") is read from its undated row.
+        var row = pricing.Models.FirstOrDefault(m => string.Equals(m.Key, model, StringComparison.OrdinalIgnoreCase));
+        if (row.Key is null)
+            row = pricing.Models.Where(m => model.StartsWith(m.Key, StringComparison.OrdinalIgnoreCase)).OrderByDescending(m => m.Key.Length).FirstOrDefault();
+
+        return row.Key is null
+            ? new AiTaskModelOptionDto(model, false, null, null)
+            : new AiTaskModelOptionDto(model, true, row.Value.InputPerMillion, row.Value.OutputPerMillion);
     }
 
     private static AiTaskModelOptionDto PriceOf(AiPricingOptions pricing, string provider, string model)

@@ -37,19 +37,20 @@ public record AiCredentials(
     /// <summary>The same credentials with <paramref name="group"/>'s own models in place of the chat models: one model per provider, chosen
     /// under "Model by task" on the AI Providers page, keyed "{group}/{provider}". A provider the group has no model for keeps its chat model, and
     /// a null group (a task that is in none) changes nothing.</summary>
+    /// <summary>The model chosen for <paramref name="group"/> on <paramref name="provider"/>, or null when none is (the caller's own default applies).</summary>
+    public string? ModelChosenFor(string group, string provider) =>
+        TaskModels is not null && TaskModels.TryGetValue($"{group}/{provider}", out var model) && !string.IsNullOrWhiteSpace(model) ? model.Trim() : null;
+
     public AiCredentials ForGroup(string? group)
     {
         if (string.IsNullOrWhiteSpace(group) || TaskModels is null || TaskModels.Count == 0)
             return this;
 
-        string? Chosen(string provider) =>
-            TaskModels.TryGetValue($"{group}/{provider}", out var model) && !string.IsNullOrWhiteSpace(model) ? model.Trim() : null;
-
         return this with
         {
-            AnthropicModel = Chosen("Anthropic") ?? AnthropicModel,
-            OpenAiChatModel = Chosen("OpenAI") ?? OpenAiChatModel,
-            GoogleChatModel = Chosen("Google") ?? GoogleChatModel,
+            AnthropicModel = ModelChosenFor(group, "Anthropic") ?? AnthropicModel,
+            OpenAiChatModel = ModelChosenFor(group, "OpenAI") ?? OpenAiChatModel,
+            GoogleChatModel = ModelChosenFor(group, "Google") ?? GoogleChatModel,
         };
     }
 

@@ -25,6 +25,8 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
 /// per-tenant from a tenant's detail page (see ITenantConfigOverrideProvider) - business tuning knobs
 /// (Campaigns/Media/Messaging/Ai) where different tenants reasonably want different values. False for
+/// <param name="SeedFromKey">When set, a missing row is first seeded from this configuration key (an appsettings or environment value that already
+/// set the same thing), and only then from <paramref name="DefaultValue"/> - so moving a setting into the database keeps what was running.</param>
 /// everything else here: WhatsApp has its own bespoke per-tenant mechanism
 /// (TenantWhatsAppConfig), AiProviders is one platform-wide config with no per-tenant form, and MediaStorage is platform infra shared by every
 /// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
@@ -39,7 +41,8 @@ public record AppSettingDefinition(
     IReadOnlyList<string>? Options = null,
     bool HiddenInEditor = false,
     int? MinValue = null,
-    int? MaxValue = null);
+    int? MaxValue = null,
+    string? SeedFromKey = null);
 
 /// <summary>
 /// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
@@ -116,6 +119,9 @@ public static class AppSettingCatalog
         new("AiProviders:TaskModels:KeywordsAndRewrites:Anthropic", "AiProviders", IsSecret: false, Description: "The model KeywordsAndRewrites runs on for Anthropic; blank means Anthropic's chat model. Edited under Model by task on the AI Providers page.", HiddenInEditor: true),
         new("AiProviders:TaskModels:KeywordsAndRewrites:OpenAI", "AiProviders", IsSecret: false, Description: "The model KeywordsAndRewrites runs on for OpenAI; blank means OpenAI's chat model. Edited under Model by task on the AI Providers page.", HiddenInEditor: true),
         new("AiProviders:TaskModels:KeywordsAndRewrites:Google", "AiProviders", IsSecret: false, Description: "The model KeywordsAndRewrites runs on for Google; blank means Google's chat model. Edited under Model by task on the AI Providers page.", HiddenInEditor: true),
+        new("AiProviders:TaskModels:LeadDiscovery:Anthropic", "AiProviders", IsSecret: false, Description: "The model lead discovery runs on for Anthropic. Edited under Model by task on the AI Providers page.", DefaultValue: "claude-haiku-4-5-20251001", HiddenInEditor: true, SeedFromKey: "LeadDiscovery:Agent:Model"),
+        new("AiProviders:TaskModels:LeadDiscovery:OpenAI", "AiProviders", IsSecret: false, Description: "The model lead discovery runs on for OpenAI. Edited under Model by task on the AI Providers page.", DefaultValue: "gpt-5-mini", HiddenInEditor: true, SeedFromKey: "LeadDiscovery:Agent:OpenAiModel"),
+        new("AiProviders:TaskModels:LeadDiscovery:Google", "AiProviders", IsSecret: false, Description: "The model lead discovery runs on for Google. Edited under Model by task on the AI Providers page.", DefaultValue: "gemini-2.5-flash", HiddenInEditor: true, SeedFromKey: "LeadDiscovery:Agent:GeminiModel"),
         new("AiProviders:Anthropic:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Claude off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Anthropic:ApiKey", "AiProviders", IsSecret: true),
         new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false),
