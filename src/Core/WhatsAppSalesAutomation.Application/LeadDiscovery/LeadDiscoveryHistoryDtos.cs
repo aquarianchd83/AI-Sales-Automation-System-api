@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Application.Common.Models;
 
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
@@ -92,7 +93,11 @@ public record LeadDiscoveryExecutionCustomerDto(
     /// <summary>Why no consent SMS went to this row, in words - "Not sent: ..." - so the column is never an unexplained blank. Null when an SMS was sent.</summary>
     string? ConsentSmsNote = null,
     /// <summary>True when the SMS was not sent because the consent SMS switch in the discovery profile is Off, so the screen can link to where it is turned on.</summary>
-    bool ConsentSmsNeedsSetting = false);
+    bool ConsentSmsNeedsSetting = false,
+    /// <summary>What became of this candidate: Saved, Lead only, Duplicate, Rejected, Not needed (qualified, but the batch was already full), Failed, Pending or Skipped. See <see cref="LeadDiscoveryExecutionOutcomes"/>.</summary>
+    string Outcome = "",
+    /// <summary>What the agent reported about this candidate (business type, contact person, address, website, the page it was found on, score and why). Null for a row from before candidates were kept.</summary>
+    LeadDiscoveryCandidateSnapshot? Candidate = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,
@@ -140,7 +145,40 @@ public record LeadDiscoveryExecutionDetailDto(
     LeadDiscoveryRunDto? Research,
     string CurrencyCode,
     string CurrencySymbol,
-    LeadDiscoveryVerificationCountsDto VerificationCounts);
+    LeadDiscoveryVerificationCountsDto VerificationCounts,
+    /// <summary>The credits this execution actually took from the tenant's wallet, net of any refund - what the tenant pays, as opposed to
+    /// <c>Research.EstimatedCostLocal</c>, the estimated cost of the searching, which is not charged. Zero when nothing was saved.</summary>
+    decimal CreditsCharged = 0m);
 
 /// <summary>A manual retry was queued; it runs as a new execution with a new Execution ID.</summary>
 public record LeadDiscoveryRetryQueuedDto(Guid ExecutionId, string BackgroundJobId);
+
+/// <summary>What became of one candidate a discovery run considered, as the "candidates considered" popup shows it.</summary>
+public static class LeadDiscoveryExecutionOutcomes
+{
+    public const string Saved = "Saved";
+    public const string Duplicate = "Duplicate";
+    public const string Rejected = "Rejected";
+    public const string NotNeeded = "Not needed";
+    public const string LeadOnly = "Lead only";
+    public const string Failed = "Failed";
+    public const string Pending = "Pending";
+    public const string Skipped = "Skipped";
+
+    /// <summary>
+    /// Saved: became a customer. Lead only: kept as a discovered lead but no customer was created (no usable number, or the DND check refused it);
+    /// the run counts it as saved. Duplicate: already a customer or discovered lead. Rejected: failed a rule of the profile (never kept). Not
+    /// needed: qualified, but the batch was already full. Skipped: an earlier execution already created it (a retry).
+    /// </summary>
+    public static string Of(string status, bool isInvalid, string? note, bool hasDiscoveredLead = false) => status switch
+    {
+        nameof(LeadDiscoveryCustomerStatus.Created) => Saved,
+        nameof(LeadDiscoveryCustomerStatus.Duplicate) => Duplicate,
+        nameof(LeadDiscoveryCustomerStatus.Failed) => Failed,
+        nameof(LeadDiscoveryCustomerStatus.Pending) or nameof(LeadDiscoveryCustomerStatus.Processing) => Pending,
+        nameof(LeadDiscoveryCustomerStatus.Skipped) when isInvalid && hasDiscoveredLead => LeadOnly,
+        nameof(LeadDiscoveryCustomerStatus.Skipped) when isInvalid => Rejected,
+        nameof(LeadDiscoveryCustomerStatus.Skipped) when note == LeadDiscoveryRunService.NotNeededNote => NotNeeded,
+        _ => Skipped
+    };
+}

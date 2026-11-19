@@ -378,7 +378,10 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.WebSearches, r.WebFetches,
         r.EstimatedCostUsd, ToLocal(r.EstimatedCostUsd, pricing), r.ExecutionId,
         CostPerLead(r.EstimatedCostUsd, r.LeadsSaved, 1m, decimals: 6),
-        CostPerLead(r.EstimatedCostUsd, r.LeadsSaved, pricing.RateToUsd, decimals: 4));
+        CostPerLead(r.EstimatedCostUsd, r.LeadsSaved, pricing.RateToUsd, decimals: 4),
+        r.SearchCostUsd is { } searchUsd ? ToLocal(searchUsd, pricing) : null,
+        r.SearchCostUsd is { } searchPart ? ToLocal(r.EstimatedCostUsd - searchPart, pricing) : null,
+        r.ResearchNote);
 
     /// <summary>Six places in USD, like the spend summary's CostPerLeadUsd; four in the local currency rather
     /// than ToLocal's two, because a cheap run's per-lead cost can be a fraction of a cent.</summary>

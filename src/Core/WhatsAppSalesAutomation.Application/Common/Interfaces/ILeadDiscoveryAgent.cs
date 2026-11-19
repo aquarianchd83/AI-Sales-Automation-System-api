@@ -92,7 +92,9 @@ public record LeadDiscoveryAgentResult(
     IReadOnlyList<DiscoveredBusinessCandidate> Candidates,
     LeadDiscoveryEvidence Evidence,
     LeadDiscoveryUsage Usage,
-    string Model)
+    string Model,
+    /// <summary>The agent's own explanation of what it submitted (which rules it ran into, why fewer than asked for, or none). Null when it gave none - the simulator never does.</summary>
+    string? Note = null)
 {
     public static LeadDiscoveryAgentResult NotConfigured(string reason) =>
         new(false, reason, Array.Empty<DiscoveredBusinessCandidate>(), LeadDiscoveryEvidence.Empty, LeadDiscoveryUsage.None, string.Empty);

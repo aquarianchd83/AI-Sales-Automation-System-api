@@ -4465,6 +4465,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CandidateDetailsJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("CandidateJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -4879,8 +4882,16 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<int>("Rejected")
                         .HasColumnType("int");
 
+                    b.Property<string>("ResearchNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<int>("Rounds")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("SearchCostUsd")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");

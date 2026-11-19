@@ -122,7 +122,14 @@ public record LeadDiscoveryRunDto(
     decimal EstimatedCostLocal,
     Guid? ExecutionId,
     decimal CostPerLeadUsd,
-    decimal CostPerLeadLocal);
+    decimal CostPerLeadLocal,
+    /// <summary>The web-search part of <paramref name="EstimatedCostLocal"/>; null on a run from before the split was recorded.</summary>
+    decimal? SearchCostLocal = null,
+    /// <summary>The token part of <paramref name="EstimatedCostLocal"/> (the total less searches); null when the split was not recorded.</summary>
+    decimal? TokensCostLocal = null,
+    /// <summary>What the research said about the run in the agent's own words - which rules it ran into, why it found fewer than asked for or none.
+    /// One line per round. Null when it gave none, or on a run from before it was recorded.</summary>
+    string? ResearchNote = null);
 
 /// <param name="CostPerLeadUsd">Zero when the period saved no leads.</param>
 public record LeadDiscoverySpendPeriodDto(

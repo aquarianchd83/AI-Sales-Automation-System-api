@@ -81,7 +81,8 @@ public static class AiFeatures
     /// The one place that says which third-party tools a feature really runs on - the page, the save validation and the feature itself all
     /// read this, so they cannot disagree. A provider appears here only when the feature's code can call it; a saved key does not make a
     /// provider supported. Adding a provider to one feature is a change to that feature's line only.
-    ///   Discovery lead      - the discovery agent is Claude's (AnthropicLeadDiscoveryAgent), and its keyword suggestions use the same tool.
+    ///   Discovery lead      - the discovery agent runs on Claude (AnthropicLeadDiscoveryAgent) or ChatGPT (OpenAiLeadDiscoveryAgent), picked per run by
+    ///                         RoutedLeadDiscoveryAgent. Gemini has no agent. Its keyword suggestions use the same tool.
     ///   Discovery keywords  - the same text generator as business keywords, so all three work.
     ///   Business keywords   - AiTextGenerator calls ChatGPT, Claude or Gemini by name, so all three work.
     ///   Conversation        - AiServiceFactory has a client for ChatGPT, Claude and Gemini.
@@ -89,7 +90,7 @@ public static class AiFeatures
     /// </summary>
     public static IReadOnlyList<string> SupportedProviders(string feature) => feature switch
     {
-        DiscoveryLead => new[] { "Anthropic" },
+        DiscoveryLead => new[] { "Anthropic", "OpenAI" },
         Conversation => new[] { "OpenAI", "Anthropic", "Google" },
         _ when IsProductTaskGroup(feature) => new[] { "OpenAI", "Anthropic", "Google" },
         BusinessKeywords => new[] { "Anthropic", "OpenAI", "Google" },

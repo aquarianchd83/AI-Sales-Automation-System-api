@@ -33,8 +33,6 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
     private const string FallbackBetaHeader = "server-side-fallback-2026-07-01";
     private const int MaxErrorBodyLength = 500;
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     private readonly HttpClient _httpClient;
     private readonly LeadDiscoveryAgentSettings _settings;
     private readonly ILogger<AnthropicLeadDiscoveryAgent> _logger;
@@ -60,10 +58,13 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
             return LeadDiscoveryAgentResult.NotConfigured("Claude (Anthropic) is turned off under Configuration > AI Providers, so lead discovery cannot run.");
         }
 
-        if (string.IsNullOrWhiteSpace(_settings.ApiKey))
+        // A dedicated discovery key wins; otherwise discovery uses the Anthropic key the platform admin saved under
+        // Configuration > AI Providers, so one key set on that screen makes discovery work with no extra deployment setting.
+        var apiKey = !string.IsNullOrWhiteSpace(_settings.ApiKey) ? _settings.ApiKey : _aiConfig.Get().AnthropicApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             return LeadDiscoveryAgentResult.NotConfigured(
-                "lead discovery has no Anthropic API key - set LeadDiscovery:Agent:ApiKey (environment variable LeadDiscovery__Agent__ApiKey).");
+                "lead discovery has no Anthropic API key - save one under Configuration > AI Providers (Claude), or set LeadDiscovery:Agent:ApiKey (environment variable LeadDiscovery__Agent__ApiKey).");
         }
 
         var evidence = new EvidenceCollector();
@@ -72,7 +73,7 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
 
         for (var turn = 1; turn <= _settings.MaxTurns; turn++)
         {
-            var response = await SendAsync(messages, cancellationToken);
+            var response = await SendAsync(apiKey, messages, cancellationToken);
             var content = response["content"] as JsonArray ?? new JsonArray();
             var stopReason = Str(response["stop_reason"]);
 
@@ -88,7 +89,11 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
                 Str(block["type"]) == "tool_use" && Str(block["name"]) == LeadDiscoveryPrompts.SubmitToolName);
 
             if (submission is not null)
-                return evidence.ToResult(ParseCandidates(submission["input"]), _settings.Model);
+            {
+                var candidates = LeadSubmission.Parse(submission["input"]);
+                LeadSubmission.LogOutcome(_logger, "Anthropic", candidates.Count, request.MaxCandidates, submission["input"]);
+                return evidence.ToResult(candidates, _settings.Model, LeadSubmission.NoteOf(submission["input"]));
+            }
 
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = content.DeepClone() });
 
@@ -104,10 +109,10 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
         }
 
         _logger.LogWarning("Lead discovery round ended without a {ToolName} call after {MaxTurns} turns", LeadDiscoveryPrompts.SubmitToolName, _settings.MaxTurns);
-        return evidence.ToResult(Array.Empty<DiscoveredBusinessCandidate>(), _settings.Model);
+        return evidence.ToResult(Array.Empty<DiscoveredBusinessCandidate>(), _settings.Model, LeadSubmission.NoSubmissionNote);
     }
 
-    private async Task<JsonObject> SendAsync(JsonArray messages, CancellationToken cancellationToken)
+    private async Task<JsonObject> SendAsync(string apiKey, JsonArray messages, CancellationToken cancellationToken)
     {
         var useFallbacks = SupportsDefaultFallbacks(_settings.Model);
 
@@ -135,7 +140,7 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
         {
             Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json")
         };
-        httpRequest.Headers.Add("x-api-key", _settings.ApiKey);
+        httpRequest.Headers.Add("x-api-key", apiKey);
         httpRequest.Headers.Add("anthropic-version", _settings.ApiVersion);
         if (useFallbacks)
             httpRequest.Headers.Add("anthropic-beta", FallbackBetaHeader);
@@ -186,30 +191,6 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
         || model.StartsWith("claude-fable-5", StringComparison.OrdinalIgnoreCase);
 
     private static JsonObject UserMessage(string text) => new() { ["role"] = "user", ["content"] = text };
-
-    private static IReadOnlyList<DiscoveredBusinessCandidate> ParseCandidates(JsonNode? input)
-    {
-        var submission = input?.Deserialize<SubmitLeadsInput>(JsonOptions);
-
-        return (submission?.Candidates ?? new List<CandidatePayload>())
-            .Select(c => new DiscoveredBusinessCandidate(
-                c.BusinessName ?? string.Empty,
-                c.BusinessType ?? string.Empty,
-                c.ContactPerson,
-                c.Address,
-                c.City,
-                c.State,
-                c.Phone,
-                c.PhoneSourceUrl,
-                c.Email,
-                c.Website,
-                c.SourceUrl ?? string.Empty,
-                c.IsIndependentBusiness,
-                c.IsPermanentlyClosed,
-                c.LeadScore,
-                c.ScoreRationale))
-            .ToList();
-    }
 
     private static string? Str(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
@@ -272,37 +253,13 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
             }
         }
 
-        public LeadDiscoveryAgentResult ToResult(IReadOnlyList<DiscoveredBusinessCandidate> candidates, string model) =>
-            new(true, null, candidates, new LeadDiscoveryEvidence(_seenUrls.ToList(), _pages.ToList()), _usage, model);
+        public LeadDiscoveryAgentResult ToResult(IReadOnlyList<DiscoveredBusinessCandidate> candidates, string model, string? note = null) =>
+            new(true, null, candidates, new LeadDiscoveryEvidence(_seenUrls.ToList(), _pages.ToList()), _usage, model, note);
 
         private void AddSeen(string? url)
         {
             if (!string.IsNullOrWhiteSpace(url))
                 _seenUrls.Add(url);
         }
-    }
-
-    private sealed class SubmitLeadsInput
-    {
-        public List<CandidatePayload>? Candidates { get; set; }
-    }
-
-    private sealed class CandidatePayload
-    {
-        public string? BusinessName { get; set; }
-        public string? BusinessType { get; set; }
-        public string? ContactPerson { get; set; }
-        public string? Address { get; set; }
-        public string? City { get; set; }
-        public string? State { get; set; }
-        public string? Phone { get; set; }
-        public string? PhoneSourceUrl { get; set; }
-        public string? Email { get; set; }
-        public string? Website { get; set; }
-        public string? SourceUrl { get; set; }
-        public bool? IsIndependentBusiness { get; set; }
-        public bool? IsPermanentlyClosed { get; set; }
-        public int LeadScore { get; set; }
-        public string? ScoreRationale { get; set; }
     }
 }

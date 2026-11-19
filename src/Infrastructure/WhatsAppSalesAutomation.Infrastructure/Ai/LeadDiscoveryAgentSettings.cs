@@ -12,10 +12,28 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// </summary>
 public class LeadDiscoveryAgentSettings
 {
-    /// <summary>"Anthropic" (default) or "Simulated" - the same convention as WhatsAppSettings.Provider.
+    /// <summary>"Anthropic" (default), "OpenAI" (ChatGPT) or "Simulated" - the same convention as WhatsAppSettings.Provider.
     /// "Simulated" runs the whole pipeline against invented businesses without calling any API or spending
     /// anything, for testing. See SimulatedLeadDiscoveryAgent.</summary>
     public string Provider { get; set; } = "Anthropic";
+
+    /// <summary>Used when <see cref="Provider"/> is "OpenAI": the key defaults to the OpenAI key saved under
+    /// Configuration > AI Providers, so set this only for a dedicated discovery key.</summary>
+    public string OpenAiApiKey { get; set; } = string.Empty;
+
+    /// <summary>Empty uses the base URL saved for OpenAI under Configuration > AI Providers.</summary>
+    public string OpenAiBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>The model that does the research. It must support the hosted web_search tool and function calling
+    /// (gpt-5, gpt-5-mini, gpt-4.1 ...). Deliberately not the chat model from AI Providers, which is usually the
+    /// cheapest one and too weak to research with. Add its rates under LeadDiscovery:Pricing:Models.</summary>
+    public string OpenAiModel { get; set; } = "gpt-5-mini";
+
+    /// <summary>"low"/"medium"/"high", or empty to use the API default. Web search needs at least "low".</summary>
+    public string? OpenAiReasoningEffort { get; set; } = "low";
+
+    /// <summary>How much of a fetched page, in characters, the OpenAI agent reads (and is verified against).</summary>
+    public int OpenAiMaxFetchChars { get; set; } = 20000;
 
     /// <summary>The platform's own Anthropic API key. Empty means lead discovery is not configured, and every
     /// tenant's run is skipped rather than failed.</summary>

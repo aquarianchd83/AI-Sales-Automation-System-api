@@ -268,13 +268,16 @@ internal static class EmbeddingRecording
 /// <summary>Lead discovery's web-search agent (Claude): one record per run, with its token use.</summary>
 public sealed class RecordingLeadDiscoveryAgent : ILeadDiscoveryAgent
 {
-    private readonly AnthropicLeadDiscoveryAgent _inner;
+    private readonly ILeadDiscoveryAgent _inner;
     private readonly AiCallRecorder _recorder;
+    private readonly string _provider;
 
-    public RecordingLeadDiscoveryAgent(AnthropicLeadDiscoveryAgent inner, AiCallRecorder recorder)
+    /// <param name="provider">The provider name the calls are logged under ("Anthropic" or "OpenAI").</param>
+    public RecordingLeadDiscoveryAgent(ILeadDiscoveryAgent inner, AiCallRecorder recorder, string provider)
     {
         _inner = inner;
         _recorder = recorder;
+        _provider = provider;
     }
 
     public async Task<LeadDiscoveryAgentResult> DiscoverAsync(LeadDiscoveryAgentRequest request, CancellationToken cancellationToken = default)
@@ -285,14 +288,14 @@ public sealed class RecordingLeadDiscoveryAgent : ILeadDiscoveryAgent
             var result = await _inner.DiscoverAsync(request, cancellationToken);
             if (result.IsConfigured)
             {
-                await _recorder.RecordAsync(AiTaskKinds.LeadDiscovery, AiFeatures.DiscoveryLead, "Anthropic", result.Model, true, (int)watch.ElapsedMilliseconds,
+                await _recorder.RecordAsync(AiTaskKinds.LeadDiscovery, AiFeatures.DiscoveryLead, _provider, result.Model, true, (int)watch.ElapsedMilliseconds,
                     result.Usage.InputTokens + result.Usage.CacheReadInputTokens + result.Usage.CacheCreationInputTokens, result.Usage.OutputTokens);
             }
             return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await _recorder.RecordAsync(AiTaskKinds.LeadDiscovery, AiFeatures.DiscoveryLead, "Anthropic", null, false, (int)watch.ElapsedMilliseconds, errorSummary: ex.Message);
+            await _recorder.RecordAsync(AiTaskKinds.LeadDiscovery, AiFeatures.DiscoveryLead, _provider, null, false, (int)watch.ElapsedMilliseconds, errorSummary: ex.Message);
             throw;
         }
     }

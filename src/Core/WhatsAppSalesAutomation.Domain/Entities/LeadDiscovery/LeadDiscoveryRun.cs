@@ -60,4 +60,12 @@ public class LeadDiscoveryRun : BaseEntity, ITenantOwned
     /// snapshot-at-the-time reasoning as Payment.AmountCents.
     /// </summary>
     public decimal EstimatedCostUsd { get; set; }
+
+    /// <summary>The part of <see cref="EstimatedCostUsd"/> that was web searches (the rest is tokens), recorded with it so the split never
+    /// has to be recomputed at later rates. Null on a run from before it was recorded.</summary>
+    public decimal? SearchCostUsd { get; set; }
+
+    /// <summary>What the research said about the run, in the agent's own words - which rules it ran into, why it submitted fewer candidates
+    /// than asked for, or none. One line per round. Null when the agent gave none, or on a run from before it was recorded.</summary>
+    public string? ResearchNote { get; set; }
 }
