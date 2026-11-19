@@ -43,9 +43,19 @@ public class SettingsService : ISettingsService
         // A setting with fixed choices only ever stores one of them, whatever the caller sent.
         foreach (var (key, value) in request.Values)
         {
-            var options = AppSettingCatalog.All.First(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase)).Options;
+            var definition = AppSettingCatalog.All.First(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
+            var options = definition.Options;
             if (options is not null && !string.IsNullOrEmpty(value) && !options.Contains(value, StringComparer.OrdinalIgnoreCase))
                 throw new FluentValidation.ValidationException(new[] { new FluentValidation.Results.ValidationFailure(key, $"{key} must be one of: {string.Join(", ", options)}.") });
+
+            // A whole-number setting stays inside its range. Empty is allowed: it clears the stored value, so the built-in default applies.
+            if ((definition.MinValue is not null || definition.MaxValue is not null) && !string.IsNullOrWhiteSpace(value))
+            {
+                var min = definition.MinValue ?? 0;
+                var max = definition.MaxValue ?? int.MaxValue;
+                if (!int.TryParse(value.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) || number < min || number > max)
+                    throw new FluentValidation.ValidationException(new[] { new FluentValidation.Results.ValidationFailure(key, $"{key} must be a whole number from {min} to {max}.") });
+            }
         }
 
         await _store.UpsertAsync(request.Values, updatedByUserId, cancellationToken);

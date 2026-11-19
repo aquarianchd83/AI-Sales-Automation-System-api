@@ -87,10 +87,18 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         return new PagedResult<LeadDiscoveryHistoryDayDto>(days, totalDays, query.Page, query.PageSize);
     }
 
-    /// <summary>The note shown when a row was not sent the consent SMS - never blank - and whether it is because the switch is Off (so the screen links to the setting).</summary>
-    internal static (string Note, bool NeedsSetting) ConsentSmsNoteFor(LeadDiscoveryExecutionCustomerDto row, IReadOnlyDictionary<Guid, string?> skippedReasons)
+    /// <summary>
+    /// The note shown when a row was not sent the consent SMS - never blank - and whether the cause is a setting the tenant can change (so the
+    /// screen links to the discovery profile). There are two causes of that kind, and the first one decides:
+    ///   - no Auto-Campaign: the customer was "not added to a campaign" - the SMS is sent only to the customers a campaign takes;
+    ///   - an Auto-Campaign, but the consent SMS switch is off: "SMS consent is not configured".
+    /// The reason the run recorded wins; a reason saved under the earlier wording is shown as the current one. Without one (an execution from
+    /// before reasons were recorded) it follows from the execution: no Auto-Campaign, or else the switch.
+    /// </summary>
+    /// <param name="autoCampaignConfigured">Whether the execution had an Auto-Campaign to take its customers.</param>
+    internal static (string Note, bool NeedsSetting) ConsentSmsNoteFor(
+        LeadDiscoveryExecutionCustomerDto row, IReadOnlyDictionary<Guid, string?> skippedReasons, bool autoCampaignConfigured = true)
     {
-        const string off = "Not sent: the consent SMS was Off";
 
         if (row.CustomerId is not { } customerId)
         {
@@ -104,14 +112,37 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             };
         }
 
-        // No invitation exists for this customer. Unless a specific reason was recorded (no WhatsApp number, say), the consent SMS was Off.
-        if (skippedReasons.TryGetValue(customerId, out var reason)
-            && !string.IsNullOrWhiteSpace(reason)
-            && reason != LeadDiscoveryRunService.ConsentSmsOffReason)
-            return ($"Not sent: {reason}", false);
+        // No invitation exists for this customer. Unless a specific reason was recorded (no WhatsApp number, say), it is one of the two settings.
+        if (skippedReasons.TryGetValue(customerId, out var recorded) && !string.IsNullOrWhiteSpace(recorded))
+        {
+            var reason = recorded switch
+            {
+                LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason => LeadDiscoveryRunService.AutoCampaignNotConfiguredReason,
+                LeadDiscoveryRunService.LegacyConsentSmsOffReason => LeadDiscoveryRunService.ConsentSmsOffReason,
+                _ => recorded
+            };
 
-        return (off, true);
+            // Both settings link to the discovery profile; the other reasons (a number the SMS provider turned away, a WhatsApp number not
+            // set up) are not fixed there.
+            if (reason is LeadDiscoveryRunService.AutoCampaignNotConfiguredReason or LeadDiscoveryRunService.ConsentSmsOffReason)
+                return (reason, true);
+
+            return ($"Not sent: {reason}", false);
+        }
+
+        // The SMS is sent only to the customers a campaign takes, so with no Auto-Campaign that is the first thing to fix; otherwise the
+        // Auto-Campaign took them and it is the consent SMS that is not set up.
+        return autoCampaignConfigured
+            ? (LeadDiscoveryRunService.ConsentSmsOffReason, true)
+            : (LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true);
     }
+
+    /// <summary>The bold lead-in of a consent SMS note, when it has one: the sentence that says which setting is missing. Null for any other note.</summary>
+    internal static string? ConsentSmsHeadlineOf(string? note) =>
+        note is null ? null
+        : note.StartsWith(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, StringComparison.Ordinal) ? LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline
+        : note.StartsWith(LeadDiscoveryRunService.ConsentSmsOffHeadline, StringComparison.Ordinal) ? LeadDiscoveryRunService.ConsentSmsOffHeadline
+        : null;
 
     public async Task<LeadDiscoveryExecutionDetailDto> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default)
     {
@@ -126,12 +157,25 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false, "", null, null))
             .ToListAsync(cancellationToken);
+
+        // What the agent reported about each candidate. Read separately, and only where one was kept, so the large text is not pulled
+        // for rows without it (an execution from before candidates were kept has none).
+        var reported = await _context.LeadDiscoveryExecutionCustomers.AsNoTracking()
+            .Where(c => c.ExecutionId == executionId && c.TenantId == tenantId && c.CandidateDetailsJson != null)
+            .Select(c => new { c.Id, Json = c.CandidateDetailsJson! })
+            .ToDictionaryAsync(c => c.Id, c => c.Json, cancellationToken);
 
         // Read back as Kind.Unspecified; without a "Z" the browser would show these digits as local time.
         customers = customers
-            .Select(c => c with { ProcessedAtUtc = AsUtc(c.ProcessedAtUtc), VerifiedAtUtc = AsUtc(c.VerifiedAtUtc) })
+            .Select(c => c with
+            {
+                ProcessedAtUtc = AsUtc(c.ProcessedAtUtc),
+                VerifiedAtUtc = AsUtc(c.VerifiedAtUtc),
+                Outcome = LeadDiscoveryExecutionOutcomes.Of(c.Status, c.IsInvalid, c.ErrorMessage, c.DiscoveredLeadId != null),
+                Candidate = reported.TryGetValue(c.Id, out var json) ? LeadDiscoveryCandidateSnapshot.Parse(json) : null
+            })
             .ToList();
 
         var customerIds = customers.Where(c => c.CustomerId != null).Select(c => c.CustomerId!.Value).Distinct().ToList();
@@ -195,8 +239,8 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             if (c.ConsentSmsStatus is not null)
                 return c;
 
-            var (note, needsSetting) = ConsentSmsNoteFor(c, skippedReasons);
-            return c with { ConsentSmsNote = note, ConsentSmsNeedsSetting = needsSetting };
+            var (note, needsSetting) = ConsentSmsNoteFor(c, skippedReasons, execution.AutoCampaignConfigured);
+            return c with { ConsentSmsNote = note, ConsentSmsNeedsSetting = needsSetting, ConsentSmsHeadline = ConsentSmsHeadlineOf(note) };
         }).ToList();
 
         var templates = await _context.LeadDiscoveryExecutionTemplates.AsNoTracking()
@@ -225,6 +269,14 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.Error)),
             customers.Count(c => c.VerificationStatus == nameof(LeadDiscoveryVerificationStatus.NotChecked)));
 
+        // What was actually taken from the wallet for this execution (charged lead by lead, and refunded if one was reversed). Summed here, not
+        // in the query: SQLite cannot sum a decimal.
+        var ledger = await _context.QuotaLedgerEntries.AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.ReferenceType == "LeadDiscoveryRun" && e.ReferenceId == executionId.ToString("N"))
+            .Select(e => e.UnitsDelta)
+            .ToListAsync(cancellationToken);
+        var creditsCharged = Math.Max(0m, -ledger.Sum());
+
         return new LeadDiscoveryExecutionDetailDto(
             ToSummary(execution, run, pricing),
             execution.LockKey,
@@ -241,7 +293,8 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             run is null ? null : LeadDiscoveryService.ToDto(run, pricing),
             pricing.CurrencyCode,
             pricing.CurrencySymbol,
-            verificationCounts);
+            verificationCounts,
+            creditsCharged);
     }
 
     public async Task<LeadDiscoveryRetryQueuedDto> RequestRetryAsync(Guid executionId, CancellationToken cancellationToken = default)

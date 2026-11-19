@@ -389,6 +389,14 @@ public class RefundService : IRefundService
         if (payment.Kind == PaymentKind.Refund || payment.AmountCents <= 0)
             return No("A refund can't be refunded.");
 
+        if (payment.Status == PaymentStatus.Failed)
+            return No("This payment did not go through, so there is nothing to refund.");
+
+        // The refund gateway here does not return money through Razorpay. Marking a real payment refunded without the money going back
+        // would be worse than refusing, so it is refused - for a tenant's request and an operator's direct refund alike.
+        if (string.Equals(payment.Provider, "Razorpay", StringComparison.OrdinalIgnoreCase))
+            return No("Refunds for automatic payments are not available here yet. Please contact support.");
+
         var alreadyAsked = await _context.RefundRequests.IgnoreQueryFilters()
             .AnyAsync(r => r.PaymentId == payment.Id && (r.Status == RefundStatus.Requested || r.Status == RefundStatus.Refunded || r.Status == RefundStatus.Failed), cancellationToken);
         if (alreadyAsked)

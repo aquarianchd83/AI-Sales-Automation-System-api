@@ -67,7 +67,7 @@ public class PlatformRevenueService : IPlatformRevenueService
         var thisMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
         var firstPayment = query.TenantId is { } only && query.From is null
-            ? await _context.Payments.AsNoTracking().IgnoreQueryFilters().Where(p => p.TenantId == only).MinAsync(p => (DateTime?)p.PaidAtUtc, cancellationToken)
+            ? await _context.Payments.AsNoTracking().IgnoreQueryFilters().Where(p => p.TenantId == only && p.Status == PaymentStatus.Succeeded).MinAsync(p => (DateTime?)p.PaidAtUtc, cancellationToken)
             : null;
         var from = query.From?.Date ?? (query.TenantId is not null ? (firstPayment?.Date ?? thisMonth) : thisMonth.AddMonths(-11));
         var to = (query.To?.Date ?? now.Date);
@@ -83,7 +83,8 @@ public class PlatformRevenueService : IPlatformRevenueService
         var rows = await (
             from p in _context.Payments.AsNoTracking().IgnoreQueryFilters()
             join t in _context.Tenants.AsNoTracking() on p.TenantId equals t.Id
-            where p.PaidAtUtc >= previousFrom && p.PaidAtUtc < toExclusive && (query.TenantId == null || p.TenantId == query.TenantId)
+            // A failed attempt is on record so the tenant can see it; it is not money.
+            where p.Status == PaymentStatus.Succeeded && p.PaidAtUtc >= previousFrom && p.PaidAtUtc < toExclusive && (query.TenantId == null || p.TenantId == query.TenantId)
             select new
             {
                 p.TenantId, TenantName = t.Name, p.Kind, p.AmountInr, p.TaxLocal, p.TotalLocal, p.LocalAmount, p.CountryCode, p.CurrencyCode, p.PaidAtUtc

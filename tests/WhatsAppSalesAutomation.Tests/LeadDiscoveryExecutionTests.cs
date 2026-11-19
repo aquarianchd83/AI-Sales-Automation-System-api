@@ -13,11 +13,13 @@ using WhatsAppSalesAutomation.Application.Consent;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Entities.Messaging;
 using WhatsAppSalesAutomation.Domain.Enums;
+using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.LeadDiscovery;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
 
@@ -481,8 +483,12 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var rejected = detail.Customers.Single(c => c.CustomerName.Contains("B"));
         Assert.Equal("Not sent: Not applicable", rejected.ConsentSmsNote);   // the SMS logic is skipped for a number that failed the DND check
         var passed = detail.Customers.Single(c => c.CustomerName.Contains("A"));
-        Assert.Equal("Not sent: the consent SMS was Off", passed.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, passed.ConsentSmsNote);   // the Auto-Campaign took it; the consent SMS is not set up
+        Assert.StartsWith("SMS consent is not configured.", passed.ConsentSmsNote);
+        Assert.Equal("SMS consent is not configured.", passed.ConsentSmsHeadline);          // shown in bold
+        Assert.Contains("Send WhatsApp consent SMS", passed.ConsentSmsNote);                // and where to turn it on
         Assert.True(passed.ConsentSmsNeedsSetting);      // the screen links this one to the discovery profile
+        Assert.Null(rejected.ConsentSmsHeadline);        // a plain note has no bold lead-in
         Assert.False(rejected.ConsentSmsNeedsSetting);   // a rejected number is not fixed by a setting
         Assert.All(detail.Customers.Where(c => c.CustomerId is null), c => Assert.StartsWith("Not sent:", c.ConsentSmsNote));
 
@@ -503,10 +509,155 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.StartsWith("Not sent: The business's WhatsApp number is not set up", note);
         Assert.False(needsSetting);
 
-        // The recorded "switch is Off" reason and a missing record both read the same, and link to the setting.
+        // The recorded "switch is Off" reason and a missing record (with an Auto-Campaign) both read the same, and link to the setting.
         reasons[customerId] = LeadDiscoveryRunService.ConsentSmsOffReason;
-        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
-        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
+    }
+
+    // ---- consent SMS on, but no Auto-Campaign: nothing can be sent, and the screen must say that - not "Off" ----
+
+    private LeadDiscoveryHistoryService History2() =>
+        new(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+    private void TurnConsentSmsOn()
+    {
+        _db.LeadDiscoveryProfiles.Single().ConsentSmsEnabled = true;
+        _db.SaveChanges();
+        // A published consent page, so the run is allowed to start (see ConsentPageBlockAsync).
+        PublishConsentPage();
+    }
+
+    [Fact]
+    public async Task With_the_consent_sms_on_but_no_auto_campaign_each_customer_is_told_why_no_sms_was_sent()
+    {
+        TurnConsentSmsOn();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.False(execution.AutoCampaignConfigured);
+        Assert.Empty(_consent.Sent);                                                       // no campaign took them, so nobody was texted
+        var recorded = await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped).ToListAsync();
+        Assert.Equal(2, recorded.Count);                                                   // one per customer
+        Assert.All(recorded, e => Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, e.Reason));
+        Assert.All(recorded, e => Assert.Equal(execution.Id, e.ExecutionId));
+
+        var detail = await History2().GetExecutionAsync(execution.Id);
+        Assert.All(detail.Customers, c =>
+        {
+            Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, c.ConsentSmsNote);
+            Assert.StartsWith("Not added to a campaign: Auto-Campaign is not configured.", c.ConsentSmsNote);
+            Assert.Equal("Not added to a campaign: Auto-Campaign is not configured.", c.ConsentSmsHeadline);   // shown in bold
+            Assert.Contains("Turn on Auto-Campaign and choose a campaign in the discovery profile.", c.ConsentSmsNote);
+            Assert.DoesNotContain("SMS consent is not configured", c.ConsentSmsNote);     // the switch is on - it is the campaign that is missing
+            Assert.True(c.ConsentSmsNeedsSetting);                                         // the screen links to the discovery profile
+        });
+    }
+
+    [Fact]
+    public async Task An_execution_from_before_the_reason_was_recorded_still_explains_itself_from_the_execution()
+    {
+        TurnConsentSmsOn();
+        _agent.Rounds.Add(Candidates("A"));
+        await Service(consentPageGate: RealGate()).RunForTenantAsync(_tenant);
+        // As written by an earlier version: no reason on the customer's history.
+        _db.CustomerHistoryEvents.RemoveRange(_db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped));
+        await _db.SaveChangesAsync();
+
+        var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
+
+        var row = Assert.Single(detail.Customers);
+        Assert.StartsWith("Not added to a campaign: Auto-Campaign is not configured.", row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, row.ConsentSmsHeadline);
+    }
+
+    [Fact]
+    public async Task With_no_auto_campaign_it_is_the_campaign_that_is_named_first_whether_or_not_the_consent_sms_switch_is_on()
+    {
+        _agent.Rounds.Add(Candidates("A"));                                                // ConsentSmsEnabled is off in the default profile
+
+        await Service().RunForTenantAsync(_tenant);
+
+        // Nothing is written on the customer's timeline for a tenant that does not use the consent SMS; the page works it out from the run.
+        Assert.Empty(await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped).ToListAsync());
+        var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
+        var row = Assert.Single(detail.Customers);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, row.ConsentSmsHeadline);
+        Assert.True(row.ConsentSmsNeedsSetting);
+    }
+
+    [Fact]
+    public async Task With_an_auto_campaign_but_the_consent_sms_not_set_up_the_customer_is_told_sms_consent_is_not_configured()
+    {
+        await RunWithOneRejectedAsync();                                                   // an Auto-Campaign took A; the consent SMS switch is off
+
+        var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
+
+        var row = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffHeadline, row.ConsentSmsHeadline);
+        Assert.True(row.ConsentSmsNeedsSetting);
+        Assert.DoesNotContain("Auto-Campaign is not configured", row.ConsentSmsNote);     // the campaign is fine - it is the SMS that is not set up
+    }
+
+    [Fact]
+    public void The_note_names_the_missing_auto_campaign_first_then_the_consent_sms_and_a_specific_recorded_reason_always_wins()
+    {
+        LeadDiscoveryExecutionCustomerDto Row(Guid customerId) =>
+            new(Guid.NewGuid(), customerId, null, "A", null, "Created", false, null, null, null, null, "NotChecked");
+        var id = Guid.NewGuid();
+        var none = new Dictionary<Guid, string?>();
+
+        // no Auto-Campaign -> "not added to a campaign", the first thing to fix
+        Assert.Equal((LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true),
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: false));
+        // an Auto-Campaign took the customer, and no SMS was sent -> the consent SMS is not set up
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true),
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: true));
+        // a specific reason recorded by the run wins over either
+        var reasons = new Dictionary<Guid, string?> { [id] = "The SMS provider turned the number away." };
+        Assert.Equal(("Not sent: The SMS provider turned the number away.", false),
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), reasons, autoCampaignConfigured: false));
+    }
+
+    [Fact]
+    public void History_saved_under_the_earlier_wording_is_shown_as_the_current_wording_and_still_links_to_the_profile()
+    {
+        LeadDiscoveryExecutionCustomerDto Row(Guid customerId) =>
+            new(Guid.NewGuid(), customerId, null, "A", null, "Created", false, null, null, null, null, "NotChecked");
+        var id = Guid.NewGuid();
+
+        var legacyCampaign = new Dictionary<Guid, string?> { [id] = LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason };
+        var legacyOff = new Dictionary<Guid, string?> { [id] = LeadDiscoveryRunService.LegacyConsentSmsOffReason };
+
+        Assert.Equal((LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), legacyCampaign));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), legacyOff));
+        Assert.NotEqual(LeadDiscoveryRunService.LegacyConsentSmsOffReason, LeadDiscoveryRunService.ConsentSmsOffReason);
+        Assert.NotEqual(LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason, LeadDiscoveryRunService.AutoCampaignNotConfiguredReason);
+    }
+
+    [Fact]
+    public void The_bold_lead_in_is_the_headline_of_the_two_setting_notes_and_nothing_else()
+    {
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline,
+            LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason));
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffHeadline,
+            LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(LeadDiscoveryRunService.ConsentSmsOffReason));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf("Not sent: Not applicable"));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf("Not sent: The SMS provider turned the number away."));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(null));
+    }
+
+    [Fact]
+    public void The_two_messages_say_what_the_tenant_asked_for()
+    {
+        Assert.Equal("Not added to a campaign: Auto-Campaign is not configured.", LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline);
+        Assert.EndsWith("Turn on Auto-Campaign and choose a campaign in the discovery profile.", LeadDiscoveryRunService.AutoCampaignNotConfiguredReason);
+        Assert.Equal("SMS consent is not configured.", LeadDiscoveryRunService.ConsentSmsOffHeadline);
+        Assert.Contains("discovery profile", LeadDiscoveryRunService.ConsentSmsOffReason);
     }
 
     [Fact]
@@ -548,6 +699,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal("A Contact", detail.Customers.Single(c => c.CustomerName.Contains("A")).CrmCustomerName);
         Assert.Null(detail.Customers.Single(c => c.CustomerName.Contains("B")).CrmCustomerName);   // rejected: no customer
+        Assert.Equal("Lead only", detail.Customers.Single(c => c.CustomerName.Contains("B")).Outcome);          // kept as a lead, counted as saved
+        Assert.Equal("Saved", detail.Customers.Single(c => c.CustomerName.Contains("A")).Outcome);
     }
 
     [Fact]
@@ -1240,7 +1393,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
+            new Snapshot<LeadDiscoveryOptions>(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
             consentPageGate);
     }
 
@@ -1680,14 +1833,722 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
 
+    // ---------------------------------------------------------------------------------------------
+    // Billing and the size of the batch
+    // ---------------------------------------------------------------------------------------------
+
+    private void SetBatchSize(int batchSize)
+    {
+        _db.LeadDiscoveryProfiles.Single().BatchSize = batchSize;
+        _db.SaveChanges();
+    }
+
+    /// <summary>Candidates the qualification rules always reject: closed businesses.</summary>
+    private static LeadDiscoveryAgentResult Rejected(params string[] names)
+    {
+        var good = Candidates(names);
+        var closed = good.Candidates.Select(c => c with { IsPermanentlyClosed = true }).ToList();
+        return good with { Candidates = closed };
+    }
+
+    private static LeadDiscoveryAgentResult Together(params LeadDiscoveryAgentResult[] parts) =>
+        new(true, null, parts.SelectMany(p => p.Candidates).ToList(),
+            new LeadDiscoveryEvidence(parts.SelectMany(p => p.Evidence.SeenUrls).ToList(), parts.SelectMany(p => p.Evidence.FetchedPages).ToList()),
+            LeadDiscoveryUsage.None, "Simulated");
+
+    [Fact]
+    public async Task The_tenant_is_charged_only_for_the_customers_created_never_for_rejected_candidates()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Together(Candidates("A", "B"), Rejected("C", "D", "E", "F")));   // 6 found, 2 valid
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2m, _quotaConsumed);                                                  // two leads, not six candidates
+        var rejected = await _db.LeadDiscoveryExecutionCustomers.Where(r => r.IsInvalid).ToListAsync();
+        Assert.Equal(4, rejected.Count);
+        Assert.All(rejected, r => Assert.Contains("(not charged)", r.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task Every_candidate_considered_is_on_the_execution_with_what_became_of_it()
+    {
+        SetBatchSize(2);
+        // 7 found: 4 qualify (2 are needed), 2 are rejected, 1 already exists.
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = Phone("G"), FirstName = "Existing", Source = "Manual" });
+        _db.SaveChanges();
+        _agent.Rounds.Add(Together(Candidates("A", "B", "C", "D"), Rejected("E", "F"), Candidates("G")));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var history = new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+        var detail = await history.GetExecutionAsync(execution.Id);
+
+        Assert.Equal(7, detail.Customers.Count);                                           // as many rows as candidates considered
+        Assert.Equal(7, detail.Research!.CandidatesConsidered);
+        Assert.Equal(2, detail.Customers.Count(c => c.Outcome == "Saved"));
+        Assert.Equal(1, detail.Customers.Count(c => c.Outcome == "Duplicate"));
+        Assert.Equal(2, detail.Customers.Count(c => c.Outcome == "Rejected"));
+        var notNeeded = detail.Customers.Where(c => c.Outcome == "Not needed").ToList();
+        Assert.Equal(2, notNeeded.Count);
+        Assert.All(notNeeded, c =>
+        {
+            Assert.Equal("Skipped", c.Status);
+            Assert.False(c.IsInvalid);
+            Assert.Null(c.CustomerId);
+            Assert.Contains("batch was already full", c.ErrorMessage);
+        });
+        Assert.Equal(2, await _db.Customers.CountAsync(c => c.Source != "Manual"));        // the not-needed ones were not saved
+        Assert.Equal(2m, _quotaConsumed);                                                  // nor charged
+    }
+
+    [Fact]
+    public async Task Every_row_keeps_what_the_agent_reported_about_its_candidate_whatever_became_of_it()
+    {
+        SetBatchSize(2);
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = Phone("G"), FirstName = "Existing", Source = "Manual" });
+        _db.SaveChanges();
+        _agent.Rounds.Add(Together(Candidates("A", "B", "C"), Rejected("D"), Candidates("G")));   // saved x2, not needed, rejected, duplicate
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync(execution.Id);
+
+        Assert.Equal(new[] { "Duplicate", "Not needed", "Rejected", "Saved", "Saved" }, detail.Customers.Select(c => c.Outcome).Order().ToArray());
+        Assert.All(detail.Customers, c => Assert.NotNull(c.Candidate));
+
+        var saved = detail.Customers.Single(c => c.CustomerName == "A");
+        Assert.Equal("Eye clinic", saved.Candidate!.BusinessType);
+        Assert.Equal("A Contact", saved.Candidate.ContactPerson);
+        Assert.Equal("Chandigarh", saved.Candidate.City);
+        Assert.Equal(80, saved.Candidate.LeadScore);
+        Assert.Equal("Good fit", saved.Candidate.ScoreRationale);
+        Assert.Contains("a-clinic", saved.Candidate.SourceUrl);
+
+        // A candidate that was never saved still has its details - the reason it was left out is on the row, the facts are here.
+        var rejected = detail.Customers.Single(c => c.Outcome == "Rejected");
+        Assert.Equal("D", rejected.CustomerName);
+        Assert.True(rejected.Candidate!.IsPermanentlyClosed);
+        Assert.Equal("Chandigarh", rejected.Candidate.City);
+        Assert.Equal("Good fit", rejected.Candidate.ScoreRationale);
+        Assert.NotNull(detail.Customers.Single(c => c.Outcome == "Not needed").Candidate);
+        Assert.NotNull(detail.Customers.Single(c => c.Outcome == "Duplicate").Candidate);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Justifying what a run cost and found
+    // ---------------------------------------------------------------------------------------------
+
+    private LeadDiscoveryHistoryService History() =>
+        new(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()));
+
+    private static LeadDiscoveryAgentResult With(LeadDiscoveryAgentResult result, string? note, LeadDiscoveryUsage? usage = null) =>
+        result with { Note = note, Usage = usage ?? result.Usage, Model = "gpt-5-mini" };
+
+    [Fact]
+    public async Task A_run_that_found_nothing_keeps_the_agents_reason_and_shows_it_on_the_execution()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(With(Candidates(), "No clinic page named a contact person, which the profile requires."));
+        _agent.Rounds.Add(With(Candidates(), "Searched chains only; none showed an address."));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var detail = await History().GetExecutionAsync((await SingleExecutionAsync()).Id);
+        Assert.Equal(0, detail.Research!.CandidatesConsidered);
+        Assert.Equal(
+            "Round 1: No clinic page named a contact person, which the profile requires.\nRound 2: Searched chains only; none showed an address.",
+            detail.Research.ResearchNote);
+    }
+
+    [Fact]
+    public async Task A_single_round_keeps_the_agents_words_as_they_are()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(With(Candidates("A", "B"), "Searched dental clinics in Chandigarh."));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var run = await _db.LeadDiscoveryRuns.SingleAsync();
+        Assert.Equal("Searched dental clinics in Chandigarh.", run.ResearchNote);
+    }
+
+    [Fact]
+    public async Task A_run_with_no_explanation_from_the_agent_has_no_note()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Null((await _db.LeadDiscoveryRuns.SingleAsync()).ResearchNote);
+    }
+
+    [Fact]
+    public async Task The_cost_of_a_run_is_recorded_as_tokens_plus_searches_and_the_parts_add_up_to_the_total()
+    {
+        SetBatchSize(2);
+        var usage = new LeadDiscoveryUsage(78_603, 2_895, 46_208, 0, WebSearches: 7, WebFetches: 2);
+        _agent.Rounds.Add(With(Candidates("A", "B"), "Searched.", usage));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var run = await _db.LeadDiscoveryRuns.SingleAsync();
+        Assert.Equal("gpt-5-mini", run.Model);
+        Assert.Equal(0.07m, run.SearchCostUsd);                                  // 7 searches x $10 / 1000
+        Assert.Equal(0.096596m, run.EstimatedCostUsd);                            // gpt-5-mini's own rates, not the default Claude model's
+        var detail = await History().GetExecutionAsync(run.ExecutionId!.Value);
+        Assert.NotNull(detail.Research!.SearchCostLocal);
+        Assert.NotNull(detail.Research.TokensCostLocal);
+        Assert.InRange(detail.Research.SearchCostLocal!.Value + detail.Research.TokensCostLocal!.Value - detail.Research.EstimatedCostLocal, -0.011m, 0.011m);
+    }
+
+    [Fact]
+    public async Task A_run_recorded_before_the_split_existed_shows_no_split_but_still_its_total()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        await Service().RunForTenantAsync(_tenant);
+        var run = await _db.LeadDiscoveryRuns.SingleAsync();
+        run.SearchCostUsd = null;
+        run.ResearchNote = null;
+        await _db.SaveChangesAsync();
+
+        var detail = await History().GetExecutionAsync(run.ExecutionId!.Value);
+
+        Assert.Null(detail.Research!.SearchCostLocal);
+        Assert.Null(detail.Research.TokensCostLocal);
+        Assert.Null(detail.Research.ResearchNote);
+    }
+
+    [Fact]
+    public async Task The_execution_shows_the_credits_it_actually_took_from_the_wallet_net_of_a_refund()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        await Service().RunForTenantAsync(_tenant);
+        var execution = await SingleExecutionAsync();
+        var key = execution.Id.ToString("N");
+        QuotaLedgerEntry Entry(decimal units, string reference) => new()
+        {
+            TenantId = _tenant, QuotaType = QuotaType.Credits, EntryType = QuotaEntryType.Consumption, UnitsDelta = units,
+            OperationKey = Guid.NewGuid().ToString("N"), ReferenceType = "LeadDiscoveryRun", ReferenceId = reference
+        };
+        _db.QuotaLedgerEntries.AddRange(
+            Entry(-1.5m, key), Entry(-1.5m, key),     // two leads charged
+            Entry(1.5m, key),                         // one of them refunded
+            Entry(-9m, Guid.NewGuid().ToString("N"))); // another execution's charge
+        await _db.SaveChangesAsync();
+
+        var detail = await History().GetExecutionAsync(execution.Id);
+
+        Assert.Equal(1.5m, detail.CreditsCharged);
+    }
+
+    [Fact]
+    public async Task An_execution_that_charged_nothing_shows_zero_credits_not_a_negative_figure()
+    {
+        _agent.Rounds.Add(Rejected("X"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var detail = await History().GetExecutionAsync((await SingleExecutionAsync()).Id);
+        Assert.Equal(0m, detail.CreditsCharged);
+    }
+
+    [Fact]
+    public async Task A_row_from_before_candidates_were_kept_shows_no_details_and_still_reads()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+        var row = await _db.LeadDiscoveryExecutionCustomers.SingleAsync();
+        row.CandidateDetailsJson = null;                       // as written by an older version
+        await _db.SaveChangesAsync();
+
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync((await SingleExecutionAsync()).Id);
+
+        Assert.Null(Assert.Single(detail.Customers).Candidate);
+        Assert.Equal("Saved", detail.Customers[0].Outcome);
+    }
+
+    [Fact]
+    public async Task Damaged_details_on_a_row_do_not_make_the_execution_unreadable()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+        var row = await _db.LeadDiscoveryExecutionCustomers.SingleAsync();
+        row.CandidateDetailsJson = "{ not json";
+        await _db.SaveChangesAsync();
+
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync((await SingleExecutionAsync()).Id);
+
+        Assert.Null(Assert.Single(detail.Customers).Candidate);
+    }
+
+    [Fact]
+    public async Task A_retry_keeps_the_details_of_the_candidates_it_carries_over()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var failure = FailCustomerSave("B Contact");
+        await Service().RunForTenantAsync(_tenant);
+        var first = await SingleExecutionAsync();
+
+        failure.Enabled = false;
+        await Service().RetryExecutionAsync(_tenant, first.Id);
+
+        var retry = (await Executions()).Last();
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync(retry.Id);
+
+        Assert.NotEmpty(detail.Customers);
+        Assert.All(detail.Customers, c => Assert.NotNull(c.Candidate));
+        Assert.Equal("B Contact", detail.Customers.Single(c => c.CustomerName == "B").Candidate!.ContactPerson);
+    }
+
+    [Fact]
+    public async Task A_retry_does_not_carry_the_not_needed_candidates_over_or_create_them()
+    {
+        SetBatchSize(1);
+        _agent.Rounds.Add(Candidates("A", "B", "C"));                                      // one needed; B and C are not needed
+        var failure = FailCustomerSave("A Contact");
+        await Service().RunForTenantAsync(_tenant);
+        var first = await SingleExecutionAsync();
+
+        failure.Enabled = false;
+        await Service().RetryExecutionAsync(_tenant, first.Id);
+
+        var names = (await _db.Customers.ToListAsync()).Select(c => c.FirstName).ToList();
+        Assert.Equal(new[] { "A Contact" }, names);                                        // only the one that was needed
+    }
+
+    [Fact]
+    public async Task Each_customer_is_charged_under_its_own_key_with_the_business_named()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var charges = new List<(string Key, string Note)>();
+
+        var service = ServiceWithChargeLog(charges);
+        await service.RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, charges.Count);
+        Assert.Equal(2, charges.Select(c => c.Key).Distinct().Count());
+        Assert.All(charges, c => Assert.StartsWith("lead:", c.Key));
+        Assert.Contains(charges, c => c.Note == "Lead: A");
+    }
+
+    [Fact]
+    public async Task A_duplicate_is_not_charged()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunForTenantAsync(_tenant);
+        var afterFirst = _quotaConsumed;
+
+        _agent.Rounds.Add(Candidates("A"));                                                // found again - already a customer
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1m, afterFirst);
+        Assert.Equal(afterFirst, _quotaConsumed);
+    }
+
+    [Fact]
+    public async Task The_run_keeps_searching_until_the_batch_is_full_even_when_a_round_finds_only_rejects()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Rejected("A", "B", "C"));                                        // nothing usable
+        _agent.Rounds.Add(Together(Rejected("D"), Candidates("E")));                       // one usable
+        _agent.Rounds.Add(Candidates("F"));                                                // the second
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(new[] { "E Contact", "F Contact" }, (await _db.Customers.OrderBy(c => c.FirstName).ToListAsync()).Select(c => c.FirstName));
+        Assert.Equal(3, _agent.Calls);
+        Assert.Equal(2m, _quotaConsumed);
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(2, execution.CustomersCreated);
+        Assert.Equal(4, execution.CustomersInvalid);
+    }
+
+    [Fact]
+    public async Task Businesses_already_rejected_are_told_to_the_agent_so_the_next_round_finds_new_ones()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Rejected("A", "B"));
+        _agent.Rounds.Add(Candidates("C", "D"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, _agent.Requests.Count);
+        Assert.Empty(_agent.Requests[0].KnownBusinesses);
+        Assert.Contains("A, Chandigarh", _agent.Requests[1].KnownBusinesses);
+        Assert.Contains("B, Chandigarh", _agent.Requests[1].KnownBusinesses);
+    }
+
+    [Fact]
+    public async Task With_no_history_the_first_round_asks_for_the_batch_plus_the_configured_starting_guess_of_waste()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(3, _agent.Requests[0].MaxCandidates);                                 // 2 / (1 - 30%) = 2.9, rounded up
+    }
+
+    // ---- how many to ask for: learned from the tenant's own runs ----
+
+    /// <summary>An earlier run of a profile, with the execution it belongs to - the learning reads runs through their executions. By default it is
+    /// an hour from now, which is after the profile was last saved (see PriorUnusableRateAsync); a test about older runs passes its own time.</summary>
+    private void RecordRealRun(int considered, int rejected, int duplicates, string model = "gpt-5-mini", DateTime? at = null, Guid? profileId = null)
+    {
+        var ranAt = at ?? DateTime.UtcNow.AddHours(1);
+        var execution = new LeadDiscoveryExecution
+        {
+            TenantId = _tenant, LeadDiscoveryProfileId = profileId ?? _profileId, ProfileName = "Eye clinic", ProcessingDate = ranAt.Date,
+            Trigger = LeadDiscoveryTriggers.Scheduled, StartedAtUtc = ranAt, EndedAtUtc = ranAt, Status = LeadDiscoveryExecutionStatus.Completed,
+            LockKey = "earlier-run", CampaignStatus = LeadDiscoveryCampaignStatus.Skipped, TemplateStatus = LeadDiscoveryAssociationStatus.Skipped,
+            MappingStatus = LeadDiscoveryAssociationStatus.Skipped
+        };
+        execution.RootExecutionId = execution.Id;
+        _db.LeadDiscoveryExecutions.Add(execution);
+        _db.LeadDiscoveryRuns.Add(new LeadDiscoveryRun
+        {
+            TenantId = _tenant, ExecutionId = execution.Id, RanAtUtc = ranAt, Model = model, Rounds = 1,
+            CandidatesConsidered = considered, LeadsSaved = considered - rejected - duplicates, Rejected = rejected, Duplicates = duplicates
+        });
+    }
+
+    /// <summary>When the profile's rules last changed. Written straight to the table, so saving the profile does not stamp it again.</summary>
+    private void ProfileLastChangedAt(DateTime whenUtc) =>
+        _db.LeadDiscoveryProfiles.ExecuteUpdate(p => p.SetProperty(x => x.UpdatedAt, whenUtc));
+
+    private static readonly string[] Letters = Enumerable.Range('A', 20).Select(c => ((char)c).ToString()).ToArray();
+
+    [Fact]
+    public async Task Example_A_a_tenant_whose_searches_throw_away_2_in_12_is_asked_for_12_to_fill_a_batch_of_10_not_20()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 12, rejected: 2, duplicates: 0);
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(12, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task A_tenant_with_a_high_rejection_history_is_asked_for_more_up_to_the_ceiling()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 20, rejected: 12, duplicates: 0);                         // 60%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(8).ToArray()));                           // 8 get through, 2 short
+        _agent.Rounds.Add(Candidates("S", "T"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(20, _agent.Requests[0].MaxCandidates);                                // 10 / 0.4 = 25, capped at 20 a round
+        Assert.True(_agent.Requests[1].MaxCandidates < 8, $"asked for {_agent.Requests[1].MaxCandidates}");   // only what is still missing - not another 20
+    }
+
+    [Fact]
+    public async Task A_simulated_run_teaches_nothing_because_its_businesses_are_invented()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 40, rejected: 36, duplicates: 0, model: "Simulated");    // would say 90% thrown away
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the starting guess (30%), not 90%
+    }
+
+    [Fact]
+    public async Task Too_little_history_is_not_trusted_and_the_starting_guess_is_used()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 5, rejected: 5, duplicates: 0);                          // 100% - but of only 5 candidates
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task Only_the_latest_runs_count_so_old_results_do_not_drag_the_estimate()
+    {
+        SetBatchSize(10);
+        for (var i = 0; i < 5; i++)
+            RecordRealRun(considered: 12, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddHours(5 - i));   // the five latest: nothing thrown away
+        RecordRealRun(considered: 100, rejected: 90, duplicates: 0, at: DateTime.UtcNow.AddMinutes(30));     // older than those five: 90%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(10, _agent.Requests[0].MaxCandidates);                                // 0% from the latest five: exactly what is needed
+    }
+
+    [Fact]
+    public async Task Runs_from_before_the_profile_was_last_changed_are_ignored_because_other_rules_threw_away_other_things()
+    {
+        SetBatchSize(10);
+        // A run under the old rules threw away 74% (as the Claude run of 17 Nov did) - then the profile was edited.
+        RecordRealRun(considered: 31, rejected: 23, duplicates: 0, at: DateTime.UtcNow.AddDays(-2));
+        await _db.SaveChangesAsync();
+        ProfileLastChangedAt(DateTime.UtcNow.AddDays(-1));
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the starting guess, not 74% -> 20
+    }
+
+    [Fact]
+    public async Task A_run_after_the_profile_was_last_changed_does_teach_it()
+    {
+        SetBatchSize(10);
+        ProfileLastChangedAt(DateTime.UtcNow.AddDays(-1));
+        RecordRealRun(considered: 12, rejected: 2, duplicates: 0, at: DateTime.UtcNow.AddHours(-3));   // since the change
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(12, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task Only_this_profiles_own_runs_teach_it_not_another_profiles()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 40, rejected: 36, duplicates: 0, profileId: Guid.NewGuid());   // another profile: 90%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task The_real_case_a_profile_edited_after_an_old_high_rejection_run_asks_for_15_and_fills_a_batch_of_10_with_nothing_left_over()
+    {
+        SetBatchSize(10);
+        // Four earlier real runs of the same profile, 47 candidates and 23 thrown away (49%), all before the profile was last saved.
+        RecordRealRun(considered: 31, rejected: 23, duplicates: 0, at: DateTime.UtcNow.AddDays(-2));
+        RecordRealRun(considered: 8, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(1));
+        RecordRealRun(considered: 6, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(2));
+        RecordRealRun(considered: 2, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(3));
+        await _db.SaveChangesAsync();
+        ProfileLastChangedAt(DateTime.UtcNow.AddHours(-6));
+        var simulated = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance);
+
+        await ServiceWithChargeLog(new List<(string Key, string Note)>(), simulated).RunForTenantAsync(_tenant);
+
+        var run = await _db.LeadDiscoveryRuns.OrderByDescending(r => r.RanAtUtc).FirstAsync(r => r.Model == "Simulated");
+        Assert.Equal(15, run.CandidatesConsidered);                                        // asked for 15 - not 20 - and got 15
+        // The earlier runs recorded above are other executions (and the test clock is fixed, so this one does not sort last by date).
+        var execution = (await Executions()).Single(e => e.LockKey != "earlier-run");
+        Assert.Equal(10, execution.CustomersCreated);
+        Assert.Equal(0, await _db.LeadDiscoveryExecutionCustomers.CountAsync(c => c.ExecutionId == execution.Id && c.ErrorMessage!.Contains("batch was already full")));
+        Assert.Equal(5, execution.CustomersInvalid);                                       // the ones a real search would have thrown away
+    }
+
+    [Fact]
+    public async Task The_starting_guess_is_a_setting_that_changes_the_first_round_for_a_tenant_with_no_history()
+    {
+        SetBatchSize(10);
+        _discoveryOptions.InitialRejectionRatePercent = 50;
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(20, _agent.Requests[0].MaxCandidates);                                // 10 / 0.5
+    }
+
+    [Fact]
+    public async Task A_round_that_found_many_rejects_makes_the_next_round_ask_for_more()
+    {
+        SetBatchSize(10);
+        _agent.Rounds.Add(Rejected(Letters.Take(15).ToArray()));                           // everything the first round found was rejected
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the 30% starting guess
+        Assert.Equal(20, _agent.Requests[1].MaxCandidates);                                // now (3 + 15) / 25 = 72% -> 10 / 0.28 = 36, capped at 20
+    }
+
+    [Fact]
+    public async Task A_round_with_no_rejects_makes_the_next_round_ask_for_little_more_than_it_still_needs()
+    {
+        SetBatchSize(10);
+        _agent.Rounds.Add(Candidates(Letters.Take(6).ToArray()));                          // 6 usable, none thrown away: 4 still needed
+        _agent.Rounds.Add(Candidates("Q", "R", "S", "T"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+        Assert.Equal(5, _agent.Requests[1].MaxCandidates);                                 // (3 + 0) / 16 = 19% -> 4 / 0.81 = 4.9
+    }
+
+    [Fact]
+    public async Task A_headroom_factor_of_one_asks_for_exactly_what_is_needed_every_round()
+    {
+        SetBatchSize(10);
+        _discoveryOptions.CandidateHeadroomFactor = 1;
+        _agent.Rounds.Add(Rejected(Letters.Take(10).ToArray()));
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.All(_agent.Requests.Take(2), r => Assert.Equal(10, r.MaxCandidates));
+    }
+
+    [Fact]
+    public async Task Candidates_kept_only_as_leads_count_as_thrown_away_because_they_do_not_fill_the_batch()
+    {
+        SetBatchSize(4);
+        // The first round's 4 are all refused by the DND check: kept as leads, none becomes a customer.
+        _verifier.Decide = (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+        _agent.Rounds.Add(Candidates("E", "F", "G", "H"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.True(_agent.Requests[1].MaxCandidates > _agent.Requests[0].MaxCandidates,
+            $"first {_agent.Requests[0].MaxCandidates}, second {_agent.Requests[1].MaxCandidates}");
+    }
+
+    [Fact]
+    public async Task The_run_stops_after_two_rounds_that_find_nothing_at_all()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A"));                                                // one valid; then the agent has nothing more
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Customers.CountAsync());
+        Assert.Equal(3, _agent.Calls);                                                     // the round that found A, then two empty ones
+    }
+
+    [Fact]
+    public async Task The_run_never_exceeds_the_round_limit_even_when_every_round_is_rejected()
+    {
+        SetBatchSize(2);
+        _discoveryOptions.MaxRounds = 3;
+        for (var i = 0; i < 10; i++)
+            _agent.Rounds.Add(Rejected($"X{i}"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(3, _agent.Calls);
+        Assert.Equal(0, await _db.Customers.CountAsync());
+        Assert.Equal(0m, _quotaConsumed);                                                  // three rounds of research, nothing charged
+        var run = await _db.LeadDiscoveryRuns.SingleAsync();
+        Assert.Equal(3, run.Rounds);
+        Assert.Equal(3, run.Rejected);
+    }
+
+    [Fact]
+    public async Task Only_as_many_leads_are_taken_as_the_tenant_can_still_pay_for()
+    {
+        SetBatchSize(5);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D", "E"));
+
+        await Service(quotaAvailable: 2m).RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2m, _quotaConsumed);
+    }
+
+    [Fact]
+    public async Task A_customer_that_failed_and_is_created_by_the_retry_is_charged_once_then()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var failure = FailCustomerSave("B Contact");
+        await Service().RunForTenantAsync(_tenant);
+        var first = await SingleExecutionAsync();
+        Assert.Equal(1m, _quotaConsumed);                                                  // A only: B was not created
+
+        failure.Enabled = false;
+        await Service().RetryExecutionAsync(_tenant, first.Id);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2m, _quotaConsumed);                                                  // B charged when it came to exist
+    }
+
+    [Fact]
+    public async Task A_retry_of_a_run_that_was_charged_per_candidate_does_not_charge_its_customers_again()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        var failure = FailCustomerSave("B Contact");
+        await Service().RunForTenantAsync(_tenant);
+        var first = await SingleExecutionAsync();
+        var consumedBefore = _quotaConsumed;
+
+        // The earlier execution was charged the old way: one entry for every candidate, when it was researched.
+        _db.QuotaLedgerEntries.Add(new QuotaLedgerEntry
+        {
+            TenantId = _tenant, QuotaType = QuotaType.Credits, EntryType = QuotaEntryType.Consumption, UnitsDelta = -3m,
+            OperationKey = $"lead:{first.RootExecutionId:N}:r1", ReferenceType = "LeadDiscoveryRun", ReferenceId = first.Id.ToString("N")
+        });
+        await _db.SaveChangesAsync();
+
+        failure.Enabled = false;
+        await Service().RetryExecutionAsync(_tenant, first.Id);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());                                 // B was created by the retry...
+        Assert.Equal(consumedBefore, _quotaConsumed);                                      // ...and not charged a second time
+    }
+
+    private LeadDiscoveryRunService ServiceWithChargeLog(List<(string Key, string Note)> charges, ILeadDiscoveryAgent? agent = null)
+    {
+        var planLimits = Stub<IPlanLimitsService>.Create(new() { ["GetLeadDiscoveryBatchLimitAsync"] = _ => Task.FromResult<int?>(null) });
+        var quota = Stub<IQuotaGate>.Create(new()
+        {
+            ["GetAvailableAsync"] = _ => Task.FromResult(1000m),
+            ["ConsumeLeadCandidatesAsync"] = args =>
+            {
+                _quotaConsumed += (decimal)args![1]!;
+                charges.Add(((string)args![2]!, (string)args![4]!));
+                return Task.FromResult((decimal)args![1]!);
+            }
+        });
+        return new LeadDiscoveryRunService(
+            _db, agent ?? _agent, planLimits, quota, Stub<IQuotaAlertService>.Create(new()),
+            _clock, new IstTimeZone(_clock), Stub<ICampaignService>.Create(new()),
+            _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
+            new Snapshot<LeadDiscoveryOptions>(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
+            null);
+    }
+
     private sealed class FakeAgent : ILeadDiscoveryAgent
     {
         public List<LeadDiscoveryAgentResult> Rounds { get; } = new();
+        public List<LeadDiscoveryAgentRequest> Requests { get; } = new();
         public int Calls { get; private set; }
 
         public Task<LeadDiscoveryAgentResult> DiscoverAsync(LeadDiscoveryAgentRequest request, CancellationToken cancellationToken = default)
         {
             Calls++;
+            Requests.Add(request with { KnownBusinesses = request.KnownBusinesses.ToList() });   // a snapshot: the service keeps adding to its own list
             if (Rounds.Count == 0)
                 return Task.FromResult(new LeadDiscoveryAgentResult(true, null, Array.Empty<DiscoveredBusinessCandidate>(),
                     LeadDiscoveryEvidence.Empty, LeadDiscoveryUsage.None, "Simulated"));

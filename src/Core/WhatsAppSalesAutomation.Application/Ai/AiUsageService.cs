@@ -199,7 +199,9 @@ public class AiUsageService : IAiUsageService
         if (subscription is null || subscription.Status == SubscriptionStatus.Canceled)
             return AiDenialReason.SubscriptionCancelled;
 
-        if (subscription.Status == SubscriptionStatus.PastDue || (subscription.CurrentPeriodEndUtc is { } end && end <= now))
+        // A plan paid for automatically keeps working for a few days past its paid period: Razorpay debits on that day and retries after it.
+        var grace = subscription.RazorpaySubscriptionRowId is null ? TimeSpan.Zero : TimeSpan.FromDays(Common.Options.AutoPayOptions.GraceDays);
+        if (subscription.Status == SubscriptionStatus.PastDue || (subscription.CurrentPeriodEndUtc is { } end && end + grace <= now))
             return AiDenialReason.SubscriptionExpired;
 
         return AiDenialReason.None;

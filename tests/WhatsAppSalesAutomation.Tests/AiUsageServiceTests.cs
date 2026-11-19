@@ -180,6 +180,39 @@ public sealed class AiUsageServiceTests : IDisposable
         Assert.Equal(5m, await BalanceAsync());
     }
 
+    /// <summary>A plan paid for by an AutoPay mandate is debited on the day its period ends, and retried for a few days after: it keeps
+    /// working through those grace days, then stops like any other expired plan.</summary>
+    [Theory]
+    [InlineData(-1, true)]
+    [InlineData(-3, true)]
+    [InlineData(-5, false)]
+    public async Task A_plan_paid_by_a_mandate_keeps_working_through_the_grace_days_after_its_period(int periodEndDays, bool allowed)
+    {
+        var plan = new Plan { Code = "premium", Name = "Premium" };
+        var razorpayPlan = new WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan { PlanId = plan.Id, AmountMinor = 284026, RazorpayPlanId = "plan_1" };
+        var mandate = new WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscription
+        {
+            TenantId = _tenant, PlanId = plan.Id, RazorpayPlanRowId = razorpayPlan.Id, RazorpaySubscriptionId = "sub_1", AmountMinor = 284026,
+            Status = WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpaySubscriptionStatus.Pending
+        };
+        _db.Tenants.Add(new Tenant { Id = _tenant, Name = "T", Slug = "t", Status = TenantStatus.Active });
+        _db.Plans.Add(plan);
+        _db.RazorpayPlans.Add(razorpayPlan);
+        _db.RazorpaySubscriptions.Add(mandate);
+        _db.Subscriptions.Add(new Subscription
+        {
+            TenantId = _tenant, PlanId = plan.Id, Status = SubscriptionStatus.Active, CurrentPeriodEndUtc = Now.AddDays(periodEndDays), RazorpaySubscriptionRowId = mandate.Id
+        });
+        await _db.SaveChangesAsync();
+        await GrantAsync(5);
+
+        var result = await _service.AuthorizeAsync(_tenant, "ConversationReply", "msg-1");
+
+        Assert.Equal(allowed, result.Allowed);
+        if (!allowed)
+            Assert.Equal(AiDenialReason.SubscriptionExpired, result.Reason);
+    }
+
     [Fact]
     public async Task Retrying_an_authorised_operation_does_not_charge_twice()
     {

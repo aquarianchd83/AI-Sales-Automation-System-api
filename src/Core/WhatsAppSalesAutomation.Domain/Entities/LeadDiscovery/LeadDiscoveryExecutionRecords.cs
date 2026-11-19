@@ -40,6 +40,10 @@ public class LeadDiscoveryExecutionCustomer : BaseEntity, ITenantOwned
     /// the row is Created or Duplicate.</summary>
     public string? CandidateJson { get; set; }
 
+    /// <summary>What the discovery agent reported about this candidate (LeadDiscoveryCandidateSnapshot, as JSON), kept whatever became of it -
+    /// unlike <see cref="CandidateJson"/>, which is only the work still to do. Null on a row from before candidates were kept.</summary>
+    public string? CandidateDetailsJson { get; set; }
+
     public DateTime? ProcessedAtUtc { get; set; }
 
     /// <summary>Whether the customer's number passed the DND / outreach-eligibility check. NotChecked for a row with no customer.</summary>

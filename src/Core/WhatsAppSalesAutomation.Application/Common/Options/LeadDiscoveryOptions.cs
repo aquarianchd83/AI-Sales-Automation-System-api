@@ -9,7 +9,16 @@ public class LeadDiscoveryOptions
 {
     /// <summary>The most agent requests one run makes while its batch is not yet full. Each round is a full
     /// round of web research, so this is the main bound on a run's cost.</summary>
-    public int MaxRounds { get; set; } = 3;
+    public int MaxRounds { get; set; } = 6;
+
+    /// <summary>The ceiling on how many candidates a round asks for, as a multiple of what is still needed. How many it actually asks for is
+    /// estimated from how many candidates this tenant's searches usually throw away (see CandidateRequestPlanner); this only stops a bad estimate
+    /// from asking for too much. 1 asks for exactly what is needed. Also capped by <see cref="MaxCandidatesPerRound"/>.</summary>
+    public int CandidateHeadroomFactor { get; set; } = 3;
+
+    /// <summary>The share of candidates, in percent, assumed to be unusable (rejected, duplicate, or kept without a customer) for a tenant with
+    /// no recent real runs to learn it from. After that the estimate comes from their own runs.</summary>
+    public int InitialRejectionRatePercent { get; set; } = 30;
 
     /// <summary>The most candidates asked for in one round. Larger batches are filled over several rounds
     /// rather than one very long agent turn.</summary>

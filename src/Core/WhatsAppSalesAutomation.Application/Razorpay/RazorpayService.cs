@@ -18,6 +18,10 @@ public interface IRazorpayService
 
     Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Switches UPI AutoPay on or off for tenants. Turning it on needs the key id, key secret and webhook secret saved: without them a tenant
+    /// would be sent to Razorpay to authorise a mandate whose payments this platform could never confirm. Turning it off is always allowed.</summary>
+    Task<RazorpaySettingsDto> SetAutoPayEnabledAsync(bool enabled, Guid? userId, CancellationToken cancellationToken = default);
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Never throws on a Razorpay error.</summary>
     Task<RazorpayCheckResultDto> TestKeysAsync(TestRazorpayKeysRequest request, CancellationToken cancellationToken = default);
 
@@ -55,7 +59,6 @@ public class RazorpayService : IRazorpayService
     public const decimal MaxAmount = 500_000m;
     public static readonly IReadOnlyList<string> Currencies = new[] { "INR", "USD" };
 
-    private const int MaxPayloadLength = 8000;
     private const int ListSize = 50;
 
     private readonly IApplicationDbContext _context;
@@ -63,9 +66,13 @@ public class RazorpayService : IRazorpayService
     private readonly IRazorpayGateway _gateway;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<RazorpayService> _logger;
+    /// <summary>Optional so the test page can be exercised without a job server; DI always supplies one.</summary>
+    private readonly IRazorpayWebhookQueue? _queue;
 
-    public RazorpayService(IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IDateTimeProvider clock, ILogger<RazorpayService> logger)
+    public RazorpayService(IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IDateTimeProvider clock, ILogger<RazorpayService> logger,
+        IRazorpayWebhookQueue? queue = null)
     {
+        _queue = queue;
         _context = context;
         _store = store;
         _gateway = gateway;
@@ -81,11 +88,13 @@ public class RazorpayService : IRazorpayService
         var keyId = Get(stored, KeyIdKey);
         var secret = Get(stored, KeySecretKey);
         var webhook = Get(stored, WebhookSecretKey);
+        var autoPay = string.Equals(Get(stored, Billing.AutoPay.AutoPaySettings.EnabledKey), "true", StringComparison.OrdinalIgnoreCase);
 
         return new RazorpaySettingsDto(
             keyId, keyId.Length == 0 ? "test" : RazorpayKeys.ModeOf(keyId),
             secret.Length > 0, Mask(secret), webhook.Length > 0, Mask(webhook),
-            keyId.Length > 0 && secret.Length > 0, WebhookPath);
+            keyId.Length > 0 && secret.Length > 0, WebhookPath,
+            autoPay, autoPay && keyId.Length > 0 && secret.Length > 0 && webhook.Length > 0);
     }
 
     public async Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default)
@@ -104,6 +113,23 @@ public class RazorpayService : IRazorpayService
             values[WebhookSecretKey] = request.WebhookSecret.Trim();
 
         await _store.UpsertAsync(values, userId, cancellationToken);
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<RazorpaySettingsDto> SetAutoPayEnabledAsync(bool enabled, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        if (enabled)
+        {
+            var current = await GetSettingsAsync(cancellationToken);
+            if (!current.IsConfigured)
+                throw new ConflictException("Save the Razorpay key id and key secret first.");
+            if (!current.HasWebhookSecret)
+                throw new ConflictException("Save the webhook secret first: without it payments cannot be confirmed, so tenants would be sent to Razorpay for nothing.");
+        }
+
+        await _store.UpsertAsync(
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [Billing.AutoPay.AutoPaySettings.EnabledKey] = enabled ? "true" : "false" }, userId, cancellationToken);
+        _logger.LogInformation("UPI AutoPay switched {State} by {UserId}", enabled ? "on" : "off", userId);
         return await GetSettingsAsync(cancellationToken);
     }
 
@@ -331,14 +357,24 @@ public class RazorpayService : IRazorpayService
             Event = parsed.Event,
             OrderId = parsed.OrderId,
             PaymentId = parsed.PaymentId,
-            Payload = Truncate(Encoding.UTF8.GetString(body), MaxPayloadLength)
+            SubscriptionId = parsed.SubscriptionId,
+            EventCreatedAtUtc = parsed.CreatedAtUtc,
+            // The whole body (the endpoint caps its size): a subscription event is applied from this column, now or on a retry.
+            Payload = Encoding.UTF8.GetString(body)
         };
+
+        if (parsed.Event.StartsWith(SubscriptionEventPrefix, StringComparison.Ordinal))
+            return await StoreForProcessingAsync(record, cancellationToken);
 
         var order = parsed.OrderId is not null
             ? await _context.RazorpayOrders.FirstOrDefaultAsync(o => o.OrderId == parsed.OrderId, cancellationToken)
             : parsed.PaymentId is not null
                 ? await _context.RazorpayOrders.FirstOrDefaultAsync(o => o.PaymentId == parsed.PaymentId, cancellationToken)
                 : null;
+
+        // A failed payment that belongs to an invoice, not to a test order, is a subscription's debit failing: stored and applied by the job.
+        if (order is null && parsed.Event == PaymentFailedEvent && parsed.InvoiceId is not null)
+            return await StoreForProcessingAsync(record, cancellationToken);
 
         if (order is null)
             record.Note = "Not one of the test page's orders.";
@@ -350,6 +386,10 @@ public class RazorpayService : IRazorpayService
             order.LastWebhookEvent = parsed.Event;
             order.LastWebhookAtUtc = _clock.UtcNow;
         }
+
+        // Applied here, in the same save that stores it, so there is nothing left to process afterwards.
+        record.ProcessingStatus = record.Applied ? RazorpayWebhookProcessingStatus.Completed : RazorpayWebhookProcessingStatus.Ignored;
+        record.ProcessedAtUtc = _clock.UtcNow;
 
         _context.RazorpayWebhookEvents.Add(record);
         try
@@ -365,6 +405,41 @@ public class RazorpayService : IRazorpayService
 
         _logger.LogInformation("Razorpay webhook {Event} ({EventId}) for order {OrderId}: {Note}", parsed.Event, key, parsed.OrderId, record.Note);
         return record.Applied ? RazorpayWebhookOutcome.Applied : RazorpayWebhookOutcome.Ignored;
+    }
+
+    public const string SubscriptionEventPrefix = "subscription.";
+    public const string PaymentFailedEvent = "payment.failed";
+
+    /// <summary>A subscription event is only stored here - durably, before Razorpay is told it arrived - and applied afterwards by the
+    /// background job. Plans and credits hang on these events, so one must never be lost because applying it failed.</summary>
+    private async Task<RazorpayWebhookOutcome> StoreForProcessingAsync(RazorpayWebhookEvent record, CancellationToken cancellationToken)
+    {
+        record.ProcessingStatus = RazorpayWebhookProcessingStatus.Received;
+        record.Note = "Stored; waiting to be applied.";
+        _context.RazorpayWebhookEvents.Add(record);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Lost a race with a parallel redelivery of the same event.
+            _context.ResetChangeTracker();
+            return RazorpayWebhookOutcome.Duplicate;
+        }
+
+        try
+        {
+            _queue?.Enqueue(record.Id);
+        }
+        catch (Exception ex)
+        {
+            // It is stored, which is what matters: the retry pass applies anything the queue never took.
+            _logger.LogWarning(ex, "Razorpay webhook {Event} ({EventId}) was stored but could not be queued; the retry pass will apply it", record.Event, record.EventId);
+        }
+
+        _logger.LogInformation("Razorpay webhook {Event} ({EventId}) for subscription {SubscriptionId} stored for processing", record.Event, record.EventId, record.SubscriptionId);
+        return RazorpayWebhookOutcome.Queued;
     }
 
     private (bool Applied, string Note) Apply(RazorpayOrder order, ParsedWebhook w)
@@ -416,7 +491,8 @@ public class RazorpayService : IRazorpayService
 
     private record ParsedWebhook(
         string Event, string? OrderId, string? PaymentId, string? Method, string? ErrorDescription,
-        string? RefundId, long? RefundAmount, long? PaymentAmountRefunded);
+        string? RefundId, long? RefundAmount, long? PaymentAmountRefunded,
+        string? SubscriptionId = null, DateTime? CreatedAtUtc = null, string? InvoiceId = null);
 
     private static ParsedWebhook Parse(byte[] body)
     {
@@ -433,6 +509,7 @@ public class RazorpayService : IRazorpayService
             var payment = Entity("payment");
             var order = Entity("order");
             var refund = Entity("refund");
+            var subscription = Entity("subscription");
 
             return new ParsedWebhook(
                 Truncate(name, 60),
@@ -442,7 +519,10 @@ public class RazorpayService : IRazorpayService
                 payment is { } pay4 ? Str(pay4, "error_description") : null,
                 refund is { } rf2 ? Str(rf2, "id") : null,
                 refund is { } rf3 ? Long(rf3, "amount") : null,
-                payment is { } pay5 ? Long(pay5, "amount_refunded") : null);
+                payment is { } pay5 ? Long(pay5, "amount_refunded") : null,
+                subscription is { } sub ? Str(sub, "id") is { } subId ? Truncate(subId, 40) : null : null,
+                Long(root, "created_at") is { } createdAt and > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAt).UtcDateTime : null,
+                payment is { } pay6 ? Str(pay6, "invoice_id") : null);
         }
         catch (JsonException)
         {

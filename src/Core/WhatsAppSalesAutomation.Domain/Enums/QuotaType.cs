@@ -11,8 +11,8 @@ public enum QuotaType
     /// <summary>One AI reply interaction.</summary>
     AiConversations = 1,
 
-    /// <summary>One lead-discovery candidate evaluated - fresh, duplicate or rejected alike, because the
-    /// provider bills the research whichever way a candidate turns out.</summary>
+    /// <summary>One lead a discovery run creates as a customer. Rejected and duplicate candidates are not charged;
+    /// the platform bears the research cost of those (see LeadDiscoveryRunService.ChargeLeadAsync).</summary>
     LeadCandidates = 2,
 
     /// <summary>One AI Content Studio generation step that costs the platform money: topic ideas, a script, a

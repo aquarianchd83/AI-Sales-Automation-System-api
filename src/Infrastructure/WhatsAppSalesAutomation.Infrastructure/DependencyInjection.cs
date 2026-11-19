@@ -320,11 +320,27 @@ public static class DependencyInjection
         }
         else
         {
+            // Any other Provider value follows the engine chosen for "Discovery lead" on the Integrations page
+            // (simulator, ChatGPT or Claude), read per run - see RoutedLeadDiscoveryAgent.
+            //
             // One request can run many web searches and fetches server-side before it responds, far beyond
             // HttpClient's 100-second default timeout.
             services.AddHttpClient<AnthropicLeadDiscoveryAgent>(
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
-            services.AddScoped<ILeadDiscoveryAgent, RecordingLeadDiscoveryAgent>();
+
+            // ChatGPT: hosted web search plus our own page reader. The reader's handler refuses non-public
+            // addresses, because the model chooses the URLs it fetches.
+            services.AddHttpClient<LeadDiscoveryPageFetcher>(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(25);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; LeadDiscoveryBot/1.0)");
+                })
+                .ConfigurePrimaryHttpMessageHandler(LeadDiscoveryPageFetcher.CreateHandler);
+            services.AddHttpClient<OpenAiLeadDiscoveryAgent>(
+                client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
+
+            services.AddScoped<SimulatedLeadDiscoveryAgent>();
+            services.AddScoped<ILeadDiscoveryAgent, RoutedLeadDiscoveryAgent>();
         }
 
         // The DND check and the consent SMS go to the simulator or to a third-party API, as the platform admin chose on the Integrations
@@ -408,6 +424,9 @@ public static class DependencyInjection
             WhatsAppSalesAutomation.Infrastructure.LeadDiscovery.SqlLeadDiscoveryLockStore>();
         services.AddScoped<TenantJobReconciliationJob>();
         services.AddScoped<SubscriptionMaintenanceJob>();
+        services.AddScoped<RazorpayWebhookProcessingJob>();
+        services.AddScoped<AutoPayMaintenanceJob>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayWebhookQueue, HangfireRazorpayWebhookQueue>();
         services.AddScoped<QuotaAlertJob>();
         services.AddScoped<DataRetentionJob>();
         services.AddScoped<DatabaseSizeMonitorJob>();

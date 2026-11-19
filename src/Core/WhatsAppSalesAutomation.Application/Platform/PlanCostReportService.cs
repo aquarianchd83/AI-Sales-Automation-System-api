@@ -168,7 +168,7 @@ public class PlanCostReportService : IPlanCostReportService
             aiSource = $"Average of {aiCount:N0} AI conversations in the last 90 days.";
         }
 
-        // Per candidate CONSIDERED - fresh, duplicate and rejected all draw quota, so all carry cost.
+        // Per candidate CONSIDERED. Every candidate costs the platform research, but only leads that become customers draw tenant quota now.
         var runs = _context.LeadDiscoveryRuns.IgnoreQueryFilters().Where(r => r.RanAtUtc >= since && r.CandidatesConsidered > 0);
         var candidates = await runs.SumAsync(r => (long)r.CandidatesConsidered, cancellationToken);
         var leadInput = BuiltIn.InputTokensPerCandidate;

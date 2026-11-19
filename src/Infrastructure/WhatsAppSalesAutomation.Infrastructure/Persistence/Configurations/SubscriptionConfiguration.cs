@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Payments;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
 
@@ -18,6 +19,8 @@ public class SubscriptionConfiguration : IEntityTypeConfiguration<Subscription>
         // second row would silently make PlanLimitsService's "the tenant's subscription" and
         // AuthService.LoginAsync's status check both ambiguous about which one is authoritative.
         builder.HasIndex(s => s.TenantId).IsUnique();
+
+        builder.HasOne<RazorpaySubscription>().WithMany().HasForeignKey(s => s.RazorpaySubscriptionRowId).OnDelete(DeleteBehavior.Restrict);
 
         // No HasQueryFilter here - Subscription is ITenantOwned, so the combined filter is built
         // reflectively in ApplicationDbContext.OnModelCreating, same as every other ITenantOwned

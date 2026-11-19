@@ -46,6 +46,16 @@ public class PlatformRazorpayController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Switches UPI AutoPay on or off for tenants. 409 when turning it on before the keys and webhook secret are saved.</summary>
+    [HttpPut("autopay")]
+    public async Task<ActionResult<RazorpaySettingsDto>> SetAutoPay([FromBody] SetRazorpayAutoPayRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _razorpay.SetAutoPayEnabledAsync(request.Enabled, _currentUser.UserId, cancellationToken);
+        await LogAsync(PlatformAuditActions.RazorpayAutoPayToggled,
+            $"UPI AutoPay switched {(request.Enabled ? "on" : "off")} ({result.Mode} keys)", cancellationToken);
+        return Ok(result);
+    }
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Always 200: the result says whether it worked.</summary>
     [HttpPost("settings/test")]
     public async Task<ActionResult<RazorpayCheckResultDto>> TestKeys([FromBody] TestRazorpayKeysRequest request, CancellationToken cancellationToken)
