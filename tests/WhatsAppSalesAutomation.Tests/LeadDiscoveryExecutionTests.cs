@@ -483,8 +483,12 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var rejected = detail.Customers.Single(c => c.CustomerName.Contains("B"));
         Assert.Equal("Not sent: Not applicable", rejected.ConsentSmsNote);   // the SMS logic is skipped for a number that failed the DND check
         var passed = detail.Customers.Single(c => c.CustomerName.Contains("A"));
-        Assert.Equal("Not sent: the consent SMS was Off", passed.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, passed.ConsentSmsNote);   // the Auto-Campaign took it; the consent SMS is not set up
+        Assert.StartsWith("SMS consent is not configured.", passed.ConsentSmsNote);
+        Assert.Equal("SMS consent is not configured.", passed.ConsentSmsHeadline);          // shown in bold
+        Assert.Contains("Send WhatsApp consent SMS", passed.ConsentSmsNote);                // and where to turn it on
         Assert.True(passed.ConsentSmsNeedsSetting);      // the screen links this one to the discovery profile
+        Assert.Null(rejected.ConsentSmsHeadline);        // a plain note has no bold lead-in
         Assert.False(rejected.ConsentSmsNeedsSetting);   // a rejected number is not fixed by a setting
         Assert.All(detail.Customers.Where(c => c.CustomerId is null), c => Assert.StartsWith("Not sent:", c.ConsentSmsNote));
 
@@ -505,10 +509,10 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         Assert.StartsWith("Not sent: The business's WhatsApp number is not set up", note);
         Assert.False(needsSetting);
 
-        // The recorded "switch is Off" reason and a missing record both read the same, and link to the setting.
+        // The recorded "switch is Off" reason and a missing record (with an Auto-Campaign) both read the same, and link to the setting.
         reasons[customerId] = LeadDiscoveryRunService.ConsentSmsOffReason;
-        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
-        Assert.Equal(("Not sent: the consent SMS was Off", true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), reasons));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(customerId, "Pass"), none));
     }
 
     // ---- consent SMS on, but no Auto-Campaign: nothing can be sent, and the screen must say that - not "Off" ----
@@ -543,8 +547,11 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         var detail = await History2().GetExecutionAsync(execution.Id);
         Assert.All(detail.Customers, c =>
         {
-            Assert.StartsWith("Not sent: Auto-Campaign is not configured", c.ConsentSmsNote);
-            Assert.DoesNotContain("was Off", c.ConsentSmsNote);                            // the switch is on - it must not say it was off
+            Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, c.ConsentSmsNote);
+            Assert.StartsWith("Not added to a campaign: Auto-Campaign is not configured.", c.ConsentSmsNote);
+            Assert.Equal("Not added to a campaign: Auto-Campaign is not configured.", c.ConsentSmsHeadline);   // shown in bold
+            Assert.Contains("Turn on Auto-Campaign and choose a campaign in the discovery profile.", c.ConsentSmsNote);
+            Assert.DoesNotContain("SMS consent is not configured", c.ConsentSmsNote);     // the switch is on - it is the campaign that is missing
             Assert.True(c.ConsentSmsNeedsSetting);                                         // the screen links to the discovery profile
         });
     }
@@ -561,44 +568,96 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
 
-        Assert.StartsWith("Not sent: Auto-Campaign is not configured", Assert.Single(detail.Customers).ConsentSmsNote);
+        var row = Assert.Single(detail.Customers);
+        Assert.StartsWith("Not added to a campaign: Auto-Campaign is not configured.", row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, row.ConsentSmsHeadline);
     }
 
     [Fact]
-    public async Task With_the_consent_sms_off_and_no_auto_campaign_it_is_still_the_switch_that_is_named()
+    public async Task With_no_auto_campaign_it_is_the_campaign_that_is_named_first_whether_or_not_the_consent_sms_switch_is_on()
     {
         _agent.Rounds.Add(Candidates("A"));                                                // ConsentSmsEnabled is off in the default profile
 
         await Service().RunForTenantAsync(_tenant);
 
+        // Nothing is written on the customer's timeline for a tenant that does not use the consent SMS; the page works it out from the run.
         Assert.Empty(await _db.CustomerHistoryEvents.Where(e => e.EventType == CustomerHistoryEventTypes.SmsSkipped).ToListAsync());
         var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
         var row = Assert.Single(detail.Customers);
-        Assert.Equal("Not sent: the consent SMS was Off", row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, row.ConsentSmsHeadline);
         Assert.True(row.ConsentSmsNeedsSetting);
     }
 
     [Fact]
-    public void The_note_names_the_missing_auto_campaign_only_when_the_switch_is_on_and_a_recorded_reason_always_wins()
+    public async Task With_an_auto_campaign_but_the_consent_sms_not_set_up_the_customer_is_told_sms_consent_is_not_configured()
+    {
+        await RunWithOneRejectedAsync();                                                   // an Auto-Campaign took A; the consent SMS switch is off
+
+        var detail = await History2().GetExecutionAsync((await SingleExecutionAsync()).Id);
+
+        var row = detail.Customers.Single(c => c.CustomerName.Contains("A"));
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffReason, row.ConsentSmsNote);
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffHeadline, row.ConsentSmsHeadline);
+        Assert.True(row.ConsentSmsNeedsSetting);
+        Assert.DoesNotContain("Auto-Campaign is not configured", row.ConsentSmsNote);     // the campaign is fine - it is the SMS that is not set up
+    }
+
+    [Fact]
+    public void The_note_names_the_missing_auto_campaign_first_then_the_consent_sms_and_a_specific_recorded_reason_always_wins()
     {
         LeadDiscoveryExecutionCustomerDto Row(Guid customerId) =>
             new(Guid.NewGuid(), customerId, null, "A", null, "Created", false, null, null, null, null, "NotChecked");
         var id = Guid.NewGuid();
         var none = new Dictionary<Guid, string?>();
 
-        // switch on, no campaign -> the missing campaign
-        Assert.Equal(("Not sent: " + LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true),
-            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: false, consentSmsEnabled: true));
-        // switch off, no campaign -> the switch
-        Assert.Equal(("Not sent: the consent SMS was Off", true),
-            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: false, consentSmsEnabled: false));
-        // a campaign was there and the switch is off -> the switch, as before
-        Assert.Equal(("Not sent: the consent SMS was Off", true),
-            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: true, consentSmsEnabled: false));
+        // no Auto-Campaign -> "not added to a campaign", the first thing to fix
+        Assert.Equal((LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true),
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: false));
+        // an Auto-Campaign took the customer, and no SMS was sent -> the consent SMS is not set up
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true),
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), none, autoCampaignConfigured: true));
         // a specific reason recorded by the run wins over either
         var reasons = new Dictionary<Guid, string?> { [id] = "The SMS provider turned the number away." };
         Assert.Equal(("Not sent: The SMS provider turned the number away.", false),
-            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), reasons, autoCampaignConfigured: false, consentSmsEnabled: true));
+            LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), reasons, autoCampaignConfigured: false));
+    }
+
+    [Fact]
+    public void History_saved_under_the_earlier_wording_is_shown_as_the_current_wording_and_still_links_to_the_profile()
+    {
+        LeadDiscoveryExecutionCustomerDto Row(Guid customerId) =>
+            new(Guid.NewGuid(), customerId, null, "A", null, "Created", false, null, null, null, null, "NotChecked");
+        var id = Guid.NewGuid();
+
+        var legacyCampaign = new Dictionary<Guid, string?> { [id] = LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason };
+        var legacyOff = new Dictionary<Guid, string?> { [id] = LeadDiscoveryRunService.LegacyConsentSmsOffReason };
+
+        Assert.Equal((LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), legacyCampaign));
+        Assert.Equal((LeadDiscoveryRunService.ConsentSmsOffReason, true), LeadDiscoveryHistoryService.ConsentSmsNoteFor(Row(id), legacyOff));
+        Assert.NotEqual(LeadDiscoveryRunService.LegacyConsentSmsOffReason, LeadDiscoveryRunService.ConsentSmsOffReason);
+        Assert.NotEqual(LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason, LeadDiscoveryRunService.AutoCampaignNotConfiguredReason);
+    }
+
+    [Fact]
+    public void The_bold_lead_in_is_the_headline_of_the_two_setting_notes_and_nothing_else()
+    {
+        Assert.Equal(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline,
+            LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(LeadDiscoveryRunService.AutoCampaignNotConfiguredReason));
+        Assert.Equal(LeadDiscoveryRunService.ConsentSmsOffHeadline,
+            LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(LeadDiscoveryRunService.ConsentSmsOffReason));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf("Not sent: Not applicable"));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf("Not sent: The SMS provider turned the number away."));
+        Assert.Null(LeadDiscoveryHistoryService.ConsentSmsHeadlineOf(null));
+    }
+
+    [Fact]
+    public void The_two_messages_say_what_the_tenant_asked_for()
+    {
+        Assert.Equal("Not added to a campaign: Auto-Campaign is not configured.", LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline);
+        Assert.EndsWith("Turn on Auto-Campaign and choose a campaign in the discovery profile.", LeadDiscoveryRunService.AutoCampaignNotConfiguredReason);
+        Assert.Equal("SMS consent is not configured.", LeadDiscoveryRunService.ConsentSmsOffHeadline);
+        Assert.Contains("discovery profile", LeadDiscoveryRunService.ConsentSmsOffReason);
     }
 
     [Fact]

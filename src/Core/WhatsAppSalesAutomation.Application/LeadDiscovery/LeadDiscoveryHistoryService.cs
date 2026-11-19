@@ -89,16 +89,16 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
 
     /// <summary>
     /// The note shown when a row was not sent the consent SMS - never blank - and whether the cause is a setting the tenant can change (so the
-    /// screen links to the discovery profile). The reason the run recorded wins. Without one (an execution from before reasons were recorded for a
-    /// run with no campaign) it follows from the execution: with no Auto-Campaign nothing is sent, and only when the switch is Off now is that said
-    /// to be why - "Off" is never claimed for a tenant whose switch is on.
+    /// screen links to the discovery profile). There are two causes of that kind, and the first one decides:
+    ///   - no Auto-Campaign: the customer was "not added to a campaign" - the SMS is sent only to the customers a campaign takes;
+    ///   - an Auto-Campaign, but the consent SMS switch is off: "SMS consent is not configured".
+    /// The reason the run recorded wins; a reason saved under the earlier wording is shown as the current one. Without one (an execution from
+    /// before reasons were recorded) it follows from the execution: no Auto-Campaign, or else the switch.
     /// </summary>
     /// <param name="autoCampaignConfigured">Whether the execution had an Auto-Campaign to take its customers.</param>
-    /// <param name="consentSmsEnabled">Whether the profile's consent SMS switch is on now.</param>
     internal static (string Note, bool NeedsSetting) ConsentSmsNoteFor(
-        LeadDiscoveryExecutionCustomerDto row, IReadOnlyDictionary<Guid, string?> skippedReasons, bool autoCampaignConfigured = true, bool consentSmsEnabled = false)
+        LeadDiscoveryExecutionCustomerDto row, IReadOnlyDictionary<Guid, string?> skippedReasons, bool autoCampaignConfigured = true)
     {
-        const string off = "Not sent: the consent SMS was Off";
 
         if (row.CustomerId is not { } customerId)
         {
@@ -112,22 +112,37 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             };
         }
 
-        // No invitation exists for this customer. Unless a specific reason was recorded (no WhatsApp number, say), the consent SMS was Off.
-        if (skippedReasons.TryGetValue(customerId, out var reason)
-            && !string.IsNullOrWhiteSpace(reason)
-            && reason != LeadDiscoveryRunService.ConsentSmsOffReason)
+        // No invitation exists for this customer. Unless a specific reason was recorded (no WhatsApp number, say), it is one of the two settings.
+        if (skippedReasons.TryGetValue(customerId, out var recorded) && !string.IsNullOrWhiteSpace(recorded))
         {
-            // A missing Auto-Campaign is a setting the tenant can change, so it links to the profile; the other reasons (a number the SMS
-            // provider turned away, a WhatsApp number not set up) are not fixed there.
-            return ($"Not sent: {reason}", reason == LeadDiscoveryRunService.AutoCampaignNotConfiguredReason);
+            var reason = recorded switch
+            {
+                LeadDiscoveryRunService.LegacyAutoCampaignNotConfiguredReason => LeadDiscoveryRunService.AutoCampaignNotConfiguredReason,
+                LeadDiscoveryRunService.LegacyConsentSmsOffReason => LeadDiscoveryRunService.ConsentSmsOffReason,
+                _ => recorded
+            };
+
+            // Both settings link to the discovery profile; the other reasons (a number the SMS provider turned away, a WhatsApp number not
+            // set up) are not fixed there.
+            if (reason is LeadDiscoveryRunService.AutoCampaignNotConfiguredReason or LeadDiscoveryRunService.ConsentSmsOffReason)
+                return (reason, true);
+
+            return ($"Not sent: {reason}", false);
         }
 
-        // The SMS is sent only to the customers a campaign takes: with the switch on and no campaign, that is the reason.
-        if (!autoCampaignConfigured && consentSmsEnabled)
-            return ($"Not sent: {LeadDiscoveryRunService.AutoCampaignNotConfiguredReason}", true);
-
-        return (off, true);
+        // The SMS is sent only to the customers a campaign takes, so with no Auto-Campaign that is the first thing to fix; otherwise the
+        // Auto-Campaign took them and it is the consent SMS that is not set up.
+        return autoCampaignConfigured
+            ? (LeadDiscoveryRunService.ConsentSmsOffReason, true)
+            : (LeadDiscoveryRunService.AutoCampaignNotConfiguredReason, true);
     }
+
+    /// <summary>The bold lead-in of a consent SMS note, when it has one: the sentence that says which setting is missing. Null for any other note.</summary>
+    internal static string? ConsentSmsHeadlineOf(string? note) =>
+        note is null ? null
+        : note.StartsWith(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, StringComparison.Ordinal) ? LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline
+        : note.StartsWith(LeadDiscoveryRunService.ConsentSmsOffHeadline, StringComparison.Ordinal) ? LeadDiscoveryRunService.ConsentSmsOffHeadline
+        : null;
 
     public async Task<LeadDiscoveryExecutionDetailDto> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default)
     {
@@ -142,7 +157,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false, "", null))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false, "", null, null))
             .ToListAsync(cancellationToken);
 
         // What the agent reported about each candidate. Read separately, and only where one was kept, so the large text is not pulled
@@ -208,12 +223,6 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
                 .ToList();
         }
 
-        // The switch as it is now, for an execution that recorded no reason of its own.
-        var consentSmsEnabled = await _context.LeadDiscoveryProfiles.AsNoTracking()
-            .Where(p => p.TenantId == tenantId && p.Id == execution.LeadDiscoveryProfileId)
-            .Select(p => p.ConsentSmsEnabled)
-            .FirstOrDefaultAsync(cancellationToken);
-
         // Rows that got no SMS say why. The reason recorded when the invitation was skipped wins; otherwise it follows from the row.
         var skippedReasons = customerIds.Count == 0
             ? new Dictionary<Guid, string?>()
@@ -230,8 +239,8 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             if (c.ConsentSmsStatus is not null)
                 return c;
 
-            var (note, needsSetting) = ConsentSmsNoteFor(c, skippedReasons, execution.AutoCampaignConfigured, consentSmsEnabled);
-            return c with { ConsentSmsNote = note, ConsentSmsNeedsSetting = needsSetting };
+            var (note, needsSetting) = ConsentSmsNoteFor(c, skippedReasons, execution.AutoCampaignConfigured);
+            return c with { ConsentSmsNote = note, ConsentSmsNeedsSetting = needsSetting, ConsentSmsHeadline = ConsentSmsHeadlineOf(note) };
         }).ToList();
 
         var templates = await _context.LeadDiscoveryExecutionTemplates.AsNoTracking()

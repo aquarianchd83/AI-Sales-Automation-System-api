@@ -1119,7 +1119,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             await _context.SaveChangesAsync(cancellationToken);
 
             // The consent SMS goes to the customers the campaign takes, so with no campaign nobody is texted - even with the switch on. Say
-            // that on each customer, rather than leaving the screen to guess ("was Off" would be wrong: the switch is on).
+            // that on each customer, rather than leaving the screen to guess ("SMS consent is not configured" would be wrong: the switch is on).
             if (profile.ConsentSmsEnabled)
             {
                 var created = await EligibleCustomerIdsAsync(execution, profile.DndCheckEnabled, cancellationToken);
@@ -1169,13 +1169,27 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     /// <summary>The note on a row for a candidate that qualified but was not needed because the batch was already full (see <see cref="LeadDiscoveryExecutionOutcomes"/>).</summary>
     internal const string NotNeededNote = "Qualified, but the batch was already full - not saved and not charged.";
 
-    /// <summary>The reason recorded on each customer, and shown on the execution, when the consent SMS is switched on but the run had no
-    /// Auto-Campaign: the SMS is sent to the customers a campaign takes, so no campaign means no SMS.</summary>
-    internal const string AutoCampaignNotConfiguredReason =
-        "Auto-Campaign is not configured, so no campaign took this customer and no consent SMS was sent. Turn on Auto-Campaign and choose a campaign in the discovery profile.";
+    // What the Consent SMS column says when a customer was not sent the SMS because of a setting. There are two, and the first one decides: the
+    // consent SMS goes only to the customers an Auto-Campaign takes, so with no Auto-Campaign that is what has to be fixed first. The headline is
+    // shown in bold, ahead of what to do about it.
+
+    /// <summary>No Auto-Campaign was configured, so no campaign took the customer (whether or not the consent SMS switch is on).</summary>
+    internal const string AutoCampaignNotConfiguredHeadline = "Not added to a campaign: Auto-Campaign is not configured.";
+
+    /// <summary>The reason recorded on each customer, and shown on the execution, when the run had no Auto-Campaign.</summary>
+    internal const string AutoCampaignNotConfiguredReason = AutoCampaignNotConfiguredHeadline + " Turn on Auto-Campaign and choose a campaign in the discovery profile.";
+
+    /// <summary>The Auto-Campaign took the customer, but the consent SMS is not set up (the switch in the discovery profile is off).</summary>
+    internal const string ConsentSmsOffHeadline = "SMS consent is not configured.";
 
     /// <summary>The reason recorded on each customer's history, and shown on the execution, when the consent SMS is switched off.</summary>
-    internal const string ConsentSmsOffReason = "The consent SMS was Off, so no invitation was sent. Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
+    internal const string ConsentSmsOffReason = ConsentSmsOffHeadline + " Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
+
+    // The wording these replaced. History rows already saved carry it, so it is still recognised and shown as the current wording.
+    internal const string LegacyAutoCampaignNotConfiguredReason =
+        "Auto-Campaign is not configured, so no campaign took this customer and no consent SMS was sent. Turn on Auto-Campaign and choose a campaign in the discovery profile.";
+    internal const string LegacyConsentSmsOffReason =
+        "The consent SMS was Off, so no invitation was sent. Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
 
     /// <summary>
     /// When no consent SMS goes to a customer - the switch is off, or no campaign took them - each still gets one history entry saying no SMS

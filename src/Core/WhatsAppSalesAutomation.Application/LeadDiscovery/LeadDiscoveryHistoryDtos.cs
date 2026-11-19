@@ -97,7 +97,9 @@ public record LeadDiscoveryExecutionCustomerDto(
     /// <summary>What became of this candidate: Saved, Lead only, Duplicate, Rejected, Not needed (qualified, but the batch was already full), Failed, Pending or Skipped. See <see cref="LeadDiscoveryExecutionOutcomes"/>.</summary>
     string Outcome = "",
     /// <summary>What the agent reported about this candidate (business type, contact person, address, website, the page it was found on, score and why). Null for a row from before candidates were kept.</summary>
-    LeadDiscoveryCandidateSnapshot? Candidate = null);
+    LeadDiscoveryCandidateSnapshot? Candidate = null,
+    /// <summary>The first sentence of <see cref="ConsentSmsNote"/> when it names a missing setting - shown in bold ahead of the rest. Null when the note has no such lead-in.</summary>
+    string? ConsentSmsHeadline = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,
