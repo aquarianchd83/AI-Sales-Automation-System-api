@@ -1333,7 +1333,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, quotaAlerts ?? Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), campaigns,
             lockStore ?? _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
+            new Snapshot<LeadDiscoveryOptions>(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
             consentPageGate);
     }
 
@@ -2134,14 +2134,160 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
-    public async Task The_agent_is_asked_for_more_candidates_than_the_batch_needs_because_rejects_are_free()
+    public async Task With_no_history_the_first_round_asks_for_the_batch_plus_the_configured_starting_guess_of_waste()
     {
         SetBatchSize(2);
         _agent.Rounds.Add(Candidates("A", "B"));
 
         await Service().RunForTenantAsync(_tenant);
 
-        Assert.Equal(6, _agent.Requests[0].MaxCandidates);                                 // 2 needed x headroom 3
+        Assert.Equal(3, _agent.Requests[0].MaxCandidates);                                 // 2 / (1 - 30%) = 2.9, rounded up
+    }
+
+    // ---- how many to ask for: learned from the tenant's own runs ----
+
+    private void RecordRealRun(int considered, int rejected, int duplicates, string model = "gpt-5-mini", DateTime? at = null) =>
+        _db.LeadDiscoveryRuns.Add(new LeadDiscoveryRun
+        {
+            TenantId = _tenant, RanAtUtc = at ?? DateTime.UtcNow.AddDays(-1), Model = model, Rounds = 1,
+            CandidatesConsidered = considered, LeadsSaved = considered - rejected - duplicates, Rejected = rejected, Duplicates = duplicates
+        });
+
+    private static readonly string[] Letters = Enumerable.Range('A', 20).Select(c => ((char)c).ToString()).ToArray();
+
+    [Fact]
+    public async Task Example_A_a_tenant_whose_searches_throw_away_2_in_12_is_asked_for_12_to_fill_a_batch_of_10_not_20()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 12, rejected: 2, duplicates: 0);
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(12, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task A_tenant_with_a_high_rejection_history_is_asked_for_more_up_to_the_ceiling()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 20, rejected: 12, duplicates: 0);                         // 60%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(8).ToArray()));                           // 8 get through, 2 short
+        _agent.Rounds.Add(Candidates("S", "T"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(20, _agent.Requests[0].MaxCandidates);                                // 10 / 0.4 = 25, capped at 20 a round
+        Assert.True(_agent.Requests[1].MaxCandidates < 8, $"asked for {_agent.Requests[1].MaxCandidates}");   // only what is still missing - not another 20
+    }
+
+    [Fact]
+    public async Task A_simulated_run_teaches_nothing_because_its_businesses_are_invented()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 40, rejected: 36, duplicates: 0, model: "Simulated");    // would say 90% thrown away
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the starting guess (30%), not 90%
+    }
+
+    [Fact]
+    public async Task Too_little_history_is_not_trusted_and_the_starting_guess_is_used()
+    {
+        SetBatchSize(10);
+        RecordRealRun(considered: 5, rejected: 5, duplicates: 0);                          // 100% - but of only 5 candidates
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+    }
+
+    [Fact]
+    public async Task Only_the_latest_runs_count_so_old_results_do_not_drag_the_estimate()
+    {
+        SetBatchSize(10);
+        for (var i = 0; i < 5; i++)
+            RecordRealRun(considered: 12, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-1 - i));   // the five latest: nothing thrown away
+        RecordRealRun(considered: 100, rejected: 90, duplicates: 0, at: DateTime.UtcNow.AddDays(-60));        // long ago: 90%
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(10, _agent.Requests[0].MaxCandidates);                                // 0% from the latest five: exactly what is needed
+    }
+
+    [Fact]
+    public async Task The_starting_guess_is_a_setting_that_changes_the_first_round_for_a_tenant_with_no_history()
+    {
+        SetBatchSize(10);
+        _discoveryOptions.InitialRejectionRatePercent = 50;
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(20, _agent.Requests[0].MaxCandidates);                                // 10 / 0.5
+    }
+
+    [Fact]
+    public async Task A_round_that_found_many_rejects_makes_the_next_round_ask_for_more()
+    {
+        SetBatchSize(10);
+        _agent.Rounds.Add(Rejected(Letters.Take(15).ToArray()));                           // everything the first round found was rejected
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);                                // the 30% starting guess
+        Assert.Equal(20, _agent.Requests[1].MaxCandidates);                                // now (3 + 15) / 25 = 72% -> 10 / 0.28 = 36, capped at 20
+    }
+
+    [Fact]
+    public async Task A_round_with_no_rejects_makes_the_next_round_ask_for_little_more_than_it_still_needs()
+    {
+        SetBatchSize(10);
+        _agent.Rounds.Add(Candidates(Letters.Take(6).ToArray()));                          // 6 usable, none thrown away: 4 still needed
+        _agent.Rounds.Add(Candidates("Q", "R", "S", "T"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(15, _agent.Requests[0].MaxCandidates);
+        Assert.Equal(5, _agent.Requests[1].MaxCandidates);                                 // (3 + 0) / 16 = 19% -> 4 / 0.81 = 4.9
+    }
+
+    [Fact]
+    public async Task A_headroom_factor_of_one_asks_for_exactly_what_is_needed_every_round()
+    {
+        SetBatchSize(10);
+        _discoveryOptions.CandidateHeadroomFactor = 1;
+        _agent.Rounds.Add(Rejected(Letters.Take(10).ToArray()));
+        _agent.Rounds.Add(Candidates(Letters.Take(10).ToArray()));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.All(_agent.Requests.Take(2), r => Assert.Equal(10, r.MaxCandidates));
+    }
+
+    [Fact]
+    public async Task Candidates_kept_only_as_leads_count_as_thrown_away_because_they_do_not_fill_the_batch()
+    {
+        SetBatchSize(4);
+        // The first round's 4 are all refused by the DND check: kept as leads, none becomes a customer.
+        _verifier.Decide = (id, _) => new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+        _agent.Rounds.Add(Candidates("E", "F", "G", "H"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.True(_agent.Requests[1].MaxCandidates > _agent.Requests[0].MaxCandidates,
+            $"first {_agent.Requests[0].MaxCandidates}, second {_agent.Requests[1].MaxCandidates}");
     }
 
     [Fact]
@@ -2245,7 +2391,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             _db, _agent, planLimits, quota, Stub<IQuotaAlertService>.Create(new()),
             _clock, new IstTimeZone(_clock), Stub<ICampaignService>.Create(new()),
             _sqlLockStore, new ApplicationInstance(), NullLogger<LeadDiscoveryRunService>.Instance,
-            Options.Create(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
+            new Snapshot<LeadDiscoveryOptions>(_discoveryOptions), new Snapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), _verifier, _consent,
             null);
     }
 

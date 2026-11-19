@@ -29,9 +29,17 @@ public sealed class RoutedLeadDiscoveryAgentTests
             null, "m", "e", "https://api.openai.com/v1/", null, "m", "e", "u");
     }
 
+    /// <summary>The agents read their settings per run, through a snapshot.</summary>
+    private sealed class FixedSnapshot<T> : IOptionsSnapshot<T> where T : class
+    {
+        public FixedSnapshot(T value) => Value = value;
+        public T Value { get; }
+        public T Get(string? name) => Value;
+    }
+
     private static RoutedLeadDiscoveryAgent Agent(AiFeatureChoice choice)
     {
-        var settings = Options.Create(new LeadDiscoveryAgentSettings());
+        var settings = new FixedSnapshot<LeadDiscoveryAgentSettings>(new LeadDiscoveryAgentSettings());
         var keys = new NoKeys();
         return new RoutedLeadDiscoveryAgent(
             new FixedRouting(choice),

@@ -17,6 +17,9 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// Console still shows a value on first run.</param>
 /// <param name="Options">When set, the value must be one of these: the console shows a dropdown instead of a text box and a save of anything else
 /// is refused.</param>
+/// <param name="MinValue">With <paramref name="MaxValue"/>: the setting is a whole number, and a save of anything else, or of a number outside the
+/// range, is refused. An empty value is always accepted - it removes the stored value, so the built-in default applies. These are guardrails on what
+/// a platform admin can type, so a typo cannot break the options binding or run up an unbounded bill.</param>
 /// <param name="HiddenInEditor">Kept as a setting (still stored, still read) but not listed in the admin editor - for a value the editor must not offer
 /// because another screen owns it, such as the per-provider token prices that Model token prices replaced.</param>
 /// <param name="IsTenantOverridable">True for the subset of keys a PlatformSuperAdmin can also override
@@ -34,7 +37,9 @@ public record AppSettingDefinition(
     bool IsTenantOverridable = false,
     string? DefaultValue = null,
     IReadOnlyList<string>? Options = null,
-    bool HiddenInEditor = false);
+    bool HiddenInEditor = false,
+    int? MinValue = null,
+    int? MaxValue = null);
 
 /// <summary>
 /// Single source of truth for which appsettings.json sections (<see cref="Categories"/>) are
@@ -47,7 +52,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio", "DatabaseSizeMonitor"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio", "DatabaseSizeMonitor", "Discovery"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -295,6 +300,26 @@ public static class AppSettingCatalog
         new("DatabaseSizeMonitor:ThresholdPercent", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "80", Description: "Email the platform operators once usage reaches this percentage of the quota."),
         new("DatabaseSizeMonitor:AutoCleanup", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "false", Options: new[] { "true", "false" }, Description: "\"true\" also erases old rows from the tables listed in CleanupTables when usage reaches the alert level."),
         new("DatabaseSizeMonitor:CleanupRetentionDays", "DatabaseSizeMonitor", IsSecret: false, DefaultValue: "30", Description: "Days of each selected table the automatic clean-up keeps (minimum 7; the audit trail keeps at least 90, customer messages 180)."),
+        // Discovery - how hard one lead discovery run may work, and so what it can cost the platform. Edited from Settings > Tenant Settings >
+        // Discovery. Live: the run service and both agents read them through IOptionsSnapshot, so a save applies from the next run with no restart.
+        // The first four are LeadDiscoveryOptions (how a run is paced); the last three are LeadDiscoveryAgentSettings (how far one round may go).
+        new("LeadDiscovery:MaxRounds", "Discovery", IsSecret: false, DefaultValue: "6", MinValue: 1, MaxValue: 20,
+            Description: "The most research rounds one run makes while its batch is not yet full. Each round is a full round of web research, so this is the main limit on what a run can cost. 1-20."),
+        new("LeadDiscovery:CandidateHeadroomFactor", "Discovery", IsSecret: false, DefaultValue: "3", MinValue: 1, MaxValue: 5,
+            Description: "The most candidates a round asks for, as a multiple of the leads still needed (3 = at most three times as many). How many it really asks for is worked out from how many candidates this tenant's searches usually throw away, so this only stops a bad estimate from asking for too much. 1 asks for exactly what is needed. 1-5."),
+        new("LeadDiscovery:InitialRejectionRatePercent", "Discovery", IsSecret: false, DefaultValue: "30", MinValue: 0, MaxValue: 90,
+            Description: "For a tenant with no recent real runs to learn from: the percentage of candidates assumed to be thrown away (rejected, duplicate, or kept without a customer), used to decide how many to ask for in the first round. After a few runs it comes from the tenant's own results. 0-90."),
+        new("LeadDiscovery:MaxCandidatesPerRound", "Discovery", IsSecret: false, DefaultValue: "20", MinValue: 1, MaxValue: 50,
+            Description: "The most candidates asked for in one round. A larger batch is filled over several rounds rather than one very long search. 1-50."),
+        new("LeadDiscovery:MaxKnownBusinessesInPrompt", "Discovery", IsSecret: false, DefaultValue: "200", MinValue: 0, MaxValue: 1000,
+            Description: "How many businesses already found are listed to the search so it does not research them again. A longer list costs more input tokens on every round. 0-1000."),
+        new("LeadDiscovery:Agent:MaxTurns", "Discovery", IsSecret: false, DefaultValue: "6", MinValue: 2, MaxValue: 20,
+            Description: "The most requests the search may make within one round, counting the continuations of a long search and the final prompt to report. 2-20."),
+        new("LeadDiscovery:Agent:MaxSearchesPerRound", "Discovery", IsSecret: false, DefaultValue: "15", MinValue: 1, MaxValue: 50,
+            Description: "The most web searches the search may run in one round. Web searches are billed per search. 1-50."),
+        new("LeadDiscovery:Agent:MaxFetchesPerRound", "Discovery", IsSecret: false, DefaultValue: "25", MinValue: 1, MaxValue: 100,
+            Description: "The most pages the search may read in one round, to check a business's phone number and email. The text of every page read is billed as input tokens. 1-100."),
+
         new("DatabaseSizeMonitor:CleanupTables", "DatabaseSizeMonitor", IsSecret: false, IsList: true, DefaultValue: string.Join(",", CleanableTableCatalog.DefaultSelection), Description: "Comma-separated table keys the automatic clean-up may erase from. Only keys in the clean-up catalog are honoured."),
     };
 }

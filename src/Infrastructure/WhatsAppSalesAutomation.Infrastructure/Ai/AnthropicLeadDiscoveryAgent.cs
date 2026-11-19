@@ -40,7 +40,7 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
 
     public AnthropicLeadDiscoveryAgent(
         HttpClient httpClient,
-        IOptions<LeadDiscoveryAgentSettings> settings,
+        IOptionsSnapshot<LeadDiscoveryAgentSettings> settings,
         ILogger<AnthropicLeadDiscoveryAgent> logger,
         IPlatformAiConfigProvider aiConfig)
     {

@@ -89,7 +89,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         ILeadDiscoveryLockStore lockStore,
         IApplicationInstance instance,
         ILogger<LeadDiscoveryRunService> logger,
-        IOptions<LeadDiscoveryOptions> options,
+        IOptionsSnapshot<LeadDiscoveryOptions> options,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing,
         IPhoneVerificationProvider verification,
         IConsentInvitationService consent,
@@ -508,6 +508,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             // candidates - and stops only when the research stalls (two rounds in a row find nothing new), the allowance runs out, or the
             // round limit is reached, which is what keeps a run's cost bounded.
             var emptyRounds = 0;
+            var priorUnusableRate = await PriorUnusableRateAsync(tenantId, cancellationToken);
             while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
@@ -531,6 +532,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 stats.Rounds++;
                 var remaining = run.BatchSize - stats.Created;
 
+                // Ask for what is likely to be needed, not a fixed multiple: how many candidates this tenant's searches usually throw away,
+                // corrected by what this run's own rounds have turned up so far (rejected, duplicate, or kept without a customer).
+                var expectedUnusable = CandidateRequestPlanner.ExpectedUnusableRate(
+                    priorUnusableRate, stats.Candidates, stats.Rejected + stats.Duplicates + (stats.Saved - stats.Created));
+                var requested = CandidateRequestPlanner.Candidates(remaining, expectedUnusable, _options.MaxCandidatesPerRound, _options.CandidateHeadroomFactor);
+                _logger.LogInformation(
+                    "Lead discovery round {Round} for tenant {TenantId}: asking for {Requested} candidates to fill {Remaining} places (expecting {Unusable:P0} to be unusable)",
+                    stats.Rounds, tenantId, requested, remaining, expectedUnusable);
+
                 LeadDiscoveryAgentResult result;
                 try
                 {
@@ -538,7 +548,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                         profile.TargetBusinessType,
                         profile.Keywords,
                         profile.Locations,
-                        RequestedCandidates(remaining),
+                        requested,
                         profile.RequiredFields,
                         profile.PhoneRequired,
                         profile.EmailRequired,
@@ -801,10 +811,30 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _context.LeadDiscoveryExecutions.Attach(run.Execution);
     }
 
-    /// <summary>How many candidates to ask the agent for. More than the batch still needs, because candidates that are rejected are not
-    /// charged and the research would otherwise need another round for each shortfall.</summary>
-    private int RequestedCandidates(int remaining) =>
-        Math.Max(1, Math.Min(_options.MaxCandidatesPerRound, remaining * Math.Max(1, _options.CandidateHeadroomFactor)));
+    /// <summary>How many candidates this tenant's recent real searches threw away (rejected or duplicate), as a share of all they considered -
+    /// the starting estimate for how many to ask for. From their last few runs that really searched, so a simulated run's invented businesses
+    /// do not teach it anything; the configured starting guess when there is not enough history yet.</summary>
+    private async Task<decimal> PriorUnusableRateAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        // "Simulated" is what a simulated run records as its model (SimulatedLeadDiscoveryAgent.ModelName, in Infrastructure).
+        var recent = await _context.LeadDiscoveryRuns.AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.CandidatesConsidered > 0 && r.Model != "Simulated")
+            .OrderByDescending(r => r.RanAtUtc)
+            .Take(RecentRunsForRejectionRate)
+            .Select(r => new { r.CandidatesConsidered, r.Rejected, r.Duplicates })
+            .ToListAsync(cancellationToken);
+
+        var learned = CandidateRequestPlanner.RateFromHistory(
+            recent.Select(r => (r.CandidatesConsidered, r.Rejected, r.Duplicates)), MinCandidatesForRejectionRate);
+
+        return learned ?? Math.Clamp(_options.InitialRejectionRatePercent, 0, 90) / 100m;
+    }
+
+    /// <summary>How many of the tenant's latest runs the unusable-candidate rate is learned from, and the fewest candidates that is allowed to
+    /// rest on: a couple of runs of a handful of businesses say nothing, so the starting guess is used until there is more.</summary>
+    private const int RecentRunsForRejectionRate = 5;
+
+    private const int MinCandidatesForRejectionRate = 10;
 
     /// <summary>
     /// Submits the rows' numbers to the verification provider as one batch and records each answer on its row, matched by the row's

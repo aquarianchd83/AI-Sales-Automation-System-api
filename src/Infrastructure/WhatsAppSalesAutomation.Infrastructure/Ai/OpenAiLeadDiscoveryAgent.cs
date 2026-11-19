@@ -33,7 +33,7 @@ public class OpenAiLeadDiscoveryAgent : ILeadDiscoveryAgent
 
     public OpenAiLeadDiscoveryAgent(
         HttpClient httpClient,
-        IOptions<LeadDiscoveryAgentSettings> settings,
+        IOptionsSnapshot<LeadDiscoveryAgentSettings> settings,
         ILogger<OpenAiLeadDiscoveryAgent> logger,
         IPlatformAiConfigProvider aiConfig,
         LeadDiscoveryPageFetcher fetcher)
