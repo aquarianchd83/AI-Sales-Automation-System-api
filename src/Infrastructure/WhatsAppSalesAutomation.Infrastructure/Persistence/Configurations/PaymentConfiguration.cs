@@ -23,11 +23,22 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(p => p.FxRateToInr).HasColumnType("decimal(18,6)");
         builder.Property(p => p.CountryCode).HasMaxLength(2);
         builder.Property(p => p.StateCode).HasMaxLength(5);
+        builder.Property(p => p.ProviderPaymentId).HasMaxLength(40);
+        builder.Property(p => p.ProviderInvoiceId).HasMaxLength(40);
+        builder.Property(p => p.ProviderSubscriptionId).HasMaxLength(40);
+        builder.Property(p => p.PaymentMethod).HasMaxLength(30);
+        builder.Property(p => p.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(p => p.FailureReason).HasMaxLength(500);
 
         // Not unique, unlike Subscription's TenantId index - a tenant accumulates many payments
         // over time, this is just the lookup PlanLimitsService-style code would use to page/filter
         // by tenant.
         builder.HasIndex(p => p.TenantId);
+
+        // One row per gateway payment, enforced by the database: the same payment reaching us through a redelivered webhook, a second
+        // kind of event or the reconciliation job can only ever be recorded once. Simulated rows have no gateway id and are not covered.
+        builder.HasIndex(p => new { p.Provider, p.ProviderPaymentId }).IsUnique().HasFilter("[ProviderPaymentId] IS NOT NULL");
+        builder.HasIndex(p => p.ProviderSubscriptionId);
 
         // No HasQueryFilter here - Payment is ITenantOwned, so the combined filter is built
         // reflectively in ApplicationDbContext.OnModelCreating, same as every other ITenantOwned

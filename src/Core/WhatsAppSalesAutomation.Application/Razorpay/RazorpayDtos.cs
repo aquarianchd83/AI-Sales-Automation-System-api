@@ -10,11 +10,18 @@ public record RazorpaySettingsDto(
     bool HasWebhookSecret,
     string? WebhookSecretHint,
     bool IsConfigured,
-    string WebhookPath);
+    string WebhookPath,
+    // Whether tenants billed in rupees pay for a plan through UPI AutoPay. Off until an operator turns it on here.
+    bool AutoPayEnabled = false,
+    // Switched on AND able to work: keys and the webhook secret are saved. Switched on but not ready means tenants still see the old buttons.
+    bool AutoPayReady = false);
 
 /// <param name="KeySecret">null keeps the stored secret, "" clears it, anything else replaces it.</param>
 /// <param name="WebhookSecret">Same convention as <paramref name="KeySecret"/>.</param>
 public record UpdateRazorpaySettingsRequest(string KeyId, string? KeySecret, string? WebhookSecret);
+
+/// <param name="Enabled">True makes a paid plan, for a tenant billed in rupees, bought through UPI AutoPay.</param>
+public record SetRazorpayAutoPayRequest(bool Enabled);
 
 /// <param name="KeySecret">null tests with the stored secret.</param>
 public record TestRazorpayKeysRequest(string KeyId, string? KeySecret);
@@ -86,6 +93,10 @@ public enum RazorpayWebhookOutcome
 
     /// <summary>Signed and stored, but not about any order of ours (or an event we do not act on).</summary>
     Ignored,
+
+    /// <summary>Signed and stored, to be applied by the background job: a subscription event. Storing it is what is acknowledged to
+    /// Razorpay - a failure while applying it afterwards loses nothing.</summary>
+    Queued,
 
     /// <summary>The same event id was already received - Razorpay redelivers until it gets a 2xx.</summary>
     Duplicate,

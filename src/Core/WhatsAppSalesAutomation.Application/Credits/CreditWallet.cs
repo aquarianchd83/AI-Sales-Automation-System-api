@@ -374,7 +374,9 @@ public class CreditAllocationService : ICreditAllocationService
         var due = await (
                 from s in _context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
                 join p in _context.Plans.AsNoTracking() on s.PlanId equals p.Id
-                where p.MonthlyCredits > 0 && s.Status == SubscriptionStatus.Active
+                // A plan paid for through a Razorpay mandate gets its credits from each confirmed payment (AutoPayEntitlements), not from the
+                // calendar: granting here as well would hand the month out twice.
+                where p.MonthlyCredits > 0 && s.Status == SubscriptionStatus.Active && s.RazorpaySubscriptionRowId == null
                 select new { s.TenantId, Plan = p })
             .ToListAsync(ct);
 

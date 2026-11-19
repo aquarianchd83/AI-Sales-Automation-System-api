@@ -130,11 +130,19 @@ public record PaymentDto(
     decimal TaxLocal = 0,
     decimal TotalLocal = 0,
     IReadOnlyList<TaxLineDto>? TaxLines = null,
-    decimal AmountInr = 0)
+    decimal AmountInr = 0,
+    // "Succeeded" or "Failed". A failed row is an attempt the gateway could not complete: nothing was paid and nothing was granted.
+    string Status = "Succeeded",
+    string? PaymentMethod = null,
+    string? FailureReason = null,
+    // The gateway's own references - the transaction and the invoice - for a payment made through one.
+    string? TransactionId = null,
+    string? InvoiceId = null)
 {
     public static PaymentDto From(Domain.Entities.Billing.Payment p) => new(
         p.Id, p.PlanName, p.AmountCents, p.CurrencyCode, p.CurrencySymbol, p.LocalAmount, p.Provider, p.PaidAtUtc, p.Kind.ToString(),
-        p.CountryCode, p.TaxLocal, p.TotalPaidLocal, ParseTaxLines(p.TaxLinesJson), p.AmountInr);
+        p.CountryCode, p.TaxLocal, p.TotalPaidLocal, ParseTaxLines(p.TaxLinesJson), p.AmountInr,
+        p.Status.ToString(), p.PaymentMethod, p.FailureReason, p.ProviderPaymentId, p.ProviderInvoiceId);
 
     public static IReadOnlyList<TaxLineDto> ParseTaxLines(string? json)
     {

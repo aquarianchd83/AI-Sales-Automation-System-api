@@ -74,6 +74,8 @@ public class LeadDiscoveryRunConfiguration : IEntityTypeConfiguration<LeadDiscov
         // Exact decimal rather than a float, and six places because a cheap run costs fractions of a cent -
         // two would round a real charge down to zero.
         builder.Property(r => r.EstimatedCostUsd).HasPrecision(18, 6);
+        builder.Property(r => r.SearchCostUsd).HasPrecision(18, 6);
+        builder.Property(r => r.ResearchNote).HasMaxLength(2000);
 
         // Every read is one tenant's runs, newest first or within a month - or the run of one execution.
         builder.HasIndex(r => new { r.TenantId, r.RanAtUtc });

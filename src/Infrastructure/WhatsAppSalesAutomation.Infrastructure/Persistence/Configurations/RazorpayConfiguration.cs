@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Payments;
+using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 
 namespace WhatsAppSalesAutomation.Infrastructure.Persistence.Configurations;
 
@@ -40,11 +42,70 @@ public class RazorpayWebhookEventConfiguration : IEntityTypeConfiguration<Razorp
         builder.Property(e => e.Event).IsRequired().HasMaxLength(60);
         builder.Property(e => e.OrderId).HasMaxLength(40);
         builder.Property(e => e.PaymentId).HasMaxLength(40);
+        builder.Property(e => e.SubscriptionId).HasMaxLength(40);
         builder.Property(e => e.Note).HasMaxLength(500);
-        builder.Property(e => e.Payload).IsRequired().HasMaxLength(8000);
+        // The whole body, uncapped: an event that failed to apply is applied again from this column.
+        builder.Property(e => e.Payload).IsRequired().HasColumnType("nvarchar(max)");
+        builder.Property(e => e.ProcessingStatus).HasConversion<string>().HasMaxLength(20);
+        builder.Property(e => e.ErrorMessage).HasMaxLength(1000);
 
         // A redelivery of the same event is recognised by this, even when two arrive at once.
         builder.HasIndex(e => e.EventId).IsUnique();
         builder.HasIndex(e => e.CreatedAt);
+        // What the processing job and the retry sweep read: everything not yet finished, oldest first.
+        builder.HasIndex(e => new { e.ProcessingStatus, e.CreatedAt });
+        builder.HasIndex(e => e.SubscriptionId);
+    }
+}
+
+public class RazorpayPlanConfiguration : IEntityTypeConfiguration<RazorpayPlan>
+{
+    public void Configure(EntityTypeBuilder<RazorpayPlan> builder)
+    {
+        builder.ToTable("RazorpayPlans");
+        builder.HasKey(p => p.Id);
+
+        builder.Property(p => p.Mode).IsRequired().HasMaxLength(4);
+        builder.Property(p => p.Currency).IsRequired().HasMaxLength(3);
+        builder.Property(p => p.Period).IsRequired().HasMaxLength(10);
+        builder.Property(p => p.RazorpayPlanId).IsRequired().HasMaxLength(40);
+
+        builder.HasOne<Plan>().WithMany().HasForeignKey(p => p.PlanId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(p => p.RazorpayPlanId).IsUnique();
+        // One Razorpay plan per distinct charge: two checkouts for the same plan and price can never create two.
+        builder.HasIndex(p => new { p.PlanId, p.Mode, p.Currency, p.AmountMinor, p.Period, p.Interval }).IsUnique();
+    }
+}
+
+public class RazorpaySubscriptionConfiguration : IEntityTypeConfiguration<RazorpaySubscription>
+{
+    public void Configure(EntityTypeBuilder<RazorpaySubscription> builder)
+    {
+        builder.ToTable("RazorpaySubscriptions");
+        builder.HasKey(s => s.Id);
+
+        builder.Property(s => s.RazorpaySubscriptionId).IsRequired().HasMaxLength(40);
+        builder.Property(s => s.Mode).IsRequired().HasMaxLength(4);
+        builder.Property(s => s.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(s => s.Currency).IsRequired().HasMaxLength(3);
+        builder.Property(s => s.ShortUrl).HasMaxLength(300);
+        builder.Property(s => s.PaymentMethod).HasMaxLength(30);
+        builder.Property(s => s.CustomerId).HasMaxLength(40);
+        builder.Property(s => s.LastEvent).HasMaxLength(60);
+
+        builder.HasOne<Tenant>().WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Plan>().WithMany().HasForeignKey(s => s.PlanId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<RazorpayPlan>().WithMany().HasForeignKey(s => s.RazorpayPlanRowId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(s => s.RazorpaySubscriptionId).IsUnique();
+        builder.HasIndex(s => new { s.TenantId, s.Status });
+        // At most one authorisation waiting per tenant: two checkouts started at the same moment cannot both create a mandate to approve.
+        builder.HasIndex(s => s.TenantId).IsUnique().HasFilter("[Status] = 'Created'").HasDatabaseName("IX_RazorpaySubscriptions_TenantId_PendingAuthorization");
+        // What reconciliation walks: everything still alive, least recently checked first.
+        builder.HasIndex(s => new { s.Status, s.LastReconciledAtUtc });
+
+        // No HasQueryFilter here - RazorpaySubscription is ITenantOwned, so the combined filter is built reflectively in
+        // ApplicationDbContext.OnModelCreating, same as every other ITenantOwned entity.
     }
 }

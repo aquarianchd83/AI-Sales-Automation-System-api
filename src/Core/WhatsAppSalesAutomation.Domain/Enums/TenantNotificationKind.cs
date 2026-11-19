@@ -51,5 +51,15 @@ public enum TenantNotificationKind
     // The platform admin attached the video a tenant asked for in the Story studio. In-app only: the tenant opens Story studio to watch it.
     StoryVideoReady = 23,
     // The platform admin declined a video request (it could not be made): the credits were returned, and the reason is in the notice.
-    StoryVideoRejected = 24
+    StoryVideoRejected = 24,
+    // Razorpay took the month's automatic payment for the plan: the plan is paid for another period and its credits are in the wallet.
+    AutoPayPaymentReceived = 25,
+    // An automatic payment did not go through. Razorpay tries again by itself over the next few days; the tenant can make sure there is money to take.
+    AutoPayPaymentFailed = 26,
+    // Every retry failed and Razorpay has stopped trying. The plan ends unless the tenant sets up automatic payment again.
+    AutoPayHalted = 27,
+    // The mandate was cancelled - by the tenant, in their UPI app, or by their bank. The plan runs to the end of what was paid for.
+    AutoPayCancelled = 28,
+    // The tenant paused the mandate in their UPI app: nothing is taken until they resume it there.
+    AutoPayPaused = 29
 }

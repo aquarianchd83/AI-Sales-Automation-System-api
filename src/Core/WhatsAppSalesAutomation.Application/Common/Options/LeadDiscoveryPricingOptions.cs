@@ -37,6 +37,11 @@ public class LeadDiscoveryPricingOptions
         ["claude-haiku-4-5"] = new() { InputPerMillion = 1m, OutputPerMillion = 5m, CacheReadPerMillion = 0.1m, CacheWritePerMillion = 1.25m },
         ["claude-sonnet-5"] = new() { InputPerMillion = 2m, OutputPerMillion = 10m, CacheReadPerMillion = 0.2m, CacheWritePerMillion = 2.5m },
         ["claude-opus-5"] = new() { InputPerMillion = 5m, OutputPerMillion = 25m, CacheReadPerMillion = 0.5m, CacheWritePerMillion = 6.25m },
+        // OpenAI (ChatGPT) models, for LeadDiscovery:Agent:OpenAiModel. OpenAI bills no separate cache write, so that rate is zero. Without a row here
+        // a run on one of these would be priced at the DefaultModel (a Claude model) and its cost overstated several times over.
+        ["gpt-5-nano"] = new() { InputPerMillion = 0.05m, OutputPerMillion = 0.4m, CacheReadPerMillion = 0.005m, CacheWritePerMillion = 0m },
+        ["gpt-5-mini"] = new() { InputPerMillion = 0.25m, OutputPerMillion = 2m, CacheReadPerMillion = 0.025m, CacheWritePerMillion = 0m },
+        ["gpt-5"] = new() { InputPerMillion = 1.25m, OutputPerMillion = 10m, CacheReadPerMillion = 0.125m, CacheWritePerMillion = 0m },
         // A simulated run reports no usage at all, so this only makes its zero cost explicit.
         ["Simulated"] = new()
     };

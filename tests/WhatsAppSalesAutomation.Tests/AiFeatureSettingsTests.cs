@@ -75,7 +75,7 @@ public class AiFeatureSettingsTests
     [Fact]
     public void Each_feature_lists_only_the_tools_its_code_can_call()
     {
-        Assert.Equal(new[] { "Anthropic" }, AiFeatures.SupportedProviders(AiFeatures.DiscoveryLead));
+        Assert.Equal(new[] { "Anthropic", "OpenAI" }, AiFeatures.SupportedProviders(AiFeatures.DiscoveryLead));
         Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, AiFeatures.SupportedProviders(AiFeatures.Conversation));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.KnowledgeBase));
         Assert.Empty(AiFeatures.SupportedProviders(AiFeatures.ContentGeneration));
@@ -90,7 +90,7 @@ public class AiFeatureSettingsTests
     {
         var dto = await Service(new MemoryStore()).GetAsync();
 
-        Assert.Equal(new[] { "Anthropic" }, dto.DiscoveryLead.SupportedProviders);
+        Assert.Equal(new[] { "Anthropic", "OpenAI" }, dto.DiscoveryLead.SupportedProviders);
         Assert.Empty(dto.KnowledgeBase.SupportedProviders);
         Assert.Equal(new[] { "OpenAI", "Anthropic", "Google" }, dto.Conversation.SupportedProviders);
         Assert.Equal(new[] { "OpenAI", "Google" }, dto.Conversation.SupportedEmbeddingProviders);
@@ -131,7 +131,7 @@ public class AiFeatureSettingsTests
         Assert.Equal("OpenAI", store.Rows["Integrations:Ai:DiscoveryKeywords:Provider"]);
         Assert.Equal("OpenAI", dto.DiscoveryKeywords.Provider);
         Assert.Equal("Anthropic", dto.DiscoveryLead.Provider); // the agent is untouched
-        Assert.Equal(new[] { "Anthropic" }, dto.DiscoveryLead.SupportedProviders);
+        Assert.Equal(new[] { "Anthropic", "OpenAI" }, dto.DiscoveryLead.SupportedProviders);
     }
 
     [Fact]
@@ -219,9 +219,9 @@ public class AiFeatureSettingsTests
     {
         var store = new MemoryStore();
 
-        // ChatGPT has a key, but discovery leads cannot call it: a request that skipped the page must not get through.
+        // Gemini has a key, but discovery leads cannot call it: a request that skipped the page must not get through.
         var error = await Assert.ThrowsAsync<ValidationException>(() =>
-            Service(store).UpdateAsync(Valid() with { DiscoveryLead = Api("OpenAI") }, null));
+            Service(store).UpdateAsync(Valid() with { DiscoveryLead = Api("Google") }, null));
 
         Assert.Contains(error.Errors, e => e.PropertyName == "DiscoveryLead.Provider" && e.ErrorMessage.Contains("not available for this feature") && e.ErrorMessage.Contains("Claude"));
         Assert.Empty(store.Rows);
@@ -279,7 +279,7 @@ public class AiFeatureSettingsTests
     {
         var store = new MemoryStore();
         store.Rows["Integrations:Ai:DiscoveryLead:Mode"] = "Api";
-        store.Rows["Integrations:Ai:DiscoveryLead:Provider"] = "OpenAI";
+        store.Rows["Integrations:Ai:DiscoveryLead:Provider"] = "Google";
         store.Rows["Integrations:Ai:KnowledgeBase:Mode"] = "Api";
         store.Rows["Integrations:Ai:KnowledgeBase:Provider"] = "Google";
 
@@ -287,10 +287,10 @@ public class AiFeatureSettingsTests
 
         Assert.False(dto.DiscoveryLead.SavedProviderSupported);
         Assert.False(dto.DiscoveryLead.IsLive);
-        Assert.Equal("OpenAI", dto.DiscoveryLead.Provider);
+        Assert.Equal("Google", dto.DiscoveryLead.Provider);
         Assert.False(dto.KnowledgeBase.SavedProviderSupported);
         Assert.False(dto.KnowledgeBase.IsLive);
-        Assert.Equal("OpenAI", store.Rows["Integrations:Ai:DiscoveryLead:Provider"]);
+        Assert.Equal("Google", store.Rows["Integrations:Ai:DiscoveryLead:Provider"]);
         Assert.Equal("Google", store.Rows["Integrations:Ai:KnowledgeBase:Provider"]);
     }
 
@@ -393,7 +393,7 @@ public class AiFeatureSettingsTests
         var ai = new FakeAi();
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            Service(new MemoryStore(), ai: ai).TestAsync(AiFeatures.DiscoveryLead, new TestAiFeatureRequest(Api("OpenAI"))));
+            Service(new MemoryStore(), ai: ai).TestAsync(AiFeatures.DiscoveryLead, new TestAiFeatureRequest(Api("Google"))));
 
         Assert.Null(ai.LastProvider);
     }
@@ -458,11 +458,44 @@ public class AiFeatureSettingsTests
     }
 
     [Fact]
-    public void Routing_never_calls_a_tool_the_feature_does_not_support()
+    public async Task Discovery_lead_can_be_switched_to_ChatGPT_and_is_live_on_it()
+    {
+        var store = new MemoryStore();
+
+        var dto = await Service(store).UpdateAsync(Valid() with { DiscoveryLead = Api("OpenAI") }, null);
+
+        Assert.Equal("OpenAI", store.Rows["Integrations:Ai:DiscoveryLead:Provider"]);
+        Assert.Equal("OpenAI", dto.DiscoveryLead.Provider);
+        Assert.True(dto.DiscoveryLead.IsLive);
+        Assert.True(dto.DiscoveryLead.SavedProviderSupported);
+    }
+
+    [Fact]
+    public async Task Discovery_lead_on_ChatGPT_needs_the_ChatGPT_key()
+    {
+        var error = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(new MemoryStore(), new FakeCredentials { OpenAiKey = null }).UpdateAsync(Valid() with { DiscoveryLead = Api("OpenAI") }, null));
+
+        Assert.Contains(error.Errors, e => e.PropertyName == "DiscoveryLead.Provider" && e.ErrorMessage.Contains("No ChatGPT key"));
+    }
+
+    [Fact]
+    public void Routing_sends_discovery_lead_to_ChatGPT_when_it_is_chosen()
     {
         var routing = new AiFeatureRouting(new Snapshot(new AiFeatureOptions
         {
             DiscoveryLead = new AiFeatureOption { Mode = "Api", Provider = "OpenAI" },
+        }));
+
+        Assert.Equal(new AiFeatureChoice(true, "OpenAI"), routing.Resolve(AiFeatures.DiscoveryLead));
+    }
+
+    [Fact]
+    public void Routing_never_calls_a_tool_the_feature_does_not_support()
+    {
+        var routing = new AiFeatureRouting(new Snapshot(new AiFeatureOptions
+        {
+            DiscoveryLead = new AiFeatureOption { Mode = "Api", Provider = "Google" },
             VideoRenders = new AiFeatureOption { Mode = "Api", Provider = "anthropic" },
         }));
 

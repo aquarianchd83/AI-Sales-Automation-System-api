@@ -89,7 +89,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         ILeadDiscoveryLockStore lockStore,
         IApplicationInstance instance,
         ILogger<LeadDiscoveryRunService> logger,
-        IOptions<LeadDiscoveryOptions> options,
+        IOptionsSnapshot<LeadDiscoveryOptions> options,
         IOptionsSnapshot<LeadDiscoveryPricingOptions> pricing,
         IPhoneVerificationProvider verification,
         IConsentInvitationService consent,
@@ -223,8 +223,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             return await RecordSkipAsync(profile, "Skipped: the tenant's plan allows no discovered leads per run.",
                 quotaExhausted: false, cancellationToken);
 
-        // Prepaid: every candidate the agent evaluates is charged - fresh, duplicate or rejected - because the
-        // provider bills the research either way. No candidates left means no run and no agent call, but it is
+        // Prepaid, but only for results: a tenant is charged for each customer a run creates - never for rejected or duplicate
+        // candidates, whatever the research cost. A tenant who cannot afford even one lead gets no run and no agent call, but it is
         // still recorded, the same way a run that ran out of quota partway through is.
         if (await _quota.GetAvailableAsync(profile.TenantId, QuotaType.LeadCandidates, cancellationToken) < 1)
         {
@@ -489,7 +489,6 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         var profile = run.Profile;
         var tenantId = profile.TenantId;
         var stats = run.Stats;
-        var runKey = run.Execution.Id.ToString("N");
 
         var rules = new QualificationRules(
             profile.PhoneRequired, profile.EmailRequired, profile.IndependentBusiness, profile.MinimumLeadScore, profile.RequiredFields);
@@ -505,12 +504,18 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         {
             // A verification provider that is not answering ends the research too: more candidates would only be paid for and
             // left unchecked.
-            while (stats.Saved < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
+            // The run keeps researching until the batch the tenant asked for is full of customers - not until it has seen enough
+            // candidates - and stops only when the research stalls (two rounds in a row find nothing new), the allowance runs out, or the
+            // round limit is reached, which is what keeps a run's cost bounded.
+            var emptyRounds = 0;
+            var priorUnusableRate = await PriorUnusableRateAsync(profile, cancellationToken);
+            while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
                 await run.Lease.EnsureCanProcessAsync(cancellationToken);
 
-                // Never ask the agent for more candidates than the tenant can still pay for.
+                // What the tenant can still pay for caps how many leads are taken below, not how many candidates are researched:
+                // only leads that become customers are charged.
                 var affordable = await _quota.GetAvailableAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
                 if (affordable < 1)
                 {
@@ -525,7 +530,16 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 }
 
                 stats.Rounds++;
-                var remaining = run.BatchSize - stats.Saved;
+                var remaining = run.BatchSize - stats.Created;
+
+                // Ask for what is likely to be needed, not a fixed multiple: how many candidates this tenant's searches usually throw away,
+                // corrected by what this run's own rounds have turned up so far (rejected, duplicate, or kept without a customer).
+                var expectedUnusable = CandidateRequestPlanner.ExpectedUnusableRate(
+                    priorUnusableRate, stats.Candidates, stats.Rejected + stats.Duplicates + (stats.Saved - stats.Created));
+                var requested = CandidateRequestPlanner.Candidates(remaining, expectedUnusable, _options.MaxCandidatesPerRound, _options.CandidateHeadroomFactor);
+                _logger.LogInformation(
+                    "Lead discovery round {Round} for tenant {TenantId}: asking for {Requested} candidates to fill {Remaining} places (expecting {Unusable:P0} to be unusable)",
+                    stats.Rounds, tenantId, requested, remaining, expectedUnusable);
 
                 LeadDiscoveryAgentResult result;
                 try
@@ -534,7 +548,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                         profile.TargetBusinessType,
                         profile.Keywords,
                         profile.Locations,
-                        (int)Math.Min(Math.Min(remaining, _options.MaxCandidatesPerRound), Math.Floor(affordable)),
+                        requested,
                         profile.RequiredFields,
                         profile.PhoneRequired,
                         profile.EmailRequired,
@@ -563,25 +577,50 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 stats.Model = result.Model;
                 stats.Candidates += result.Candidates.Count;
                 stats.Usage += result.Usage;
+                stats.AddNote(result.Note);
+
+                // Everything the agent returned is known from here on, rejected candidates included, so the next round is told to look
+                // for other businesses instead of handing the same ones back.
+                foreach (var candidate in result.Candidates)
+                {
+                    if (!string.IsNullOrWhiteSpace(candidate.BusinessName))
+                        knownBusinesses.Add(string.IsNullOrWhiteSpace(candidate.City) ? candidate.BusinessName : $"{candidate.BusinessName}, {candidate.City}");
+                }
 
                 if (result.Candidates.Count == 0)
-                    break;
+                {
+                    if (++emptyRounds >= 2)
+                        break;
+                    continue;
+                }
+
+                emptyRounds = 0;
 
                 var assessments = LeadQualification.AssessAll(result.Candidates, result.Evidence, rules);
                 var rows = new List<LeadDiscoveryExecutionCustomer>();
                 var qualified = new List<VerifiedLead>();
+
+                // What the agent reported for each qualified lead, to keep on its row whatever becomes of it. Qualification produces a new
+                // object per lead, so the original is found by reference.
+                var reported = new Dictionary<VerifiedLead, DiscoveredBusinessCandidate>(ReferenceEqualityComparer.Instance);
+                string? DetailsOf(VerifiedLead lead) =>
+                    reported.TryGetValue(lead, out var original) ? LeadDiscoveryCandidateSnapshot.Serialize(original) : null;
+
                 for (var i = 0; i < assessments.Count; i++)
                 {
                     if (assessments[i].Lead is { } lead)
                     {
                         qualified.Add(lead);
+                        reported[lead] = result.Candidates[i];
                         continue;
                     }
 
                     stats.Reject(assessments[i].RejectionReason!);
                     var candidate = result.Candidates[i];
-                    rows.Add(NewRow(run.Execution, candidate.BusinessName, candidate.Phone, LeadDiscoveryCustomerStatus.Skipped,
-                        $"Invalid: {assessments[i].RejectionReason}", isInvalid: true));
+                    var rejectedRow = NewRow(run.Execution, candidate.BusinessName, candidate.Phone, LeadDiscoveryCustomerStatus.Skipped,
+                        $"Invalid: {assessments[i].RejectionReason} (not charged)", isInvalid: true);
+                    rejectedRow.CandidateDetailsJson = LeadDiscoveryCandidateSnapshot.Serialize(candidate);
+                    rows.Add(rejectedRow);
                 }
 
                 var fresh = await RemoveDuplicatesAsync(tenantId, qualified, cancellationToken);
@@ -589,28 +628,34 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 foreach (var duplicate in qualified.Where(l => !freshSet.Contains(l)))
                 {
                     stats.Duplicates++;
-                    rows.Add(NewRow(run.Execution, duplicate.BusinessName, duplicate.Phone, LeadDiscoveryCustomerStatus.Duplicate,
-                        "Matches an existing customer or discovered lead."));
+                    var duplicateRow = NewRow(run.Execution, duplicate.BusinessName, duplicate.Phone, LeadDiscoveryCustomerStatus.Duplicate,
+                        "Matches an existing customer or discovered lead (not charged).");
+                    duplicateRow.CandidateDetailsJson = DetailsOf(duplicate);
+                    rows.Add(duplicateRow);
                 }
 
-                var toSave = fresh.Take(remaining).ToList();
+                // Only as many leads as the batch still needs and the tenant can still pay for. Rejected and duplicate candidates are
+                // already on this execution as Invalid / Duplicate rows and are never charged: the tenant pays one lead's price for each
+                // customer created (see VerifyAndProcessAsync), not for the research that found it.
+                var toSave = fresh.Take(Math.Min(remaining, (int)Math.Floor(affordable))).ToList();
 
-                // Charged for what was evaluated this round, with the split recorded on the ledger entry so the
-                // tenant can see why 25 candidates cost 25 units when only 12 became leads.
-                await _quota.ConsumeLeadCandidatesAsync(
-                    tenantId,
-                    result.Candidates.Count,
-                    $"lead:{runKey}:r{stats.Rounds}",
-                    runKey,
-                    $"{result.Candidates.Count} candidates: {toSave.Count} new, {qualified.Count - fresh.Count} duplicate, {assessments.Count - qualified.Count} rejected",
-                    cancellationToken);
-
-                // The quota ledger resets the change tracker when it retries a concurrency conflict.
-                _context.LeadDiscoveryExecutions.Attach(run.Execution);
+                // The qualified candidates beyond what the batch needs are recorded too, so every candidate the run considered is on the
+                // execution with what became of it. They are not saved and not charged, and a later run can still find them.
+                foreach (var surplus in fresh.Skip(toSave.Count))
+                {
+                    var surplusRow = NewRow(run.Execution, surplus.BusinessName, surplus.Phone, LeadDiscoveryCustomerStatus.Skipped, NotNeededNote);
+                    surplusRow.CandidateDetailsJson = DetailsOf(surplus);
+                    rows.Add(surplusRow);
+                }
 
                 // Recorded Pending, with the candidate, before any of them is processed: an execution that stops
                 // part-way leaves exactly the unprocessed ones for a retry.
-                var pending = toSave.Select(lead => (Lead: lead, Row: NewPendingRow(run.Execution, lead))).ToList();
+                var pending = toSave.Select(lead =>
+                {
+                    var pendingRow = NewPendingRow(run.Execution, lead);
+                    pendingRow.CandidateDetailsJson = DetailsOf(lead);
+                    return (Lead: lead, Row: pendingRow);
+                }).ToList();
                 rows.AddRange(pending.Select(p => p.Row));
                 _context.LeadDiscoveryExecutionCustomers.AddRange(rows);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -622,10 +667,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                         stats.Saved++;
                         knownBusinesses.Add(lead.City is null ? lead.BusinessName : $"{lead.BusinessName}, {lead.City}");
                     }
-                }
 
-                if (toSave.Count == 0)
-                    break;
+                    if (outcome == CustomerOutcome.Created)
+                        stats.Created++;
+                }
             }
         }
         finally
@@ -667,6 +712,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 skipped.VerificationReason = earlier.VerificationReason;
                 skipped.VerifiedAtUtc = earlier.VerifiedAtUtc;
                 skipped.VerificationRequestId = earlier.VerificationRequestId;
+                skipped.CandidateDetailsJson = earlier.CandidateDetailsJson;
                 rows.Add(skipped);
                 continue;
             }
@@ -678,12 +724,19 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
             var row = NewPendingRow(run.Execution, lead);
             row.RetriedFromId = earlier.Id;
+            row.CandidateDetailsJson = earlier.CandidateDetailsJson;
             rows.Add(row);
             toProcess.Add((lead, row));
         }
 
         _context.LeadDiscoveryExecutionCustomers.AddRange(rows);
         await _context.SaveChangesAsync(cancellationToken);
+
+        // An execution that began before leads were charged one by one paid for every candidate when it was researched (operation keys
+        // "lead:{root}:r{round}"), so a retry of one of those must not charge its customers a second time.
+        var legacyKey = $"lead:{run.Execution.RootExecutionId:N}:r";
+        run.LeadsAlreadyBilled = await _context.QuotaLedgerEntries.AsNoTracking()
+            .AnyAsync(e => e.TenantId == run.Profile.TenantId && e.OperationKey != null && e.OperationKey.StartsWith(legacyKey), cancellationToken);
 
         await VerifyAndProcessAsync(run, toProcess, cancellationToken);
     }
@@ -713,11 +766,87 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 && row.VerificationStatus is not (LeadDiscoveryVerificationStatus.Pass or LeadDiscoveryVerificationStatus.Fail))
                 continue;
 
-            outcomes.Add((lead, await ProcessCustomerAsync(run, row, lead, cancellationToken)));
+            var outcome = await ProcessCustomerAsync(run, row, lead, cancellationToken);
+            outcomes.Add((lead, outcome));
+
+            // Charged the moment the customer exists, so a run that stops part-way has charged exactly the customers it created.
+            if (outcome == CustomerOutcome.Created)
+                await ChargeLeadAsync(run, row, lead, cancellationToken);
         }
 
         return outcomes;
     }
+
+    /// <summary>
+    /// The one place a tenant pays for discovery: one lead's price for each customer a run creates. A rejected candidate, a duplicate, or
+    /// a business kept only as a discovered lead (no usable number, or a number the DND check refused) is never charged, however much
+    /// research it took. The operation key is the history row's id, so a retry that meets the same customer cannot charge it twice.
+    /// Never fails the run - the customer is already committed - and a wallet that has run dry since the batch was planned simply
+    /// charges what is left.
+    /// </summary>
+    private async Task ChargeLeadAsync(ExecutionRun run, LeadDiscoveryExecutionCustomer row, VerifiedLead lead, CancellationToken cancellationToken)
+    {
+        if (run.LeadsAlreadyBilled)
+            return;
+
+        try
+        {
+            var charged = await _quota.ConsumeLeadCandidatesAsync(
+                run.Profile.TenantId,
+                1,
+                $"lead:{row.Id:N}",
+                run.Execution.Id.ToString("N"),
+                $"Lead: {Truncate(lead.BusinessName, 120)}",
+                cancellationToken);
+
+            if (charged > 0)
+                run.Stats.Billed++;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Could not charge lead discovery customer {CustomerName} in execution {ExecutionId}", row.CustomerName, run.Execution.Id);
+        }
+
+        // The quota ledger resets the change tracker when it retries a concurrency conflict.
+        _context.LeadDiscoveryExecutions.Attach(run.Execution);
+    }
+
+    /// <summary>
+    /// How many candidates this profile's recent real searches threw away (rejected or duplicate), as a share of all they considered - the
+    /// starting estimate for how many to ask for. What gets thrown away depends on the profile's rules (a required contact person, a required
+    /// phone, ...), so it learns only from this profile's own runs, and only from those since the profile was last changed: a run made under
+    /// earlier rules says nothing about the current ones. Simulated runs are left out because their businesses are invented. With too little
+    /// history the configured starting guess is used.
+    /// </summary>
+    private async Task<decimal> PriorUnusableRateAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
+    {
+        var since = profile.UpdatedAt ?? profile.CreatedAt;
+
+        // "Simulated" is what a simulated run records as its model (SimulatedLeadDiscoveryAgent.ModelName, in Infrastructure).
+        var recent = await (
+                from r in _context.LeadDiscoveryRuns.AsNoTracking()
+                join e in _context.LeadDiscoveryExecutions.AsNoTracking() on r.ExecutionId equals e.Id
+                where r.TenantId == profile.TenantId
+                      && e.LeadDiscoveryProfileId == profile.Id
+                      && r.RanAtUtc >= since
+                      && r.CandidatesConsidered > 0
+                      && r.Model != "Simulated"
+                orderby r.RanAtUtc descending
+                select new { r.CandidatesConsidered, r.Rejected, r.Duplicates })
+            .Take(RecentRunsForRejectionRate)
+            .ToListAsync(cancellationToken);
+
+        var learned = CandidateRequestPlanner.RateFromHistory(
+            recent.Select(r => (r.CandidatesConsidered, r.Rejected, r.Duplicates)), MinCandidatesForRejectionRate);
+
+        return learned ?? Math.Clamp(_options.InitialRejectionRatePercent, 0, 90) / 100m;
+    }
+
+    /// <summary>How many of the tenant's latest runs the unusable-candidate rate is learned from, and the fewest candidates that is allowed to
+    /// rest on: a couple of runs of a handful of businesses say nothing, so the starting guess is used until there is more.</summary>
+    private const int RecentRunsForRejectionRate = 5;
+
+    private const int MinCandidatesForRejectionRate = 10;
 
     /// <summary>
     /// Submits the rows' numbers to the verification provider as one batch and records each answer on its row, matched by the row's
@@ -988,6 +1117,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         {
             SkipCampaign(execution, "Auto-Campaign = Not Configured");
             await _context.SaveChangesAsync(cancellationToken);
+
+            // The consent SMS goes to the customers the campaign takes, so with no campaign nobody is texted - even with the switch on. Say
+            // that on each customer, rather than leaving the screen to guess ("SMS consent is not configured" would be wrong: the switch is on).
+            if (profile.ConsentSmsEnabled)
+            {
+                var created = await EligibleCustomerIdsAsync(execution, profile.DndCheckEnabled, cancellationToken);
+                await RecordConsentSmsNotSentAsync(run, created.Passed, AutoCampaignNotConfiguredReason, cancellationToken);
+            }
+
             return;
         }
 
@@ -1025,17 +1163,40 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (profile.ConsentSmsEnabled)
             await SendConsentInvitationsAsync(run, campaignId.Value, eligible, cancellationToken);
         else
-            await RecordConsentSmsOffAsync(run, eligible, cancellationToken);
+            await RecordConsentSmsNotSentAsync(run, eligible, ConsentSmsOffReason, cancellationToken);
     }
 
+    /// <summary>The note on a row for a candidate that qualified but was not needed because the batch was already full (see <see cref="LeadDiscoveryExecutionOutcomes"/>).</summary>
+    internal const string NotNeededNote = "Qualified, but the batch was already full - not saved and not charged.";
+
+    // What the Consent SMS column says when a customer was not sent the SMS because of a setting. There are two, and the first one decides: the
+    // consent SMS goes only to the customers an Auto-Campaign takes, so with no Auto-Campaign that is what has to be fixed first. The headline is
+    // shown in bold, ahead of what to do about it.
+
+    /// <summary>No Auto-Campaign was configured, so no campaign took the customer (whether or not the consent SMS switch is on).</summary>
+    internal const string AutoCampaignNotConfiguredHeadline = "Not added to a campaign: Auto-Campaign is not configured.";
+
+    /// <summary>The reason recorded on each customer, and shown on the execution, when the run had no Auto-Campaign.</summary>
+    internal const string AutoCampaignNotConfiguredReason = AutoCampaignNotConfiguredHeadline + " Turn on Auto-Campaign and choose a campaign in the discovery profile.";
+
+    /// <summary>The Auto-Campaign took the customer, but the consent SMS is not set up (the switch in the discovery profile is off).</summary>
+    internal const string ConsentSmsOffHeadline = "SMS consent is not configured.";
+
     /// <summary>The reason recorded on each customer's history, and shown on the execution, when the consent SMS is switched off.</summary>
-    internal const string ConsentSmsOffReason = "The consent SMS was Off, so no invitation was sent. Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
+    internal const string ConsentSmsOffReason = ConsentSmsOffHeadline + " Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
+
+    // The wording these replaced. History rows already saved carry it, so it is still recognised and shown as the current wording.
+    internal const string LegacyAutoCampaignNotConfiguredReason =
+        "Auto-Campaign is not configured, so no campaign took this customer and no consent SMS was sent. Turn on Auto-Campaign and choose a campaign in the discovery profile.";
+    internal const string LegacyConsentSmsOffReason =
+        "The consent SMS was Off, so no invitation was sent. Turn on \"Send WhatsApp consent SMS\" in the discovery profile to send it.";
 
     /// <summary>
-    /// When the consent SMS is off, each customer the campaign took still gets one history entry saying no SMS was sent and why - an empty
-    /// column would not tell the tenant whether something went wrong. Once per customer per execution, so a retried execution adds none.
+    /// When no consent SMS goes to a customer - the switch is off, or no campaign took them - each still gets one history entry saying no SMS
+    /// was sent and why: an empty column would not tell the tenant whether something went wrong. Once per customer per execution, so a retried
+    /// execution adds none.
     /// </summary>
-    private async Task RecordConsentSmsOffAsync(ExecutionRun run, IReadOnlyCollection<Guid> customerIds, CancellationToken cancellationToken)
+    private async Task RecordConsentSmsNotSentAsync(ExecutionRun run, IReadOnlyCollection<Guid> customerIds, string reason, CancellationToken cancellationToken)
     {
         if (customerIds.Count == 0)
             return;
@@ -1057,7 +1218,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 EventType = CustomerHistoryEventTypes.SmsSkipped,
                 OccurredAtUtc = now,
                 NewStatus = "NotSent",
-                Reason = ConsentSmsOffReason,
+                Reason = reason,
                 CampaignId = run.Execution.GeneratedCampaignId,
                 ExecutionId = executionId,
                 CorrelationId = executionId.ToString("N")
@@ -1745,7 +1906,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 CacheWriteTokens = stats.Usage.CacheCreationInputTokens,
                 WebSearches = stats.Usage.WebSearches,
                 WebFetches = stats.Usage.WebFetches,
-                EstimatedCostUsd = LeadDiscoveryCost.Estimate(stats.Usage, stats.Model, _pricing)
+                EstimatedCostUsd = LeadDiscoveryCost.Estimate(stats.Usage, stats.Model, _pricing),
+                SearchCostUsd = LeadDiscoveryCost.SearchCost(stats.Usage, _pricing),
+                ResearchNote = Truncate(stats.NotesText(), 2000)
             });
 
             await _context.SaveChangesAsync(CancellationToken.None);
@@ -1947,6 +2110,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         /// retry asks again, and its customer is kept out of the campaign until then.</summary>
         public bool VerificationUnfinished { get; set; }
         public string? NotConfiguredReason { get; set; }
+
+        /// <summary>A retry of an execution that was charged per candidate when it was researched: its customers are already paid for.</summary>
+        public bool LeadsAlreadyBilled { get; set; }
     }
 
     private sealed class RunStats
@@ -1960,6 +2126,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         public int Rounds { get; set; }
         public int Candidates { get; set; }
         public int Saved { get; set; }
+
+        /// <summary>Customers created this run - the figure the batch is measured against, and the leads the tenant is charged for.</summary>
+        public int Created { get; set; }
+
+        /// <summary>Customers actually charged for (fewer than <see cref="Created"/> only when the wallet ran dry mid-run).</summary>
+        public int Billed { get; set; }
         public int Duplicates { get; set; }
         public bool QuotaExhausted { get; set; }
 
@@ -1972,13 +2144,30 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         public int Rejected => _rejections.Values.Sum();
 
+        private readonly List<string> _notes = new();
+
+        /// <summary>The agent's own explanation for a round, kept so the run can say why it found what it found.</summary>
+        public void AddNote(string? note)
+        {
+            if (!string.IsNullOrWhiteSpace(note))
+                _notes.Add(note.Trim());
+        }
+
+        /// <summary>One line per round - "Round 2: ..." - or just the text when there was one round. Null when the agent gave none.</summary>
+        public string? NotesText() => _notes.Count switch
+        {
+            0 => null,
+            1 => _notes[0],
+            _ => string.Join("\n", _notes.Select((n, i) => $"Round {i + 1}: {n}"))
+        };
+
         public void Reject(string reason) => _rejections[reason] = _rejections.GetValueOrDefault(reason) + 1;
 
         /// <summary>What the research consumed - enough to price a run from the job list without opening the
         /// Anthropic Console. A simulated run reports zeros for the token counts.</summary>
         public string ToSummary()
         {
-            var summary = $"saved={Saved} batchSize={_batchSize} rounds={Rounds} candidates={Candidates} " +
+            var summary = $"saved={Saved} created={Created} charged={Billed} batchSize={_batchSize} rounds={Rounds} candidates={Candidates} rejectedNotCharged={Rejected} " +
                           $"inputTokens={Usage.InputTokens} outputTokens={Usage.OutputTokens} " +
                           $"cacheReadTokens={Usage.CacheReadInputTokens} cacheWriteTokens={Usage.CacheCreationInputTokens} " +
                           $"webSearches={Usage.WebSearches} webFetches={Usage.WebFetches}";
