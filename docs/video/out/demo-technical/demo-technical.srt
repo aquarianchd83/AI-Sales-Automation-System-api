@@ -1,0 +1,104 @@
+1
+00:00:00,200 --> 00:00:11,614
+This is a recording of the real Angular billing component, driven over the DevTools protocol, against a small mock server that plays our API and Razorpay.
+
+2
+00:00:11,614 --> 00:00:13,837
+Nothing here touches Razorpay.
+
+3
+00:00:14,937 --> 00:00:22,101
+The page loads the plans, the subscription, the AutoPay availability and the current mandate.
+
+4
+00:00:22,101 --> 00:00:28,649
+Availability is true, so a paid plan's button reads Subscribe now instead of Upgrade.
+
+5
+00:00:30,162 --> 00:00:32,575
+Subscribe opens a confirmation.
+
+6
+00:00:32,575 --> 00:00:39,504
+On confirm, the component posts only the plan id to billing slash autopay slash checkout.
+
+7
+00:00:39,504 --> 00:00:47,834
+The server computes the amount from the database, with tax, and creates the Razorpay plan and subscription.
+
+8
+00:00:50,708 --> 00:00:56,419
+The response carries the authorisation URL, which opens in a new tab.
+
+9
+00:00:56,419 --> 00:00:59,895
+The component then reads the mandate back.
+
+10
+00:00:59,895 --> 00:01:07,675
+Its status is Pending authorization, and the plan access is untouched: no payment, no credits.
+
+11
+00:01:09,183 --> 00:01:11,753
+The mock now moves the mandate on.
+
+12
+00:01:11,753 --> 00:01:18,934
+The component is polling the refresh endpoint every five seconds, and the server asks Razorpay.
+
+13
+00:01:18,934 --> 00:01:21,807
+It shows Payment pending, then Active.
+
+14
+00:01:21,807 --> 00:01:29,215
+Only on that transition does it reload the subscription, the payment history and the entitlements.
+
+15
+00:01:30,714 --> 00:01:39,607
+The history row comes from the payments endpoint, with the new optional fields: method, transaction id and status.
+
+16
+00:01:41,107 --> 00:01:46,812
+Invoices are read from Razorpay through the server on demand, not stored.
+
+17
+00:01:46,812 --> 00:01:50,015
+Each row links to Razorpay's hosted page.
+
+18
+00:01:51,525 --> 00:01:59,341
+A failed payment is recorded server side as a Failed payment row, matched to the mandate through its invoice.
+
+19
+00:01:59,341 --> 00:02:06,153
+The mandate is Pending at Razorpay, which the screen shows as Past due, with the retry message.
+
+20
+00:02:06,153 --> 00:02:10,312
+The failed row is listed with its reason and is not money.
+
+21
+00:02:11,813 --> 00:02:15,962
+After a successful retry the mandate is Active again.
+
+22
+00:02:15,962 --> 00:02:19,015
+Cancel posts cancel at cycle end, true.
+
+23
+00:02:19,015 --> 00:02:26,294
+The server records that the plan will not renew, and the screen shows Cancellation scheduled.
+
+24
+00:02:26,294 --> 00:02:33,104
+Whether Razorpay honours cancel at cycle end for UPI mandates is still to be confirmed.
+
+25
+00:02:34,618 --> 00:02:42,244
+What this does not show: Razorpay's real responses, a UPI app, webhooks arriving, or the database.
+
+26
+00:02:42,244 --> 00:02:52,983
+Those are covered by the backend tests with a fake gateway, and by the manual checklist in the testing document, which is still to be run.
+
