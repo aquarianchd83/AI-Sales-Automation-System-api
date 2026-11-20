@@ -27,8 +27,9 @@ public class MessageTemplateConfiguration : IEntityTypeConfiguration<MessageTemp
             .HasForeignKey(t => t.HeaderMediaAssetId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Meta scopes template names by (name, language) - the same template name commonly exists
-        // once per language, e.g. "welcome_offer" in both en and hi.
-        builder.HasIndex(t => new { t.WhatsAppTemplateName, t.Language }).IsUnique();
+        // Meta scopes template names by (name, language) within one WhatsApp Business account - the same template name commonly exists
+        // once per language, e.g. "welcome_offer" in both en and hi. Every tenant has its own account, so two tenants may use the same
+        // name: the index is per tenant.
+        builder.HasIndex(t => new { t.TenantId, t.WhatsAppTemplateName, t.Language }).IsUnique();
     }
 }

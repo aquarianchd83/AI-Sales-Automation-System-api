@@ -277,6 +277,14 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .ToListAsync(cancellationToken);
         var creditsCharged = Math.Max(0m, -ledger.Sum());
 
+        // Leads this execution took from the cache (found and paid for by an earlier run) are on its rows, so they count as considered here;
+        // the run's own research figure stays what the agent returned, which the cost reports and the rejection-rate estimate rely on.
+        var fromCache = await _context.LeadDiscoveryCachedLeads.AsNoTracking()
+            .CountAsync(c => c.TenantId == tenantId && c.UsedExecutionId == executionId, cancellationToken);
+        var research = run is null ? null : LeadDiscoveryService.ToDto(run, pricing);
+        if (research is not null && fromCache > 0)
+            research = research with { CandidatesConsidered = research.CandidatesConsidered + fromCache };
+
         return new LeadDiscoveryExecutionDetailDto(
             ToSummary(execution, run, pricing),
             execution.LockKey,
@@ -290,7 +298,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             customers,
             templates,
             transitions,
-            run is null ? null : LeadDiscoveryService.ToDto(run, pricing),
+            research,
             pricing.CurrencyCode,
             pricing.CurrencySymbol,
             verificationCounts,

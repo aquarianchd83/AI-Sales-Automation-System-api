@@ -133,6 +133,8 @@ public interface IApplicationDbContext
 
     DbSet<LeadDiscoveryExecutionCustomer> LeadDiscoveryExecutionCustomers { get; }
 
+    DbSet<LeadDiscoveryCachedLead> LeadDiscoveryCachedLeads { get; }
+
     DbSet<LeadDiscoveryExecutionTemplate> LeadDiscoveryExecutionTemplates { get; }
 
     DbSet<LeadDiscoveryLockTransition> LeadDiscoveryLockTransitions { get; }

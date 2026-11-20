@@ -1569,6 +1569,32 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_number_the_dnd_check_refuses_is_charged_like_a_customer()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Customers.CountAsync());   // B is kept as a discovered lead only
+        Assert.Equal(2m, _quotaConsumed);                    // but the tenant pays for both
+    }
+
+    [Fact]
+    public async Task A_candidate_rejected_by_the_profile_rules_is_charged_like_a_lead()
+    {
+        SetBatchSize(1);
+        _agent.Rounds.Add(Together(Candidates("A"), Rejected("B", "C")));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(3m, _quotaConsumed);                    // 1 saved + 2 rejected
+    }
+
+    [Fact]
     public async Task Only_customers_who_passed_verification_join_the_campaign()
     {
         EnableAutoCampaign();
@@ -1857,7 +1883,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             LeadDiscoveryUsage.None, "Simulated");
 
     [Fact]
-    public async Task The_tenant_is_charged_only_for_the_customers_created_never_for_rejected_candidates()
+    public async Task The_tenant_is_charged_for_the_customers_created_and_for_rejected_candidates()
     {
         SetBatchSize(2);
         _agent.Rounds.Add(Together(Candidates("A", "B"), Rejected("C", "D", "E", "F")));   // 6 found, 2 valid
@@ -1865,10 +1891,10 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         await Service().RunForTenantAsync(_tenant);
 
         Assert.Equal(2, await _db.Customers.CountAsync());
-        Assert.Equal(2m, _quotaConsumed);                                                  // two leads, not six candidates
+        Assert.Equal(6m, _quotaConsumed);                                                  // 2 saved + 4 rejected
         var rejected = await _db.LeadDiscoveryExecutionCustomers.Where(r => r.IsInvalid).ToListAsync();
         Assert.Equal(4, rejected.Count);
-        Assert.All(rejected, r => Assert.Contains("(not charged)", r.ErrorMessage));
+        Assert.All(rejected, r => Assert.Contains("(charged)", r.ErrorMessage));
     }
 
     [Fact]
@@ -1901,7 +1927,71 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             Assert.Contains("batch was already full", c.ErrorMessage);
         });
         Assert.Equal(2, await _db.Customers.CountAsync(c => c.Source != "Manual"));        // the not-needed ones were not saved
-        Assert.Equal(2m, _quotaConsumed);                                                  // nor charged
+        Assert.Equal(4m, _quotaConsumed);                                                  // 2 saved + 2 rejected charged; duplicate and not-needed are not
+    }
+
+    [Fact]
+    public async Task Qualified_leads_the_batch_had_no_room_for_are_kept_for_the_next_run()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));   // 4 qualify, 2 are needed
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var kept = await _db.LeadDiscoveryCachedLeads.Where(c => c.UsedAtUtc == null).ToListAsync();
+        Assert.Equal(2, kept.Count);
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2m, _quotaConsumed);   // the kept leads are not charged yet
+    }
+
+    [Fact]
+    public async Task The_next_run_uses_the_kept_leads_before_researching_and_charges_for_them_only_then()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+        await Service().RunForTenantAsync(_tenant);
+        var callsAfterFirstRun = _agent.Calls;
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(callsAfterFirstRun, _agent.Calls);                                  // nothing new was researched, so nothing more was paid for research
+        Assert.Equal(4, await _db.Customers.CountAsync());                               // C and D became customers
+        Assert.Equal(4m, _quotaConsumed);                                                // charged when they became customers
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedAtUtc == null));
+        Assert.Equal(2, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedExecutionId != null));
+    }
+
+    [Fact]
+    public async Task A_run_that_used_kept_leads_shows_the_same_number_found_and_considered()
+    {
+        SetBatchSize(3);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));   // 3 saved, D kept
+        await Service().RunForTenantAsync(_tenant);
+        _agent.Rounds.Add(Together(Candidates("E", "F"), Rejected("G")));   // next run: D from the cache + E, F; G rejected
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var second = (await Executions()).OrderByDescending(e => e.StartedAtUtc).First();
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync(second.Id);
+
+        Assert.Equal(detail.Customers.Count, detail.Research!.CandidatesConsidered);
+    }
+
+    [Fact]
+    public async Task A_kept_lead_that_became_a_customer_in_the_meantime_is_dropped_not_used()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C"));
+        await Service().RunForTenantAsync(_tenant);
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = Phone("C"), FirstName = "Existing", Source = "Manual" });
+        _db.SaveChanges();
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(3, await _db.Customers.CountAsync());                               // A, B and the manual one - C was not created again
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedAtUtc == null));
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedExecutionId != null));
     }
 
     [Fact]
@@ -2172,7 +2262,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal(new[] { "E Contact", "F Contact" }, (await _db.Customers.OrderBy(c => c.FirstName).ToListAsync()).Select(c => c.FirstName));
         Assert.Equal(3, _agent.Calls);
-        Assert.Equal(2m, _quotaConsumed);
+        Assert.Equal(6m, _quotaConsumed);                                                  // 2 saved + 4 rejected
         var execution = await SingleExecutionAsync();
         Assert.Equal(2, execution.CustomersCreated);
         Assert.Equal(4, execution.CustomersInvalid);
@@ -2458,7 +2548,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal(3, _agent.Calls);
         Assert.Equal(0, await _db.Customers.CountAsync());
-        Assert.Equal(0m, _quotaConsumed);                                                  // three rounds of research, nothing charged
+        Assert.Equal(3m, _quotaConsumed);                                                  // three rejected candidates, each charged
         var run = await _db.LeadDiscoveryRuns.SingleAsync();
         Assert.Equal(3, run.Rounds);
         Assert.Equal(3, run.Rejected);

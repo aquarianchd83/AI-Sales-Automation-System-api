@@ -25,7 +25,11 @@ public class AiPricingOptions
         ["Anthropic/claude-sonnet-4-5"] = new() { PromptPer1K = 0.003m, CompletionPer1K = 0.015m },
         ["OpenAI/gpt-5-nano"] = new() { PromptPer1K = 0.00005m, CompletionPer1K = 0.0004m },
         ["OpenAI/gpt-5-mini"] = new() { PromptPer1K = 0.00025m, CompletionPer1K = 0.002m },
-        ["OpenAI/gpt-5"] = new() { PromptPer1K = 0.00125m, CompletionPer1K = 0.01m }
+        ["OpenAI/gpt-5"] = new() { PromptPer1K = 0.00125m, CompletionPer1K = 0.01m },
+        ["Google/gemini-2.5-flash-lite"] = new() { PromptPer1K = 0.0001m, CompletionPer1K = 0.0004m },
+        ["Google/gemini-flash-lite-latest"] = new() { PromptPer1K = 0.0001m, CompletionPer1K = 0.0004m },
+        ["Google/gemini-2.5-flash"] = new() { PromptPer1K = 0.0003m, CompletionPer1K = 0.0025m },
+        ["Google/gemini-2.5-pro"] = new() { PromptPer1K = 0.00125m, CompletionPer1K = 0.01m }
     };
 
     public AiModelRates? RatesFor(string modelUsed)

@@ -189,9 +189,11 @@ public sealed class AiTaskModelsTests
     {
         var gemini = (await Service(new MemoryStore()).GetAsync()).Groups[0].Providers.Single(p => p.Provider == "Google");
 
-        Assert.False(gemini.HasPrice);
-        Assert.Null(gemini.InputPer1M);
-        Assert.Contains(gemini.Options, o => o.Model == "gemini-flash-lite-latest" && !o.HasPrice);
+        // The configured Gemini alias has a price row; a model the catalogue lists with no row stays flagged.
+        Assert.True(gemini.HasPrice);
+        Assert.Equal(0.1m, gemini.InputPer1M);
+        Assert.Contains(gemini.Options, o => o.Model == "gemini-flash-lite-latest" && o.HasPrice);
+        Assert.Null(new WhatsAppSalesAutomation.Application.Common.Options.AiPricingOptions().RatesForConfiguredModel("Google", "gemini-unlisted-model"));
     }
 
     [Fact]

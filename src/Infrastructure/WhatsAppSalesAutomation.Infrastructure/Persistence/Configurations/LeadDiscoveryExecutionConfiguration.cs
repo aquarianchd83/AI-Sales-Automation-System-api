@@ -66,6 +66,23 @@ public class LeadDiscoveryExecutionCustomerConfiguration : IEntityTypeConfigurat
     }
 }
 
+public class LeadDiscoveryCachedLeadConfiguration : IEntityTypeConfiguration<LeadDiscoveryCachedLead>
+{
+    public void Configure(EntityTypeBuilder<LeadDiscoveryCachedLead> builder)
+    {
+        builder.ToTable("LeadDiscoveryCachedLeads");
+        builder.HasKey(c => c.Id);
+
+        builder.Property(c => c.BusinessName).IsRequired().HasMaxLength(300);
+        builder.Property(c => c.PhoneKey).HasMaxLength(50);
+        builder.Property(c => c.NameKey).IsRequired().HasMaxLength(500);
+        builder.Property(c => c.CandidateJson).IsRequired().HasColumnType("nvarchar(max)");
+        builder.Property(c => c.CandidateDetailsJson).HasColumnType("nvarchar(max)");
+
+        builder.HasIndex(c => new { c.TenantId, c.LeadDiscoveryProfileId, c.UsedAtUtc });
+    }
+}
+
 public class LeadDiscoveryExecutionTemplateConfiguration : IEntityTypeConfiguration<LeadDiscoveryExecutionTemplate>
 {
     public void Configure(EntityTypeBuilder<LeadDiscoveryExecutionTemplate> builder)
