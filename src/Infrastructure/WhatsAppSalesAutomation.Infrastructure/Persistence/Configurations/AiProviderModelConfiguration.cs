@@ -15,6 +15,8 @@ public class AiProviderModelConfiguration : IEntityTypeConfiguration<AiProviderM
         builder.Property(m => m.DisplayName).IsRequired().HasMaxLength(200);
         builder.Property(m => m.ModelId).IsRequired().HasMaxLength(200);
         builder.Property(m => m.ModelType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(m => m.CostTier).HasConversion<string>().HasMaxLength(20);
+        builder.Property(m => m.BestFor).IsRequired().HasMaxLength(500);
         builder.Property(m => m.InputPricePer1MUsd).HasPrecision(18, 6);
         builder.Property(m => m.OutputPricePer1MUsd).HasPrecision(18, 6);
         builder.Property(m => m.Description).HasMaxLength(1000);

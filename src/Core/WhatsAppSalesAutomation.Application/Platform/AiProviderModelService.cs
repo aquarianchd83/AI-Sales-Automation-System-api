@@ -92,6 +92,8 @@ public class AiProviderModelService : IAiProviderModelService
         model.MaxOutputTokens = r.MaxOutputTokens;
         model.InputPricePer1MUsd = r.InputPricePer1MUsd;
         model.OutputPricePer1MUsd = r.OutputPricePer1MUsd;
+        model.CostTier = r.CostTier;
+        model.BestFor = AiModelTasks.Join(r.BestFor);
         model.Description = string.IsNullOrWhiteSpace(r.Description) ? null : r.Description.Trim();
         model.IsActive = r.IsActive;
         model.IsDefault = r.IsDefault;
@@ -120,5 +122,5 @@ public class AiProviderModelService : IAiProviderModelService
 
     private static AiProviderModelDto ToDto(AiProviderModel m) => new(
         m.Id, m.Provider, m.DisplayName, m.ModelId, m.ModelType, m.ContextWindowTokens, m.MaxOutputTokens,
-        m.InputPricePer1MUsd, m.OutputPricePer1MUsd, m.Description, m.IsActive, m.IsDefault, m.CreatedAt);
+        m.InputPricePer1MUsd, m.OutputPricePer1MUsd, m.CostTier, AiModelTasks.Split(m.BestFor), m.Description, m.IsActive, m.IsDefault, m.CreatedAt);
 }

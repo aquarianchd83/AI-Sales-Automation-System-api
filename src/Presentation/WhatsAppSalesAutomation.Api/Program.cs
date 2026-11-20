@@ -218,6 +218,10 @@ try
         await PlanSeeder.SeedAsync(scope.ServiceProvider);
         await QuotaCatalogSeeder.SeedAsync(scope.ServiceProvider);
 
+        // The starter AI model catalogue (Platform Admin > AI Provider Models) with cost tiers and when-to-use notes - insert-only by provider and model id,
+        // so a platform admin's edits survive a restart (see AiProviderModelSeeder's own doc comment).
+        await AiProviderModelSeeder.SeedAsync(scope.ServiceProvider);
+
         // The Content Management System's starter FAQ catalog - real customer-facing content every
         // environment needs, not a Seed:* gated dev convenience, so this always runs (see FaqSeeder's
         // own doc comment).
