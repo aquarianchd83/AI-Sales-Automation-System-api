@@ -120,9 +120,10 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
     {
         var credentials = _credentials.Get();
 
-        // Every model each provider offers, asked once per provider (a provider that is off or unreachable lists none, and the page offers what is priced).
-        var offered = await Task.WhenAll(Providers.Select(async p => (p.Provider, Models: await _catalog.ListAsync(p.Provider, cancellationToken))));
-        var listed = offered.ToDictionary(o => o.Provider, o => o.Models, StringComparer.Ordinal);
+        // Every active chat model the platform's catalogue (AI Provider Models) holds for each provider. One at a time: they share one database context.
+        var listed = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var p in Providers)
+            listed[p.Provider] = await _catalog.ListAsync(p.Provider, cancellationToken);
         var pricing = _pricing.Value;
         var leadPricing = _leadPricing.Value;
 
@@ -153,7 +154,7 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
                 .Select(m => new AiTaskModelOptionDto(m.Key[(provider.Length + 1)..], true, PerMillion(m.Value.PromptPer1K), PerMillion(m.Value.CompletionPer1K)))
                 .ToList();
 
-        // The models the operator can choose from: every model the provider lists, the priced ones, and whatever is chosen or in use now, so a current
+        // The models the operator can choose from: every model the catalogue lists for the provider, the priced ones, and whatever is chosen or in use now, so a current
         // choice is never missing.
         foreach (var model in listed.Concat(new[] { selected, chat }).Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!))
         {
