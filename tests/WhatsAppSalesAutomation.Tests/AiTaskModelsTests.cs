@@ -61,6 +61,8 @@ public sealed class AiTaskModelsTests
         public FakeCatalog(Dictionary<string, string[]>? listed = null) => _listed = listed ?? new();
         public Task<IReadOnlyList<string>> ListAsync(string provider, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(_listed.GetValueOrDefault(provider) ?? Array.Empty<string>());
+        public Task<IReadOnlyList<string>> ListAsync(string provider, WhatsAppSalesAutomation.Domain.Entities.Platform.AiModelType type, CancellationToken cancellationToken = default) =>
+            ListAsync(provider, cancellationToken);
     }
 
     private static PlatformAiTaskModelsService Service(

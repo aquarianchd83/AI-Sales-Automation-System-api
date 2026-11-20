@@ -44,6 +44,9 @@ public static class AiProviderModelSeeder
         new("OpenAI", "GPT Image 1", "gpt-image-1", AiModelType.Image, AiModelCostTier.Expensive, null, null, null, null, true,
             "Use to generate still pictures, such as the scene frames in the cinematic story studio and marketing visuals. Billed per picture rather than per token, and costs far more than any text model, so generate only after the user confirms the prompt."),
 
+        new("OpenAI", "GPT-4o mini TTS", "gpt-4o-mini-tts", AiModelType.Speech, AiModelCostTier.Cheap, null, null, null, null, true,
+            "Use to turn a script line into spoken audio, such as the voice-over on a Content Studio story. Billed per line of speech, not per token, so generate it only after the user confirms the text."),
+
         // Google (Gemini)
         new("Google", "Gemini 2.5 Flash-Lite", "gemini-2.5-flash-lite", AiModelType.Chat, AiModelCostTier.Cheap, 1_048_576, 65_536, 0.1m, 0.4m, false,
             "Use for the lowest-cost bulk work: classification, extraction, tagging and quick replies. Choose it for lead discovery when volume is high and each lookup is simple; note Google Search grounding is billed separately."),
@@ -53,6 +56,8 @@ public static class AiProviderModelSeeder
             "Use for harder reasoning and very long inputs: deep multi-step research, analysing large product catalogues or documents, and careful long-form writing. Switch to it only where Flash falls short."),
         new("Google", "Text Embedding 004", "text-embedding-004", AiModelType.Embedding, AiModelCostTier.Cheap, 2_048, null, null, null, true,
             "Use to embed knowledge-base text and questions for semantic search when Gemini is the embedding provider. Priced at or near zero, so use it for every chunk."),
+        new("Google", "Veo 3.1 Fast", "veo-3.1-fast-generate-preview", AiModelType.Video, AiModelCostTier.Expensive, null, null, null, null, true,
+            "Use to generate the video clip for a scene in the Content Studio story studio. Billed per second of video, which makes it the costliest thing the studio does, so render only scenes the user has approved."),
     };
 
     /// <summary>The tasks each seeded model is recommended for (AiModelTasks keys), by model id. Cheap models take the high-volume, simple jobs; the stronger ones the document and creative work.</summary>

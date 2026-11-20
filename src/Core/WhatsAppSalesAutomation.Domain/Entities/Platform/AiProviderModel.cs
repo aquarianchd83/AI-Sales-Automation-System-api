@@ -55,5 +55,9 @@ public enum AiModelType
 {
     Chat = 0,
     Embedding = 1,
-    Image = 2
+    Image = 2,
+    /// <summary>Text to speech, e.g. the Content Studio voice-over model.</summary>
+    Speech = 3,
+    /// <summary>Video generation, e.g. the Content Studio Veo model.</summary>
+    Video = 4
 }
