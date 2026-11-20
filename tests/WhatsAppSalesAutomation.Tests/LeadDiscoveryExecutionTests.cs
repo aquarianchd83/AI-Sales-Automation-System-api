@@ -1962,6 +1962,23 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_that_used_kept_leads_shows_the_same_number_found_and_considered()
+    {
+        SetBatchSize(3);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));   // 3 saved, D kept
+        await Service().RunForTenantAsync(_tenant);
+        _agent.Rounds.Add(Together(Candidates("E", "F"), Rejected("G")));   // next run: D from the cache + E, F; G rejected
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var second = (await Executions()).OrderByDescending(e => e.StartedAtUtc).First();
+        var detail = await new LeadDiscoveryHistoryService(_db, new TestTenantContext(_tenant), Stub<ILeadDiscoveryRetryScheduler>.Create(new()))
+            .GetExecutionAsync(second.Id);
+
+        Assert.Equal(detail.Customers.Count, detail.Research!.CandidatesConsidered);
+    }
+
+    [Fact]
     public async Task A_kept_lead_that_became_a_customer_in_the_meantime_is_dropped_not_used()
     {
         SetBatchSize(2);
