@@ -919,8 +919,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             var outcome = await ProcessCustomerAsync(run, row, lead, cancellationToken);
             outcomes.Add((lead, outcome));
 
-            // Charged the moment the customer exists, so a run that stops part-way has charged exactly the customers it created.
-            if (outcome == CustomerOutcome.Created)
+            // Charged the moment the lead is committed, so a run that stops part-way has charged exactly what it saved. A lead kept without a
+            // customer (no usable number, or a number the DND check refused) is charged like a customer: the research found a real business,
+            // and the tenant keeps it as a discovered lead.
+            if (outcome is CustomerOutcome.Created or CustomerOutcome.LeadOnly)
                 await ChargeLeadAsync(run, row, lead, cancellationToken);
         }
 
@@ -928,9 +930,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     }
 
     /// <summary>
-    /// The one place a tenant pays for discovery: one lead's price for each customer a run creates. A rejected candidate, a duplicate, or
-    /// a business kept only as a discovered lead (no usable number, or a number the DND check refused) is never charged, however much
-    /// research it took. The operation key is the history row's id, so a retry that meets the same customer cannot charge it twice.
+    /// The one place a tenant pays for discovery: one lead's price for each customer a run creates, and for each business it keeps only as a
+    /// discovered lead (no usable number, or a number the DND check refused). A candidate rejected by the profile's rules, a duplicate, or a
+    /// surplus lead kept for the next run is never charged, however much research it took. The operation key is the history row's id, so a retry that meets the same customer cannot charge it twice.
     /// Never fails the run - the customer is already committed - and a wallet that has run dry since the batch was planned simply
     /// charges what is left.
     /// </summary>

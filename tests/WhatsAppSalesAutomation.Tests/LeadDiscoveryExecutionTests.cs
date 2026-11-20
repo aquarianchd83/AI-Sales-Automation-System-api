@@ -1569,6 +1569,32 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_number_the_dnd_check_refuses_is_charged_like_a_customer()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B"));
+        _verifier.Decide = (id, phone) => phone.EndsWith(Phone("B")[^4..])
+            ? new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Fail, "DND", null)
+            : new PhoneVerificationItemResult(id, LeadDiscoveryVerificationStatus.Pass, null, null);
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Customers.CountAsync());   // B is kept as a discovered lead only
+        Assert.Equal(2m, _quotaConsumed);                    // but the tenant pays for both
+    }
+
+    [Fact]
+    public async Task A_candidate_rejected_by_the_profile_rules_is_still_not_charged()
+    {
+        SetBatchSize(1);
+        _agent.Rounds.Add(Together(Candidates("A"), Rejected("B", "C")));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1m, _quotaConsumed);
+    }
+
+    [Fact]
     public async Task Only_customers_who_passed_verification_join_the_campaign()
     {
         EnableAutoCampaign();

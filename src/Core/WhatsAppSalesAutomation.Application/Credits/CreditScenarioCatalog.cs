@@ -33,7 +33,7 @@ public static class CreditScenarioCatalog
             "A billable template message sent by an agent, a campaign or a lead follow-up. Free-form replies inside the 24-hour window cost nothing.",
             QuotaType.Credits, CreditPayer.Tenant, false, 1m, "message"),
         new(CreditScenario.LeadDiscovery, "Lead discovery", "Lead discovery",
-            "Each new lead a discovery run adds as a customer. Rejected and duplicate candidates are never charged, however much searching they took.",
+            "Each new lead a discovery run adds as a customer, and each business it keeps as a lead only because its number is unusable or refused by the DND check. Candidates rejected by the profile's rules, duplicates, and leads kept for the next run are not charged.",
             QuotaType.Credits, CreditPayer.Tenant, false, 1m, "lead"),
         new(CreditScenario.ContentStudioGeneration, "Content Studio generation", "Content Studio",
             "Topic ideas, a script, a scene breakdown, a voice-over or a generated illustration.",
