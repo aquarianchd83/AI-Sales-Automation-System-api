@@ -1584,14 +1584,14 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_candidate_rejected_by_the_profile_rules_is_still_not_charged()
+    public async Task A_candidate_rejected_by_the_profile_rules_is_charged_like_a_lead()
     {
         SetBatchSize(1);
         _agent.Rounds.Add(Together(Candidates("A"), Rejected("B", "C")));
 
         await Service().RunForTenantAsync(_tenant);
 
-        Assert.Equal(1m, _quotaConsumed);
+        Assert.Equal(3m, _quotaConsumed);                    // 1 saved + 2 rejected
     }
 
     [Fact]
@@ -1883,7 +1883,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             LeadDiscoveryUsage.None, "Simulated");
 
     [Fact]
-    public async Task The_tenant_is_charged_only_for_the_customers_created_never_for_rejected_candidates()
+    public async Task The_tenant_is_charged_for_the_customers_created_and_for_rejected_candidates()
     {
         SetBatchSize(2);
         _agent.Rounds.Add(Together(Candidates("A", "B"), Rejected("C", "D", "E", "F")));   // 6 found, 2 valid
@@ -1891,10 +1891,10 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         await Service().RunForTenantAsync(_tenant);
 
         Assert.Equal(2, await _db.Customers.CountAsync());
-        Assert.Equal(2m, _quotaConsumed);                                                  // two leads, not six candidates
+        Assert.Equal(6m, _quotaConsumed);                                                  // 2 saved + 4 rejected
         var rejected = await _db.LeadDiscoveryExecutionCustomers.Where(r => r.IsInvalid).ToListAsync();
         Assert.Equal(4, rejected.Count);
-        Assert.All(rejected, r => Assert.Contains("(not charged)", r.ErrorMessage));
+        Assert.All(rejected, r => Assert.Contains("(charged)", r.ErrorMessage));
     }
 
     [Fact]
@@ -1927,7 +1927,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             Assert.Contains("batch was already full", c.ErrorMessage);
         });
         Assert.Equal(2, await _db.Customers.CountAsync(c => c.Source != "Manual"));        // the not-needed ones were not saved
-        Assert.Equal(2m, _quotaConsumed);                                                  // nor charged
+        Assert.Equal(4m, _quotaConsumed);                                                  // 2 saved + 2 rejected charged; duplicate and not-needed are not
     }
 
     [Fact]
@@ -2245,7 +2245,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal(new[] { "E Contact", "F Contact" }, (await _db.Customers.OrderBy(c => c.FirstName).ToListAsync()).Select(c => c.FirstName));
         Assert.Equal(3, _agent.Calls);
-        Assert.Equal(2m, _quotaConsumed);
+        Assert.Equal(6m, _quotaConsumed);                                                  // 2 saved + 4 rejected
         var execution = await SingleExecutionAsync();
         Assert.Equal(2, execution.CustomersCreated);
         Assert.Equal(4, execution.CustomersInvalid);
@@ -2531,7 +2531,7 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
 
         Assert.Equal(3, _agent.Calls);
         Assert.Equal(0, await _db.Customers.CountAsync());
-        Assert.Equal(0m, _quotaConsumed);                                                  // three rounds of research, nothing charged
+        Assert.Equal(3m, _quotaConsumed);                                                  // three rejected candidates, each charged
         var run = await _db.LeadDiscoveryRuns.SingleAsync();
         Assert.Equal(3, run.Rounds);
         Assert.Equal(3, run.Rejected);

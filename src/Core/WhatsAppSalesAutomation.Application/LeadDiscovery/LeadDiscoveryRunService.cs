@@ -603,6 +603,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 var assessments = LeadQualification.AssessAll(result.Candidates, result.Evidence, rules);
                 var rows = new List<LeadDiscoveryExecutionCustomer>();
                 var qualified = new List<VerifiedLead>();
+                var rejectedRows = new List<LeadDiscoveryExecutionCustomer>();
 
                 // What the agent reported for each qualified lead, to keep on its row whatever becomes of it. Qualification produces a new
                 // object per lead, so the original is found by reference.
@@ -622,9 +623,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     stats.Reject(assessments[i].RejectionReason!);
                     var candidate = result.Candidates[i];
                     var rejectedRow = NewRow(run.Execution, candidate.BusinessName, candidate.Phone, LeadDiscoveryCustomerStatus.Skipped,
-                        $"Invalid: {assessments[i].RejectionReason} (not charged)", isInvalid: true);
+                        $"Invalid: {assessments[i].RejectionReason} (charged)", isInvalid: true);
                     rejectedRow.CandidateDetailsJson = LeadDiscoveryCandidateSnapshot.Serialize(candidate);
                     rows.Add(rejectedRow);
+                    rejectedRows.Add(rejectedRow);
                 }
 
                 var fresh = await RemoveDuplicatesAsync(tenantId, qualified, cancellationToken);
@@ -638,10 +640,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                     rows.Add(duplicateRow);
                 }
 
-                // Only as many leads as the batch still needs and the tenant can still pay for. Rejected and duplicate candidates are
-                // already on this execution as Invalid / Duplicate rows and are never charged: the tenant pays one lead's price for each
-                // customer created (see VerifyAndProcessAsync), not for the research that found it.
-                var toSave = fresh.Take(Math.Min(remaining, (int)Math.Floor(affordable))).ToList();
+                // Only as many leads as the batch still needs and the tenant can still pay for. Candidates rejected by the profile's rules are
+                // charged one lead's price each, like the leads saved (see ChargeLeadAsync), so what they cost comes off what can be spent on
+                // saving leads. Duplicates are on this execution as Duplicate rows and are not charged.
+                var spendable = Math.Max(0, (int)Math.Floor(affordable) - rejectedRows.Count);
+                var toSave = fresh.Take(Math.Min(remaining, spendable)).ToList();
 
                 // The qualified candidates beyond what the batch needs are recorded too, so every candidate the run considered is on the
                 // execution with what became of it. They are not saved as customers and not charged; they are kept in the cache, because the
@@ -667,6 +670,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 rows.AddRange(pending.Select(p => p.Row));
                 _context.LeadDiscoveryExecutionCustomers.AddRange(rows);
                 await _context.SaveChangesAsync(cancellationToken);
+
+                // The rejected candidates are on the execution now, so each is charged against its own row (a retry cannot charge it twice).
+                foreach (var rejectedRow in rejectedRows)
+                    await ChargeLeadAsync(run, rejectedRow, rejectedRow.CustomerName, cancellationToken);
 
                 foreach (var (lead, outcome) in await VerifyAndProcessAsync(run, pending, cancellationToken))
                 {
@@ -923,7 +930,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             // customer (no usable number, or a number the DND check refused) is charged like a customer: the research found a real business,
             // and the tenant keeps it as a discovered lead.
             if (outcome is CustomerOutcome.Created or CustomerOutcome.LeadOnly)
-                await ChargeLeadAsync(run, row, lead, cancellationToken);
+                await ChargeLeadAsync(run, row, lead.BusinessName, cancellationToken);
         }
 
         return outcomes;
@@ -931,12 +938,12 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
     /// <summary>
     /// The one place a tenant pays for discovery: one lead's price for each customer a run creates, and for each business it keeps only as a
-    /// discovered lead (no usable number, or a number the DND check refused). A candidate rejected by the profile's rules, a duplicate, or a
-    /// surplus lead kept for the next run is never charged, however much research it took. The operation key is the history row's id, so a retry that meets the same customer cannot charge it twice.
+    /// discovered lead (no usable number, or a number the DND check refused), and for each candidate rejected by the profile's rules. A
+    /// duplicate, or a surplus lead kept for the next run, is not charged. The operation key is the history row's id, so a retry that meets the same customer cannot charge it twice.
     /// Never fails the run - the customer is already committed - and a wallet that has run dry since the batch was planned simply
     /// charges what is left.
     /// </summary>
-    private async Task ChargeLeadAsync(ExecutionRun run, LeadDiscoveryExecutionCustomer row, VerifiedLead lead, CancellationToken cancellationToken)
+    private async Task ChargeLeadAsync(ExecutionRun run, LeadDiscoveryExecutionCustomer row, string businessName, CancellationToken cancellationToken)
     {
         if (run.LeadsAlreadyBilled)
             return;
@@ -948,7 +955,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 1,
                 $"lead:{row.Id:N}",
                 run.Execution.Id.ToString("N"),
-                $"Lead: {Truncate(lead.BusinessName, 120)}",
+                $"Lead: {Truncate(businessName, 120)}",
                 cancellationToken);
 
             if (charged > 0)
