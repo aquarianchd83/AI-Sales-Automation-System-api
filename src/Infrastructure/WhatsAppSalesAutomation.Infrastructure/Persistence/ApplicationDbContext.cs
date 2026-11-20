@@ -218,6 +218,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Domain.Entities.ProductKnowledge.KnowledgeItem> KnowledgeItems => Set<Domain.Entities.ProductKnowledge.KnowledgeItem>();
 
     public DbSet<Announcement> Announcements => Set<Announcement>();
+    public DbSet<AiProviderModel> AiProviderModels => Set<AiProviderModel>();
 
     public DbSet<PlatformMessageTemplate> PlatformMessageTemplates => Set<PlatformMessageTemplate>();
 

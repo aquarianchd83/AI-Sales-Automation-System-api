@@ -254,6 +254,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformWhatsAppConnectionService, PlatformWhatsAppConnectionService>();
         services.AddScoped<IPlatformUserSearchService, PlatformUserSearchService>();
         services.AddScoped<IAnnouncementService, AnnouncementService>();
+        services.AddScoped<IAiProviderModelService, AiProviderModelService>();
         services.AddScoped<IFlowchartService, FlowchartService>();
         services.AddScoped<IFaqService, FaqService>();
         services.AddScoped<IPlatformDashboardService, PlatformDashboardService>();
