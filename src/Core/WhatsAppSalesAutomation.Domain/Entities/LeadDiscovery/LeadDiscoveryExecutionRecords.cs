@@ -60,6 +60,41 @@ public class LeadDiscoveryExecutionCustomer : BaseEntity, ITenantOwned
     public string? VerificationRequestId { get; set; }
 }
 
+/// <summary>
+/// A lead the discovery agent found and that qualified, but that the batch had no room for. The tenant already paid for the research that found it,
+/// so it is kept and used first by the profile's next run instead of being researched (and paid for) again. Not charged until it becomes a customer.
+/// </summary>
+public class LeadDiscoveryCachedLead : BaseEntity, ITenantOwned
+{
+    public Guid TenantId { get; set; }
+
+    public Guid LeadDiscoveryProfileId { get; set; }
+
+    /// <summary>The execution that found it.</summary>
+    public Guid SourceExecutionId { get; set; }
+
+    public string BusinessName { get; set; } = string.Empty;
+
+    public string? PhoneKey { get; set; }
+
+    public string NameKey { get; set; } = string.Empty;
+
+    /// <summary>The qualified lead (VerifiedLead, as JSON).</summary>
+    public string CandidateJson { get; set; } = string.Empty;
+
+    /// <summary>What the agent reported about it (LeadDiscoveryCandidateSnapshot, as JSON).</summary>
+    public string? CandidateDetailsJson { get; set; }
+
+    /// <summary>After this the lead is stale and is no longer offered to a run.</summary>
+    public DateTime ExpiresAtUtc { get; set; }
+
+    /// <summary>Set when a run took it, or dropped it (it became a customer some other way, or no longer fits the profile).</summary>
+    public DateTime? UsedAtUtc { get; set; }
+
+    /// <summary>The execution that took it; null when it was dropped instead.</summary>
+    public Guid? UsedExecutionId { get; set; }
+}
+
 /// <summary>One Auto-Campaign template (a step of the referred campaign) and whether it was associated with
 /// the generated campaign in this execution.</summary>
 public class LeadDiscoveryExecutionTemplate : BaseEntity, ITenantOwned

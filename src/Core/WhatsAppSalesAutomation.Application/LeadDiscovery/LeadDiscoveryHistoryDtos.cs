@@ -182,7 +182,7 @@ public static class LeadDiscoveryExecutionOutcomes
         nameof(LeadDiscoveryCustomerStatus.Pending) or nameof(LeadDiscoveryCustomerStatus.Processing) => Pending,
         nameof(LeadDiscoveryCustomerStatus.Skipped) when isInvalid && hasDiscoveredLead => LeadOnly,
         nameof(LeadDiscoveryCustomerStatus.Skipped) when isInvalid => Rejected,
-        nameof(LeadDiscoveryCustomerStatus.Skipped) when note == LeadDiscoveryRunService.NotNeededNote => NotNeeded,
+        nameof(LeadDiscoveryCustomerStatus.Skipped) when note is LeadDiscoveryRunService.NotNeededNote or LeadDiscoveryRunService.LegacyNotNeededNote => NotNeeded,
         _ => Skipped
     };
 }

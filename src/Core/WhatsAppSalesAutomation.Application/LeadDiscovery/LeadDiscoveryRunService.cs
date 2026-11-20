@@ -509,6 +509,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             // round limit is reached, which is what keeps a run's cost bounded.
             var emptyRounds = 0;
             var priorUnusableRate = await PriorUnusableRateAsync(profile, cancellationToken);
+
+            // Leads an earlier run found and paid for but had no room for come first: no new research is bought for places they can fill.
+            await UseCachedLeadsAsync(run, knownBusinesses, cancellationToken);
+
             while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
@@ -640,13 +644,17 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
                 var toSave = fresh.Take(Math.Min(remaining, (int)Math.Floor(affordable))).ToList();
 
                 // The qualified candidates beyond what the batch needs are recorded too, so every candidate the run considered is on the
-                // execution with what became of it. They are not saved and not charged, and a later run can still find them.
-                foreach (var surplus in fresh.Skip(toSave.Count))
+                // execution with what became of it. They are not saved as customers and not charged; they are kept in the cache, because the
+                // research that found them is already paid for, and the profile's next run uses them before researching anything new.
+                var surplusLeads = fresh.Skip(toSave.Count).ToList();
+                foreach (var surplus in surplusLeads)
                 {
                     var surplusRow = NewRow(run.Execution, surplus.BusinessName, surplus.Phone, LeadDiscoveryCustomerStatus.Skipped, NotNeededNote);
                     surplusRow.CandidateDetailsJson = DetailsOf(surplus);
                     rows.Add(surplusRow);
                 }
+
+                await CacheSurplusAsync(run, surplusLeads, DetailsOf, cancellationToken);
 
                 // Recorded Pending, with the candidate, before any of them is processed: an execution that stops
                 // part-way leaves exactly the unprocessed ones for a retry.
@@ -676,6 +684,148 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         finally
         {
             await RecordRunCostAsync(run);
+        }
+    }
+
+    /// <summary>How long a kept lead stays offered to the profile's runs; after that its details are likely out of date.</summary>
+    private const int CachedLeadLifetimeDays = 30;
+
+    /// <summary>The most unused leads kept for one profile, so the cache cannot grow without bound.</summary>
+    private const int CachedLeadsMaxPerProfile = 200;
+
+    /// <summary>
+    /// Keeps the qualified leads the batch had no room for, so the next run can use what the tenant already paid to find. A lead already
+    /// in the cache is not added twice.
+    /// </summary>
+    private async Task CacheSurplusAsync(
+        ExecutionRun run, IReadOnlyList<VerifiedLead> surplus, Func<VerifiedLead, string?> detailsOf, CancellationToken cancellationToken)
+    {
+        if (surplus.Count == 0)
+            return;
+
+        var profile = run.Profile;
+        var now = _dateTime.UtcNow;
+        var nameKeys = surplus.Select(l => l.NameKey).Distinct().ToList();
+        var phoneKeys = surplus.Select(l => l.PhoneKey).OfType<string>().Distinct().ToList();
+
+        var held = await _context.LeadDiscoveryCachedLeads.AsNoTracking()
+            .Where(c => c.TenantId == profile.TenantId && c.LeadDiscoveryProfileId == profile.Id && c.UsedAtUtc == null && c.ExpiresAtUtc > now)
+            .Select(c => new { c.NameKey, c.PhoneKey })
+            .ToListAsync(cancellationToken);
+
+        var heldNames = held.Select(h => h.NameKey).ToHashSet();
+        var heldPhones = held.Select(h => h.PhoneKey).OfType<string>().ToHashSet();
+        var room = CachedLeadsMaxPerProfile - held.Count;
+
+        foreach (var lead in surplus)
+        {
+            if (room <= 0)
+                break;
+            if (heldNames.Contains(lead.NameKey) || (lead.PhoneKey is not null && heldPhones.Contains(lead.PhoneKey)))
+                continue;
+
+            _context.LeadDiscoveryCachedLeads.Add(new LeadDiscoveryCachedLead
+            {
+                TenantId = profile.TenantId,
+                LeadDiscoveryProfileId = profile.Id,
+                SourceExecutionId = run.Execution.Id,
+                BusinessName = Truncate(lead.BusinessName, 300)!,
+                PhoneKey = Truncate(lead.PhoneKey, 50),
+                NameKey = Truncate(lead.NameKey, 500)!,
+                CandidateJson = JsonSerializer.Serialize(lead),
+                CandidateDetailsJson = detailsOf(lead),
+                ExpiresAtUtc = now.AddDays(CachedLeadLifetimeDays)
+            });
+            heldNames.Add(lead.NameKey);
+            if (lead.PhoneKey is not null)
+                heldPhones.Add(lead.PhoneKey);
+            room--;
+        }
+    }
+
+    /// <summary>
+    /// Takes the leads kept from earlier runs for as many places as the batch has (and the tenant can still pay for), before any new research.
+    /// A kept lead that has since become a customer or discovered lead, or no longer fits the profile, is dropped. The leads taken go through
+    /// the same verification, customer creation and charging as a freshly discovered one - they are charged only now, when they become customers.
+    /// </summary>
+    private async Task UseCachedLeadsAsync(ExecutionRun run, List<string> knownBusinesses, CancellationToken cancellationToken)
+    {
+        var profile = run.Profile;
+        var tenantId = profile.TenantId;
+        var stats = run.Stats;
+        var now = _dateTime.UtcNow;
+
+        var entries = await _context.LeadDiscoveryCachedLeads
+            .Where(c => c.TenantId == tenantId && c.LeadDiscoveryProfileId == profile.Id && c.UsedAtUtc == null && c.ExpiresAtUtc > now)
+            .OrderBy(c => c.CreatedAt)
+            .Take(CachedLeadsMaxPerProfile)
+            .ToListAsync(cancellationToken);
+        if (entries.Count == 0)
+            return;
+
+        bool StillFits(VerifiedLead lead) =>
+            lead.LeadScore >= profile.MinimumLeadScore
+            && (!profile.PhoneRequired || lead.PhoneE164 is not null)
+            && (!profile.EmailRequired || !string.IsNullOrWhiteSpace(lead.Email));
+
+        var byLead = new Dictionary<VerifiedLead, LeadDiscoveryCachedLead>(ReferenceEqualityComparer.Instance);
+        var candidates = new List<VerifiedLead>();
+        foreach (var entry in entries)
+        {
+            if (DeserializeCandidate(entry.CandidateJson) is { } lead && StillFits(lead))
+            {
+                byLead[lead] = entry;
+                candidates.Add(lead);
+            }
+            else
+            {
+                entry.UsedAtUtc = now; // dropped
+            }
+        }
+
+        var fresh = await RemoveDuplicatesAsync(tenantId, candidates, cancellationToken);
+        var freshSet = new HashSet<VerifiedLead>(fresh, ReferenceEqualityComparer.Instance);
+        foreach (var lead in candidates.Where(l => !freshSet.Contains(l)))
+            byLead[lead].UsedAtUtc = now; // dropped: already a customer or discovered lead
+
+        var affordable = await _quota.GetAvailableAsync(tenantId, QuotaType.LeadCandidates, cancellationToken);
+        var toUse = fresh.Take(Math.Max(0, Math.Min(run.BatchSize - stats.Created, (int)Math.Floor(affordable)))).ToList();
+
+        // Whatever is not used stays in the cache for the next run. The ones still held are known, so the agent is not sent to find them again.
+        foreach (var lead in fresh.Skip(toUse.Count))
+            knownBusinesses.Add(lead.City is null ? lead.BusinessName : $"{lead.BusinessName}, {lead.City}");
+
+        if (toUse.Count == 0)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        run.Step = LeadDiscoverySteps.Customers;
+        var pending = toUse.Select(lead =>
+        {
+            var entry = byLead[lead];
+            entry.UsedAtUtc = now;
+            entry.UsedExecutionId = run.Execution.Id;
+            var row = NewPendingRow(run.Execution, lead);
+            row.CandidateDetailsJson = entry.CandidateDetailsJson;
+            return (Lead: lead, Row: row);
+        }).ToList();
+        _context.LeadDiscoveryExecutionCustomers.AddRange(pending.Select(p => p.Row));
+        await _context.SaveChangesAsync(cancellationToken);
+
+        stats.AddNote($"Used {toUse.Count} lead(s) kept from earlier runs - no new research was paid for them.");
+
+        foreach (var (lead, outcome) in await VerifyAndProcessAsync(run, pending, cancellationToken))
+        {
+            if (outcome is CustomerOutcome.Created or CustomerOutcome.LeadOnly)
+            {
+                stats.Saved++;
+                knownBusinesses.Add(lead.City is null ? lead.BusinessName : $"{lead.BusinessName}, {lead.City}");
+            }
+
+            if (outcome == CustomerOutcome.Created)
+                stats.Created++;
         }
     }
 
@@ -1167,7 +1317,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     }
 
     /// <summary>The note on a row for a candidate that qualified but was not needed because the batch was already full (see <see cref="LeadDiscoveryExecutionOutcomes"/>).</summary>
-    internal const string NotNeededNote = "Qualified, but the batch was already full - not saved and not charged.";
+    internal const string NotNeededNote = "Qualified, but the batch was already full - kept for the next run, not charged.";
+
+    /// <summary>The wording before leads were kept for the next run. History rows already saved carry it.</summary>
+    internal const string LegacyNotNeededNote = "Qualified, but the batch was already full - not saved and not charged.";
 
     // What the Consent SMS column says when a customer was not sent the SMS because of a setting. There are two, and the first one decides: the
     // consent SMS goes only to the customers an Auto-Campaign takes, so with no Auto-Campaign that is what has to be fixed first. The headline is

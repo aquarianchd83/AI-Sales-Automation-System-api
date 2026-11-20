@@ -1905,6 +1905,53 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Qualified_leads_the_batch_had_no_room_for_are_kept_for_the_next_run()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));   // 4 qualify, 2 are needed
+
+        await Service().RunForTenantAsync(_tenant);
+
+        var kept = await _db.LeadDiscoveryCachedLeads.Where(c => c.UsedAtUtc == null).ToListAsync();
+        Assert.Equal(2, kept.Count);
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2m, _quotaConsumed);   // the kept leads are not charged yet
+    }
+
+    [Fact]
+    public async Task The_next_run_uses_the_kept_leads_before_researching_and_charges_for_them_only_then()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+        await Service().RunForTenantAsync(_tenant);
+        var callsAfterFirstRun = _agent.Calls;
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(callsAfterFirstRun, _agent.Calls);                                  // nothing new was researched, so nothing more was paid for research
+        Assert.Equal(4, await _db.Customers.CountAsync());                               // C and D became customers
+        Assert.Equal(4m, _quotaConsumed);                                                // charged when they became customers
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedAtUtc == null));
+        Assert.Equal(2, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedExecutionId != null));
+    }
+
+    [Fact]
+    public async Task A_kept_lead_that_became_a_customer_in_the_meantime_is_dropped_not_used()
+    {
+        SetBatchSize(2);
+        _agent.Rounds.Add(Candidates("A", "B", "C"));
+        await Service().RunForTenantAsync(_tenant);
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = Phone("C"), FirstName = "Existing", Source = "Manual" });
+        _db.SaveChanges();
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(3, await _db.Customers.CountAsync());                               // A, B and the manual one - C was not created again
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedAtUtc == null));
+        Assert.Equal(0, await _db.LeadDiscoveryCachedLeads.CountAsync(c => c.UsedExecutionId != null));
+    }
+
+    [Fact]
     public async Task Every_row_keeps_what_the_agent_reported_about_its_candidate_whatever_became_of_it()
     {
         SetBatchSize(2);
