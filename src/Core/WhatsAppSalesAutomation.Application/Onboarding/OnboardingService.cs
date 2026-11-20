@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Tenancy;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -64,12 +65,15 @@ public class OnboardingService : IOnboardingService
     private readonly ITenantWhatsAppConfigProvider _whatsApp;
     private readonly IDateTimeProvider _clock;
     private readonly ITenantJobProvisioner? _jobs;
+    private readonly IFeatureAccessService? _features;
 
     public OnboardingService(
         IApplicationDbContext context, ITenantContext tenantContext, ICurrentUserService currentUser,
-        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock, ITenantJobProvisioner? jobs = null)
+        ITenantWhatsAppConfigProvider whatsApp, IDateTimeProvider clock, ITenantJobProvisioner? jobs = null,
+        IFeatureAccessService? features = null)
     {
         _jobs = jobs;
+        _features = features;
         _context = context;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -91,7 +95,7 @@ public class OnboardingService : IOnboardingService
         var foundCurrent = false;
         var anyUnmet = false;
 
-        foreach (var step in OnboardingCatalog.Steps)
+        foreach (var step in await StepsForPlanAsync(tenantId, cancellationToken))
         {
             recorded.TryGetValue(step.Key, out var row);
 
@@ -145,6 +149,30 @@ public class OnboardingService : IOnboardingService
             steps.FirstOrDefault(s => s.State == OnboardingStepState.Current)?.Key,
             tenant.OnboardingCompletedAt,
             steps);
+    }
+
+    /// <summary>
+    /// The catalog's steps that apply to this tenant's plan: a step for a feature the plan does not include (lead discovery,
+    /// product knowledge) is left out, and the weights of the steps that remain are scaled so they still add up to 100.
+    /// Without a feature service (or when the plan includes everything) this is the whole catalog.
+    /// </summary>
+    private async Task<IReadOnlyList<OnboardingStepDefinition>> StepsForPlanAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (_features is null)
+            return OnboardingCatalog.Steps;
+
+        var features = await _features.GetFeaturesAsync(tenantId, cancellationToken);
+        var kept = OnboardingCatalog.Steps
+            .Where(s => !OnboardingCatalog.RequiredFeature.TryGetValue(s.Key, out var feature) || features.Contains(feature))
+            .ToList();
+        if (kept.Count == OnboardingCatalog.Steps.Count || kept.Count == 0)
+            return kept.Count == 0 ? OnboardingCatalog.Steps : kept;
+
+        var total = kept.Sum(s => s.Weight);
+        var scaled = kept.Select(s => s with { Weight = (int)Math.Round(s.Weight * 100.0 / total) }).ToList();
+        var drift = 100 - scaled.Sum(s => s.Weight);
+        scaled[^1] = scaled[^1] with { Weight = scaled[^1].Weight + drift };
+        return scaled;
     }
 
     private static OnboardingStepDto ToDto(OnboardingStepDefinition step, OnboardingStepState state, DateTime? completedAt, string? missing) =>
