@@ -26,7 +26,22 @@ public class PlatformAiConfigProvider : IPlatformAiConfigProvider
             s.Anthropic.Enabled ? Blank(s.Anthropic.ApiKey) : null, s.Anthropic.Model, s.Anthropic.ApiVersion, s.Anthropic.BaseUrl,
             s.OpenAI.Enabled ? Blank(s.OpenAI.ApiKey) : null, s.OpenAI.ChatModel, s.OpenAI.EmbeddingModel, s.OpenAI.BaseUrl,
             s.Google.Enabled ? Blank(s.Google.ApiKey) : null, s.Google.ChatModel, s.Google.EmbeddingModel, s.Google.BaseUrl,
-            s.Anthropic.Enabled, s.OpenAI.Enabled, s.Google.Enabled);
+            s.Anthropic.Enabled, s.OpenAI.Enabled, s.Google.Enabled,
+            TaskModelsOf(s));
+    }
+
+    private static Dictionary<string, string> TaskModelsOf(AiProviderSettings s)
+    {
+        var chosen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (group, byProvider) in s.TaskModels ?? new())
+        {
+            foreach (var (provider, model) in byProvider ?? new())
+            {
+                if (!string.IsNullOrWhiteSpace(model))
+                    chosen[$"{group}/{provider}"] = model.Trim();
+            }
+        }
+        return chosen;
     }
 
     private static bool IsOff(AiProviderSettings s, string? provider) => provider?.Trim().ToLowerInvariant() switch

@@ -18,11 +18,13 @@ namespace WhatsAppSalesAutomation.Api.Controllers;
 public class PlatformAiProvidersController : ControllerBase
 {
     private readonly IPlatformAiProvidersService _providers;
+    private readonly IPlatformAiTaskModelsService _taskModels;
     private readonly ICurrentUserService _currentUser;
 
-    public PlatformAiProvidersController(IPlatformAiProvidersService providers, ICurrentUserService currentUser)
+    public PlatformAiProvidersController(IPlatformAiProvidersService providers, IPlatformAiTaskModelsService taskModels, ICurrentUserService currentUser)
     {
         _providers = providers;
+        _taskModels = taskModels;
         _currentUser = currentUser;
     }
 
@@ -37,6 +39,21 @@ public class PlatformAiProvidersController : ControllerBase
     [HttpPut("policy")]
     public async Task<ActionResult<AiPolicyDto>> UpdatePolicy([FromBody] UpdateAiPolicyRequest request, CancellationToken cancellationToken)
         => Ok(await _providers.UpdatePolicyAsync(request, ActorId, ActorEmail, cancellationToken));
+
+    /// <summary>"Model by task": the model each group of tasks runs on, per provider, with prices from the charges page.</summary>
+    [HttpGet("task-models")]
+    public async Task<ActionResult<AiTaskModelsDto>> TaskModels(CancellationToken cancellationToken)
+        => Ok(await _taskModels.GetAsync(cancellationToken));
+
+    [HttpPut("task-models")]
+    public async Task<ActionResult<AiTaskModelsDto>> UpdateTaskModels([FromBody] UpdateAiTaskModelsRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _taskModels.UpdateAsync(request, ActorId, cancellationToken);
+        var keys = (request.Choices ?? Array.Empty<AiTaskModelChoiceRequest>()).Select(c => $"AiProviders:TaskModels:{c.Group}:{c.Provider}").ToList();
+        if (keys.Count > 0)
+            await _providers.AuditSettingsChangeAsync("AiProviders", keys, ActorId, ActorEmail, cancellationToken);
+        return Ok(result);
+    }
 
     [HttpGet("executions")]
     public async Task<ActionResult<PagedResult<AiExecutionDto>>> Executions([FromQuery] AiExecutionQuery query, CancellationToken cancellationToken)

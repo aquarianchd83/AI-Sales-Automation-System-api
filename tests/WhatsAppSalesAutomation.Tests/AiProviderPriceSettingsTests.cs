@@ -47,6 +47,7 @@ public sealed class AiProviderPriceSettingsTests
             Assert.Equal("0", definition.DefaultValue);
         }
 
-        Assert.All(AppSettingCatalog.All.Where(d => d.HiddenInEditor), d => Assert.Contains(d.Key, PriceKeys));
+        // The only other hidden settings are the per-group models, which have their own card (Model by task) on the AI Providers page.
+        Assert.All(AppSettingCatalog.All.Where(d => d.HiddenInEditor && !d.Key.StartsWith("AiProviders:TaskModels:", StringComparison.Ordinal)), d => Assert.Contains(d.Key, PriceKeys));
     }
 }

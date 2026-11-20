@@ -35,6 +35,10 @@ public class AiProviderSettings
     /// <summary>0-100. Mirrors WhatsAppSettings.SimulatedFailureRatePercent - lets the escalation-on-
     /// send-failure path be exercised locally without needing a real provider outage.</summary>
     public int SimulatedFailureRatePercent { get; set; } = 0;
+
+    /// <summary>Bound from "AiProviders:TaskModels": group name, then provider name, then the model that group runs on for that provider. Blank or
+    /// absent means the provider's chat model. Edited under "Model by task" on the AI Providers page.</summary>
+    public Dictionary<string, Dictionary<string, string?>> TaskModels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class AnthropicSettings

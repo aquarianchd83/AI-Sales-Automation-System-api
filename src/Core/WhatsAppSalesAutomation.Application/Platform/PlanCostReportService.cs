@@ -1,3 +1,4 @@
+using WhatsAppSalesAutomation.Application.Ai;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
@@ -112,8 +113,8 @@ public interface IPlanCostReportService
 /// <summary>
 /// Prices a plan from the Configuration page's charges, so the operator no longer works it out by hand. The unit costs
 /// are: a WhatsApp pool unit = the category mix spent at each category's per-message rate, divided by how many pool units
-/// that mix uses (the quota weights); an AI conversation = its tokens at the default AI model's rates; a lead candidate =
-/// its tokens and searches at the default lead discovery model's rates. All estimates from list prices - see the pricing
+/// that mix uses (the quota weights); an AI conversation = its tokens at the rates of the model customer replies run on; a lead candidate =
+/// its tokens and searches at the rates of the model chosen for lead discovery (AI Providers > Model by task). All estimates from list prices - see the pricing
 /// options for why they are not an invoice.
 /// </summary>
 public class PlanCostReportService : IPlanCostReportService
@@ -129,6 +130,8 @@ public class PlanCostReportService : IPlanCostReportService
     private readonly AiPricingOptions _aiPricing;
     private readonly FxOptions _fx;
     private readonly CostAssumptionsOptions _costing;
+    private readonly IPlatformAiConfigProvider _aiConfig;
+    private readonly IAiFeatureRouting _routing;
 
     public PlanCostReportService(
         IApplicationDbContext context,
@@ -138,8 +141,12 @@ public class PlanCostReportService : IPlanCostReportService
         IOptionsSnapshot<LeadDiscoveryPricingOptions> leadPricing,
         IOptionsSnapshot<AiPricingOptions> aiPricing,
         IOptionsSnapshot<FxOptions> fx,
-        IOptionsSnapshot<CostAssumptionsOptions> costing)
+        IOptionsSnapshot<CostAssumptionsOptions> costing,
+        IPlatformAiConfigProvider aiConfig,
+        IAiFeatureRouting routing)
     {
+        _aiConfig = aiConfig;
+        _routing = routing;
         _fx = fx.Value;
         _costing = costing.Value;
         _context = context;
@@ -149,6 +156,17 @@ public class PlanCostReportService : IPlanCostReportService
         _leadPricing = leadPricing.Value;
         _aiPricing = aiPricing.Value;
     }
+
+    /// <summary>A warning about which model is priced (none chosen, or no price for it) - the ones a quote built from the same estimate must repeat.</summary>
+    internal static bool IsModelWarning(string warning) =>
+        warning.Contains("has no price") || warning.StartsWith("No lead discovery model") || warning.StartsWith("AI replies run on the simulator");
+
+    private static string ChatModelOf(AiCredentials c, string provider) => provider switch
+    {
+        "Anthropic" => c.AnthropicModel,
+        "OpenAI" => c.OpenAiChatModel,
+        _ => c.GoogleChatModel,
+    };
 
     public async Task<PlanCostDefaultsDto> GetDefaultsAsync(CancellationToken cancellationToken = default)
     {
@@ -218,7 +236,7 @@ public class PlanCostReportService : IPlanCostReportService
         var totalInr = reference?.CostInr ?? 0m;
 
         // Only what affects the cost: a plan-level "no price set" or "not sold" note means nothing for a pack.
-        var warnings = report.Warnings.Where(w => w.StartsWith("No default") || w.Contains("mix")).ToList();
+        var warnings = report.Warnings.Where(w => IsModelWarning(w) || w.Contains("mix")).ToList();
 
         return new CreditPackCostReportDto(
             request.QuotaType, units, margin, units > 0 ? Math.Round(totalInr / units, 6) : 0m, totalInr, countries, warnings, report.Assumptions);
@@ -271,16 +289,28 @@ public class PlanCostReportService : IPlanCostReportService
             .ToList();
 
         // ---- AI conversations
-        AiModelRates? aiRates = string.IsNullOrWhiteSpace(_aiPricing.DefaultModel) ? null : _aiPricing.Models.GetValueOrDefault(_aiPricing.DefaultModel);
+        // Priced at the model customer replies really run on: the active chat provider's model for that group (AI Providers > Model by task).
+        var credentials = _aiConfig.Get();
+        var chatProvider = credentials.Provider is "Anthropic" or "OpenAI" or "Google" ? credentials.Provider : null;
+        var chatModel = chatProvider is null ? null : ChatModelOf(credentials.ForGroup(AiModelGroups.CustomerReplies), chatProvider);
+        var aiRates = chatProvider is null ? null : _aiPricing.RatesForConfiguredModel(chatProvider, chatModel);
+        var aiModelLabel = chatProvider is null ? null : $"{chatProvider}:{chatModel}";
         var aiPer = aiRates is null ? 0m : a.PromptTokensPerConversation / 1000m * aiRates.PromptPer1K + a.CompletionTokensPerConversation / 1000m * aiRates.CompletionPer1K;
         if (aiUnits > 0 && aiRates is null)
-            warnings.Add("No default AI model is chosen on the Configuration page, so AI conversations are counted as free.");
+            warnings.Add(aiModelLabel is null
+                ? "AI replies run on the simulator, so AI conversations are counted as free."
+                : $"{aiModelLabel} has no price on the AI Provider Charges page, so AI conversations are counted as free.");
 
         // ---- Lead discovery
-        var leadRates = _leadPricing.RatesFor(null);
-        var leadModel = string.IsNullOrWhiteSpace(_leadPricing.DefaultModel) ? "fallback rates" : _leadPricing.DefaultModel!;
-        if (leadUnits > 0 && string.IsNullOrWhiteSpace(_leadPricing.DefaultModel))
-            warnings.Add("No default lead discovery model is chosen on the Configuration page, so the fallback rates are used.");
+        // Priced at the model lead discovery really runs on (AI Providers > Model by task); a model with no row is priced at the fallback rates.
+        var leadRoute = _routing.Resolve(AiFeatures.DiscoveryLead);
+        var leadChosen = leadRoute.UsesThirdParty ? credentials.ModelChosenFor(AiModelGroups.LeadDiscovery, leadRoute.Provider) : null;
+        var leadRates = _leadPricing.RatesFor(leadChosen);
+        var leadModel = leadChosen is not null && _leadPricing.Models.ContainsKey(leadChosen) ? leadChosen : "fallback rates";
+        if (leadUnits > 0 && leadModel == "fallback rates")
+            warnings.Add(leadChosen is null
+                ? "No lead discovery model is chosen on the AI Providers page, so the fallback rates are used."
+                : $"{leadChosen} has no row in the lead discovery prices on the Configuration page, so the fallback rates are used.");
         var leadPer = (a.InputTokensPerCandidate * leadRates.InputPerMillion + a.OutputTokensPerCandidate * leadRates.OutputPerMillion) / 1_000_000m
                       + a.WebSearchesPerCandidate * _leadPricing.WebSearchPerThousand / 1000m;
 
@@ -326,7 +356,7 @@ public class PlanCostReportService : IPlanCostReportService
 
         return new PlanCostReportDto(
             waUnits, Math.Round(messages, 0), categories,
-            new PlanCostAiDto(aiUnits, string.IsNullOrWhiteSpace(_aiPricing.DefaultModel) ? null : _aiPricing.DefaultModel!.Replace('/', ':'), Math.Round(aiPer, 6), Math.Round(aiTotal, 4)),
+            new PlanCostAiDto(aiUnits, aiModelLabel, Math.Round(aiPer, 6), Math.Round(aiTotal, 4)),
             new PlanCostLeadDto(leadUnits, leadModel, Math.Round(leadPer, 6), Math.Round(leadTotal, 4)),
             rows, warnings, a, _fx.InrPerUsd);
     }

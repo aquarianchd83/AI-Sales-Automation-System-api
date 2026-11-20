@@ -107,12 +107,10 @@ public class PlatformConfigurationService : IPlatformConfigurationService
                 new LeadDiscoveryChargesConfigDto(
                     _leadPricing.WebSearchPerThousand,
                     ToDto("Default", _leadPricing.Default),
-                    _leadPricing.Models.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase).Select(m => ToDto(m.Key, m.Value)).ToList(),
-                    string.IsNullOrWhiteSpace(_leadPricing.DefaultModel) ? null : _leadPricing.DefaultModel),
+                    _leadPricing.Models.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase).Select(m => ToDto(m.Key, m.Value)).ToList()),
                 new AiChargesConfigDto(
                     _aiPricing.Models.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase)
-                        .Select(m => new AiModelRatesDto(m.Key.Replace('/', ':'), m.Value.PromptPer1K, m.Value.CompletionPer1K)).ToList(),
-                    string.IsNullOrWhiteSpace(_aiPricing.DefaultModel) ? null : _aiPricing.DefaultModel.Replace('/', ':'))),
+                        .Select(m => new AiModelRatesDto(m.Key.Replace('/', ':'), m.Value.PromptPer1K, m.Value.CompletionPer1K)).ToList())),
             catalog.Select(r => new CountryConfigDto(r.CountryCode, r.CountryName, r.CurrencyCode, r.CurrencySymbol, !disabled.Contains(r.CountryCode))).ToList(),
             new TaxConfigDto(
                 _tax.SupplierStateCode,
@@ -208,12 +206,6 @@ public class PlatformConfigurationService : IPlatformConfigurationService
         SetLeadRates("LeadDiscovery:Pricing:Default", lead.Default);
         foreach (var model in lead.Models)
             SetLeadRates($"LeadDiscovery:Pricing:Models:{model.Model.Trim()}", model);
-
-        if (!string.IsNullOrWhiteSpace(lead.DefaultModel))
-            values["LeadDiscovery:Pricing:DefaultModel"] = lead.DefaultModel.Trim();
-
-        if (!string.IsNullOrWhiteSpace(request.Charges.Ai.DefaultModel))
-            values["Ai:Pricing:DefaultModel"] = AiPricingOptions.KeyFor(request.Charges.Ai.DefaultModel.Trim());
 
         foreach (var model in request.Charges.Ai.Models)
         {
@@ -377,10 +369,6 @@ public class PlatformConfigurationValidator : AbstractValidator<PlatformConfigur
                 l.RuleFor(x => x.Models)
                     .Must(list => list.Select(m => m.Model?.Trim().ToLowerInvariant()).Distinct().Count() == list.Count)
                     .WithMessage("Each model can be listed only once.");
-                l.RuleFor(x => x)
-                    .Must(lead => string.IsNullOrWhiteSpace(lead.DefaultModel)
-                        || lead.Models.Any(m => string.Equals(m.Model?.Trim(), lead.DefaultModel.Trim(), StringComparison.OrdinalIgnoreCase)))
-                    .WithMessage("The default lead discovery model must be one of the listed models.");
             });
 
             c.RuleFor(x => x.Ai).NotNull().ChildRules(a =>
@@ -395,10 +383,6 @@ public class PlatformConfigurationValidator : AbstractValidator<PlatformConfigur
                 a.RuleFor(x => x.Models)
                     .Must(list => list.Select(m => m.Model?.Trim().ToLowerInvariant()).Distinct().Count() == list.Count)
                     .WithMessage("Each model can be listed only once.");
-                a.RuleFor(x => x)
-                    .Must(ai => string.IsNullOrWhiteSpace(ai.DefaultModel)
-                        || ai.Models.Any(m => string.Equals(m.Model?.Trim(), ai.DefaultModel.Trim(), StringComparison.OrdinalIgnoreCase)))
-                    .WithMessage("The default AI model must be one of the listed models.");
             });
         });
     }

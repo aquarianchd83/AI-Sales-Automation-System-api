@@ -367,7 +367,29 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         LeadDiscoveryRetryRules.CanRetry(e),
         run is null ? 0m : LeadDiscoveryService.ToDto(run, pricing).EstimatedCostLocal,
         pricing.CurrencyCode,
-        pricing.CurrencySymbol);
+        pricing.CurrencySymbol,
+        ProviderOf(run?.Model),
+        string.IsNullOrWhiteSpace(run?.Model) ? null : run!.Model);
+
+    /// <summary>The AI provider that did the research, read from the model name the run recorded (a run stores the model, not the
+    /// provider). Null when the execution did no research - a retry, or a run skipped before it started.</summary>
+    internal static string? ProviderOf(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return null;
+
+        var name = model.Trim();
+        if (name.Equals("Simulated", StringComparison.OrdinalIgnoreCase))
+            return "Simulated";
+        if (name.StartsWith("claude", StringComparison.OrdinalIgnoreCase))
+            return "Anthropic";
+        if (name.StartsWith("gpt", StringComparison.OrdinalIgnoreCase) || System.Text.RegularExpressions.Regex.IsMatch(name, @"^o\d", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            return "OpenAI";
+        if (name.StartsWith("gemini", StringComparison.OrdinalIgnoreCase))
+            return "Google";
+
+        return name;
+    }
 
     // A DateTime read back from SQL Server datetime2 is Kind.Unspecified and would serialize without a "Z",
     // which a browser reads as local time.

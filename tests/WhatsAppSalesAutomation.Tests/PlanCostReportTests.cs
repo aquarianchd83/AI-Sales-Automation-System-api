@@ -50,13 +50,19 @@ public sealed class PlanCostReportTests : IDisposable
         _connection.Dispose();
     }
 
-    private PlanCostReportService Service(string? aiDefault = "OpenAI/gpt-5-mini", string? leadDefault = "claude-sonnet-5", CostAssumptionsOptions? costing = null) =>
-        new(_db, new CountryAvailability(_store), _clock,
+    /// <param name="aiDefault">The model customer replies run on (null: one nobody priced).</param>
+    /// <param name="leadDefault">The model chosen for lead discovery (null: none chosen).</param>
+    private PlanCostReportService Service(string? aiDefault = "gpt-5-mini", string? leadDefault = "claude-sonnet-5", CostAssumptionsOptions? costing = null)
+    {
+        var (config, routing) = PlanCostTestSupport.Models(aiDefault, leadDefault);
+        return new(_db, new CountryAvailability(_store), _clock,
             new FixedOptions<WhatsAppPricingOptions>(new()),
-            new FixedOptions<LeadDiscoveryPricingOptions>(new() { DefaultModel = leadDefault }),
-            new FixedOptions<AiPricingOptions>(new() { DefaultModel = aiDefault }),
+            new FixedOptions<LeadDiscoveryPricingOptions>(new()),
+            new FixedOptions<AiPricingOptions>(new()),
             new FixedOptions<FxOptions>(new()),
-            new FixedOptions<CostAssumptionsOptions>(costing ?? new()));
+            new FixedOptions<CostAssumptionsOptions>(costing ?? new()),
+            config, routing);
+    }
 
     // 100% marketing, 1000 AI prompt + 500 completion tokens, 10,000 + 1,000 tokens and one search per candidate.
     private static readonly PlanCostAssumptionsDto Simple = new(100, 0, 0, 1000, 500, 10_000, 1_000, 1m);
@@ -164,7 +170,7 @@ public sealed class PlanCostReportTests : IDisposable
         Assert.All(report.Countries, c => Assert.Equal(0m, c.SuggestedPriceLocal));
 
         var noModel = await Service(aiDefault: null, costing: Typical).BuildCreditPackAsync(new CreditPackCostRequest(QuotaType.AiConversations, 1000, 50));
-        Assert.Contains(noModel.Warnings, w => w.Contains("No default AI model"));
+        Assert.Contains(noModel.Warnings, w => w.Contains("has no price") && w.Contains("AI conversations are counted as free"));
         Assert.DoesNotContain(noModel.Warnings, w => w.Contains("No country has a price"));
     }
 
@@ -237,8 +243,8 @@ public sealed class PlanCostReportTests : IDisposable
             new PlanQuotaInput(QuotaType.LeadCandidates, 10)));
 
         Assert.Equal(0m, report.Ai.TotalUsd);
-        Assert.Contains(report.Warnings, w => w.Contains("No default AI model"));
-        Assert.Contains(report.Warnings, w => w.Contains("No default lead discovery model"));
+        Assert.Contains(report.Warnings, w => w.Contains("has no price") && w.Contains("AI conversations are counted as free"));
+        Assert.Contains(report.Warnings, w => w.Contains("No lead discovery model is chosen"));
     }
 
     [Fact]

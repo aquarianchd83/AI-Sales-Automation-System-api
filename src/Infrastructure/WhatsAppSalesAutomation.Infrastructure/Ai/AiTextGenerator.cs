@@ -33,7 +33,8 @@ public class AiTextGenerator : IAiTextGenerator
 
     public async Task<string?> GenerateAsync(string systemPrompt, string userPrompt, int maxTokens, CancellationToken cancellationToken = default, string? provider = null)
     {
-        var credentials = _configProvider.Get();
+        // Keyword suggestions and rewrites carry an AI-use label; the model chosen for their group is used, else the chat model.
+        var credentials = _configProvider.Get()?.ForGroup(Application.Ai.AiModelGroups.ForTask(Application.Ai.Tasks.AiCallLabel.Current));
         if (credentials is null)
             return null;
 

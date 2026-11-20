@@ -7,7 +7,7 @@ using Xunit;
 
 namespace WhatsAppSalesAutomation.Tests;
 
-/// <summary>The Discovery lead choice on the Integrations page (simulator, ChatGPT, Claude) decides which engine a run uses. The paths tested
+/// <summary>The Discovery lead choice on the Integrations page (simulator, ChatGPT, Claude, Gemini) decides which engine a run uses. The paths tested
 /// here never reach the AI call recorder (no real call is made), so none is supplied.</summary>
 public sealed class RoutedLeadDiscoveryAgentTests
 {
@@ -47,6 +47,8 @@ public sealed class RoutedLeadDiscoveryAgentTests
             new OpenAiLeadDiscoveryAgent(new HttpClient(), settings, NullLogger<OpenAiLeadDiscoveryAgent>.Instance, keys,
                 new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler()))),
             new AnthropicLeadDiscoveryAgent(new HttpClient(), settings, NullLogger<AnthropicLeadDiscoveryAgent>.Instance, keys),
+            new GeminiLeadDiscoveryAgent(new HttpClient(), settings, NullLogger<GeminiLeadDiscoveryAgent>.Instance, keys,
+                new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler()))),
             recorder: null!);
     }
 
@@ -78,9 +80,18 @@ public sealed class RoutedLeadDiscoveryAgentTests
     }
 
     [Fact]
-    public async Task A_tool_discovery_cannot_run_on_falls_back_to_the_simulator()
+    public async Task The_Gemini_choice_runs_the_Gemini_agent()
     {
         var result = await Agent(new AiFeatureChoice(true, "Google")).DiscoverAsync(Request);
+
+        Assert.False(result.IsConfigured);
+        Assert.Contains("Gemini", result.NotConfiguredReason);
+    }
+
+    [Fact]
+    public async Task A_tool_discovery_cannot_run_on_falls_back_to_the_simulator()
+    {
+        var result = await Agent(new AiFeatureChoice(true, "Perplexity")).DiscoverAsync(Request);
 
         Assert.Equal(SimulatedLeadDiscoveryAgent.ModelName, result.Model);
     }

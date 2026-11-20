@@ -312,6 +312,7 @@ public static class DependencyInjection
         // anything, and every tenant's run uses whichever is configured.
         var leadDiscoverySection = configuration.GetSection("LeadDiscovery:Agent");
         services.Configure<LeadDiscoveryAgentSettings>(leadDiscoverySection);
+        services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IProviderModelCatalog, ProviderModelCatalog>();
         var leadDiscoverySettings = leadDiscoverySection.Get<LeadDiscoveryAgentSettings>() ?? new LeadDiscoveryAgentSettings();
 
         if (string.Equals(leadDiscoverySettings.Provider, "Simulated", StringComparison.OrdinalIgnoreCase))
@@ -337,6 +338,10 @@ public static class DependencyInjection
                 })
                 .ConfigurePrimaryHttpMessageHandler(LeadDiscoveryPageFetcher.CreateHandler);
             services.AddHttpClient<OpenAiLeadDiscoveryAgent>(
+                client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
+
+            // Gemini: Google Search grounding for the research, then the same page reader as ChatGPT.
+            services.AddHttpClient<GeminiLeadDiscoveryAgent>(
                 client => client.Timeout = TimeSpan.FromMinutes(leadDiscoverySettings.RequestTimeoutMinutes));
 
             services.AddScoped<SimulatedLeadDiscoveryAgent>();

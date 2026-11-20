@@ -235,7 +235,8 @@ public interface IAiTaskPolicyProvider
 
 /// <param name="ImageBase64">For <see cref="AiTaskKinds.ScannedDocumentReading"/>: one page image, base64. Null for text tasks.</param>
 public sealed record AiCompletionRequest(
-    string Provider, string System, string User, int MaxTokens, bool ExpectJson, int TimeoutSeconds, string? ImageBase64 = null, string? ImageMediaType = null);
+    string Provider, string System, string User, int MaxTokens, bool ExpectJson, int TimeoutSeconds, string? ImageBase64 = null, string? ImageMediaType = null,
+    string? Task = null);
 
 /// <summary>What one provider call returned, normalised. Provider-specific detail stays in <see cref="ErrorMessage"/> (already short and scrubbed).</summary>
 public sealed record AiCompletionResult(

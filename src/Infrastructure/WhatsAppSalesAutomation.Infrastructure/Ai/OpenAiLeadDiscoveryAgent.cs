@@ -59,7 +59,9 @@ public class OpenAiLeadDiscoveryAgent : ILeadDiscoveryAgent
                 "lead discovery has no OpenAI API key - save one under Configuration > AI Providers (OpenAI), or set LeadDiscovery:Agent:OpenAiApiKey (environment variable LeadDiscovery__Agent__OpenAiApiKey).");
         }
 
-        var model = Blank(_settings.OpenAiModel) ?? "gpt-5-mini";
+        var model = config.ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "OpenAI");
+        if (model is null)
+            return LeadDiscoveryAgentResult.NotConfigured(LeadDiscoveryPrompts.NoModelChosen("ChatGPT"));
         var baseUrl = Blank(_settings.OpenAiBaseUrl) ?? config.OpenAiBaseUrl;
 
         var evidence = new EvidenceCollector();
@@ -101,6 +103,16 @@ public class OpenAiLeadDiscoveryAgent : ILeadDiscoveryAgent
 
             if (previousResponseId is null || nudged)
                 break;
+
+            // The model ended a turn with no tool call at all: say why (status, incomplete reason, what it did emit), because
+            // the nudge below makes it write a submission note that blames 'the user'.
+            _logger.LogWarning(
+                "OpenAI lead discovery turn {Turn} ended with no tool call: status {Status}, incomplete reason {IncompleteReason}, output items [{OutputTypes}], output tokens {OutputTokens}",
+                turn,
+                Str(response["status"]),
+                Str(response["incomplete_details"]?["reason"]),
+                string.Join(", ", output.OfType<JsonObject>().Select(item => Str(item["type"]))),
+                Str(response["usage"]?["output_tokens"]));
 
             nudged = true;
             input = new JsonArray { UserMessage(LeadDiscoveryPrompts.SubmitNudge) };
