@@ -58,7 +58,9 @@ public class GeminiLeadDiscoveryAgent : ILeadDiscoveryAgent
                 "lead discovery has no Gemini API key - save one under Configuration > AI Providers (Google), or set LeadDiscovery:Agent:GeminiApiKey (environment variable LeadDiscovery__Agent__GeminiApiKey).");
         }
 
-        var model = config.ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "Google") ?? Blank(_settings.GeminiModel) ?? "gemini-2.5-flash";
+        var model = config.ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "Google");
+        if (model is null)
+            return LeadDiscoveryAgentResult.NotConfigured(LeadDiscoveryPrompts.NoModelChosen("Gemini"));
         var baseUrl = Blank(config.GoogleBaseUrl) ?? "https://generativelanguage.googleapis.com/v1beta/";
         var evidence = new Evidence();
 

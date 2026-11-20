@@ -61,9 +61,12 @@ public sealed class GeminiLeadDiscoveryAgentTests
         }
     }
 
+    /// <summary>The model lead discovery is saved to run on: there is no default in code.</summary>
+    private static readonly Dictionary<string, string> Chosen = new() { ["LeadDiscovery/Google"] = "gemini-2.5-flash" };
+
     private static GeminiLeadDiscoveryAgent Agent(ScriptedGemini handler, string? key = "AIza-test", bool enabled = true, LeadDiscoveryAgentSettings? settings = null, Dictionary<string, string>? taskModels = null) =>
         new(new HttpClient(handler), new FixedSnapshot<LeadDiscoveryAgentSettings>(settings ?? new LeadDiscoveryAgentSettings()),
-            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys(key, enabled, taskModels),
+            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys(key, enabled, taskModels ?? Chosen),
             new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler())));
 
     private static string Research(string text = "1. Smile Dental, Pune - https://smile.example/contact", int prompt = 1000, int output = 200) =>
@@ -169,6 +172,21 @@ public sealed class GeminiLeadDiscoveryAgentTests
         var message = (string)handler.Sent[1]["contents"]![0]!["parts"]![0]!["text"]!;
         Assert.Contains("1. Smile Dental, Pune", message);
         Assert.Contains("- https://smile.example/contact", message);
+    }
+
+    [Fact]
+    public async Task Is_not_configured_until_a_model_is_chosen_for_lead_discovery()
+    {
+        var handler = new ScriptedGemini();
+        var agent = new GeminiLeadDiscoveryAgent(new HttpClient(handler), new FixedSnapshot<LeadDiscoveryAgentSettings>(new LeadDiscoveryAgentSettings()),
+            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys("AIza-test"),
+            new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler())));
+
+        var result = await agent.DiscoverAsync(Request);
+
+        Assert.False(result.IsConfigured);
+        Assert.Contains("choose one under AI Providers > Model by task", result.NotConfiguredReason);
+        Assert.Empty(handler.Sent);
     }
 
     [Fact]
@@ -284,7 +302,7 @@ public sealed class GeminiLeadDiscoveryAgentTests
     {
         var handler = new ThrowingHandler();
         var agent = new GeminiLeadDiscoveryAgent(new HttpClient(handler), new FixedSnapshot<LeadDiscoveryAgentSettings>(new LeadDiscoveryAgentSettings()),
-            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys("AIza-test"),
+            NullLogger<GeminiLeadDiscoveryAgent>.Instance, new Keys("AIza-test", taskModels: Chosen),
             new LeadDiscoveryPageFetcher(new HttpClient(LeadDiscoveryPageFetcher.CreateHandler())));
 
         var error = await Assert.ThrowsAsync<HttpRequestException>(() => agent.DiscoverAsync(Request));

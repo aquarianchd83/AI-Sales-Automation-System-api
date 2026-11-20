@@ -30,15 +30,12 @@ public record LeadDiscoveryModelRatesDto(string Model, decimal InputPerMillion, 
 public record LeadDiscoveryChargesConfigDto(
     decimal WebSearchPerThousand,
     LeadDiscoveryModelRatesDto Default,
-    IReadOnlyList<LeadDiscoveryModelRatesDto> Models,
-    // The model the platform runs; a run on a model with no row is priced at this one. Null = no choice made.
-    string? DefaultModel = null);
+    IReadOnlyList<LeadDiscoveryModelRatesDto> Models);
 
 /// <summary>Per-1,000-token rates for a conversational AI model, in USD. Model reads "Provider:model".</summary>
 public record AiModelRatesDto(string Model, decimal PromptPer1K, decimal CompletionPer1K);
 
-/// <summary><see cref="DefaultModel"/> reads "Provider:model" and must be one of <see cref="Models"/>. Null = no choice made.</summary>
-public record AiChargesConfigDto(IReadOnlyList<AiModelRatesDto> Models, string? DefaultModel = null);
+public record AiChargesConfigDto(IReadOnlyList<AiModelRatesDto> Models);
 
 /// <summary>What the platform charges (or estimates) for each metered thing, all in USD.</summary>
 public record ChargesConfigDto(WhatsAppChargesConfigDto WhatsApp, LeadDiscoveryChargesConfigDto LeadDiscovery, AiChargesConfigDto Ai);

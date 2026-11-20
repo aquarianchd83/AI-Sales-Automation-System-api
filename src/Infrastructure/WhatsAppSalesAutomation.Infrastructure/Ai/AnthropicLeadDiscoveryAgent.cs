@@ -67,8 +67,10 @@ public class AnthropicLeadDiscoveryAgent : ILeadDiscoveryAgent
                 "lead discovery has no Anthropic API key - save one under Configuration > AI Providers (Claude), or set LeadDiscovery:Agent:ApiKey (environment variable LeadDiscovery__Agent__ApiKey).");
         }
 
-        // The model chosen for lead discovery on the AI Providers page, else the discovery default.
-        var model = _aiConfig.Get().ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "Anthropic") ?? _settings.Model;
+        // The model chosen for lead discovery on the AI Providers page (Model by task); there is no default in code.
+        var model = _aiConfig.Get().ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "Anthropic");
+        if (model is null)
+            return LeadDiscoveryAgentResult.NotConfigured(LeadDiscoveryPrompts.NoModelChosen("Claude"));
 
         var evidence = new EvidenceCollector();
         var messages = new JsonArray { UserMessage(LeadDiscoveryPrompts.BuildUserMessage(request)) };

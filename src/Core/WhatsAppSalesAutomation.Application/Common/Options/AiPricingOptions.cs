@@ -28,11 +28,6 @@ public class AiPricingOptions
         ["OpenAI/gpt-5"] = new() { PromptPer1K = 0.00125m, CompletionPer1K = 0.01m }
     };
 
-    /// <summary>The model the platform runs conversations on, as <c>Provider/model</c> (see <see cref="KeyFor"/>), chosen
-    /// on the Configuration page. An interaction whose model has no row of its own is priced at this model's rates.
-    /// Blank means no choice was made, and an unlisted model is counted as free.</summary>
-    public string? DefaultModel { get; set; }
-
     public AiModelRates? RatesFor(string modelUsed)
     {
         if (Models.TryGetValue(KeyFor(modelUsed), out var rates))
@@ -42,7 +37,9 @@ public class AiPricingOptions
         if (modelUsed.StartsWith("Simulated", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        return !string.IsNullOrWhiteSpace(DefaultModel) && Models.TryGetValue(DefaultModel, out var chosen) ? chosen : null;
+        // A dated model id ("claude-haiku-4-5-20251001") is read from its undated row. A model with no row at all is counted as free.
+        var separator = modelUsed.IndexOf(':');
+        return separator > 0 ? RatesForConfiguredModel(modelUsed[..separator], modelUsed[(separator + 1)..]) : null;
     }
 
     /// <summary>The row for the model a provider is configured to run, or null when it has none. Unlike <see cref="RatesFor"/> it never falls back to the

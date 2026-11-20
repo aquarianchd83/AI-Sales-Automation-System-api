@@ -54,19 +54,28 @@ public sealed class AiTaskModelsTests
         public T Get(string? name) => Value;
     }
 
-    private sealed class Defaults : ILeadDiscoveryDefaultModels
+    /// <summary>The models each provider lists (none for a provider not named), as the provider's own API would return them.</summary>
+    private sealed class FakeCatalog : IProviderModelCatalog
     {
-        public string ModelFor(string provider) => provider switch
-        {
-            "Anthropic" => "claude-haiku-4-5-20251001",
-            "OpenAI" => "gpt-5-mini",
-            _ => "gemini-2.5-flash",
-        };
+        private readonly Dictionary<string, string[]> _listed;
+        public FakeCatalog(Dictionary<string, string[]>? listed = null) => _listed = listed ?? new();
+        public Task<IReadOnlyList<string>> ListAsync(string provider, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(_listed.GetValueOrDefault(provider) ?? Array.Empty<string>());
     }
 
-    private static PlatformAiTaskModelsService Service(MemoryStore store, AiCredentials? credentials = null, AiPricingOptions? pricing = null) =>
+    private static PlatformAiTaskModelsService Service(
+        MemoryStore store, AiCredentials? credentials = null, AiPricingOptions? pricing = null, Dictionary<string, string[]>? listed = null) =>
         new(store, new FixedConfig(credentials ?? Credentials()), new FixedSnapshot<AiPricingOptions>(pricing ?? new AiPricingOptions()),
-            new FixedSnapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), new Defaults());
+            new FixedSnapshot<LeadDiscoveryPricingOptions>(new LeadDiscoveryPricingOptions()), new FakeCatalog(listed));
+
+    private static MemoryStore LeadModelsSaved()
+    {
+        var store = new MemoryStore();
+        store.Rows["AiProviders:TaskModels:LeadDiscovery:Anthropic"] = "claude-haiku-4-5-20251001";
+        store.Rows["AiProviders:TaskModels:LeadDiscovery:OpenAI"] = "gpt-5-mini";
+        store.Rows["AiProviders:TaskModels:LeadDiscovery:Google"] = "gemini-2.5-flash";
+        return store;
+    }
 
     // ---- which group a task belongs to ----
 
@@ -217,9 +226,21 @@ public sealed class AiTaskModelsTests
     // ---- lead discovery: the fourth group ----
 
     [Fact]
-    public async Task Lead_discovery_defaults_to_the_discovery_model_not_the_chat_model()
+    public async Task Lead_discovery_has_no_default_model_in_code_so_nothing_saved_means_nothing_chosen()
     {
         var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+
+        Assert.All(group.Providers, cell =>
+        {
+            Assert.Null(cell.Selected);
+            Assert.Equal(string.Empty, cell.EffectiveModel);
+        });
+    }
+
+    [Fact]
+    public async Task Lead_discovery_shows_the_models_saved_for_it()
+    {
+        var group = (await Service(LeadModelsSaved()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
 
         Assert.Equal("Default", group.DefaultLabel);
         var claude = group.Providers.Single(p => p.Provider == "Anthropic");
@@ -231,7 +252,7 @@ public sealed class AiTaskModelsTests
     [Fact]
     public async Task Lead_discovery_is_priced_from_its_own_table_with_dated_ids_read_from_their_undated_row()
     {
-        var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+        var group = (await Service(LeadModelsSaved()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
 
         var claude = group.Providers.Single(p => p.Provider == "Anthropic");
         Assert.True(claude.HasPrice);
@@ -250,9 +271,9 @@ public sealed class AiTaskModelsTests
     [Fact]
     public async Task Lead_discovery_offers_each_provider_only_its_own_priced_models()
     {
-        var group = (await Service(new MemoryStore()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
+        var group = (await Service(LeadModelsSaved()).GetAsync()).Groups.Single(g => g.Key == "LeadDiscovery");
 
-        Assert.Equal(new[] { "gpt-5", "gpt-5-mini", "gpt-5-nano" }, group.Providers.Single(p => p.Provider == "OpenAI").Options.Select(o => o.Model));
+        Assert.Equal(new[] { "gpt-5-nano", "gpt-5-mini", "gpt-5" }, group.Providers.Single(p => p.Provider == "OpenAI").Options.Select(o => o.Model));
         Assert.DoesNotContain(group.Providers.Single(p => p.Provider == "Anthropic").Options, o => o.Model == "Simulated");
         Assert.Contains(group.Providers.Single(p => p.Provider == "Google").Options, o => o.Model == "gemini-2.5-pro");
     }
@@ -310,6 +331,53 @@ public sealed class AiTaskModelsTests
         Assert.Equal("gpt-5", credentials.ModelChosenFor(AiModelGroups.LeadDiscovery, "OpenAI"));
         Assert.Null(credentials.ModelChosenFor(AiModelGroups.LeadDiscovery, "Anthropic"));
         Assert.Null(Credentials().ModelChosenFor(AiModelGroups.LeadDiscovery, "OpenAI"));
+    }
+
+    // ---- every model the provider offers, cheapest first ----
+
+    [Fact]
+    public async Task Every_model_the_provider_lists_is_offered_cheapest_first_and_those_with_no_price_last()
+    {
+        var dto = await Service(new MemoryStore(), listed: new() { ["OpenAI"] = new[] { "gpt-5", "gpt-4.1-nano", "gpt-5-nano", "o3-mini" } }).GetAsync();
+
+        var options = dto.Groups[0].Providers.Single(p => p.Provider == "OpenAI").Options;
+
+        // priced: gpt-5-nano 0.05+0.4, gpt-5-mini 0.25+2, gpt-5 1.25+10; then the unpriced ones by name
+        Assert.Equal(new[] { "gpt-5-nano", "gpt-5-mini", "gpt-5", "gpt-4.1-nano", "o3-mini" }, options.Select(o => o.Model));
+        Assert.All(options.Take(3), o => Assert.True(o.HasPrice));
+        Assert.All(options.Skip(3), o => Assert.False(o.HasPrice));
+    }
+
+    [Fact]
+    public async Task A_model_is_offered_once_even_when_it_is_listed_and_priced_and_in_use()
+    {
+        var dto = await Service(new MemoryStore(), listed: new() { ["OpenAI"] = new[] { "GPT-5-NANO", "gpt-5-nano" } }).GetAsync();
+
+        var options = dto.Groups[0].Providers.Single(p => p.Provider == "OpenAI").Options;
+
+        Assert.Single(options, o => string.Equals(o.Model, "gpt-5-nano", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task A_provider_that_lists_nothing_still_offers_the_priced_models_and_the_one_in_use()
+    {
+        var options = (await Service(new MemoryStore()).GetAsync()).Groups[0].Providers.Single(p => p.Provider == "Anthropic").Options;
+
+        Assert.Contains(options, o => o.Model == "claude-sonnet-4-5");
+        Assert.Contains(options, o => o.Model == "claude-haiku-4-5-20251001");
+    }
+
+    [Fact]
+    public async Task The_models_a_provider_lists_are_offered_to_lead_discovery_too_priced_from_its_own_table()
+    {
+        var group = (await Service(LeadModelsSaved(), listed: new() { ["Anthropic"] = new[] { "claude-opus-5", "claude-3-7-sonnet-latest" } }).GetAsync())
+            .Groups.Single(g => g.Key == "LeadDiscovery");
+
+        var options = group.Providers.Single(p => p.Provider == "Anthropic").Options;
+        Assert.Equal("claude-opus-5", options.First(o => o.Model == "claude-opus-5").Model);
+        Assert.True(options.Single(o => o.Model == "claude-opus-5").HasPrice);
+        Assert.False(options.Single(o => o.Model == "claude-3-7-sonnet-latest").HasPrice);
+        Assert.Equal("claude-3-7-sonnet-latest", options.Last().Model);
     }
 
     // ---- saving ----

@@ -68,13 +68,15 @@ public sealed class ServiceMarginTests : IDisposable
 
     private ServiceMarginService Service(decimal inrPerUsd = 100m)
     {
+        var (aiConfig, routing) = PlanCostTestSupport.Models();
         var costs = new PlanCostReportService(
             _db, new CountryAvailability(_store), _clock,
             new FixedOptions<WhatsAppPricingOptions>(new()),
-            new FixedOptions<LeadDiscoveryPricingOptions>(new() { DefaultModel = "claude-sonnet-5" }),
-            new FixedOptions<AiPricingOptions>(new() { DefaultModel = "OpenAI/gpt-5-mini" }),
+            new FixedOptions<LeadDiscoveryPricingOptions>(new()),
+            new FixedOptions<AiPricingOptions>(new()),
             new FixedOptions<FxOptions>(new() { InrPerUsd = inrPerUsd }),
-            new FixedOptions<CostAssumptionsOptions>(new()));
+            new FixedOptions<CostAssumptionsOptions>(new()),
+            aiConfig, routing);
         var credits = new CreditPayerService(_db, _clock, new QuotaLedgerService(_db, _clock));
         return new ServiceMarginService(
             _db, costs, credits, _clock, new FixedOptions<FxOptions>(new() { InrPerUsd = inrPerUsd }),

@@ -65,23 +65,23 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
     private readonly IPlatformAiConfigProvider _credentials;
     private readonly IOptionsSnapshot<AiPricingOptions> _pricing;
     private readonly IOptionsSnapshot<LeadDiscoveryPricingOptions> _leadPricing;
-    private readonly ILeadDiscoveryDefaultModels _leadDefaults;
+    private readonly IProviderModelCatalog _catalog;
 
     public PlatformAiTaskModelsService(
         IAppSettingsStore store, IPlatformAiConfigProvider credentials, IOptionsSnapshot<AiPricingOptions> pricing,
-        IOptionsSnapshot<LeadDiscoveryPricingOptions> leadPricing, ILeadDiscoveryDefaultModels leadDefaults)
+        IOptionsSnapshot<LeadDiscoveryPricingOptions> leadPricing, IProviderModelCatalog catalog)
     {
         _store = store;
         _credentials = credentials;
         _pricing = pricing;
         _leadPricing = leadPricing;
-        _leadDefaults = leadDefaults;
+        _catalog = catalog;
     }
 
     public async Task<AiTaskModelsDto> GetAsync(CancellationToken cancellationToken = default)
     {
         var stored = await _store.GetAllAsync(cancellationToken);
-        return Build(stored);
+        return await BuildAsync(stored, cancellationToken);
     }
 
     public async Task<AiTaskModelsDto> UpdateAsync(UpdateAiTaskModelsRequest request, Guid? updatedByUserId, CancellationToken cancellationToken = default)
@@ -116,24 +116,29 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
         return await GetAsync(cancellationToken);
     }
 
-    private AiTaskModelsDto Build(IReadOnlyDictionary<string, string?> stored)
+    private async Task<AiTaskModelsDto> BuildAsync(IReadOnlyDictionary<string, string?> stored, CancellationToken cancellationToken)
     {
         var credentials = _credentials.Get();
+
+        // Every model each provider offers, asked once per provider (a provider that is off or unreachable lists none, and the page offers what is priced).
+        var offered = await Task.WhenAll(Providers.Select(async p => (p.Provider, Models: await _catalog.ListAsync(p.Provider, cancellationToken))));
+        var listed = offered.ToDictionary(o => o.Provider, o => o.Models, StringComparer.Ordinal);
         var pricing = _pricing.Value;
         var leadPricing = _leadPricing.Value;
 
         return new AiTaskModelsDto(AiModelGroups.All.Select(group => new AiTaskModelGroupDto(
             group.Key, group.Title, group.Description, group.Tasks, group.DefaultLabel, group.AllowDefault,
-            Providers.Select(p => Cell(group, p.Provider, p.Label, credentials, stored, pricing, leadPricing)).ToList())).ToList());
+            Providers.Select(p => Cell(group, p.Provider, p.Label, credentials, stored, pricing, leadPricing, listed[p.Provider])).ToList())).ToList());
     }
 
     private AiTaskModelCellDto Cell(
         AiModelGroup group, string provider, string label, AiCredentials credentials, IReadOnlyDictionary<string, string?> stored, AiPricingOptions pricing,
-        LeadDiscoveryPricingOptions leadPricing)
+        LeadDiscoveryPricingOptions leadPricing, IReadOnlyList<string> listed)
     {
         // Lead discovery is priced on its own table (LeadDiscovery:Pricing) and defaults to the discovery model, not the chat model.
         var discovery = group.Key == AiModelGroups.LeadDiscovery;
-        var chat = discovery ? _leadDefaults.ModelFor(provider) : ChatModelOf(credentials, provider);
+        // Lead discovery has no default model: nothing saved means nothing chosen (an empty name), and its run is skipped until one is.
+        var chat = discovery ? string.Empty : ChatModelOf(credentials, provider);
         stored.TryGetValue(AiModelGroups.SettingKey(group.Key, provider), out var raw);
         var selected = string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
         var effective = selected ?? chat;
@@ -148,8 +153,9 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
                 .Select(m => new AiTaskModelOptionDto(m.Key[(provider.Length + 1)..], true, PerMillion(m.Value.PromptPer1K), PerMillion(m.Value.CompletionPer1K)))
                 .ToList();
 
-        // The models the operator can choose from are the priced ones, plus whatever is chosen or configured now, so a current choice is never missing.
-        foreach (var model in new[] { selected, chat }.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!))
+        // The models the operator can choose from: every model the provider lists, the priced ones, and whatever is chosen or in use now, so a current
+        // choice is never missing.
+        foreach (var model in listed.Concat(new[] { selected, chat }).Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!))
         {
             if (!priced.Any(o => string.Equals(o.Model, model, StringComparison.OrdinalIgnoreCase)))
                 priced.Add(discovery ? LeadPriceOf(leadPricing, model) : PriceOf(pricing, provider, model));
@@ -159,7 +165,8 @@ public class PlatformAiTaskModelsService : IPlatformAiTaskModelsService
         return new AiTaskModelCellDto(
             provider, label, credentials.IsEnabled(provider) && !string.IsNullOrWhiteSpace(KeyOf(credentials, provider)),
             chat, selected, effective, current.HasPrice, current.InputPer1M, current.OutputPer1M,
-            priced.OrderBy(o => o.Model, StringComparer.OrdinalIgnoreCase).ToList());
+            // Cheapest first (input plus output per million tokens); a model with no price goes last, by name.
+            priced.OrderBy(o => o.HasPrice ? 0 : 1).ThenBy(o => (o.InputPer1M ?? 0m) + (o.OutputPer1M ?? 0m)).ThenBy(o => o.Model, StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     /// <summary>The provider a discovery model belongs to, read from its name (a discovery price row is keyed by model alone).</summary>

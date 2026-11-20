@@ -169,7 +169,7 @@ public class ServiceMarginService : IServiceMarginService
             new PlanQuotaInput(QuotaType.AiConversations, EstimateUnits),
             new PlanQuotaInput(QuotaType.LeadCandidates, EstimateUnits)
         }), cancellationToken);
-        notes.AddRange(estimate.Warnings.Where(w => w.StartsWith("No default") || w.Contains("mix")));
+        notes.AddRange(estimate.Warnings.Where(w => PlanCostReportService.IsModelWarning(w) || w.Contains("mix")));
 
         // ---- AI conversation: the average of what each reply really cost.
         var replies = _context.AiExecutions.AsNoTracking().IgnoreQueryFilters()

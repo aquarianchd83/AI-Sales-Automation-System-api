@@ -9,6 +9,10 @@ internal static class LeadDiscoveryPrompts
 {
     public const string SubmitToolName = "submit_leads";
 
+    /// <summary>The reason a run is skipped when no model is saved for the engine: the model is chosen on the AI Providers page.</summary>
+    public static string NoModelChosen(string engine) =>
+        $"lead discovery has no {engine} model - choose one under AI Providers > Model by task > Lead discovery.";
+
     public const string SystemPrompt =
         """
         You are a business lead discovery agent for a sales team. You are industry-independent: the target business type, keywords, locations and qualification rules all come from the request, and you must not assume any particular industry.

@@ -13,10 +13,9 @@ public sealed class LeadDiscoveryCostTests
         InputTokens: 78_603, OutputTokens: 2_895, CacheReadInputTokens: 46_208, CacheCreationInputTokens: 0, WebSearches: 7, WebFetches: 2);
 
     [Fact]
-    public void A_ChatGPT_model_is_priced_at_its_own_rates_not_at_the_default_models()
+    public void A_ChatGPT_model_is_priced_at_its_own_rates_not_at_the_fallback_rates()
     {
-        // As on a server whose configuration names a Claude model as the default and prices only Claude models.
-        var pricing = new LeadDiscoveryPricingOptions { DefaultModel = "claude-haiku-4-5-20251001" };
+        var pricing = new LeadDiscoveryPricingOptions();
 
         Assert.Equal(0.25m, pricing.RatesFor("gpt-5-mini").InputPerMillion);
         Assert.Equal(2m, pricing.RatesFor("gpt-5-mini").OutputPerMillion);
@@ -28,7 +27,7 @@ public sealed class LeadDiscoveryCostTests
     [Fact]
     public void A_run_on_gpt_5_mini_costs_its_tokens_at_gpt_5_mini_rates_plus_its_searches()
     {
-        var pricing = new LeadDiscoveryPricingOptions { DefaultModel = "claude-haiku-4-5-20251001" };
+        var pricing = new LeadDiscoveryPricingOptions();
 
         var cost = LeadDiscoveryCost.Estimate(RealRun, "gpt-5-mini", pricing);
 
@@ -37,9 +36,9 @@ public sealed class LeadDiscoveryCostTests
     }
 
     [Fact]
-    public void The_same_usage_priced_as_the_default_claude_model_is_the_overstated_figure_that_was_shown()
+    public void A_model_nobody_priced_costs_at_the_fallback_rates_which_is_the_overstated_figure_that_was_shown()
     {
-        var overstated = LeadDiscoveryCost.Estimate(RealRun, "a-model-nobody-priced", new LeadDiscoveryPricingOptions { DefaultModel = "claude-haiku-4-5-20251001" });
+        var overstated = LeadDiscoveryCost.Estimate(RealRun, "a-model-nobody-priced", new LeadDiscoveryPricingOptions());
 
         Assert.Equal(0.167699m, overstated);   // the figure on the screen that prompted this
     }

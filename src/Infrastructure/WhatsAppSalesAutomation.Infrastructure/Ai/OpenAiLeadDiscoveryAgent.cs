@@ -59,7 +59,9 @@ public class OpenAiLeadDiscoveryAgent : ILeadDiscoveryAgent
                 "lead discovery has no OpenAI API key - save one under Configuration > AI Providers (OpenAI), or set LeadDiscovery:Agent:OpenAiApiKey (environment variable LeadDiscovery__Agent__OpenAiApiKey).");
         }
 
-        var model = config.ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "OpenAI") ?? Blank(_settings.OpenAiModel) ?? "gpt-5-mini";
+        var model = config.ModelChosenFor(Application.Ai.AiModelGroups.LeadDiscovery, "OpenAI");
+        if (model is null)
+            return LeadDiscoveryAgentResult.NotConfigured(LeadDiscoveryPrompts.NoModelChosen("ChatGPT"));
         var baseUrl = Blank(_settings.OpenAiBaseUrl) ?? config.OpenAiBaseUrl;
 
         var evidence = new EvidenceCollector();

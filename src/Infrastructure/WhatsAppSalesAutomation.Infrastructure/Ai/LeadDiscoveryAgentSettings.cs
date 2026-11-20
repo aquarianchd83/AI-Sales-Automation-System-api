@@ -10,6 +10,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// environment variable <c>LeadDiscovery__Agent__ApiKey</c>, user secrets, or whatever the deployment uses
 /// for secrets.
 /// </summary>
+/// <remarks>
+/// The model each engine researches with is not here: it is chosen and saved on the AI Providers page (Model by task > Lead discovery,
+/// <c>AiProviders:TaskModels:LeadDiscovery:{Provider}</c>), so there is no model default in code.
+/// </remarks>
 public class LeadDiscoveryAgentSettings
 {
     /// <summary>"Anthropic" (default), "OpenAI" (ChatGPT) or "Simulated" - the same convention as WhatsAppSettings.Provider.
@@ -24,11 +28,6 @@ public class LeadDiscoveryAgentSettings
     /// <summary>Empty uses the base URL saved for OpenAI under Configuration > AI Providers.</summary>
     public string OpenAiBaseUrl { get; set; } = string.Empty;
 
-    /// <summary>The model that does the research. It must support the hosted web_search tool and function calling
-    /// (gpt-5, gpt-5-mini, gpt-4.1 ...). Deliberately not the chat model from AI Providers, which is usually the
-    /// cheapest one and too weak to research with. Add its rates under LeadDiscovery:Pricing:Models.</summary>
-    public string OpenAiModel { get; set; } = "gpt-5-mini";
-
     /// <summary>"low"/"medium"/"high", or empty to use the API default. Web search needs at least "low".</summary>
     public string? OpenAiReasoningEffort { get; set; } = "low";
 
@@ -39,10 +38,6 @@ public class LeadDiscoveryAgentSettings
     /// for a dedicated discovery key.</summary>
     public string GeminiApiKey { get; set; } = string.Empty;
 
-    /// <summary>The model that does the research. It must support Google Search grounding and function calling (gemini-2.5-flash, gemini-2.5-pro ...).
-    /// Add its rates under LeadDiscovery:Pricing:Models.</summary>
-    public string GeminiModel { get; set; } = "gemini-2.5-flash";
-
     /// <summary>The platform's own Anthropic API key. Empty means lead discovery is not configured, and every
     /// tenant's run is skipped rather than failed.</summary>
     public string ApiKey { get; set; } = string.Empty;
@@ -52,12 +47,6 @@ public class LeadDiscoveryAgentSettings
     public string BaseUrl { get; set; } = "https://api.anthropic.com/v1/";
 
     public string ApiVersion { get; set; } = "2023-06-01";
-
-    /// <summary>Claude Haiku 4.5 is the cheapest current Claude model, and phone and email accuracy is
-    /// enforced by LeadQualification whatever the model answers - so a cheaper model costs qualified leads
-    /// per run, not correctness. "claude-sonnet-5" or "claude-opus-5" buy better judgment on relevance,
-    /// independence and scoring; compare the token counts in each run's summary before changing it.</summary>
-    public string Model { get; set; } = "claude-haiku-4-5-20251001";
 
     public int MaxTokens { get; set; } = 16000;
 

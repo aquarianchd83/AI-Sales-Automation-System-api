@@ -169,64 +169,30 @@ public class PlatformConfigurationTests
     }
 
     [Fact]
-    public async Task The_chosen_default_models_round_trip_and_start_out_unset()
+    public async Task The_charges_have_no_default_model_to_choose()
     {
-        var store = new CapturingStore();
-        var initial = await Service(store).GetAsync();
-        Assert.Null(initial.Charges.LeadDiscovery.DefaultModel);
-        Assert.Null(initial.Charges.Ai.DefaultModel);
+        var initial = await Service(new CapturingStore()).GetAsync();
 
-        var edited = initial with
-        {
-            Charges = initial.Charges with
-            {
-                LeadDiscovery = initial.Charges.LeadDiscovery with { DefaultModel = "claude-sonnet-5" },
-                Ai = initial.Charges.Ai with { DefaultModel = "OpenAI:gpt-5-mini" }
-            }
-        };
-        await Service(store).UpdateAsync(edited, null);
-
-        var reread = await Service(new CapturingStore(), new ConfigurationBuilder().AddInMemoryCollection(store.Saved).Build()).GetAsync();
-        Assert.Equal("claude-sonnet-5", reread.Charges.LeadDiscovery.DefaultModel);
-        Assert.Equal("OpenAI:gpt-5-mini", reread.Charges.Ai.DefaultModel);
-
-        // Clearing it stores no row, so it is unset again.
-        var cleared = edited with { Charges = edited.Charges with { LeadDiscovery = edited.Charges.LeadDiscovery with { DefaultModel = null } } };
-        var clearStore = new CapturingStore();
-        await Service(clearStore).UpdateAsync(cleared, null);
-        Assert.DoesNotContain("LeadDiscovery:Pricing:DefaultModel", clearStore.Saved.Keys);
+        Assert.DoesNotContain(typeof(LeadDiscoveryChargesConfigDto).GetProperties(), p => p.Name == "DefaultModel");
+        Assert.DoesNotContain(typeof(AiChargesConfigDto).GetProperties(), p => p.Name == "DefaultModel");
+        Assert.NotEmpty(initial.Charges.LeadDiscovery.Models);
+        Assert.NotEmpty(initial.Charges.Ai.Models);
     }
 
     [Fact]
-    public async Task A_default_model_that_is_not_in_the_list_is_rejected()
+    public void A_model_with_no_row_is_priced_at_the_fallback_rates_for_lead_discovery_and_counted_as_free_for_AI_conversations()
     {
-        var store = new CapturingStore();
-        var service = Service(store);
-        var good = await service.GetAsync();
+        var estimator = new AiSpendEstimator(new FixedOptions<AiPricingOptions>(new()));
 
-        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(
-            good with { Charges = good.Charges with { Ai = good.Charges.Ai with { DefaultModel = "OpenAI:nope" } } }, null));
-        await Assert.ThrowsAsync<ValidationException>(() => service.UpdateAsync(
-            good with { Charges = good.Charges with { LeadDiscovery = good.Charges.LeadDiscovery with { DefaultModel = "nope" } } }, null));
-        Assert.Empty(store.Saved);
-    }
-
-    [Fact]
-    public void An_unlisted_model_is_priced_at_the_chosen_default_but_a_simulated_one_stays_free()
-    {
-        var ai = new AiPricingOptions { DefaultModel = "OpenAI/gpt-5-mini" };
-        var estimator = new AiSpendEstimator(new FixedOptions<AiPricingOptions>(ai));
-
-        // gpt-5-mini is 0.00025 / 0.002 per 1K: 2K prompt + 1K completion.
-        Assert.Equal(0.0025m, estimator.EstimateUsd("OpenAI:some-new-model", 2000, 1000));
+        // A dated model id is read from its undated row: gpt-5-mini is 0.00025 / 0.002 per 1K, so 2K prompt + 1K completion.
+        Assert.Equal(0.0025m, estimator.EstimateUsd("OpenAI:gpt-5-mini-2025-08-07", 2000, 1000));
+        // A model nobody priced is free, and so is a simulated one.
+        Assert.Equal(0m, estimator.EstimateUsd("OpenAI:some-new-model", 2000, 1000));
         Assert.Equal(0m, estimator.EstimateUsd("Simulated:x", 2000, 1000));
-        // Without a chosen default an unlisted model is still free.
-        Assert.Equal(0m, new AiSpendEstimator(new FixedOptions<AiPricingOptions>(new())).EstimateUsd("OpenAI:some-new-model", 2000, 1000));
 
-        var lead = new LeadDiscoveryPricingOptions { DefaultModel = "claude-opus-5" };
-        Assert.Equal(25m, lead.RatesFor("some-other-model").OutputPerMillion);
-        Assert.Equal(10m, lead.RatesFor("claude-sonnet-5").OutputPerMillion);
-        Assert.Equal(5m, new LeadDiscoveryPricingOptions().RatesFor("some-other-model").OutputPerMillion);
+        var lead = new LeadDiscoveryPricingOptions();
+        Assert.Equal(5m, lead.RatesFor("some-other-model").OutputPerMillion);   // the fallback row
+        Assert.Equal(10m, lead.RatesFor("claude-sonnet-5").OutputPerMillion);   // its own row
     }
 
     private static PlatformConfigurationDto WithCountries(PlatformConfigurationDto config, params string[] disabled) =>
