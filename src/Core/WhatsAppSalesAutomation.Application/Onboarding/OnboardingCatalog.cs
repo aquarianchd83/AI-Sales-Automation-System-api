@@ -1,3 +1,5 @@
+using WhatsAppSalesAutomation.Domain.Enums;
+
 namespace WhatsAppSalesAutomation.Application.Onboarding;
 
 /// <summary>One step of tenant onboarding: its place in the sequence, its weight towards the progress bar, and
@@ -23,6 +25,13 @@ public static class OnboardingCatalog
     /// <summary>TEMPORARY: steps that stay to do but no longer hold up the step after them, so the flow can be walked
     /// past one still being worked on. Empty this set to restore strict sequencing.</summary>
     public static readonly IReadOnlySet<string> OnHold = new HashSet<string>();
+
+    /// <summary>Steps that only exist when the tenant's plan includes the feature; the others apply to every plan.</summary>
+    public static readonly IReadOnlyDictionary<string, PlatformFeature> RequiredFeature = new Dictionary<string, PlatformFeature>
+    {
+        [LeadDiscovery] = PlatformFeature.LeadDiscovery,
+        [KnowledgeBase] = PlatformFeature.ProductKnowledge,
+    };
 
     public static readonly IReadOnlyList<OnboardingStepDefinition> Steps = new OnboardingStepDefinition[]
     {
