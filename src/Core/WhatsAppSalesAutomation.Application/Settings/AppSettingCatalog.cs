@@ -1,4 +1,5 @@
 using WhatsAppSalesAutomation.Application.Common.Options;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
 
 namespace WhatsAppSalesAutomation.Application.Settings;
 
@@ -30,6 +31,9 @@ namespace WhatsAppSalesAutomation.Application.Settings;
 /// everything else here: WhatsApp has its own bespoke per-tenant mechanism
 /// (TenantWhatsAppConfig), AiProviders is one platform-wide config with no per-tenant form, and MediaStorage is platform infra shared by every
 /// tenant (one file store) - it doesn't belong in a per-tenant override table either.</param>
+/// <summary>A setting that names a model of one provider: the console offers the models of that provider and type in the AI Provider Models catalogue.</summary>
+public record CatalogModelSource(string Provider, AiModelType Type);
+
 public record AppSettingDefinition(
     string Key,
     string Category,
@@ -39,6 +43,7 @@ public record AppSettingDefinition(
     bool IsTenantOverridable = false,
     string? DefaultValue = null,
     IReadOnlyList<string>? Options = null,
+    CatalogModelSource? ModelFrom = null,
     bool HiddenInEditor = false,
     int? MinValue = null,
     int? MaxValue = null,
@@ -97,13 +102,13 @@ public static class AppSettingCatalog
         new("ContentStudio:Cinematic:SubtitleFontsDirectory", "ContentStudio", IsSecret: false, Description: "Folder with a Devanagari-capable font (for example Noto Sans Devanagari) for subtitles. Leave empty to use the server's own fonts; a bare Linux server usually has none, and Hindi subtitles then show as boxes.", DefaultValue: ""),
         new("ContentStudio:Cinematic:SubtitleFontName", "ContentStudio", IsSecret: false, Description: "Font family name for subtitles, for example \"Noto Sans Devanagari\". Leave empty for the renderer's default.", DefaultValue: ""),
         new("ContentStudio:Cinematic:SpeechProvider", "ContentStudio", IsSecret: false, Description: "Where an added voice-over comes from: \"Simulator\" (free test tones) or \"OpenAI\" (paid speech). The clips keep their own voices unless a voice-over is added.", DefaultValue: "Simulator", Options: new[] { "Simulator", "OpenAI" }),
-        new("ContentStudio:Cinematic:SpeechModel", "ContentStudio", IsSecret: false, Description: "OpenAI speech model id.", DefaultValue: "gpt-4o-mini-tts"),
+        new("ContentStudio:Cinematic:SpeechModel", "ContentStudio", IsSecret: false, Description: "OpenAI speech model id.", DefaultValue: "gpt-4o-mini-tts", ModelFrom: new("OpenAI", AiModelType.Speech)),
         new("ContentStudio:Cinematic:SpeechUsdPerLine", "ContentStudio", IsSecret: false, Description: "Price per spoken line used for the estimate shown before a paid voice-over. An estimate, not billing data.", DefaultValue: "0.02"),
         new("ContentStudio:Cinematic:CharacterImageProvider", "ContentStudio", IsSecret: false, Description: "Where new character pictures come from: \"Simulator\" (free placeholders) or \"OpenAI\" (paid).", DefaultValue: "Simulator", Options: new[] { "Simulator", "OpenAI" }),
-        new("ContentStudio:Cinematic:ImageModel", "ContentStudio", IsSecret: false, Description: "OpenAI image model id.", DefaultValue: "gpt-image-1"),
+        new("ContentStudio:Cinematic:ImageModel", "ContentStudio", IsSecret: false, Description: "OpenAI image model id.", DefaultValue: "gpt-image-1", ModelFrom: new("OpenAI", AiModelType.Image)),
         new("ContentStudio:Cinematic:ImageUsdEstimate", "ContentStudio", IsSecret: false, Description: "Price per picture used for the estimate shown before a paid picture. An estimate, not billing data.", DefaultValue: "0.17"),
         new("ContentStudio:Cinematic:VideoProvider", "ContentStudio", IsSecret: false, Description: "Where scene clips can come from for tenants: \"Simulator\" (free test clips) or \"Google\" (Gemini: automatic, paid, made with Veo). Google Flow import is always available. Gemini also needs its key under Configuration > AI Providers.", DefaultValue: "Simulator", Options: new[] { "Simulator", "Google" }),
-        new("ContentStudio:Cinematic:VeoModel", "ContentStudio", IsSecret: false, Description: "Veo model id sent to the Gemini API.", DefaultValue: "veo-3.1-fast-generate-preview"),
+        new("ContentStudio:Cinematic:VeoModel", "ContentStudio", IsSecret: false, Description: "Veo model id sent to the Gemini API.", DefaultValue: "veo-3.1-fast-generate-preview", ModelFrom: new("Google", AiModelType.Video)),
         new("ContentStudio:Cinematic:VeoUsdPerSecond", "ContentStudio", IsSecret: false, Description: "Price per generated second used for the cost estimate shown before a paid clip. Check Google pricing; this is an estimate, not billing data.", DefaultValue: "0.12"),
         new("ContentStudio:Cinematic:MaxAutomaticRetries", "ContentStudio", IsSecret: false, Description: "How many times a failed scene may be retried automatically. Paid regeneration beyond this needs the user to confirm.", DefaultValue: "1", Options: new[] { "0", "1", "2" }),
         // AiProviders - the single, platform-wide AI configuration every tenant runs on. All live (read through IOptionsSnapshot).
@@ -124,22 +129,22 @@ public static class AppSettingCatalog
         new("AiProviders:TaskModels:LeadDiscovery:Google", "AiProviders", IsSecret: false, Description: "The model lead discovery runs on for Google. Edited under Model by task on the AI Providers page.", DefaultValue: "gemini-2.5-flash", HiddenInEditor: true, SeedFromKey: "LeadDiscovery:Agent:GeminiModel"),
         new("AiProviders:Anthropic:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Claude off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Anthropic:ApiKey", "AiProviders", IsSecret: true),
-        new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false),
+        new("AiProviders:Anthropic:Model", "AiProviders", IsSecret: false, ModelFrom: new("Anthropic", AiModelType.Chat)),
         new("AiProviders:Anthropic:ApiVersion", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:BaseUrl", "AiProviders", IsSecret: false),
         new("AiProviders:Anthropic:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:Anthropic:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Claude output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:OpenAI:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns ChatGPT off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:OpenAI:ApiKey", "AiProviders", IsSecret: true),
-        new("AiProviders:OpenAI:ChatModel", "AiProviders", IsSecret: false),
-        new("AiProviders:OpenAI:EmbeddingModel", "AiProviders", IsSecret: false),
+        new("AiProviders:OpenAI:ChatModel", "AiProviders", IsSecret: false, ModelFrom: new("OpenAI", AiModelType.Chat)),
+        new("AiProviders:OpenAI:EmbeddingModel", "AiProviders", IsSecret: false, ModelFrom: new("OpenAI", AiModelType.Embedding)),
         new("AiProviders:OpenAI:BaseUrl", "AiProviders", IsSecret: false),
         new("AiProviders:OpenAI:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:OpenAI:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of ChatGPT output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:Google:Enabled", "AiProviders", IsSecret: false, Description: "\"true\" (On) or \"false\" (Off). Off turns Gemini off across the whole application: it is not used for chat, embeddings, suggestions or lead discovery, and anything set to it runs on the simulator. Live once saved.", DefaultValue: "true", Options: new[] { "true", "false" }),
         new("AiProviders:Google:ApiKey", "AiProviders", IsSecret: true),
-        new("AiProviders:Google:ChatModel", "AiProviders", IsSecret: false),
-        new("AiProviders:Google:EmbeddingModel", "AiProviders", IsSecret: false),
+        new("AiProviders:Google:ChatModel", "AiProviders", IsSecret: false, ModelFrom: new("Google", AiModelType.Chat)),
+        new("AiProviders:Google:EmbeddingModel", "AiProviders", IsSecret: false, ModelFrom: new("Google", AiModelType.Embedding)),
         new("AiProviders:Google:BaseUrl", "AiProviders", IsSecret: false),
         new("AiProviders:Google:InputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini input for the model above, US dollars per million tokens. Hidden from the editor: a model with a row in Model token prices is priced from there, and this is only the fallback for a model without one.", DefaultValue: "0", HiddenInEditor: true),
         new("AiProviders:Google:OutputPer1MUsd", "AiProviders", IsSecret: false, Description: "Price of Gemini output for the model above, US dollars per million tokens.", DefaultValue: "0", HiddenInEditor: true),

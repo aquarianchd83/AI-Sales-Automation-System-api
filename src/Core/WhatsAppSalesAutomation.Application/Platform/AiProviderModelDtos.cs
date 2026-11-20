@@ -13,6 +13,8 @@ public record AiProviderModelDto(
     int? MaxOutputTokens,
     decimal? InputPricePer1MUsd,
     decimal? OutputPricePer1MUsd,
+    AiModelCostTier CostTier,
+    string[] BestFor,
     string? Description,
     bool IsActive,
     bool IsDefault,
@@ -28,6 +30,8 @@ public record SaveAiProviderModelRequest(
     int? MaxOutputTokens = null,
     decimal? InputPricePer1MUsd = null,
     decimal? OutputPricePer1MUsd = null,
+    AiModelCostTier CostTier = AiModelCostTier.Average,
+    string[]? BestFor = null,
     string? Description = null,
     bool IsActive = true,
     bool IsDefault = false);
@@ -40,6 +44,8 @@ public class SaveAiProviderModelRequestValidator : AbstractValidator<SaveAiProvi
         RuleFor(r => r.DisplayName).NotEmpty().MaximumLength(200);
         RuleFor(r => r.ModelId).NotEmpty().MaximumLength(200);
         RuleFor(r => r.ModelType).IsInEnum();
+        RuleFor(r => r.CostTier).IsInEnum();
+        RuleForEach(r => r.BestFor).Must(AiModelTasks.IsKnown).WithMessage("'{PropertyValue}' is not a known task.").When(r => r.BestFor != null);
         RuleFor(r => r.ContextWindowTokens).GreaterThan(0).When(r => r.ContextWindowTokens.HasValue);
         RuleFor(r => r.MaxOutputTokens).GreaterThan(0).When(r => r.MaxOutputTokens.HasValue);
         RuleFor(r => r.InputPricePer1MUsd).GreaterThanOrEqualTo(0).When(r => r.InputPricePer1MUsd.HasValue);

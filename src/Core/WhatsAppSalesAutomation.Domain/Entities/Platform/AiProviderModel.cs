@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using WhatsAppSalesAutomation.Domain.Common;
 
 namespace WhatsAppSalesAutomation.Domain.Entities.Platform;
@@ -26,6 +27,13 @@ public class AiProviderModel : BaseEntity
 
     public decimal? OutputPricePer1MUsd { get; set; }
 
+    /// <summary>How expensive the model is relative to the others, so a cheap one can be picked for bulk work and an expensive one only where it pays off.</summary>
+    public AiModelCostTier CostTier { get; set; } = AiModelCostTier.Average;
+
+    /// <summary>The tasks this model is the recommended pick for, as comma-separated <c>AiModelTasks</c> keys (e.g. "customer-replies,business-keywords"). Empty when it is not recommended for any; the Compare screen groups models by these.</summary>
+    public string BestFor { get; set; } = string.Empty;
+
+    /// <summary>In which scenario to use the model.</summary>
     public string? Description { get; set; }
 
     public bool IsActive { get; set; } = true;
@@ -34,9 +42,22 @@ public class AiProviderModel : BaseEntity
     public bool IsDefault { get; set; }
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AiModelCostTier
+{
+    Cheap = 0,
+    Average = 1,
+    Expensive = 2
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AiModelType
 {
     Chat = 0,
     Embedding = 1,
-    Image = 2
+    Image = 2,
+    /// <summary>Text to speech, e.g. the Content Studio voice-over model.</summary>
+    Speech = 3,
+    /// <summary>Video generation, e.g. the Content Studio Veo model.</summary>
+    Video = 4
 }
