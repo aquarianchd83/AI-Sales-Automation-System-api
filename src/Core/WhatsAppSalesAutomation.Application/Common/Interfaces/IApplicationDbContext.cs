@@ -208,6 +208,7 @@ public interface IApplicationDbContext
     DbSet<Domain.Entities.ProductKnowledge.KnowledgeItem> KnowledgeItems { get; }
 
     DbSet<Announcement> Announcements { get; }
+    DbSet<AiProviderModel> AiProviderModels { get; }
 
     DbSet<PlatformMessageTemplate> PlatformMessageTemplates { get; }
 
