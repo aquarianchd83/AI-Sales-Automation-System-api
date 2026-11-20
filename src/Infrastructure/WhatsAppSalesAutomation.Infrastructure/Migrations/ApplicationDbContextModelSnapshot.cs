@@ -5666,7 +5666,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("HeaderMediaAssetId");
 
-                    b.HasIndex("WhatsAppTemplateName", "Language")
+                    b.HasIndex("TenantId", "WhatsAppTemplateName", "Language")
                         .IsUnique();
 
                     b.ToTable("MessageTemplates", (string)null);

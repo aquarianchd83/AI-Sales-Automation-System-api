@@ -87,7 +87,15 @@ public class MessageTemplateService : IMessageTemplateService
         };
 
         _context.MessageTemplates.Add(template);
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MessageTemplates_", StringComparison.Ordinal) == true)
+        {
+            // Another request created the same name and language between the check above and this save.
+            throw new ConflictException($"A template named '{request.WhatsAppTemplateName}' already exists for language '{request.Language}'.");
+        }
 
         return await ToDtoAsync(template, cancellationToken);
     }
