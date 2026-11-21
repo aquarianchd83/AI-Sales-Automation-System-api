@@ -64,6 +64,23 @@ Migration `AddWalletRechargeTransactions` adds `PaymentTransactions` (tenant-own
 
 Automated tests: `dotnet test --filter WalletRecharge` (API) and `ng test --include '**/wallet-recharge/**'` (Angular).
 
-## Razorpay MCP
+## Razorpay API calls
 
-The Razorpay MCP server is a dashboard assistant for development (looking up orders and payments while testing). The wallet recharge does **not** depend on it: order creation, signature and webhook verification, capture and reconciliation use Razorpay's REST API from the backend, with credentials kept server-side.
+The wallet recharge talks to Razorpay only through its REST API, called from the backend (`RazorpayGateway`, base URL `https://api.razorpay.com/v1/`, HTTP basic auth with `Razorpay:KeyId` : `Razorpay:KeySecret`). No MCP server or other tool sits in between, and the key secret never reaches the browser.
+
+| When | Request | What it is for |
+|---|---|---|
+| Create order | `POST /v1/orders` `{ amount, currency, receipt, notes }` | Razorpay order for the server-priced total (paise) |
+| Verify | `GET /v1/payments/{payment_id}` | Razorpay's own record: order id, amount, currency, status |
+| Verify / webhook / reconciliation | `POST /v1/payments/{payment_id}/capture` `{ amount, currency }` | Captures an `authorized` payment before crediting |
+| Reconciliation and status check | `GET /v1/orders/{order_id}/payments` | Every attempt on an order, when no callback or webhook arrived |
+| Settings test | `GET /v1/orders?count=1` | Checks the saved keys work |
+
+Inbound, Razorpay calls `POST /api/v1/webhooks/razorpay`; its `X-Razorpay-Signature` is verified over the raw body with `Razorpay:WebhookSecret`. Refunds are issued from the Razorpay dashboard and reach the wallet through the `refund.*` webhooks.
+
+To look up an order or payment while testing, call the same endpoints yourself, for example:
+
+```bash
+curl -u rzp_test_KEYID:KEYSECRET https://api.razorpay.com/v1/orders/order_XXXX/payments
+curl -u rzp_test_KEYID:KEYSECRET https://api.razorpay.com/v1/payments/pay_XXXX
+```
