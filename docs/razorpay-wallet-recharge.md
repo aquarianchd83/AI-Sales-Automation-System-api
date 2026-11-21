@@ -13,6 +13,12 @@ Tenants buy wallet credits with Razorpay (UPI, cards, net banking, wallets). The
 
 The browser's success callback never credits anything. The balance on screen changes only after the server says the top-up is `Credited`.
 
+## Credit packs ("Buy extra credits")
+
+The **Buy** buttons on the wallet screen pay through the same flow. `POST /api/v1/wallet/recharge/credit-packs/{packId}/create-order` prices the pack on the server (its price for the tenant's country plus GST - the same price the screen shows), needs an active plan as before, and creates the Razorpay order for the pack's credits. The `PaymentTransactions` row carries `CreditPackId`; Checkout, verify, webhook and reconciliation are exactly the top-up's, and on capture the wallet gets the pack's credits once, the `Payments` row is a `CreditPack` payment for that pack, and the tenant gets a "credits added" notice.
+
+The old `POST /api/v1/billing/credit-packs/{id}/purchase` (credits with no payment) is refused once Razorpay keys are saved; it only works on an install with no payment gateway.
+
 ## Exactly-once crediting
 
 Verify, webhook and reconciliation all end in one method (`WalletRechargeService.CompleteAsync`), which in **one database transaction** marks the top-up `Credited`, writes the `Payments` row and writes the wallet ledger entry. Three independent guards stop a second credit:

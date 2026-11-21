@@ -36,6 +36,8 @@ public class BillingService : IBillingService
     /// <summary>Optional like the notifier. Without it nothing is ever sent to AutoPay and every purchase is simulated, as before.</summary>
     private readonly IAutoPayService? _autoPay;
 
+    private readonly IAppSettingsStore? _settings;
+
     public BillingService(
         IApplicationDbContext context,
         ITenantContext tenantContext,
@@ -45,8 +47,10 @@ public class BillingService : IBillingService
         IPricingService pricing,
         ICreditAllocationService credits,
         ITenantNotifier? notifier = null,
-        IAutoPayService? autoPay = null)
+        IAutoPayService? autoPay = null,
+        IAppSettingsStore? settings = null)
     {
+        _settings = settings;
         _autoPay = autoPay;
         _credits = credits;
         _notifier = notifier;
@@ -249,6 +253,16 @@ public class BillingService : IBillingService
 
     public async Task<PaymentDto> PurchaseCreditPackAsync(Guid tenantId, Guid packId, CancellationToken cancellationToken = default)
     {
+        // Once Razorpay is set up, a pack is bought through Checkout (WalletRechargeService.CreatePackOrderAsync) and credited only when the money is
+        // captured. This simulated purchase - credits with no payment - is left only for an install with no payment gateway at all.
+        if (_settings is not null)
+        {
+            var stored = await _settings.GetAllAsync(cancellationToken);
+            if (stored.TryGetValue("Razorpay:KeyId", out var keyId) && !string.IsNullOrWhiteSpace(keyId)
+                && stored.TryGetValue("Razorpay:KeySecret", out var secret) && !string.IsNullOrWhiteSpace(secret))
+                throw new ConflictException("Credit packs are paid through Razorpay. Refresh the page and press Buy again.");
+        }
+
         var pack = await _context.CreditPacks.FirstOrDefaultAsync(p => p.Id == packId && p.IsActive, cancellationToken)
             ?? throw new NotFoundException(nameof(CreditPack), packId);
 

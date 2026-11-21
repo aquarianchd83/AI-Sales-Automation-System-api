@@ -70,6 +70,24 @@ public sealed class PlanAndCreditFlowTests : IDisposable
 
     private Task<Subscription> SubscriptionAsync() => _db.Subscriptions.IgnoreQueryFilters().SingleAsync();
 
+    // ---- Credit packs once Razorpay is set up
+
+    [Fact]
+    public async Task With_razorpay_keys_saved_a_credit_pack_cannot_be_bought_without_paying()
+    {
+        var settings = new MemorySettingsStore();
+        settings.Rows["Razorpay:KeyId"] = "rzp_test_KEY";
+        settings.Rows["Razorpay:KeySecret"] = "secret";
+        var jobs = Fake.Of<ITenantJobProvisioner>((m, _) => Task.CompletedTask);
+        var billing = new BillingService(_db, new PlatformContext(), _clock, jobs, _ledger, TestPricing.NoTax(), _credits, settings: settings);
+
+        var refused = await Assert.ThrowsAsync<ConflictException>(() => billing.PurchaseCreditPackAsync(_tenant.Id, _pack.Id));
+
+        Assert.Contains("Razorpay", refused.Message);
+        Assert.Equal(0m, await BalanceAsync());
+        Assert.Empty(await _db.Payments.IgnoreQueryFilters().ToListAsync());
+    }
+
     // ---- The Trial plan
 
     [Fact]
