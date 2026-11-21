@@ -39,6 +39,10 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(
             "razorpay-webhook-retry", job => job.RetryWebhooksAsync(), "*/5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Every 5 minutes: settles wallet top-ups whose browser was closed or whose webhook never arrived, by asking Razorpay about each pending order.
+        recurringJobs.AddOrUpdate<WalletRechargeReconciliationJob>(
+            "wallet-recharge-reconciliation", job => job.RunAsync(), "*/5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Daily at 01:45 UTC, clear of the passes at 00:30 and 03:20: compares every live AutoPay mandate with Razorpay's own record, so a
         // webhook that never arrived cannot leave a mandate wrong for more than a day. Read-mostly at Razorpay; it never starts a debit.
         recurringJobs.AddOrUpdate<AutoPayMaintenanceJob>(

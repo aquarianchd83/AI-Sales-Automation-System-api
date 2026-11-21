@@ -47,6 +47,7 @@ public static class DependencyInjection
         services.Configure<MediaOptions>(configuration.GetSection("Media"));
         services.Configure<AiOptions>(configuration.GetSection("Ai"));
         services.Configure<AppLinkOptions>(configuration.GetSection("App"));
+        services.Configure<WhatsAppSalesAutomation.Application.Wallet.WalletRechargeOptions>(configuration.GetSection(WhatsAppSalesAutomation.Application.Wallet.WalletRechargeOptions.SectionName));
         services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
         services.Configure<StudioOptions>(configuration.GetSection("ContentStudio"));
 
@@ -246,6 +247,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformMessageTemplateService, PlatformMessageTemplateService>();
         services.AddScoped<IPlatformNoticeTemplates, PlatformNoticeTemplates>();
         services.AddScoped<IPlatformMediaService, PlatformMediaService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Wallet.IWalletRechargeService, WhatsAppSalesAutomation.Application.Wallet.WalletRechargeService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayService, WhatsAppSalesAutomation.Application.Razorpay.RazorpayService>();
         services.AddScoped<IPlanCostReportService, PlanCostReportService>();
         services.AddScoped<IServiceMarginService, ServiceMarginService>();

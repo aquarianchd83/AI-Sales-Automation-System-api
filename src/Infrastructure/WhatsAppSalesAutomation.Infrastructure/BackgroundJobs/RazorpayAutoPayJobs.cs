@@ -2,6 +2,7 @@ using Hangfire;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Billing.AutoPay;
 using WhatsAppSalesAutomation.Application.Razorpay;
+using WhatsAppSalesAutomation.Application.Wallet;
 
 namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 
@@ -106,6 +107,35 @@ public class AutoPayMaintenanceJob
         catch (Exception ex)
         {
             _logger.LogError(ex, "AutoPay reconciliation failed");
+        }
+    }
+}
+
+/// <summary>
+/// Settles wallet top-ups that never heard back - the browser was closed mid-payment, or the webhook was lost - by asking Razorpay what became of each
+/// order, and calls abandoned checkouts abandoned. Safe to run as often as you like: crediting is exactly-once, and it never throws, so the next run
+/// simply starts from a clean slate.
+/// </summary>
+public class WalletRechargeReconciliationJob
+{
+    private readonly IWalletRechargeService _recharge;
+    private readonly ILogger<WalletRechargeReconciliationJob> _logger;
+
+    public WalletRechargeReconciliationJob(IWalletRechargeService recharge, ILogger<WalletRechargeReconciliationJob> logger)
+    {
+        _recharge = recharge;
+        _logger = logger;
+    }
+
+    public async Task RunAsync()
+    {
+        try
+        {
+            await _recharge.ReconcilePendingAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Wallet recharge reconciliation pass failed");
         }
     }
 }

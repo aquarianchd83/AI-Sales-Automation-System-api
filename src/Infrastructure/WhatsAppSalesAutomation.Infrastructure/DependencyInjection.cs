@@ -430,6 +430,7 @@ public static class DependencyInjection
         services.AddScoped<SubscriptionMaintenanceJob>();
         services.AddScoped<RazorpayWebhookProcessingJob>();
         services.AddScoped<AutoPayMaintenanceJob>();
+        services.AddScoped<WalletRechargeReconciliationJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayWebhookQueue, HangfireRazorpayWebhookQueue>();
         services.AddScoped<QuotaAlertJob>();
         services.AddScoped<DataRetentionJob>();
@@ -451,7 +452,11 @@ public static class DependencyInjection
         services.AddHttpClient<WhatsAppSalesAutomation.Application.Platform.IPlatformWhatsAppVerifier, WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppVerifier>().RemoveAllLoggers();
         services.AddScoped<WhatsAppSalesAutomation.Application.Notifications.IPlatformWhatsAppTemplateAdmin>(sp => sp.GetRequiredService<WhatsAppSalesAutomation.Infrastructure.Notifications.PlatformWhatsAppSender>());
         services.AddScoped<PlatformTemplateSyncJob>();
-        services.AddHttpClient<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayGateway, WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway>(client =>
+        // Razorpay: orders, payments, capture and refunds go through Razorpay's MCP server (RazorpayMcpGateway, Razorpay:Transport = Mcp by default);
+        // plans, subscriptions and invoices - which the MCP server has no tools for - and Razorpay:Transport = Rest use the REST API (RazorpayGateway).
+        services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway>(client =>
             client.BaseAddress = new Uri(WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayGateway.DefaultBaseUrl));
+        services.AddHttpClient<WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayMcpClient>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayGateway, WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayMcpGateway>();
     }
 }

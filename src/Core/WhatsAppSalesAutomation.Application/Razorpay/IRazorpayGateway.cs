@@ -70,6 +70,11 @@ public interface IRazorpayGateway
 
     Task<RazorpayResult<RazorpayPaymentInfo>> FetchPaymentAsync(RazorpayCredentials credentials, string paymentId, CancellationToken cancellationToken = default);
 
+    /// <summary>Every payment attempt made against an order (GET /orders/{id}/payments) - what the reconciliation of a wallet top-up reads when no webhook
+    /// or browser callback ever reported the outcome.</summary>
+    Task<RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>> FetchOrderPaymentsAsync(
+        RazorpayCredentials credentials, string orderId, CancellationToken cancellationToken = default);
+
     /// <summary>Captures an authorized payment. Needed only when the account is not set to capture automatically.</summary>
     Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
         RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default);

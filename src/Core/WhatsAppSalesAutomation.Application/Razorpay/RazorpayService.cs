@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Wallet;
 using WhatsAppSalesAutomation.Domain.Entities.Payments;
 
 namespace WhatsAppSalesAutomation.Application.Razorpay;
@@ -68,11 +69,14 @@ public class RazorpayService : IRazorpayService
     private readonly ILogger<RazorpayService> _logger;
     /// <summary>Optional so the test page can be exercised without a job server; DI always supplies one.</summary>
     private readonly IRazorpayWebhookQueue? _queue;
+    /// <summary>Optional so the test page and its tests run without the tenant wallet; DI always supplies it. Tenants' wallet top-up orders are applied through it.</summary>
+    private readonly IWalletRechargeService? _walletRecharge;
 
     public RazorpayService(IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IDateTimeProvider clock, ILogger<RazorpayService> logger,
-        IRazorpayWebhookQueue? queue = null)
+        IRazorpayWebhookQueue? queue = null, IWalletRechargeService? walletRecharge = null)
     {
         _queue = queue;
+        _walletRecharge = walletRecharge;
         _context = context;
         _store = store;
         _gateway = gateway;
@@ -366,6 +370,35 @@ public class RazorpayService : IRazorpayService
         if (parsed.Event.StartsWith(SubscriptionEventPrefix, StringComparison.Ordinal))
             return await StoreForProcessingAsync(record, cancellationToken);
 
+        // A tenant's wallet top-up is applied by the wallet service (it credits the wallet, exactly once); anything it does not recognise falls through.
+        if (_walletRecharge is not null && (parsed.OrderId is not null || parsed.PaymentId is not null))
+        {
+            var wallet = await _walletRecharge.HandleWebhookAsync(
+                new WalletWebhookEvent(parsed.Event, parsed.OrderId, parsed.PaymentId, parsed.Method, parsed.ErrorDescription, parsed.PaymentAmount,
+                    parsed.PaymentCurrency, parsed.PaymentStatus, parsed.RefundId, parsed.RefundAmount, parsed.PaymentAmountRefunded), cancellationToken);
+            if (wallet.Matched)
+            {
+                record.Applied = wallet.Applied;
+                record.Note = Truncate(wallet.Note, 500);
+                record.ProcessingStatus = wallet.Applied ? RazorpayWebhookProcessingStatus.Completed : RazorpayWebhookProcessingStatus.Ignored;
+                record.ProcessedAtUtc = _clock.UtcNow;
+                _context.RazorpayWebhookEvents.Add(record);
+                try
+                {
+                    await _context.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException)
+                {
+                    // Lost a race with a parallel redelivery of the same event; the wallet itself was credited only once.
+                    _context.ResetChangeTracker();
+                    return RazorpayWebhookOutcome.Duplicate;
+                }
+
+                _logger.LogInformation("Razorpay webhook {Event} ({EventId}) for wallet top-up order {OrderId}: {Note}", parsed.Event, key, parsed.OrderId, record.Note);
+                return record.Applied ? RazorpayWebhookOutcome.Applied : RazorpayWebhookOutcome.Ignored;
+            }
+        }
+
         var order = parsed.OrderId is not null
             ? await _context.RazorpayOrders.FirstOrDefaultAsync(o => o.OrderId == parsed.OrderId, cancellationToken)
             : parsed.PaymentId is not null
@@ -492,7 +525,8 @@ public class RazorpayService : IRazorpayService
     private record ParsedWebhook(
         string Event, string? OrderId, string? PaymentId, string? Method, string? ErrorDescription,
         string? RefundId, long? RefundAmount, long? PaymentAmountRefunded,
-        string? SubscriptionId = null, DateTime? CreatedAtUtc = null, string? InvoiceId = null);
+        string? SubscriptionId = null, DateTime? CreatedAtUtc = null, string? InvoiceId = null,
+        long? PaymentAmount = null, string? PaymentCurrency = null, string? PaymentStatus = null);
 
     private static ParsedWebhook Parse(byte[] body)
     {
@@ -522,7 +556,10 @@ public class RazorpayService : IRazorpayService
                 payment is { } pay5 ? Long(pay5, "amount_refunded") : null,
                 subscription is { } sub ? Str(sub, "id") is { } subId ? Truncate(subId, 40) : null : null,
                 Long(root, "created_at") is { } createdAt and > 0 ? DateTimeOffset.FromUnixTimeSeconds(createdAt).UtcDateTime : null,
-                payment is { } pay6 ? Str(pay6, "invoice_id") : null);
+                payment is { } pay6 ? Str(pay6, "invoice_id") : null,
+                payment is { } pay7 ? Long(pay7, "amount") : null,
+                payment is { } pay8 ? Str(pay8, "currency") : null,
+                payment is { } pay9 ? Str(pay9, "status") : null);
         }
         catch (JsonException)
         {
