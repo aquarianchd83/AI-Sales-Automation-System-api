@@ -60,7 +60,7 @@ public static class AppSettingCatalog
 {
     public static readonly IReadOnlyList<string> Categories = new[]
     {
-        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "MetaAds", "ContentStudio", "DatabaseSizeMonitor", "Discovery"
+        "WhatsApp", "AiProviders", "Campaigns", "Media", "Messaging", "Ai", "MediaStorage", "App", "Email", "Sms", "Integrations", "Retention", "PlatformWhatsApp", "WhatsAppProvider", "WhatsAppBridge", "Razorpay", "Wallet", "MetaAds", "ContentStudio", "DatabaseSizeMonitor", "Discovery"
     };
 
     public static readonly IReadOnlyList<AppSettingDefinition> All = new List<AppSettingDefinition>
@@ -305,6 +305,14 @@ public static class AppSettingCatalog
         // Recurring plan billing (AutoPayService). Off until the operator turns it on: the keys above also serve the test page, and must not by
         // themselves start sending tenants to a mandate.
         new("Razorpay:AutoPayEnabled", "Razorpay", IsSecret: false, Description: "\"true\" makes tenants billed in rupees pay for a plan through Razorpay UPI AutoPay instead of the simulated payment. Needs Subscriptions enabled on the Razorpay account.", DefaultValue: "false", Options: new[] { "true", "false" }),
+
+        // Tenant wallet top-ups through Razorpay (WalletRechargeService). Live: read through IOptionsSnapshot, no restart. The Razorpay keys above decide Test or Live.
+        new("Wallet:MinRechargeInr", "Wallet", IsSecret: false, DefaultValue: "100", Description: "Smallest wallet recharge a tenant can make, in rupees (before tax)."),
+        new("Wallet:MaxRechargeInr", "Wallet", IsSecret: false, DefaultValue: "50000", Description: "Largest wallet recharge a tenant can make, in rupees (before tax)."),
+        new("Wallet:CreditsPerRupee", "Wallet", IsSecret: false, DefaultValue: "1", Description: "Wallet credits one rupee of recharge buys (the wallet holds credits, not rupees)."),
+        new("Wallet:RechargePresets", "Wallet", IsSecret: false, DefaultValue: "100,500,1000,2000,5000", Description: "Quick-pick recharge amounts in rupees, comma separated. Amounts outside the min/max are ignored."),
+        new("Wallet:BusinessName", "Wallet", IsSecret: false, DefaultValue: "Sales Automation", Description: "The merchant name Razorpay Checkout shows."),
+        new("Wallet:AbandonAfterMinutes", "Wallet", IsSecret: false, DefaultValue: "60", Description: "Minutes an order may wait for a payment before the checkout is treated as abandoned."),
 
         // Retention - how long data the platform only needs for a while is kept, in days. 0 keeps it forever; 1-6 counts as 7. Read live by
         // the daily clean-up. Conversations and messages are deliberately not here.

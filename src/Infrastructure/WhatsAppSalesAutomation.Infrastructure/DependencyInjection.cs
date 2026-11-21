@@ -430,6 +430,7 @@ public static class DependencyInjection
         services.AddScoped<SubscriptionMaintenanceJob>();
         services.AddScoped<RazorpayWebhookProcessingJob>();
         services.AddScoped<AutoPayMaintenanceJob>();
+        services.AddScoped<WalletRechargeReconciliationJob>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Razorpay.IRazorpayWebhookQueue, HangfireRazorpayWebhookQueue>();
         services.AddScoped<QuotaAlertJob>();
         services.AddScoped<DataRetentionJob>();

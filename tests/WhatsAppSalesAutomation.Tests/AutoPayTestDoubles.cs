@@ -143,6 +143,9 @@ public sealed class FakeSubscriptionGateway : IRazorpayGateway
     public Task<RazorpayResult<RazorpayPaymentInfo>> FetchPaymentAsync(RazorpayCredentials credentials, string paymentId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
+    public Task<RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>> FetchOrderPaymentsAsync(RazorpayCredentials credentials, string orderId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
         RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();

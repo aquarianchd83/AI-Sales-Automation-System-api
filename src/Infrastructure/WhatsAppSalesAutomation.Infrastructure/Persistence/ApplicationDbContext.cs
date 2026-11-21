@@ -227,6 +227,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder> RazorpayOrders => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayOrder>();
 
+    public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.PaymentTransaction> PaymentTransactions => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.PaymentTransaction>();
+
     public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent> RazorpayWebhookEvents => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayWebhookEvent>();
 
     public DbSet<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan> RazorpayPlans => Set<WhatsAppSalesAutomation.Domain.Entities.Payments.RazorpayPlan>();

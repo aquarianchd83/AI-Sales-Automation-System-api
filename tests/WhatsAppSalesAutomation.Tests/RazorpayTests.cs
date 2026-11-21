@@ -526,6 +526,9 @@ public sealed class RazorpayServiceTests : IDisposable
             return Task.FromResult(Payments.TryGetValue(paymentId, out var p) ? RazorpayResult<RazorpayPaymentInfo>.Ok(p) : RazorpayResult<RazorpayPaymentInfo>.Fail("The id provided does not exist"));
         }
 
+        public Task<RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>> FetchOrderPaymentsAsync(RazorpayCredentials credentials, string orderId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>.Ok(Payments.Values.Where(p => p.OrderId == orderId).ToList()));
+
         public Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
             RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default)
         {

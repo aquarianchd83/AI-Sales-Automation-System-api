@@ -50,6 +50,19 @@ public class RazorpayGateway : IRazorpayGateway
     public async Task<RazorpayResult<RazorpayPaymentInfo>> FetchPaymentAsync(RazorpayCredentials credentials, string paymentId, CancellationToken cancellationToken = default) =>
         ToPayment(await SendAsync<PaymentBody>(credentials, HttpMethod.Get, $"payments/{Uri.EscapeDataString(paymentId)}", null, cancellationToken));
 
+    public async Task<RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>> FetchOrderPaymentsAsync(
+        RazorpayCredentials credentials, string orderId, CancellationToken cancellationToken = default)
+    {
+        var result = await SendAsync<PaymentCollectionBody>(credentials, HttpMethod.Get, $"orders/{Uri.EscapeDataString(orderId)}/payments", null, cancellationToken);
+        if (!result.Success || result.Value is null)
+            return RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>.Fail(result.Error ?? "Razorpay returned no payments.");
+
+        var payments = (result.Value.Items ?? new List<PaymentBody>()).Where(p => p.Id is not null)
+            .Select(p => new RazorpayPaymentInfo(p.Id!, p.OrderId ?? orderId, p.Amount, p.Currency ?? "INR", p.Status ?? "unknown", p.Method, p.AmountRefunded, p.ErrorDescription))
+            .ToList();
+        return RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>.Ok(payments);
+    }
+
     public async Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
         RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default) =>
         ToPayment(await SendAsync<PaymentBody>(credentials, HttpMethod.Post, $"payments/{Uri.EscapeDataString(paymentId)}/capture", new { amount = amountMinor, currency }, cancellationToken));
@@ -200,6 +213,11 @@ public class RazorpayGateway : IRazorpayGateway
         public string? Method { get; set; }
         public long AmountRefunded { get; set; }
         public string? ErrorDescription { get; set; }
+    }
+
+    private sealed class PaymentCollectionBody
+    {
+        public List<PaymentBody>? Items { get; set; }
     }
 
     private sealed class PlanBody

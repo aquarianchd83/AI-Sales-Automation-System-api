@@ -91,6 +91,37 @@ public class QuotaLedgerService : IQuotaLedgerService
             return true;
         }, cancellationToken);
 
+    /// <summary>
+    /// Credits a tenant's wallet with <paramref name="credits"/> bought by a wallet top-up. The wallet is the same single credit wallet a credit pack
+    /// feeds (a purchase grant, valid <see cref="CreditValidityMonths"/> months, so a refund can claw it back), and the ledger entry is keyed by
+    /// <paramref name="transactionId"/> - calling this twice for one top-up writes one entry and returns false the second time.
+    /// </summary>
+    /// <param name="paymentId">The <c>Payment</c> row for the money received.</param>
+    /// <param name="note">Where it came from, e.g. "Razorpay wallet top-up pay_...".</param>
+    public Task<bool> GrantTopUpAsync(Guid tenantId, decimal credits, Guid transactionId, Guid paymentId, string note, CancellationToken cancellationToken = default)
+    {
+        if (credits <= 0)
+            throw new ArgumentOutOfRangeException(nameof(credits), "A top-up must add a positive number of credits.");
+
+        return WithRetryAsync(async () =>
+        {
+            var operationKey = $"topup:{transactionId}";
+            if (await HasEntryAsync(tenantId, operationKey, QuotaEntryType.Purchase, cancellationToken))
+                return false;
+
+            var now = _dateTime.UtcNow;
+            var book = await OpenAsync(tenantId, QuotaType.Credits, now, cancellationToken);
+            var grant = NewGrant(tenantId, QuotaType.Credits, QuotaGrantOrigin.CreditPurchase, credits, now, now.AddMonths(CreditValidityMonths), paymentId);
+            _context.QuotaGrants.Add(grant);
+            book.Grants.Add(grant);
+            Post(book, QuotaEntryType.Purchase, credits, grant.Id, operationKey, "Payment", paymentId.ToString(), note, null, now);
+            book.Wallet.Balance = book.Running;
+
+            await _context.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
+    }
+
     public async Task<ConsumeResult> ConsumeAsync(ConsumeRequest request, CancellationToken cancellationToken = default)
     {
         if (request.Units <= 0)

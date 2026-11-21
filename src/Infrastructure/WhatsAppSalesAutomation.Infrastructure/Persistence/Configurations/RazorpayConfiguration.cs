@@ -109,3 +109,41 @@ public class RazorpaySubscriptionConfiguration : IEntityTypeConfiguration<Razorp
         // ApplicationDbContext.OnModelCreating, same as every other ITenantOwned entity.
     }
 }
+
+/// <summary>A tenant's wallet top-up through Razorpay. The unique indexes are what make crediting exactly-once at the database level: one row per
+/// Razorpay order, and a gateway payment id that can belong to only one top-up.</summary>
+public class PaymentTransactionConfiguration : IEntityTypeConfiguration<PaymentTransaction>
+{
+    public void Configure(EntityTypeBuilder<PaymentTransaction> builder)
+    {
+        builder.ToTable("PaymentTransactions");
+        builder.HasKey(t => t.Id);
+
+        builder.Property(t => t.InternalTransactionId).IsRequired().HasMaxLength(40);
+        builder.Property(t => t.RazorpayOrderId).IsRequired().HasMaxLength(40);
+        builder.Property(t => t.RazorpayPaymentId).HasMaxLength(40);
+        builder.Property(t => t.Amount).HasColumnType("decimal(18,2)");
+        builder.Property(t => t.TaxAmount).HasColumnType("decimal(18,2)");
+        builder.Property(t => t.TotalAmount).HasColumnType("decimal(18,2)");
+        builder.Property(t => t.Credits).HasColumnType("decimal(18,2)");
+        builder.Property(t => t.CreditsPerRupee).HasColumnType("decimal(18,6)");
+        builder.Property(t => t.FxRateToInr).HasColumnType("decimal(18,6)");
+        builder.Property(t => t.TotalInr).HasColumnType("decimal(18,2)");
+        builder.Property(t => t.Currency).IsRequired().HasMaxLength(3);
+        builder.Property(t => t.CountryCode).HasMaxLength(2);
+        builder.Property(t => t.StateCode).HasMaxLength(5);
+        builder.Property(t => t.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(t => t.PaymentMethod).HasMaxLength(30);
+        builder.Property(t => t.Mode).IsRequired().HasMaxLength(4);
+        builder.Property(t => t.FailureReason).HasMaxLength(500);
+
+        builder.HasIndex(t => t.InternalTransactionId).IsUnique();
+        builder.HasIndex(t => t.RazorpayOrderId).IsUnique();
+        builder.HasIndex(t => t.RazorpayPaymentId).IsUnique().HasFilter("[RazorpayPaymentId] IS NOT NULL");
+        builder.HasIndex(t => new { t.TenantId, t.CreatedAt });
+        // What the reconciliation job reads: everything still waiting, oldest first.
+        builder.HasIndex(t => new { t.Status, t.CreatedAt });
+
+        // No HasQueryFilter here - PaymentTransaction is ITenantOwned, so the combined filter is built reflectively in ApplicationDbContext.OnModelCreating.
+    }
+}
