@@ -1,4 +1,0 @@
-{
-  "/api": { "target": "http://localhost:7099", "secure": false, "changeOrigin": true },
-  "/hubs": { "target": "http://localhost:7099", "secure": false, "changeOrigin": true }
-}
