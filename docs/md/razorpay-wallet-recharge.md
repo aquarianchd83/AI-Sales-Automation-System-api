@@ -5,11 +5,11 @@ Tenants buy wallet credits with Razorpay (UPI, cards, net banking, wallets). The
 ## The flow
 
 1. **Quote** - `GET /api/v1/wallet/recharge/quote?amount=500`. The server prices the amount: GST on top (existing `Tax` options), total payable, credits bought, balance after. Creates nothing.
-2. **Create order** - `POST /api/v1/wallet/recharge/create-order` `{ "amount": 500, "currency": "INR" }`. The tenant comes from the JWT, never from the body. The server validates min/max, re-prices, creates a Razorpay order (`POST /v1/orders`) and stores a `PaymentTransactions` row (`Created`). It returns the order id and the *public* key id for Checkout.
+2. **Create order** - `POST /api/v1/wallet/recharge/create-order` `{ "amount": 500, "currency": "INR" }`. The tenant comes from the JWT, never from the body. The server validates min/max, re-prices, creates a Razorpay order (MCP tool `create_order`) and stores a `PaymentTransactions` row (`Created`). It returns the order id and the *public* key id for Checkout.
 3. **Checkout** - Angular opens Razorpay Checkout for that order. A success callback only carries `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`.
 4. **Verify** - `POST /api/v1/wallet/recharge/verify-payment` with those three. The server checks the HMAC signature, that the order belongs to the caller's tenant, then fetches the payment from Razorpay and checks order id, amount and currency. An `authorized` payment is captured. Only a `captured` payment is credited.
 5. **Webhook** - `POST /api/v1/webhooks/razorpay` (the existing endpoint). Signature is verified over the raw body. `payment.authorized`, `payment.captured`, `order.paid`, `payment.failed`, `refund.created`, `refund.processed` are applied to the matching top-up. This is what credits the wallet when the browser was closed.
-6. **Reconciliation** - a Hangfire job (`wallet-recharge-reconciliation`, every 5 minutes) asks Razorpay (`GET /v1/orders/{id}/payments`) about top-ups that never heard back, credits genuine payments, and marks checkouts with no payment `Expired` after `Wallet:AbandonAfterMinutes`. `GET .../payment-status/{id}` does the same check on demand. An `Expired` top-up is still asked about hourly for 3 days, so a UPI payment completed late is credited even if its webhook was lost.
+6. **Reconciliation** - a Hangfire job (`wallet-recharge-reconciliation`, every 5 minutes) asks Razorpay (MCP tool `fetch_order_payments`) about top-ups that never heard back, credits genuine payments, and marks checkouts with no payment `Expired` after `Wallet:AbandonAfterMinutes`. `GET .../payment-status/{id}` does the same check on demand. An `Expired` top-up is still asked about hourly for 3 days, so a UPI payment completed late is credited even if its webhook was lost.
 
 The browser's success callback never credits anything. The balance on screen changes only after the server says the top-up is `Credited`.
 
@@ -64,23 +64,34 @@ Migration `AddWalletRechargeTransactions` adds `PaymentTransactions` (tenant-own
 
 Automated tests: `dotnet test --filter WalletRecharge` (API) and `ng test --include '**/wallet-recharge/**'` (Angular).
 
-## Razorpay API calls
+## Razorpay MCP
 
-The wallet recharge talks to Razorpay only through its REST API, called from the backend (`RazorpayGateway`, base URL `https://api.razorpay.com/v1/`, HTTP basic auth with `Razorpay:KeyId` : `Razorpay:KeySecret`). No MCP server or other tool sits in between, and the key secret never reaches the browser.
+The backend talks to Razorpay through **Razorpay's MCP server** (`https://mcp.razorpay.com/mcp`), as an MCP client (`RazorpayMcpClient`: JSON-RPC 2.0 over Streamable HTTP - `initialize`, `notifications/initialized`, `tools/call`; replies read as JSON or as an event stream). It authenticates with Razorpay's merchant token, `Authorization: Basic base64(Razorpay:KeyId:Razorpay:KeySecret)`, built from the saved keys on every request; the key secret never reaches the browser. One MCP session is opened per key pair per request/job scope and reopened if the server forgets it.
 
-| When | Request | What it is for |
+| When | MCP tool | Arguments | What it is for |
+|---|---|---|---|
+| Create order | `create_order` | `amount`, `currency`, `receipt`, `notes` | Razorpay order for the server-priced total (paise) |
+| Verify | `fetch_payment` | `payment_id` | Razorpay's own record: order id, amount, currency, status |
+| Verify / webhook / reconciliation | `capture_payment` | `payment_id`, `amount`, `currency` | Captures an `authorized` payment before crediting |
+| Reconciliation and status check | `fetch_order_payments` | `order_id` | Every attempt on an order, when no callback or webhook arrived |
+| Refund (refund requests) | `create_refund` | `payment_id`, `amount` | A full refund asks for what is left of the payment (`fetch_payment` first) |
+| Settings key check | `fetch_all_orders` | `count: 1` | Checks the saved keys work |
+
+A tool that fails (`isError`) comes back as a normal failed result in Razorpay's words; nothing is thrown, and the wallet flow treats it exactly like a failed API call (pending, retried by reconciliation).
+
+**Not over MCP:**
+- Signatures. The checkout signature and the webhook `X-Razorpay-Signature` are HMACs checked in the backend with the key secret / `Razorpay:WebhookSecret`; they are not Razorpay calls.
+- UPI AutoPay plans, subscriptions and invoices. Razorpay's MCP server has no tools for them, so those keep using the REST API (`RazorpayGateway`).
+
+Inbound, Razorpay still calls `POST /api/v1/webhooks/razorpay` for every event.
+
+### Settings
+
+| Setting | Default | Meaning |
 |---|---|---|
-| Create order | `POST /v1/orders` `{ amount, currency, receipt, notes }` | Razorpay order for the server-priced total (paise) |
-| Verify | `GET /v1/payments/{payment_id}` | Razorpay's own record: order id, amount, currency, status |
-| Verify / webhook / reconciliation | `POST /v1/payments/{payment_id}/capture` `{ amount, currency }` | Captures an `authorized` payment before crediting |
-| Reconciliation and status check | `GET /v1/orders/{order_id}/payments` | Every attempt on an order, when no callback or webhook arrived |
-| Settings test | `GET /v1/orders?count=1` | Checks the saved keys work |
+| `Razorpay:Transport` | `Mcp` | `Mcp` = through the MCP server; `Rest` = straight to `https://api.razorpay.com/v1/` (a switch for an MCP outage, no redeploy) |
+| `Razorpay:McpUrl` | `https://mcp.razorpay.com/mcp` | MCP endpoint (https only), e.g. a self-hosted Razorpay MCP server |
 
-Inbound, Razorpay calls `POST /api/v1/webhooks/razorpay`; its `X-Razorpay-Signature` is verified over the raw body with `Razorpay:WebhookSecret`. Refunds are issued from the Razorpay dashboard and reach the wallet through the `refund.*` webhooks.
+The Razorpay category is hidden on the generic Settings screen; change these through the settings API (`PUT /api/v1/settings/Razorpay` with `{ "values": { "Razorpay:Transport": "Rest" } }` - only the keys sent are changed) until the Razorpay screen gets a control for them.
 
-To look up an order or payment while testing, call the same endpoints yourself, for example:
-
-```bash
-curl -u rzp_test_KEYID:KEYSECRET https://api.razorpay.com/v1/orders/order_XXXX/payments
-curl -u rzp_test_KEYID:KEYSECRET https://api.razorpay.com/v1/payments/pay_XXXX
-```
+Automated tests: `dotnet test --filter RazorpayMcp` runs the gateway against a fake MCP server (session, auth header, event-stream replies, tool errors, the REST switch).
