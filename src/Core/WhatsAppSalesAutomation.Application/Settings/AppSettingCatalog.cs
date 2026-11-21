@@ -303,7 +303,7 @@ public static class AppSettingCatalog
         new("Razorpay:KeySecret", "Razorpay", IsSecret: true, Description: "API key secret. Signs checkout responses; never sent to a browser."),
         new("Razorpay:WebhookSecret", "Razorpay", IsSecret: true, Description: "The secret set on the Razorpay webhook; verifies every webhook delivery."),
         // How the backend reaches Razorpay for orders, payments, capture and refunds (RazorpayMcpGateway). Read on every request - no restart.
-        new("Razorpay:Transport", "Razorpay", IsSecret: false, DefaultValue: "Mcp", Options: new[] { "Mcp", "Rest" }, Description: "\"Mcp\" calls Razorpay through its MCP server (create_order, fetch_payment, capture_payment, fetch_order_payments, create_refund); \"Rest\" calls the REST API directly. AutoPay plans and subscriptions always use the REST API."),
+        new("Razorpay:Transport", "Razorpay", IsSecret: false, DefaultValue: "Mcp", Options: new[] { "Mcp", "Rest" }, Description: "\"Mcp\" reads payments and orders through Razorpay's MCP server (fetch_payment, fetch_order_payments, fetch_all_orders); \"Rest\" sends those reads to the REST API too. Creating orders, capture, refunds and AutoPay always use the REST API, because Razorpay's MCP server is read-only."),
         new("Razorpay:McpUrl", "Razorpay", IsSecret: false, DefaultValue: "https://mcp.razorpay.com/mcp", Description: "Razorpay MCP server endpoint (https). The API key id and secret above are sent to it as the merchant token."),
         // Recurring plan billing (AutoPayService). Off until the operator turns it on: the keys above also serve the test page, and must not by
         // themselves start sending tenants to a mandate.

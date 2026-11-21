@@ -5,10 +5,14 @@ using WhatsAppSalesAutomation.Application.Razorpay;
 namespace WhatsAppSalesAutomation.Infrastructure.Payments;
 
 /// <summary>
-/// The backend's Razorpay gateway. By default orders, payments, capture and refunds go through Razorpay's MCP server (<see cref="RazorpayMcpClient"/>):
-/// <c>create_order</c>, <c>fetch_payment</c>, <c>fetch_order_payments</c>, <c>capture_payment</c>, <c>create_refund</c> and <c>fetch_all_orders</c>
-/// (the key check). Razorpay's MCP server has no tools for plans, subscriptions or invoices, so UPI AutoPay keeps using the REST API
-/// (<see cref="RazorpayGateway"/>) for those.
+/// The backend's Razorpay gateway: reads through Razorpay's MCP server (<see cref="RazorpayMcpClient"/>), writes through the REST API
+/// (<see cref="RazorpayGateway"/>).
+/// <para>
+/// Razorpay's hosted MCP server is read-only: it has <c>fetch_payment</c>, <c>fetch_order_payments</c> and <c>fetch_all_orders</c> (the key check),
+/// but no <c>create_order</c>, <c>capture_payment</c> or <c>create_refund</c> - calling them fails with "tool not found". So creating an order,
+/// capturing and refunding always use REST, and a read whose tool the configured server does not have falls back to REST as well. Plans,
+/// subscriptions and invoices (UPI AutoPay) have no MCP tools and use REST too.
+/// </para>
 /// <para>
 /// <c>Razorpay:Transport</c> = <c>Rest</c> (Platform Admin Console &gt; Razorpay) sends everything straight to the REST API again - a switch for an
 /// MCP outage, no redeploy. <c>Razorpay:McpUrl</c> points at another MCP server (e.g. a self-hosted one).
@@ -40,30 +44,17 @@ public class RazorpayMcpGateway : IRazorpayGateway
             return await _rest.PingAsync(credentials, cancellationToken);
 
         var result = await CallAsync(credentials, "fetch_all_orders", new Dictionary<string, object?> { ["count"] = 1 }, cancellationToken);
+        if (IsMissingTool(result, "fetch_all_orders"))
+            return await _rest.PingAsync(credentials, cancellationToken);
         return result.Success ? RazorpayResult<bool>.Ok(true) : RazorpayResult<bool>.Fail(result.Error!);
     }
 
-    public async Task<RazorpayResult<RazorpayOrderInfo>> CreateOrderAsync(
+    public Task<RazorpayResult<RazorpayOrderInfo>> CreateOrderAsync(
         RazorpayCredentials credentials, long amountMinor, string currency, string receipt, IReadOnlyDictionary<string, string> notes,
         CancellationToken cancellationToken = default)
     {
-        if (await RestAsync(cancellationToken))
-            return await _rest.CreateOrderAsync(credentials, amountMinor, currency, receipt, notes, cancellationToken);
-
-        var result = await CallAsync(credentials, "create_order", new Dictionary<string, object?>
-        {
-            ["amount"] = amountMinor,
-            ["currency"] = currency,
-            ["receipt"] = receipt,
-            ["notes"] = notes
-        }, cancellationToken);
-        if (!result.Success)
-            return RazorpayResult<RazorpayOrderInfo>.Fail(result.Error!);
-
-        var o = result.Value;
-        return Str(o, "id") is { } id
-            ? RazorpayResult<RazorpayOrderInfo>.Ok(new RazorpayOrderInfo(id, Long(o, "amount") ?? amountMinor, Str(o, "currency") ?? currency, Str(o, "receipt") ?? receipt, Str(o, "status") ?? "created"))
-            : RazorpayResult<RazorpayOrderInfo>.Fail("Razorpay returned no order id.");
+        // A write: Razorpay's MCP server has no create_order tool.
+        return _rest.CreateOrderAsync(credentials, amountMinor, currency, receipt, notes, cancellationToken);
     }
 
     public async Task<RazorpayResult<RazorpayPaymentInfo>> FetchPaymentAsync(RazorpayCredentials credentials, string paymentId, CancellationToken cancellationToken = default)
@@ -71,7 +62,8 @@ public class RazorpayMcpGateway : IRazorpayGateway
         if (await RestAsync(cancellationToken))
             return await _rest.FetchPaymentAsync(credentials, paymentId, cancellationToken);
 
-        return ToPayment(await CallAsync(credentials, "fetch_payment", new Dictionary<string, object?> { ["payment_id"] = paymentId }, cancellationToken), null);
+        var result = await CallAsync(credentials, "fetch_payment", new Dictionary<string, object?> { ["payment_id"] = paymentId }, cancellationToken);
+        return IsMissingTool(result, "fetch_payment") ? await _rest.FetchPaymentAsync(credentials, paymentId, cancellationToken) : ToPayment(result, null);
     }
 
     public async Task<RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>> FetchOrderPaymentsAsync(
@@ -81,6 +73,8 @@ public class RazorpayMcpGateway : IRazorpayGateway
             return await _rest.FetchOrderPaymentsAsync(credentials, orderId, cancellationToken);
 
         var result = await CallAsync(credentials, "fetch_order_payments", new Dictionary<string, object?> { ["order_id"] = orderId }, cancellationToken);
+        if (IsMissingTool(result, "fetch_order_payments"))
+            return await _rest.FetchOrderPaymentsAsync(credentials, orderId, cancellationToken);
         if (!result.Success)
             return RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>.Fail(result.Error!);
 
@@ -98,48 +92,13 @@ public class RazorpayMcpGateway : IRazorpayGateway
         return RazorpayResult<IReadOnlyList<RazorpayPaymentInfo>>.Ok(payments);
     }
 
-    public async Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
-        RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default)
-    {
-        if (await RestAsync(cancellationToken))
-            return await _rest.CapturePaymentAsync(credentials, paymentId, amountMinor, currency, cancellationToken);
+    // Writes: Razorpay's MCP server has no capture_payment or create_refund tool.
+    public Task<RazorpayResult<RazorpayPaymentInfo>> CapturePaymentAsync(
+        RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default) =>
+        _rest.CapturePaymentAsync(credentials, paymentId, amountMinor, currency, cancellationToken);
 
-        return ToPayment(await CallAsync(credentials, "capture_payment", new Dictionary<string, object?>
-        {
-            ["payment_id"] = paymentId,
-            ["amount"] = amountMinor,
-            ["currency"] = currency
-        }, cancellationToken), null);
-    }
-
-    public async Task<RazorpayResult<RazorpayRefundInfo>> RefundAsync(RazorpayCredentials credentials, string paymentId, long? amountMinor, CancellationToken cancellationToken = default)
-    {
-        if (await RestAsync(cancellationToken))
-            return await _rest.RefundAsync(credentials, paymentId, amountMinor, cancellationToken);
-
-        // create_refund needs an amount; "refund in full" means whatever of the payment is not refunded yet.
-        var amount = amountMinor;
-        if (amount is null)
-        {
-            var payment = await FetchPaymentAsync(credentials, paymentId, cancellationToken);
-            if (!payment.Success || payment.Value is null)
-                return RazorpayResult<RazorpayRefundInfo>.Fail(payment.Error ?? "Razorpay returned no payment.");
-            amount = payment.Value.Amount - payment.Value.AmountRefunded;
-            if (amount <= 0)
-                return RazorpayResult<RazorpayRefundInfo>.Fail("The payment is already fully refunded.");
-        }
-
-        var result = await CallAsync(credentials, "create_refund", new Dictionary<string, object?> { ["payment_id"] = paymentId, ["amount"] = amount }, cancellationToken);
-        if (!result.Success)
-            return RazorpayResult<RazorpayRefundInfo>.Fail(result.Error!);
-
-        var r = result.Value;
-        return Str(r, "id") is { } id
-            ? RazorpayResult<RazorpayRefundInfo>.Ok(new RazorpayRefundInfo(id, Str(r, "payment_id") ?? paymentId, Long(r, "amount") ?? amount.Value, Str(r, "status") ?? "pending"))
-            : RazorpayResult<RazorpayRefundInfo>.Fail("Razorpay returned no refund id.");
-    }
-
-    // ── Not offered by Razorpay's MCP server: always the REST API ────────────────────────────
+    public Task<RazorpayResult<RazorpayRefundInfo>> RefundAsync(RazorpayCredentials credentials, string paymentId, long? amountMinor, CancellationToken cancellationToken = default) =>
+        _rest.RefundAsync(credentials, paymentId, amountMinor, cancellationToken);
 
     public Task<RazorpayResult<RazorpayPlanInfo>> CreatePlanAsync(
         RazorpayCredentials credentials, string period, int interval, string name, long amountMinor, string currency, IReadOnlyDictionary<string, string> notes,
@@ -186,6 +145,12 @@ public class RazorpayMcpGateway : IRazorpayGateway
     private async Task<RazorpayResult<JsonElement>> CallAsync(
         RazorpayCredentials credentials, string tool, IReadOnlyDictionary<string, object?> arguments, CancellationToken cancellationToken) =>
         await _mcp.CallToolAsync((await RouteAsync(cancellationToken)).Url, credentials, tool, arguments, cancellationToken);
+
+    /// <summary>The MCP server does not have this tool (Razorpay's reply: "tool 'x' not found: tool not found"), so the REST API answers instead.</summary>
+    private static bool IsMissingTool(RazorpayResult<JsonElement> result, string tool) =>
+        !result.Success && result.Error is { } error
+        && (error.Contains("tool not found", StringComparison.OrdinalIgnoreCase) || error.Contains($"tool '{tool}' not found", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("unknown tool", StringComparison.OrdinalIgnoreCase));
 
     private static RazorpayResult<RazorpayPaymentInfo> ToPayment(RazorpayResult<JsonElement> result, string? orderId) =>
         !result.Success

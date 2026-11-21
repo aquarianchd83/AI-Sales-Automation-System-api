@@ -168,7 +168,7 @@ public class WalletRechargeService : IWalletRechargeService
         var quote = _pricing.Quote(packPrice, tenant.CountryCode, tenant.StateCode)
             ?? throw new ConflictException("This credit pack isn't available in your country.");
         if (quote.CurrencyCode != "INR")
-            throw new ConflictException("Paying through Razorpay is available for accounts billed in INR.");
+            throw new ConflictException($"Credit packs can only be paid in INR (Indian Rupees) right now. Please contact support to buy credits in {quote.CurrencyCode}.");
 
         return await OpenOrderAsync(tenant, userId, quote, pack.Units, 0m, pack.Id, pack.Name, cancellationToken);
     }

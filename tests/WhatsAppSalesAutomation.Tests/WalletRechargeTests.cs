@@ -145,6 +145,37 @@ public sealed class WalletRechargeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_credit_pack_priced_outside_india_is_refused_with_a_clear_inr_only_message_and_no_order()
+    {
+        var pack = await PackAsync(500m, 996m);
+        _db.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = pack.Id, CountryCode = "US", Amount = 12m });
+        var tenant = await _db.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Id == _tenant);
+        tenant.CountryCode = "US";
+        tenant.StateCode = null;
+        await _db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<ConflictException>(() => _service.CreatePackOrderAsync(_tenant, null, pack.Id));
+
+        Assert.Contains("only be paid in INR", error.Message);
+        Assert.Contains("USD", error.Message);
+        Assert.Equal(0, _gateway.OrdersCreated);
+        Assert.Empty(await _db.PaymentTransactions.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_payment_in_another_currency_than_the_order_is_not_credited()
+    {
+        var pack = await PackAsync(500m, 996m);
+        var order = await _service.CreatePackOrderAsync(_tenant, null, pack.Id);
+        Pay(order, "pay_X1", currency: "USD");
+
+        var result = await _service.VerifyAsync(_tenant, Signed(order.OrderId, "pay_X1"));
+
+        Assert.False(result.Success);
+        Assert.Equal(0m, await BalanceAsync());
+    }
+
+    [Fact]
     public async Task A_credit_pack_cannot_be_bought_without_an_active_plan()
     {
         var pack = await PackAsync(withPlan: false);

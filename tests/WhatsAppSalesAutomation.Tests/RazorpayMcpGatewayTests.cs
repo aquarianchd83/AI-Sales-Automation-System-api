@@ -27,23 +27,19 @@ public sealed class RazorpayMcpGatewayTests
         _settings);
 
     [Fact]
-    public async Task An_order_is_created_with_the_create_order_tool_and_razorpays_json_is_read_back()
+    public async Task An_order_is_created_through_the_rest_api_because_razorpays_mcp_server_has_no_create_order_tool()
     {
-        _server.Tools["create_order"] = args => new JsonObject
-        {
-            ["id"] = "order_M1", ["amount"] = args["amount"]!.GetValue<long>(), ["currency"] = "INR", ["receipt"] = args["receipt"]!.GetValue<string>(), ["status"] = "created"
-        };
+        _restHandler.Body = """{"id":"order_R1","amount":59000,"currency":"INR","receipt":"wr-1","status":"created"}""";
 
         var result = await Gateway().CreateOrderAsync(Keys, 59_000, "INR", "wr-1", new Dictionary<string, string> { ["source"] = "wallet-recharge" });
 
         Assert.True(result.Success);
-        Assert.Equal("order_M1", result.Value!.Id);
-        Assert.Equal(59_000, result.Value.Amount);
-        var call = _server.Calls.Single(c => c.Tool == "create_order");
-        Assert.Equal(59_000, call.Arguments["amount"]!.GetValue<long>());
-        Assert.Equal("INR", call.Arguments["currency"]!.GetValue<string>());
-        Assert.Equal("wallet-recharge", call.Arguments["notes"]!["source"]!.GetValue<string>());
-        Assert.Equal(0, _restHandler.Calls);
+        Assert.Equal("order_R1", result.Value!.Id);
+        Assert.Equal(1, _restHandler.Calls);
+        Assert.Equal("POST", _restHandler.Requests.Single().Method);
+        Assert.EndsWith("/orders", _restHandler.Requests.Single().Path);
+        Assert.Empty(_server.Calls);
+        Assert.Equal(0, _server.Initializes);
     }
 
     [Fact]
@@ -91,29 +87,35 @@ public sealed class RazorpayMcpGatewayTests
     }
 
     [Fact]
-    public async Task An_authorized_payment_is_captured_with_capture_payment()
+    public async Task Capture_and_refund_go_through_the_rest_api()
     {
-        _server.Tools["capture_payment"] = _ => Payment("pay_1", "captured");
+        _restHandler.Body = Payment("pay_1", "captured").ToJsonString();
+        var gateway = Gateway();
 
-        var result = await Gateway().CapturePaymentAsync(Keys, "pay_1", 59_000, "INR");
+        var captured = await gateway.CapturePaymentAsync(Keys, "pay_1", 59_000, "INR");
+        _restHandler.Body = """{"id":"rfnd_1","payment_id":"pay_1","amount":59000,"status":"processed"}""";
+        var refunded = await gateway.RefundAsync(Keys, "pay_1", 59_000);
 
-        Assert.Equal("captured", result.Value!.Status);
-        var args = _server.Calls.Single().Arguments;
-        Assert.Equal(59_000, args["amount"]!.GetValue<long>());
-        Assert.Equal("INR", args["currency"]!.GetValue<string>());
+        Assert.Equal("captured", captured.Value!.Status);
+        Assert.Equal("rfnd_1", refunded.Value!.Id);
+        Assert.Equal(2, _restHandler.Calls);
+        Assert.Contains(_restHandler.Requests, r => r.Path.EndsWith("/payments/pay_1/capture"));
+        Assert.Contains(_restHandler.Requests, r => r.Path.EndsWith("/payments/pay_1/refund"));
+        Assert.Empty(_server.Calls);
     }
 
     [Fact]
-    public async Task A_full_refund_asks_for_what_is_left_of_the_payment()
+    public async Task A_read_whose_tool_the_mcp_server_does_not_have_is_answered_by_the_rest_api()
     {
-        _server.Tools["fetch_payment"] = _ => { var p = Payment("pay_1", "captured"); p["amount_refunded"] = 9_000; return p; };
-        _server.Tools["create_refund"] = args => new JsonObject { ["id"] = "rfnd_1", ["payment_id"] = "pay_1", ["amount"] = args["amount"]!.GetValue<long>(), ["status"] = "processed" };
+        // No fetch_payment tool on this server: it answers "tool 'fetch_payment' not found: tool not found".
+        _restHandler.Body = Payment("pay_1", "captured").ToJsonString();
 
-        var result = await Gateway().RefundAsync(Keys, "pay_1", null);
+        var result = await Gateway().FetchPaymentAsync(Keys, "pay_1");
 
         Assert.True(result.Success);
-        Assert.Equal(50_000, result.Value!.Amount);
-        Assert.Equal(50_000, _server.Calls.Single(c => c.Tool == "create_refund").Arguments["amount"]!.GetValue<long>());
+        Assert.Equal("pay_1", result.Value!.Id);
+        Assert.Single(_server.Calls);
+        Assert.Equal(1, _restHandler.Calls);
     }
 
     [Fact]
@@ -251,6 +253,8 @@ public sealed class RazorpayMcpGatewayTests
             var name = body["params"]!["name"]!.GetValue<string>();
             var args = body["params"]!["arguments"]!.AsObject();
             Calls.Add((name, args, session));
+            if (!Tools.ContainsKey(name))
+                return Reply(body, new JsonObject { ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = $"tool '{name}' not found: tool not found" }), ["isError"] = true });
             try
             {
                 var result = Tools[name](args);
@@ -275,10 +279,12 @@ public sealed class RazorpayMcpGatewayTests
     {
         public string Body { get; set; } = "{}";
         public int Calls { get; private set; }
+        public List<(string Method, string Path)> Requests { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
+            Requests.Add((request.Method.Method, request.RequestUri!.AbsolutePath));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Body, Encoding.UTF8, "application/json") });
         }
     }

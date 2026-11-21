@@ -5,7 +5,7 @@ Tenants buy wallet credits with Razorpay (UPI, cards, net banking, wallets). The
 ## The flow
 
 1. **Quote** - `GET /api/v1/wallet/recharge/quote?amount=500`. The server prices the amount: GST on top (existing `Tax` options), total payable, credits bought, balance after. Creates nothing.
-2. **Create order** - `POST /api/v1/wallet/recharge/create-order` `{ "amount": 500, "currency": "INR" }`. The tenant comes from the JWT, never from the body. The server validates min/max, re-prices, creates a Razorpay order (MCP tool `create_order`) and stores a `PaymentTransactions` row (`Created`). It returns the order id and the *public* key id for Checkout.
+2. **Create order** - `POST /api/v1/wallet/recharge/create-order` `{ "amount": 500, "currency": "INR" }`. The tenant comes from the JWT, never from the body. The server validates min/max, re-prices, creates a Razorpay order (REST `POST /orders`) and stores a `PaymentTransactions` row (`Created`). It returns the order id and the *public* key id for Checkout.
 3. **Checkout** - Angular opens Razorpay Checkout for that order. A success callback only carries `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`.
 4. **Verify** - `POST /api/v1/wallet/recharge/verify-payment` with those three. The server checks the HMAC signature, that the order belongs to the caller's tenant, then fetches the payment from Razorpay and checks order id, amount and currency. An `authorized` payment is captured. Only a `captured` payment is credited.
 5. **Webhook** - `POST /api/v1/webhooks/razorpay` (the existing endpoint). Signature is verified over the raw body. `payment.authorized`, `payment.captured`, `order.paid`, `payment.failed`, `refund.created`, `refund.processed` are applied to the matching top-up. This is what credits the wallet when the browser was closed.
@@ -76,17 +76,17 @@ The backend talks to Razorpay through **Razorpay's MCP server** (`https://mcp.ra
 
 | When | MCP tool | Arguments | What it is for |
 |---|---|---|---|
-| Create order | `create_order` | `amount`, `currency`, `receipt`, `notes` | Razorpay order for the server-priced total (paise) |
 | Verify | `fetch_payment` | `payment_id` | Razorpay's own record: order id, amount, currency, status |
-| Verify / webhook / reconciliation | `capture_payment` | `payment_id`, `amount`, `currency` | Captures an `authorized` payment before crediting |
 | Reconciliation and status check | `fetch_order_payments` | `order_id` | Every attempt on an order, when no callback or webhook arrived |
-| Refund (refund requests) | `create_refund` | `payment_id`, `amount` | A full refund asks for what is left of the payment (`fetch_payment` first) |
 | Settings key check | `fetch_all_orders` | `count: 1` | Checks the saved keys work |
+
+Razorpay's hosted MCP server is **read-only**: it has no `create_order`, `capture_payment` or `create_refund` (calling one fails with "tool 'create_order' not found: tool not found"). So the writes always use the REST API (`RazorpayGateway`): creating an order (`POST /orders`), capturing an `authorized` payment (`POST /payments/{id}/capture`) and refunds (`POST /payments/{id}/refund`). If the configured MCP server is missing one of the read tools above, that read falls back to REST too.
 
 A tool that fails (`isError`) comes back as a normal failed result in Razorpay's words; nothing is thrown, and the wallet flow treats it exactly like a failed API call (pending, retried by reconciliation).
 
 **Not over MCP:**
 - Signatures. The checkout signature and the webhook `X-Razorpay-Signature` are HMACs checked in the backend with the key secret / `Razorpay:WebhookSecret`; they are not Razorpay calls.
+- Creating orders, capture and refunds (see above).
 - UPI AutoPay plans, subscriptions and invoices. Razorpay's MCP server has no tools for them, so those keep using the REST API (`RazorpayGateway`).
 
 Inbound, Razorpay still calls `POST /api/v1/webhooks/razorpay` for every event.
