@@ -10,6 +10,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Credits;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Razorpay;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
@@ -52,6 +53,7 @@ public class WalletRechargeService : IWalletRechargeService
     public const string Source = "RAZORPAY";
     private const int ReconcileBatch = 50;
     private const int MaxPendingOrders = 5;
+    private const int MaxWriteAttempts = 3;
 
     private readonly IApplicationDbContext _context;
     private readonly IAppSettingsStore _store;
@@ -62,11 +64,15 @@ public class WalletRechargeService : IWalletRechargeService
     private readonly IDateTimeProvider _clock;
     private readonly IOptionsSnapshot<WalletRechargeOptions> _options;
     private readonly ILogger<WalletRechargeService> _logger;
+    /// <summary>Optional so tests can leave it out; DI always supplies it. Tells the operators about money that arrived but was not credited.</summary>
+    private readonly IPlatformNotifier? _platformNotifier;
 
     public WalletRechargeService(
         IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IPricingService pricing, QuotaLedgerService ledger,
-        ICreditWalletService wallet, IDateTimeProvider clock, IOptionsSnapshot<WalletRechargeOptions> options, ILogger<WalletRechargeService> logger)
+        ICreditWalletService wallet, IDateTimeProvider clock, IOptionsSnapshot<WalletRechargeOptions> options, ILogger<WalletRechargeService> logger,
+        IPlatformNotifier? platformNotifier = null)
     {
+        _platformNotifier = platformNotifier;
         _context = context;
         _store = store;
         _gateway = gateway;
@@ -104,7 +110,8 @@ public class WalletRechargeService : IWalletRechargeService
         var txn = await OwnedAsync(tenantId, t => t.Id == transactionId, cancellationToken)
             ?? throw new NotFoundException(nameof(PaymentTransaction), transactionId);
 
-        if (txn.Status is PaymentTransactionStatus.Created or PaymentTransactionStatus.Authorized or PaymentTransactionStatus.Failed)
+        // Expired too: a UPI payment can complete after the checkout was given up on, and without a webhook nothing else would notice it.
+        if (txn.Status is PaymentTransactionStatus.Created or PaymentTransactionStatus.Authorized or PaymentTransactionStatus.Failed or PaymentTransactionStatus.Expired)
         {
             await ReconcileOneAsync(txn, cancellationToken);
             txn = await OwnedAsync(tenantId, t => t.Id == transactionId, cancellationToken) ?? txn;
@@ -204,13 +211,10 @@ public class WalletRechargeService : IWalletRechargeService
             return new RechargeVerifyResultDto(success, pending, message, dto, success ? await BalanceAsync(tenantId, cancellationToken) : null);
         }
 
-        // A replay of a checkout already settled: nothing to redo, and nothing is credited again.
-        if (IsCredited(txn))
-        {
-            return txn.RazorpayPaymentId == paymentId
-                ? await Result(true, false, "This payment was already confirmed and your wallet credited.")
-                : await Result(false, false, "This recharge was already paid with a different payment.");
-        }
+        // A replay of a checkout already settled: nothing to redo, and nothing is credited again. A DIFFERENT payment on a paid top-up goes on
+        // through the checks below, so that a genuine one is reported to the operators for a refund.
+        if (IsCredited(txn) && txn.RazorpayPaymentId == paymentId)
+            return await Result(true, false, "This payment was already confirmed and your wallet credited.");
 
         var credentials = await RequireCredentialsAsync(cancellationToken);
         if (!RazorpaySignatures.IsValidPaymentSignature(txn.RazorpayOrderId, paymentId, request.RazorpaySignature, credentials.KeySecret))
@@ -224,11 +228,15 @@ public class WalletRechargeService : IWalletRechargeService
             return await Result(false, true, "Your payment is genuine but Razorpay's record could not be read yet. Your wallet will be credited automatically once it is confirmed.");
 
         var outcome = await SettlePaymentAsync(txn, fetched.Value, credentials, cancellationToken);
+        var after = await OwnedAsync(tenantId, t => t.Id == txn.Id, cancellationToken);
+        if (outcome == Settlement.Rejected && after is not null && IsCredited(after))
+            return await Result(false, false, "This recharge was already paid with a different payment. If you were charged twice, the extra payment will be refunded.");
+
         return outcome switch
         {
             Settlement.Credited or Settlement.AlreadyCredited => await Result(true, false, "Payment confirmed and your wallet credited."),
             Settlement.Pending => await Result(false, true, "Your payment is being confirmed. Your wallet will be credited automatically."),
-            _ => await Result(false, false, (await OwnedAsync(tenantId, t => t.Id == txn.Id, cancellationToken))?.FailureReason ?? "The payment did not go through.")
+            _ => await Result(false, false, after?.FailureReason ?? "The payment did not go through.")
         };
     }
 
@@ -248,7 +256,23 @@ public class WalletRechargeService : IWalletRechargeService
         switch (webhook.Event)
         {
             case "payment.authorized":
-                if (txn.Status is PaymentTransactionStatus.Created or PaymentTransactionStatus.Failed)
+                // With the payment's details, settle it now: the server captures it (an account not set to capture automatically would otherwise
+                // wait for the reconciliation job) and credits the wallet. Without them, just note that money is on its way.
+                if (webhook.PaymentId is not null && webhook.PaymentAmount is not null && webhook.OrderId is not null)
+                {
+                    var authorized = new RazorpayPaymentInfo(
+                        webhook.PaymentId, webhook.OrderId, webhook.PaymentAmount.Value, webhook.PaymentCurrency ?? "INR", webhook.PaymentStatus ?? "authorized",
+                        webhook.Method, webhook.PaymentAmountRefunded ?? 0, webhook.ErrorDescription);
+                    var settled = await SettlePaymentAsync(txn, authorized, await RequireCredentialsAsync(cancellationToken), cancellationToken);
+                    return new WalletWebhookResult(true, settled == Settlement.Credited, settled switch
+                    {
+                        Settlement.Credited => "Payment authorized and captured - wallet credited.",
+                        Settlement.AlreadyCredited => "Already credited.",
+                        Settlement.Pending => "Payment authorized; capture will be retried.",
+                        _ => "Payment rejected: " + (txn.FailureReason ?? "it did not match the order.")
+                    });
+                }
+                if (txn.Status is PaymentTransactionStatus.Created or PaymentTransactionStatus.Failed or PaymentTransactionStatus.Expired)
                 {
                     txn.Status = PaymentTransactionStatus.Authorized;
                     txn.PaymentMethod ??= webhook.Method;
@@ -259,7 +283,8 @@ public class WalletRechargeService : IWalletRechargeService
 
             case "payment.captured":
             case "order.paid":
-                if (IsCredited(txn))
+                // Already credited with THIS payment (or the event names none): nothing to do. A different payment goes on to be checked and reported.
+                if (IsCredited(txn) && (webhook.PaymentId is null || webhook.PaymentId == txn.RazorpayPaymentId))
                     return new WalletWebhookResult(true, false, "Already credited.");
 
                 // A signed event names the payment and its amount; without them (an order-level event) ask Razorpay.
@@ -310,12 +335,18 @@ public class WalletRechargeService : IWalletRechargeService
         var askAgainAfter = now.AddMinutes(-10);
         var recent = now.AddDays(-7);
         var failedRecent = now.AddDays(-1);
+        // An abandoned checkout is still asked about, less often, for a few days: a UPI payment can be completed late, and if its webhook was lost
+        // this is the only thing that would ever credit it.
+        var expiredRecent = now.AddDays(-3);
+        var askExpiredAgainAfter = now.AddMinutes(-60);
 
         var due = await _context.PaymentTransactions.IgnoreQueryFilters()
             .Where(t => t.CreatedAt < settleAfter
-                && (t.LastReconciledAt == null || t.LastReconciledAt < askAgainAfter)
-                && ((t.Status == PaymentTransactionStatus.Created || t.Status == PaymentTransactionStatus.Authorized) && t.CreatedAt > recent
-                    || t.Status == PaymentTransactionStatus.Failed && t.CreatedAt > failedRecent))
+                && ((t.LastReconciledAt == null || t.LastReconciledAt < askAgainAfter)
+                    && ((t.Status == PaymentTransactionStatus.Created || t.Status == PaymentTransactionStatus.Authorized) && t.CreatedAt > recent
+                        || t.Status == PaymentTransactionStatus.Failed && t.CreatedAt > failedRecent)
+                    || t.Status == PaymentTransactionStatus.Expired && t.CreatedAt > expiredRecent
+                        && (t.LastReconciledAt == null || t.LastReconciledAt < askExpiredAgainAfter)))
             .OrderBy(t => t.CreatedAt).Take(ReconcileBatch)
             .ToListAsync(cancellationToken);
 
@@ -362,7 +393,8 @@ public class WalletRechargeService : IWalletRechargeService
                    ?? listed.Value.FirstOrDefault(p => p.Status == "authorized")
                    ?? listed.Value.OrderByDescending(p => p.Id, StringComparer.Ordinal).FirstOrDefault(p => p.Status == "failed");
 
-        if (best is not null)
+        // For a checkout already called abandoned, only money matters: a failed attempt does not turn "Expired" into "Failed".
+        if (best is not null && !(txn.Status == PaymentTransactionStatus.Expired && best.Status == "failed"))
         {
             var settled = await SettlePaymentAsync(txn, best, credentials, cancellationToken);
             return settled == Settlement.Credited || (await ReloadStatusAsync(tenantId, id, cancellationToken)) != before;
@@ -392,7 +424,15 @@ public class WalletRechargeService : IWalletRechargeService
     private async Task<Settlement> SettlePaymentAsync(PaymentTransaction txn, RazorpayPaymentInfo payment, RazorpayCredentials credentials, CancellationToken cancellationToken)
     {
         if (IsCredited(txn))
-            return txn.RazorpayPaymentId == payment.Id ? Settlement.AlreadyCredited : Settlement.Rejected;
+        {
+            if (txn.RazorpayPaymentId == payment.Id)
+                return Settlement.AlreadyCredited;
+
+            // The top-up is already paid by another payment. This one is not credited, and must not be lost sight of either: if Razorpay
+            // captured it, the tenant has paid twice.
+            await AlertUncreditedPaymentAsync(txn, payment, "A second payment arrived on a wallet top-up that was already paid.", cancellationToken);
+            return Settlement.Rejected;
+        }
 
         if (payment.OrderId != txn.RazorpayOrderId || payment.Amount != txn.AmountMinor || !string.Equals(payment.Currency, txn.Currency, StringComparison.OrdinalIgnoreCase))
         {
@@ -401,6 +441,7 @@ public class WalletRechargeService : IWalletRechargeService
             txn.Status = PaymentTransactionStatus.Failed;
             txn.FailureReason = "The payment does not match the order's amount or currency.";
             await _context.SaveChangesAsync(cancellationToken);
+            await AlertUncreditedPaymentAsync(txn, payment, "A payment did not match its wallet top-up's amount or currency.", cancellationToken);
             return Settlement.Rejected;
         }
 
@@ -419,8 +460,7 @@ public class WalletRechargeService : IWalletRechargeService
 
         if (payment.Status is "captured" or "refunded")
         {
-            await CompleteAsync(txn, payment.Id, payment.Method, cancellationToken);
-            return Settlement.Credited;
+            return await CompleteAsync(txn, payment, cancellationToken) ? Settlement.Credited : Settlement.Rejected;
         }
 
         if (payment.Status == "failed")
@@ -438,94 +478,169 @@ public class WalletRechargeService : IWalletRechargeService
 
     /// <summary>
     /// Marks the transaction credited, records the payment and writes the wallet credit in ONE database transaction, so either all three happen or none.
-    /// Exactly once: the unique index on a gateway payment id and the ledger's per-transaction operation key both refuse a second credit, so two
-    /// deliveries racing (webhook and browser, or a redelivered webhook) can only ever add the credits once - the loser finds it already done.
+    /// Exactly once: the transaction row's concurrency token, the unique index on a gateway payment id and the ledger's per-transaction operation key all
+    /// refuse a second credit, so two deliveries racing (webhook and browser, or a redelivered webhook) can only ever add the credits once - the loser
+    /// re-reads the row and finds it already done. True when this payment is the one the top-up is credited with.
     /// </summary>
-    private async Task CompleteAsync(PaymentTransaction txn, string paymentId, string? method, CancellationToken cancellationToken)
+    private async Task<bool> CompleteAsync(PaymentTransaction txn, RazorpayPaymentInfo paid, CancellationToken cancellationToken)
     {
         var id = txn.Id;
-        var now = _clock.UtcNow;
-
-        await using var tx = await _context.BeginTransactionAsync(cancellationToken);
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var payment = new Payment
+            var now = _clock.UtcNow;
+            await using var tx = await _context.BeginTransactionAsync(cancellationToken);
+            try
             {
-                TenantId = txn.TenantId,
-                Kind = PaymentKind.WalletTopUp,
-                PlanName = "Wallet top-up",
-                AmountCents = txn.AmountUsdCents,
-                CurrencyCode = txn.Currency,
-                CurrencySymbol = "₹",
-                LocalAmount = txn.Amount,
-                CountryCode = txn.CountryCode,
-                StateCode = txn.StateCode,
-                TaxLocal = txn.TaxAmount,
-                TaxLinesJson = txn.TaxLinesJson,
-                TotalLocal = txn.TotalAmount,
-                AmountInr = txn.TotalInr,
-                FxRateToInr = txn.FxRateToInr,
-                Provider = "Razorpay",
-                ProviderPaymentId = paymentId,
-                PaymentMethod = method ?? txn.PaymentMethod,
-                Status = PaymentStatus.Succeeded,
-                PaidAtUtc = now
-            };
-            _context.Payments.Add(payment);
+                var payment = new Payment
+                {
+                    TenantId = txn.TenantId,
+                    Kind = PaymentKind.WalletTopUp,
+                    PlanName = "Wallet top-up",
+                    AmountCents = txn.AmountUsdCents,
+                    CurrencyCode = txn.Currency,
+                    CurrencySymbol = "₹",
+                    LocalAmount = txn.Amount,
+                    CountryCode = txn.CountryCode,
+                    StateCode = txn.StateCode,
+                    TaxLocal = txn.TaxAmount,
+                    TaxLinesJson = txn.TaxLinesJson,
+                    TotalLocal = txn.TotalAmount,
+                    AmountInr = txn.TotalInr,
+                    FxRateToInr = txn.FxRateToInr,
+                    Provider = "Razorpay",
+                    ProviderPaymentId = paid.Id,
+                    PaymentMethod = paid.Method ?? txn.PaymentMethod,
+                    Status = PaymentStatus.Succeeded,
+                    PaidAtUtc = now
+                };
+                _context.Payments.Add(payment);
 
-            txn.Status = PaymentTransactionStatus.Credited;
-            txn.RazorpayPaymentId = paymentId;
-            txn.PaymentMethod = method ?? txn.PaymentMethod;
-            txn.CapturedAt ??= now;
-            txn.CreditedAt = now;
-            txn.PaymentId = payment.Id;
-            txn.FailureReason = null;
-            await _context.SaveChangesAsync(cancellationToken);
+                txn.Status = PaymentTransactionStatus.Credited;
+                txn.RazorpayPaymentId = paid.Id;
+                txn.PaymentMethod = paid.Method ?? txn.PaymentMethod;
+                txn.CapturedAt ??= now;
+                txn.CreditedAt = now;
+                txn.PaymentId = payment.Id;
+                txn.FailureReason = null;
+                await _context.SaveChangesAsync(cancellationToken);
 
-            await _ledger.GrantTopUpAsync(txn.TenantId, txn.Credits, txn.Id, payment.Id, $"{Source} wallet top-up {paymentId}", cancellationToken);
-            await tx.CommitAsync(cancellationToken);
+                await _ledger.GrantTopUpAsync(txn.TenantId, txn.Credits, txn.Id, payment.Id, $"{Source} wallet top-up {paid.Id}", cancellationToken);
+                await tx.CommitAsync(cancellationToken);
 
-            _logger.LogInformation("Wallet recharge {Reference} credited: tenant {TenantId} +{Credits} credits (payment {PaymentId})", txn.InternalTransactionId, txn.TenantId, txn.Credits, paymentId);
-        }
-        catch (DbUpdateException)
-        {
-            await tx.RollbackAsync(CancellationToken.None);
-            _context.ResetChangeTracker();
+                _logger.LogInformation("Wallet recharge {Reference} credited: tenant {TenantId} +{Credits} credits (payment {PaymentId})", txn.InternalTransactionId, txn.TenantId, txn.Credits, paid.Id);
+                return true;
+            }
+            catch (DbUpdateException ex)
+            {
+                await tx.RollbackAsync(CancellationToken.None);
+                _context.ResetChangeTracker();
 
-            // Lost a race: another delivery of the same payment got there first. Anything else is a real failure.
-            var done = await _context.PaymentTransactions.IgnoreQueryFilters().AsNoTracking()
-                .AnyAsync(t => t.Id == id && t.Status == PaymentTransactionStatus.Credited, cancellationToken);
-            if (!done)
-                throw;
-            _logger.LogInformation("Wallet recharge {TransactionId}: payment {PaymentId} was credited by a parallel delivery", id, paymentId);
+                // Someone else wrote the row first: another delivery of the same payment, a different payment on the same order, or just the
+                // reconciliation job stamping it. Re-read it and decide again.
+                var fresh = await _context.PaymentTransactions.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+                if (fresh is not null && IsCredited(fresh))
+                {
+                    if (fresh.RazorpayPaymentId == paid.Id)
+                    {
+                        _logger.LogInformation("Wallet recharge {TransactionId}: payment {PaymentId} was credited by a parallel delivery", id, paid.Id);
+                        return true;
+                    }
+
+                    await AlertUncreditedPaymentAsync(fresh, paid, "A second payment arrived on a wallet top-up that was already paid.", cancellationToken);
+                    return false;
+                }
+
+                if (fresh is null || attempt >= MaxWriteAttempts)
+                {
+                    _logger.LogError(ex, "Wallet recharge {TransactionId}: payment {PaymentId} could not be credited", id, paid.Id);
+                    throw;
+                }
+                txn = fresh;
+            }
         }
     }
 
     private async Task<bool> ApplyRefundAsync(PaymentTransaction txn, WalletWebhookEvent webhook, CancellationToken cancellationToken)
     {
-        if (!IsCredited(txn) || txn.PaymentId is null)
-            return false;
+        var id = txn.Id;
+        for (var attempt = 1; ; attempt++)
+        {
+            if (!IsCredited(txn) || txn.PaymentId is null)
+                return false;
 
-        var refunded = Math.Min(txn.AmountMinor, Math.Max(txn.RefundedMinor, webhook.PaymentAmountRefunded ?? 0));
-        if (refunded == txn.RefundedMinor && webhook.PaymentAmountRefunded is null && webhook.RefundAmount is { } single)
-            refunded = Math.Min(txn.AmountMinor, txn.RefundedMinor + single);
+            var refunded = Math.Min(txn.AmountMinor, Math.Max(txn.RefundedMinor, webhook.PaymentAmountRefunded ?? 0));
+            if (refunded == txn.RefundedMinor && webhook.PaymentAmountRefunded is null && webhook.RefundAmount is { } single)
+                refunded = Math.Min(txn.AmountMinor, txn.RefundedMinor + single);
 
-        var delta = refunded - txn.RefundedMinor;
-        if (delta <= 0)
-            return false;
+            var delta = refunded - txn.RefundedMinor;
+            if (delta <= 0)
+                return false;
 
-        // The refunded share of the credits is taken back by a compensating ledger entry - history is never edited.
-        var clawBack = decimal.Round(txn.Credits * delta / txn.AmountMinor, 2, MidpointRounding.AwayFromZero);
+            // The refunded share of the credits is taken back by a compensating ledger entry - history is never edited. The entry is keyed by the
+            // refunded total it brings the top-up to, so refund.created and refund.processed for the same refund write it once between them.
+            var clawBack = decimal.Round(txn.Credits * delta / txn.AmountMinor, 2, MidpointRounding.AwayFromZero);
+            var operationKey = $"refund:{txn.Id}:{refunded}";
 
-        await using var tx = await _context.BeginTransactionAsync(cancellationToken);
-        await _ledger.ClawBackCreditsAsync(txn.TenantId, txn.PaymentId.Value, clawBack, $"{Source} refund {webhook.RefundId ?? string.Empty}".Trim(), null, cancellationToken);
-        txn.RefundedMinor = refunded;
-        txn.Status = refunded >= txn.AmountMinor ? PaymentTransactionStatus.Refunded : PaymentTransactionStatus.PartiallyRefunded;
-        await _context.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+            await using var tx = await _context.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                // The row is written FIRST: its concurrency token makes a parallel delivery of the same refund fail here, before any credits move.
+                txn.RefundedMinor = refunded;
+                txn.Status = refunded >= txn.AmountMinor ? PaymentTransactionStatus.Refunded : PaymentTransactionStatus.PartiallyRefunded;
+                await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Wallet recharge {TransactionId}: refund of {Delta} paise recorded, {Credits} credits taken back", txn.Id, delta, clawBack);
-        return true;
+                var taken = await _ledger.ClawBackTopUpAsync(
+                    txn.TenantId, txn.PaymentId.Value, clawBack, operationKey, $"{Source} refund {webhook.RefundId ?? string.Empty}".Trim(), cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                _logger.LogInformation("Wallet recharge {TransactionId}: refund of {Delta} paise recorded, {Credits} credits taken back", id, delta, taken);
+                return true;
+            }
+            catch (DbUpdateException) when (attempt < MaxWriteAttempts)
+            {
+                await tx.RollbackAsync(CancellationToken.None);
+                _context.ResetChangeTracker();
+                var fresh = await _context.PaymentTransactions.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+                if (fresh is null)
+                    return false;
+                txn = fresh;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tells the platform operators about money Razorpay holds for a top-up that was NOT credited - a second payment on a paid order, or a payment
+    /// that did not match the order. A captured one has to be refunded by hand; an authorized one is released by Razorpay on its own. Never throws.
+    /// </summary>
+    private async Task AlertUncreditedPaymentAsync(PaymentTransaction txn, RazorpayPaymentInfo payment, string what, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning("Wallet recharge {Reference}: payment {PaymentId} ({Status}, {Amount} paise) was not credited: {What}",
+            txn.InternalTransactionId, payment.Id, payment.Status, payment.Amount, what);
+        if (_platformNotifier is null || payment.Status is not ("captured" or "authorized"))
+            return;
+
+        try
+        {
+            var tenantName = await _context.Tenants.IgnoreQueryFilters().AsNoTracking().Where(t => t.Id == txn.TenantId).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken);
+            var rupees = (payment.Amount / 100m).ToString("#,##0.00", CultureInfo.InvariantCulture);
+            var captured = payment.Status == "captured";
+            var action = captured
+                ? $"INR {rupees} is captured and was not added to the wallet - refund it from the Razorpay dashboard."
+                : $"INR {rupees} is only authorized, not captured; Razorpay releases it back to the customer on its own.";
+            var body = $"{(tenantName is null ? string.Empty : tenantName + ": ")}{what} Payment {payment.Id} on order {txn.RazorpayOrderId} (top-up {txn.InternalTransactionId}). {action}";
+
+            await _platformNotifier.NotifyAsync(new PlatformNotificationRequest(
+                PlatformNotificationKind.WalletPaymentNeedsAttention,
+                captured ? PlatformNotificationSeverity.Critical : PlatformNotificationSeverity.Warning,
+                $"wallet-{payment.Id}",
+                captured ? "Wallet payment needs a refund" : "Wallet payment not credited",
+                body.Length <= 1000 ? body : body[..999] + "…",
+                txn.TenantId), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Wallet recharge {Reference}: the operator alert for payment {PaymentId} could not be raised", txn.InternalTransactionId, payment.Id);
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────

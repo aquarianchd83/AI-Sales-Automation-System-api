@@ -222,12 +222,24 @@ public class QuotaLedgerService : IQuotaLedgerService
         }, cancellationToken);
     }
 
-    public async Task<decimal> ClawBackCreditsAsync(Guid tenantId, Guid paymentId, decimal units, string reason, Guid? actorUserId, CancellationToken cancellationToken = default)
-    {
-        var operationKey = $"clawback:{Guid.NewGuid()}";
+    public Task<decimal> ClawBackCreditsAsync(Guid tenantId, Guid paymentId, decimal units, string reason, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        ClawBackAsync(tenantId, paymentId, units, $"clawback:{Guid.NewGuid()}", idempotent: false, reason, actorUserId, cancellationToken);
 
+    /// <summary>
+    /// Takes back the refunded share of a wallet top-up's credits, at most once per <paramref name="operationKey"/>: a second call with the same key
+    /// (the same refund reported again, by another webhook or a redelivery) writes nothing and returns 0.
+    /// </summary>
+    public Task<decimal> ClawBackTopUpAsync(Guid tenantId, Guid paymentId, decimal units, string operationKey, string reason, CancellationToken cancellationToken = default) =>
+        ClawBackAsync(tenantId, paymentId, units, operationKey, idempotent: true, reason, null, cancellationToken);
+
+    private async Task<decimal> ClawBackAsync(
+        Guid tenantId, Guid paymentId, decimal units, string operationKey, bool idempotent, string reason, Guid? actorUserId, CancellationToken cancellationToken)
+    {
         return await WithRetryAsync(async () =>
         {
+            if (idempotent && await HasEntryAsync(tenantId, operationKey, QuotaEntryType.RefundClawback, cancellationToken))
+                return 0m;
+
             var target = await _context.QuotaGrants.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(g => g.TenantId == tenantId && g.PaymentId == paymentId && g.Origin == QuotaGrantOrigin.CreditPurchase, cancellationToken);
             if (target is null)

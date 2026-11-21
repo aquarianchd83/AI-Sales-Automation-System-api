@@ -32,6 +32,7 @@ public sealed class WalletRechargeTests : IDisposable
     private readonly MemorySettingsStore _store = new();
     private readonly WalletGateway _gateway = new();
     private readonly TestClock _clock = new();
+    private readonly RecordingPlatformNotifier _operators = new();
     private readonly QuotaLedgerService _ledger;
     private readonly WalletRechargeService _service;
     private readonly Guid _tenant = Guid.NewGuid();
@@ -48,7 +49,8 @@ public sealed class WalletRechargeTests : IDisposable
         var wallet = new CreditWalletService(_db, _ledger, new FeatureAccessService(_db), new CreditCostService(_db), _clock);
         var pricing = new PricingService(Snapshot.Of(new TaxOptions()), Snapshot.Of(new FxOptions()));
         _service = new WalletRechargeService(
-            _db, _store, _gateway, pricing, _ledger, wallet, _clock, Snapshot.Of(new WalletRechargeOptions()), NullLogger<WalletRechargeService>.Instance);
+            _db, _store, _gateway, pricing, _ledger, wallet, _clock, Snapshot.Of(new WalletRechargeOptions()), NullLogger<WalletRechargeService>.Instance,
+            _operators);
 
         _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Acme", Slug = "acme", CountryCode = "IN", StateCode = "MH" });
         _db.Tenants.Add(new Tenant { Id = _other, Name = "Globex", Slug = "globex", CountryCode = "IN", StateCode = "KA" });
@@ -80,7 +82,7 @@ public sealed class WalletRechargeTests : IDisposable
         _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.TenantId == _tenant && e.EntryType == QuotaEntryType.Purchase);
 
     private static WalletWebhookEvent Hook(string name, RechargeCheckoutDto order, string? paymentId, long? refunded = null, long? refundAmount = null, string? refundId = null, long? amount = null) =>
-        new(name, order.OrderId, paymentId, "upi", null, amount ?? order.AmountMinor, "INR", name == "payment.failed" ? "failed" : "captured", refundId, refundAmount, refunded);
+        new(name, order.OrderId, paymentId, "upi", null, amount ?? order.AmountMinor, "INR", name switch { "payment.failed" => "failed", "payment.authorized" => "authorized", _ => "captured" }, refundId, refundAmount, refunded);
 
     // ── Creating the order ──────────────────────────────────────────────────────────────
 
@@ -370,14 +372,82 @@ public sealed class WalletRechargeTests : IDisposable
     }
 
     [Fact]
-    public async Task An_authorized_webhook_credits_nothing_until_the_payment_is_captured()
+    public async Task An_authorized_webhook_is_captured_by_the_server_and_then_credited()
     {
         var order = await OrderAsync(500m);
+        Pay(order, "pay_A1", "authorized");
+
+        await _service.HandleWebhookAsync(Hook("payment.authorized", order, "pay_A1"));
+
+        Assert.Equal(1, _gateway.CaptureCalls);
+        Assert.Equal(500m, await BalanceAsync());
+        Assert.Equal(PaymentTransactionStatus.Credited, (await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task An_authorized_webhook_whose_capture_fails_credits_nothing_and_waits_for_a_retry()
+    {
+        var order = await OrderAsync(500m);
+        Pay(order, "pay_A1", "authorized");
+        _gateway.FailCapture = true;
 
         await _service.HandleWebhookAsync(Hook("payment.authorized", order, "pay_A1"));
 
         Assert.Equal(0m, await BalanceAsync());
         Assert.Equal(PaymentTransactionStatus.Authorized, (await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync()).Status);
+
+        // The next reconciliation pass captures it.
+        _gateway.FailCapture = false;
+        _clock.UtcNow = _clock.UtcNow.AddMinutes(5);
+        await _service.ReconcilePendingAsync();
+        Assert.Equal(500m, await BalanceAsync());
+    }
+
+    // ── Money that arrives but is not credited is reported to the operators ─────────────────
+
+    [Fact]
+    public async Task A_second_captured_payment_on_a_paid_order_is_not_credited_and_the_operators_are_told_to_refund_it()
+    {
+        var order = await OrderAsync(500m);
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A1"));
+
+        var result = await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A2"));
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A2"));   // redelivered: still one alert
+
+        Assert.False(result.Applied);
+        Assert.Equal(500m, await BalanceAsync());
+        var alert = Assert.Single(_operators.Sent);
+        Assert.Equal(PlatformNotificationKind.WalletPaymentNeedsAttention, alert.Kind);
+        Assert.Equal(PlatformNotificationSeverity.Critical, alert.Severity);
+        Assert.Equal(_tenant, alert.TenantId);
+        Assert.Contains("pay_A2", alert.Body);
+    }
+
+    [Fact]
+    public async Task Verifying_a_second_payment_on_a_paid_order_tells_the_tenant_and_alerts_the_operators()
+    {
+        var order = await OrderAsync(500m);
+        Pay(order, "pay_A1");
+        Pay(order, "pay_A2");
+        await _service.VerifyAsync(_tenant, Signed(order.OrderId, "pay_A1"));
+
+        var second = await _service.VerifyAsync(_tenant, Signed(order.OrderId, "pay_A2"));
+
+        Assert.False(second.Success);
+        Assert.Contains("already paid", second.Message);
+        Assert.Equal("Credited", second.Transaction.Status);
+        Assert.Single(_operators.Sent);
+    }
+
+    [Fact]
+    public async Task A_captured_payment_that_does_not_match_the_order_is_reported_to_the_operators()
+    {
+        var order = await OrderAsync(500m);
+
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A1", amount: 100));
+
+        Assert.Equal(0m, await BalanceAsync());
+        Assert.Equal(PlatformNotificationKind.WalletPaymentNeedsAttention, Assert.Single(_operators.Sent).Kind);
     }
 
     [Fact]
@@ -413,6 +483,40 @@ public sealed class WalletRechargeTests : IDisposable
         Assert.Equal(PaymentTransactionStatus.PartiallyRefunded, (await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync()).Status);
     }
 
+    [Fact]
+    public async Task Two_partial_refunds_each_take_back_their_own_share_once()
+    {
+        var order = await OrderAsync(500m);
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A1"));
+
+        await _service.HandleWebhookAsync(Hook("refund.created", order, "pay_A1", refunded: 11_800, refundAmount: 11_800, refundId: "rfnd_1"));
+        await _service.HandleWebhookAsync(Hook("refund.processed", order, "pay_A1", refunded: 11_800, refundAmount: 11_800, refundId: "rfnd_1"));
+        await _service.HandleWebhookAsync(Hook("refund.created", order, "pay_A1", refunded: 23_600, refundAmount: 11_800, refundId: "rfnd_2"));
+        await _service.HandleWebhookAsync(Hook("refund.processed", order, "pay_A1", refunded: 23_600, refundAmount: 11_800, refundId: "rfnd_2"));
+
+        Assert.Equal(300m, await BalanceAsync());   // 500 - 100 - 100
+        Assert.Equal(2, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.EntryType == QuotaEntryType.RefundClawback));
+    }
+
+    [Fact]
+    public async Task A_refund_reported_again_from_a_stale_read_is_still_clawed_back_only_once()
+    {
+        var order = await OrderAsync(500m);
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_A1"));
+        await _service.HandleWebhookAsync(Hook("refund.created", order, "pay_A1", refunded: 29_500, refundAmount: 29_500, refundId: "rfnd_1"));
+
+        // What a parallel delivery that read the row before the first one saved would see: nothing refunded yet.
+        var row = await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync();
+        row.RefundedMinor = 0;
+        row.Status = PaymentTransactionStatus.Credited;
+        await _db.SaveChangesAsync();
+
+        await _service.HandleWebhookAsync(Hook("refund.processed", order, "pay_A1", refunded: 29_500, refundAmount: 29_500, refundId: "rfnd_1"));
+
+        Assert.Equal(250m, await BalanceAsync());
+        Assert.Equal(1, await _db.QuotaLedgerEntries.IgnoreQueryFilters().CountAsync(e => e.EntryType == QuotaEntryType.RefundClawback));
+    }
+
     // ── Reconciliation ──────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -445,6 +549,54 @@ public sealed class WalletRechargeTests : IDisposable
         Assert.Equal(1, await _service.ReconcilePendingAsync());
         Assert.Equal(PaymentTransactionStatus.Expired, (await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync()).Status);
         Assert.Equal(0m, await BalanceAsync());
+    }
+
+    [Fact]
+    public async Task A_late_payment_on_an_abandoned_checkout_is_still_credited_by_reconciliation()
+    {
+        var order = await OrderAsync(500m);
+        _clock.UtcNow = _clock.UtcNow.AddHours(2);
+        await _service.ReconcilePendingAsync();
+        Assert.Equal(PaymentTransactionStatus.Expired, (await _db.PaymentTransactions.IgnoreQueryFilters().AsNoTracking().SingleAsync()).Status);
+
+        // The customer finishes the UPI payment late, and its webhook never arrives.
+        Pay(order, "pay_LATE");
+        _clock.UtcNow = _clock.UtcNow.AddMinutes(30);
+        Assert.Equal(0, await _service.ReconcilePendingAsync());   // an expired checkout is asked about only hourly
+        _clock.UtcNow = _clock.UtcNow.AddMinutes(31);
+        Assert.Equal(1, await _service.ReconcilePendingAsync());
+
+        Assert.Equal(500m, await BalanceAsync());
+        Assert.Equal(PaymentTransactionStatus.Credited, (await _db.PaymentTransactions.IgnoreQueryFilters().AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_does_not_turn_an_abandoned_checkout_into_a_failure()
+    {
+        var order = await OrderAsync(500m);
+        _clock.UtcNow = _clock.UtcNow.AddHours(2);
+        await _service.ReconcilePendingAsync();
+
+        Pay(order, "pay_X", "failed");
+        _clock.UtcNow = _clock.UtcNow.AddHours(2);
+        await _service.ReconcilePendingAsync();
+
+        Assert.Equal(PaymentTransactionStatus.Expired, (await _db.PaymentTransactions.IgnoreQueryFilters().AsNoTracking().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Checking_the_status_of_an_expired_top_up_that_was_paid_late_credits_it()
+    {
+        var order = await OrderAsync(500m);
+        _clock.UtcNow = _clock.UtcNow.AddHours(2);
+        await _service.ReconcilePendingAsync();
+        Pay(order, "pay_LATE");
+        var id = (await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync()).Id;
+
+        var status = await _service.GetStatusAsync(_tenant, id);
+
+        Assert.Equal("Credited", status.Status);
+        Assert.Equal(500m, await BalanceAsync());
     }
 
     [Fact]
@@ -530,6 +682,7 @@ public sealed class WalletRechargeTests : IDisposable
         public long LastOrderAmount { get; private set; }
         public int FetchCalls { get; private set; }
         public int CaptureCalls { get; private set; }
+        public bool FailCapture { get; set; }
 
         public Task<RazorpayResult<bool>> PingAsync(RazorpayCredentials credentials, CancellationToken cancellationToken = default) =>
             Task.FromResult(RazorpayResult<bool>.Ok(true));
@@ -554,6 +707,8 @@ public sealed class WalletRechargeTests : IDisposable
             RazorpayCredentials credentials, string paymentId, long amountMinor, string currency, CancellationToken cancellationToken = default)
         {
             CaptureCalls++;
+            if (FailCapture)
+                return Task.FromResult(RazorpayResult<RazorpayPaymentInfo>.Fail("Capture failed"));
             var captured = Payments[paymentId] with { Status = "captured" };
             Payments[paymentId] = captured;
             return Task.FromResult(RazorpayResult<RazorpayPaymentInfo>.Ok(captured));

@@ -5847,6 +5847,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<long>("RefundedMinor")
                         .HasColumnType("bigint");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<string>("StateCode")
                         .HasMaxLength(5)
                         .HasColumnType("nvarchar(5)");
