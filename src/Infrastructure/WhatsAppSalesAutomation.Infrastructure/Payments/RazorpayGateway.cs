@@ -173,7 +173,18 @@ public class RazorpayGateway : IRazorpayGateway
         try
         {
             using var doc = JsonDocument.Parse(text);
-            return doc.RootElement.TryGetProperty("error", out var e) && e.TryGetProperty("description", out var d) ? d.GetString() : null;
+            // Razorpay normally answers { "error": { "description": "..." } }, but a proxy, an auth failure or a gateway error can
+            // answer with a bare string or a differently shaped body. Read what is there rather than throw and hide the real reason.
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.String)
+                return root.GetString();
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var e))
+                return null;
+            if (e.ValueKind == JsonValueKind.String)
+                return e.GetString();
+            return e.ValueKind == JsonValueKind.Object && e.TryGetProperty("description", out var d) && d.ValueKind == JsonValueKind.String
+                ? d.GetString()
+                : null;
         }
         catch (JsonException)
         {
