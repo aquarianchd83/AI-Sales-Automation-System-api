@@ -9,7 +9,7 @@ Tenants buy wallet credits with Razorpay (UPI, cards, net banking, wallets). The
 3. **Checkout** - Angular opens Razorpay Checkout for that order. A success callback only carries `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`.
 4. **Verify** - `POST /api/v1/wallet/recharge/verify-payment` with those three. The server checks the HMAC signature, that the order belongs to the caller's tenant, then fetches the payment from Razorpay and checks order id, amount and currency. An `authorized` payment is captured. Only a `captured` payment is credited.
 5. **Webhook** - `POST /api/v1/webhooks/razorpay` (the existing endpoint). Signature is verified over the raw body. `payment.authorized`, `payment.captured`, `order.paid`, `payment.failed`, `refund.created`, `refund.processed` are applied to the matching top-up. This is what credits the wallet when the browser was closed.
-6. **Reconciliation** - a Hangfire job (`wallet-recharge-reconciliation`, every 5 minutes) asks Razorpay (`GET /v1/orders/{id}/payments`) about top-ups that never heard back, credits genuine payments, and marks checkouts with no payment `Expired` after `Wallet:AbandonAfterMinutes`. `GET .../payment-status/{id}` does the same check on demand.
+6. **Reconciliation** - a Hangfire job (`wallet-recharge-reconciliation`, every 5 minutes) asks Razorpay (`GET /v1/orders/{id}/payments`) about top-ups that never heard back, credits genuine payments, and marks checkouts with no payment `Expired` after `Wallet:AbandonAfterMinutes`. `GET .../payment-status/{id}` does the same check on demand. An `Expired` top-up is still asked about hourly for 3 days, so a UPI payment completed late is credited even if its webhook was lost.
 
 The browser's success callback never credits anything. The balance on screen changes only after the server says the top-up is `Credited`.
 
@@ -19,13 +19,16 @@ Verify, webhook and reconciliation all end in one method (`WalletRechargeService
 
 - unique index on `PaymentTransactions.RazorpayPaymentId` and on `Payments (Provider, ProviderPaymentId)` - a payment can be applied once;
 - the ledger entry is keyed `topup:{transactionId}` and is skipped if it exists;
-- a top-up already `Credited` is never credited again (a second, different payment on the same order is refused and needs a manual refund).
+- `PaymentTransactions.RowVersion` (optimistic concurrency): two deliveries writing the same top-up at once cannot both win; the loser re-reads the row and decides again;
+- a top-up already `Credited` is never credited again. A second, different payment on the same order (or a captured payment that does not match the order) is not credited and raises a `WalletPaymentNeedsAttention` operator alert: a captured one must be refunded from the Razorpay dashboard, an authorized one is released by Razorpay on its own.
+
+`payment.authorized` with the payment's details is settled straight away: the server captures it and credits the wallet, so an account without auto-capture does not wait for reconciliation.
 
 Duplicate webhooks are also recognised by the unique `RazorpayWebhookEvents.EventId`.
 
 ## Ledger
 
-Credits are a purchase grant in the existing `QuotaLedgerEntry` ledger (`EntryType = Purchase`, `ReferenceType = Payment`, `ReferenceId` = the `Payments` row, note `RAZORPAY wallet top-up pay_...`), with `BalanceAfter` (previous balance = `BalanceAfter - UnitsDelta`). Entries are never edited. A refund (from the Razorpay dashboard, seen through the webhook) takes the refunded share of credits back with a new `RefundClawback` entry, once per refunded amount. Credits already spent cannot be clawed back; only what is left is taken.
+Credits are a purchase grant in the existing `QuotaLedgerEntry` ledger (`EntryType = Purchase`, `ReferenceType = Payment`, `ReferenceId` = the `Payments` row, note `RAZORPAY wallet top-up pay_...`), with `BalanceAfter` (previous balance = `BalanceAfter - UnitsDelta`). Entries are never edited. A refund (from the Razorpay dashboard, seen through the webhook) takes the refunded share of credits back with a new `RefundClawback` entry, once per refunded amount. Credits already spent cannot be clawed back; only what is left is taken. The clawback entry is keyed `refund:{transactionId}:{refundedPaise}`, so `refund.created` and `refund.processed` for the same refund take credits back once between them, even when they arrive together.
 
 ## Configuration
 

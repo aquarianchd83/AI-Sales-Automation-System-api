@@ -136,6 +136,7 @@ public class PaymentTransactionConfiguration : IEntityTypeConfiguration<PaymentT
         builder.Property(t => t.PaymentMethod).HasMaxLength(30);
         builder.Property(t => t.Mode).IsRequired().HasMaxLength(4);
         builder.Property(t => t.FailureReason).HasMaxLength(500);
+        builder.Property(t => t.RowVersion).IsRowVersion();
 
         builder.HasIndex(t => t.InternalTransactionId).IsUnique();
         builder.HasIndex(t => t.RazorpayOrderId).IsUnique();

@@ -27,7 +27,11 @@ public enum PlatformNotificationKind
     ConfigurationNeeded = 6,
 
     /// <summary>The database is using at least the configured share (default 80%) of its capacity.</summary>
-    DatabaseCapacity = 7
+    DatabaseCapacity = 7,
+
+    /// <summary>A tenant's wallet top-up received money that was not credited (a second payment on a paid order, or a payment that did not match
+    /// the order). The money is held at Razorpay until an operator refunds it.</summary>
+    WalletPaymentNeedsAttention = 8
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

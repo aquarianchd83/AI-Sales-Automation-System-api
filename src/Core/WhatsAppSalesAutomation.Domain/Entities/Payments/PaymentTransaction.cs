@@ -80,6 +80,10 @@ public class PaymentTransaction : BaseEntity, ITenantOwned
     public DateTime? LastReconciledAt { get; set; }
 
     public long RefundedMinor { get; set; }
+
+    /// <summary>Optimistic concurrency: two deliveries settling or refunding the same top-up at once (browser and webhook, or refund.created and
+    /// refund.processed arriving together) cannot both write - the loser's save fails and it re-reads the row.</summary>
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
 
 public enum PaymentTransactionStatus
