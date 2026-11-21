@@ -10,6 +10,7 @@ using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Application.Razorpay;
 using WhatsAppSalesAutomation.Application.Wallet;
+using WhatsAppSalesAutomation.Domain.Entities.Billing;
 using WhatsAppSalesAutomation.Domain.Entities.Payments;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
@@ -33,6 +34,7 @@ public sealed class WalletRechargeTests : IDisposable
     private readonly WalletGateway _gateway = new();
     private readonly TestClock _clock = new();
     private readonly RecordingPlatformNotifier _operators = new();
+    private readonly RecordingNotifier _tenantNotices = new();
     private readonly QuotaLedgerService _ledger;
     private readonly WalletRechargeService _service;
     private readonly Guid _tenant = Guid.NewGuid();
@@ -50,7 +52,7 @@ public sealed class WalletRechargeTests : IDisposable
         var pricing = new PricingService(Snapshot.Of(new TaxOptions()), Snapshot.Of(new FxOptions()));
         _service = new WalletRechargeService(
             _db, _store, _gateway, pricing, _ledger, wallet, _clock, Snapshot.Of(new WalletRechargeOptions()), NullLogger<WalletRechargeService>.Instance,
-            _operators);
+            _operators, _tenantNotices);
 
         _db.Tenants.Add(new Tenant { Id = _tenant, Name = "Acme", Slug = "acme", CountryCode = "IN", StateCode = "MH" });
         _db.Tenants.Add(new Tenant { Id = _other, Name = "Globex", Slug = "globex", CountryCode = "IN", StateCode = "KA" });
@@ -83,6 +85,84 @@ public sealed class WalletRechargeTests : IDisposable
 
     private static WalletWebhookEvent Hook(string name, RechargeCheckoutDto order, string? paymentId, long? refunded = null, long? refundAmount = null, string? refundId = null, long? amount = null) =>
         new(name, order.OrderId, paymentId, "upi", null, amount ?? order.AmountMinor, "INR", name switch { "payment.failed" => "failed", "payment.authorized" => "authorized", _ => "captured" }, refundId, refundAmount, refunded);
+
+    // ── Credit packs (the "Buy" buttons) ─────────────────────────────────────────────────
+
+    private async Task<CreditPack> PackAsync(decimal units = 500m, decimal priceInr = 996m, bool withPlan = true)
+    {
+        var pack = new CreditPack { QuotaType = QuotaType.Credits, Name = $"{units:#,##0} credits", Units = units, PriceCents = 1200 };
+        _db.CreditPacks.Add(pack);
+        _db.CreditPackPrices.Add(new CreditPackPrice { CreditPackId = pack.Id, CountryCode = "IN", Amount = priceInr });
+        if (withPlan)
+        {
+            var plan = new Plan { Code = "basic-" + Guid.NewGuid().ToString("N")[..6], Name = "Basic", IsActive = true };
+            _db.Plans.Add(plan);
+            _db.Subscriptions.Add(new Subscription { TenantId = _tenant, PlanId = plan.Id, Status = SubscriptionStatus.Active });
+        }
+        await _db.SaveChangesAsync();
+        return pack;
+    }
+
+    [Fact]
+    public async Task A_credit_pack_order_is_priced_from_the_pack_with_gst_and_buys_the_packs_credits()
+    {
+        var pack = await PackAsync(500m, 996m);
+
+        var order = await _service.CreatePackOrderAsync(_tenant, Guid.NewGuid(), pack.Id);
+
+        Assert.Equal(996m, order.Amount);
+        Assert.Equal(179.28m, order.Tax);
+        Assert.Equal(1175.28m, order.Total);
+        Assert.Equal(117_528, order.AmountMinor);
+        Assert.Equal(500m, order.Credits);
+        Assert.Equal("500 credits", order.Description);
+        var row = await _db.PaymentTransactions.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(pack.Id, row.CreditPackId);
+        Assert.Equal(0m, await BalanceAsync());   // nothing until it is paid
+    }
+
+    [Fact]
+    public async Task A_paid_credit_pack_adds_the_packs_credits_once_records_a_credit_pack_payment_and_tells_the_tenant()
+    {
+        var pack = await PackAsync(500m, 996m);
+        var order = await _service.CreatePackOrderAsync(_tenant, null, pack.Id);
+        Pay(order, "pay_P1");
+
+        var result = await _service.VerifyAsync(_tenant, Signed(order.OrderId, "pay_P1"));
+        await _service.HandleWebhookAsync(Hook("payment.captured", order, "pay_P1"));   // the webhook too: still once
+
+        Assert.True(result.Success);
+        Assert.Equal(500m, await BalanceAsync());
+        Assert.Equal(1, await LedgerEntriesAsync());
+        var payment = await _db.Payments.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal(PaymentKind.CreditPack, payment.Kind);
+        Assert.Equal(pack.Id, payment.CreditPackId);
+        Assert.Equal("500 credits", payment.PlanName);
+        Assert.Equal("pay_P1", payment.ProviderPaymentId);
+        var notice = Assert.Single(_tenantNotices.Sent);
+        Assert.Equal(TenantNotificationKind.CreditsAdded, notice.Kind);
+        Assert.Contains("500 credits", notice.Title);
+    }
+
+    [Fact]
+    public async Task A_credit_pack_cannot_be_bought_without_an_active_plan()
+    {
+        var pack = await PackAsync(withPlan: false);
+
+        await Assert.ThrowsAsync<ConflictException>(() => _service.CreatePackOrderAsync(_tenant, null, pack.Id));
+        Assert.Equal(0, _gateway.OrdersCreated);
+    }
+
+    [Fact]
+    public async Task An_inactive_or_unknown_credit_pack_is_not_found()
+    {
+        var pack = await PackAsync();
+        pack.IsActive = false;
+        await _db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _service.CreatePackOrderAsync(_tenant, null, pack.Id));
+        await Assert.ThrowsAsync<NotFoundException>(() => _service.CreatePackOrderAsync(_tenant, null, Guid.NewGuid()));
+    }
 
     // ── Creating the order ──────────────────────────────────────────────────────────────
 
