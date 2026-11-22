@@ -166,11 +166,19 @@ public class RazorpaySubscriptionEventProcessor : IRazorpaySubscriptionEventProc
         if (hook.Payment is not { InvoiceId: { Length: > 0 } invoiceId } payment)
             return (false, "A failed payment with no invoice: not a subscription's.");
 
-        var credentials = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).Credentials
-            ?? throw new InvalidOperationException("Razorpay is not set up, so the failed payment's invoice could not be looked up.");
-        var invoice = await _gateway.FetchInvoiceAsync(credentials, invoiceId, cancellationToken);
-        if (!invoice.Success || invoice.Value is null)
-            throw new InvalidOperationException($"The invoice {invoiceId} of failed payment {payment.Id} could not be read from Razorpay: {invoice.Error}");
+        // The event does not say whether it came from the Test or the Live account: the active mode's keys are asked first, then the other's.
+        var all = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).AllCredentials;
+        if (all.Count == 0)
+            throw new InvalidOperationException("Razorpay is not set up, so the failed payment's invoice could not be looked up.");
+        RazorpayResult<RazorpayInvoiceInfo>? invoice = null;
+        foreach (var keys in all)
+        {
+            invoice = await _gateway.FetchInvoiceAsync(keys, invoiceId, cancellationToken);
+            if (invoice.Success && invoice.Value is not null)
+                break;
+        }
+        if (invoice is null || !invoice.Success || invoice.Value is null)
+            throw new InvalidOperationException($"The invoice {invoiceId} of failed payment {payment.Id} could not be read from Razorpay: {invoice?.Error}");
         if (string.IsNullOrEmpty(invoice.Value.SubscriptionId))
             return (false, "The failed payment's invoice is not a subscription's.");
 
@@ -207,7 +215,7 @@ public class RazorpaySubscriptionEventProcessor : IRazorpaySubscriptionEventProc
         }
 
         // Older than, or as old as, what has already been applied: its place in the order is unknown, so Razorpay's own record decides.
-        var credentials = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).Credentials
+        var credentials = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).CredentialsFor(mandate.Mode)
             ?? throw new InvalidOperationException("Razorpay is not set up, so an out-of-order event could not be checked against it.");
         if (credentials.Mode != mandate.Mode)
             return $"out of order, and the {mandate.Mode} mandate cannot be checked with {credentials.Mode} keys; its state was left alone";

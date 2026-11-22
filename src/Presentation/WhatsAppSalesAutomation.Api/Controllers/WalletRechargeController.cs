@@ -47,6 +47,11 @@ public class WalletRechargeController : ControllerBase
     public async Task<ActionResult<RechargeCheckoutDto>> CreateOrder([FromBody] CreateRechargeOrderRequest request, CancellationToken cancellationToken)
         => Ok(await _recharge.CreateOrderAsync(RequireTenantId(), _currentUser.UserId, request, cancellationToken));
 
+    /// <summary>A Razorpay order for one credit pack (the "Buy" buttons). Verified and credited through the same verify-payment / webhook / reconciliation path.</summary>
+    [HttpPost("recharge/credit-packs/{packId:guid}/create-order")]
+    public async Task<ActionResult<RechargeCheckoutDto>> CreatePackOrder(Guid packId, CancellationToken cancellationToken)
+        => Ok(await _recharge.CreatePackOrderAsync(RequireTenantId(), _currentUser.UserId, packId, cancellationToken));
+
     [HttpPost("recharge/verify-payment")]
     public async Task<ActionResult<RechargeVerifyResultDto>> VerifyPayment([FromBody] VerifyRechargePaymentRequest request, CancellationToken cancellationToken)
         => Ok(await _recharge.VerifyAsync(RequireTenantId(), request, cancellationToken));

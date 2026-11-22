@@ -102,10 +102,16 @@ public static class PlanSeeder
 
     private static async Task PutEveryTenantOnItsPlanAsync(ApplicationDbContext db, ICreditAllocationService credits, Plan trial)
     {
-        var plans = await db.Subscriptions.IgnoreQueryFilters().AsNoTracking().ToDictionaryAsync(s => s.TenantId, s => s.PlanId);
+        var subscriptions = await db.Subscriptions.IgnoreQueryFilters().AsNoTracking()
+            .Select(s => new { s.TenantId, s.PlanId, s.RazorpaySubscriptionRowId })
+            .ToListAsync();
+        var plans = subscriptions.ToDictionary(s => s.TenantId, s => s.PlanId);
+        // A plan paid for through a UPI AutoPay mandate is already on its plan, with the period it paid for and the credits its payments
+        // granted. Re-assigning it here would wipe that paid-through date and hand out a calendar month's credits on top of the paid ones.
+        var onAutoPay = subscriptions.Where(s => s.RazorpaySubscriptionRowId != null && s.PlanId != null).Select(s => s.TenantId).ToHashSet();
         var tenantIds = await db.Tenants.IgnoreQueryFilters().AsNoTracking().Select(t => t.Id).ToListAsync();
 
-        foreach (var tenantId in tenantIds)
+        foreach (var tenantId in tenantIds.Where(id => !onAutoPay.Contains(id)))
             await credits.AssignPlanAsync(tenantId, plans.GetValueOrDefault(tenantId) ?? trial.Id);
     }
 }

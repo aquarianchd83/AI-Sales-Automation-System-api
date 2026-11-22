@@ -70,6 +70,7 @@ public class AutoPayService : IAutoPayService
     private readonly IDateTimeProvider _clock;
     private readonly AutoPayOptions _options;
     private readonly ILogger<AutoPayService> _logger;
+    private readonly IAutoPayEntitlements? _entitlements;
 
     public AutoPayService(
         IApplicationDbContext context,
@@ -78,7 +79,8 @@ public class AutoPayService : IAutoPayService
         IPricingService pricing,
         IDateTimeProvider clock,
         IOptionsSnapshot<AutoPayOptions> options,
-        ILogger<AutoPayService> logger)
+        ILogger<AutoPayService> logger,
+        IAutoPayEntitlements? entitlements = null)
     {
         _context = context;
         _store = store;
@@ -87,6 +89,7 @@ public class AutoPayService : IAutoPayService
         _clock = clock;
         _options = options.Value;
         _logger = logger;
+        _entitlements = entitlements;
     }
 
     // ── Availability ────────────────────────────────────────────────────────────────────
@@ -325,21 +328,38 @@ public class AutoPayService : IAutoPayService
         if (Ended.Contains(row.Status))
             return await ToDtoAsync(row, cancellationToken);
 
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the subscription cannot be checked.");
         var fetched = await _gateway.FetchSubscriptionAsync(credentials, row.RazorpaySubscriptionId, cancellationToken);
         if (!fetched.Success || fetched.Value is null)
             throw new ConflictException($"Razorpay could not be reached to check the subscription: {fetched.Error}");
 
+        var previous = row.Status;
         Apply(row, fetched.Value);
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (_entitlements is not null)
+        {
+            if (row.Status != previous)
+                await _entitlements.MandateChangedAsync(row, previous, cancellationToken);
+
+            // The tenant has just come back from authorising (or pressed "Check status"). If Razorpay has taken the payment, the plan
+            // follows it now - not when the charge webhook happens to arrive, or at tomorrow's reconciliation if it never does.
+            var (recovered, rebound) = await AutoPayPaymentSync.SyncAsync(
+                _context, _gateway, _entitlements, _clock, _logger, row, credentials, fetched.Value.PaidCount, cancellationToken);
+            if (recovered > 0 || rebound)
+                _logger.LogInformation(
+                    "AutoPay refresh of {SubscriptionId} for tenant {TenantId}: {Recovered} payments recovered, plan put back on the mandate: {Rebound}",
+                    row.RazorpaySubscriptionId, tenantId, recovered, rebound);
+        }
+
         return await ToDtoAsync(row, cancellationToken);
     }
 
     public async Task<IReadOnlyList<AutoPayInvoiceDto>> GetInvoicesAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         var row = await FindAsync(tenantId, id, cancellationToken);
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the invoices cannot be read.");
         if (credentials.Mode != row.Mode)
             return Array.Empty<AutoPayInvoiceDto>();
@@ -369,7 +389,7 @@ public class AutoPayService : IAutoPayService
         if (Ended.Contains(row.Status) || (cancelAtCycleEnd && row.CancelAtCycleEnd))
             return await ToDtoAsync(row, cancellationToken);
 
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the subscription cannot be cancelled.");
 
         // "At the end of the cycle" needs a paid cycle in progress. One never authorised, or one whose payments have stopped, has none.

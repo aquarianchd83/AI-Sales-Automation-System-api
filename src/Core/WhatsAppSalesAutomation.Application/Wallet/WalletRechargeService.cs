@@ -34,6 +34,9 @@ public interface IWalletRechargeService
 
     Task<RechargeCheckoutDto> CreateOrderAsync(Guid tenantId, Guid? userId, CreateRechargeOrderRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>A Razorpay order for one credit pack: the pack's regional price plus tax, for the pack's credits. Paid, verified and credited exactly like a top-up.</summary>
+    Task<RechargeCheckoutDto> CreatePackOrderAsync(Guid tenantId, Guid? userId, Guid packId, CancellationToken cancellationToken = default);
+
     Task<RechargeVerifyResultDto> VerifyAsync(Guid tenantId, VerifyRechargePaymentRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>The transaction's state. A top-up still waiting is checked against Razorpay first, so a tenant who closed the browser mid-payment sees the truth.</summary>
@@ -66,13 +69,16 @@ public class WalletRechargeService : IWalletRechargeService
     private readonly ILogger<WalletRechargeService> _logger;
     /// <summary>Optional so tests can leave it out; DI always supplies it. Tells the operators about money that arrived but was not credited.</summary>
     private readonly IPlatformNotifier? _platformNotifier;
+    /// <summary>Optional so tests can leave it out; DI always supplies it. Tells the tenant its credits arrived.</summary>
+    private readonly ITenantNotifier? _tenantNotifier;
 
     public WalletRechargeService(
         IApplicationDbContext context, IAppSettingsStore store, IRazorpayGateway gateway, IPricingService pricing, QuotaLedgerService ledger,
         ICreditWalletService wallet, IDateTimeProvider clock, IOptionsSnapshot<WalletRechargeOptions> options, ILogger<WalletRechargeService> logger,
-        IPlatformNotifier? platformNotifier = null)
+        IPlatformNotifier? platformNotifier = null, ITenantNotifier? tenantNotifier = null)
     {
         _platformNotifier = platformNotifier;
+        _tenantNotifier = tenantNotifier;
         _context = context;
         _store = store;
         _gateway = gateway;
@@ -138,6 +144,41 @@ public class WalletRechargeService : IWalletRechargeService
 
         var tenant = await RequireTenantAsync(tenantId, cancellationToken);
         var (quote, credits) = Price(tenant, request.Amount);
+        return await OpenOrderAsync(tenant, userId, quote, credits, Options.CreditsPerRupee, null, $"Wallet recharge ({credits:#,##0.##} credits)", cancellationToken);
+    }
+
+    public async Task<RechargeCheckoutDto> CreatePackOrderAsync(Guid tenantId, Guid? userId, Guid packId, CancellationToken cancellationToken = default)
+    {
+        var pack = await _context.CreditPacks.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(p => p.Id == packId && p.IsActive, cancellationToken)
+            ?? throw new NotFoundException(nameof(CreditPack), packId);
+        var tenant = await RequireTenantAsync(tenantId, cancellationToken);
+
+        // The same rule as before Razorpay: packs are an add-on to a live plan.
+        var subscription = await _context.Subscriptions.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenantId, cancellationToken);
+        var canBuy = subscription is { PlanId: not null } && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.PastDue
+                     && tenant.Status is TenantStatus.Active or TenantStatus.Trial;
+        if (!canBuy)
+            throw new ConflictException("Credits can only be bought while you have an active plan. Choose a plan first.");
+        if (pack.Units <= 0)
+            throw new ConflictException("This credit pack adds no credits.");
+
+        var region = RegionalPricingCatalog.Resolve(tenant.CountryCode);
+        var packPrice = (await CatalogPricing.LoadPackPricesAsync(_context, new[] { pack.Id }, cancellationToken))
+            .GetValueOrDefault(pack.Id)?.GetValueOrDefault(region.CountryCode);
+        var quote = _pricing.Quote(packPrice, tenant.CountryCode, tenant.StateCode)
+            ?? throw new ConflictException("This credit pack isn't available in your country.");
+        if (quote.CurrencyCode != "INR")
+            throw new ConflictException($"Credit packs can only be paid in INR (Indian Rupees) right now. Please contact support to buy credits in {quote.CurrencyCode}.");
+
+        return await OpenOrderAsync(tenant, userId, quote, pack.Units, 0m, pack.Id, pack.Name, cancellationToken);
+    }
+
+    /// <summary>Creates the Razorpay order for an already-priced purchase and records the transaction that will be credited when it is paid.</summary>
+    private async Task<RechargeCheckoutDto> OpenOrderAsync(
+        Domain.Entities.Tenancy.Tenant tenant, Guid? userId, PriceQuote quote, decimal credits, decimal creditsPerRupee, Guid? creditPackId, string description,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.Id;
         var credentials = await RequireCredentialsAsync(cancellationToken);
 
         // A guard against a script spraying orders: a handful of unpaid orders at a time is plenty for a person.
@@ -149,7 +190,9 @@ public class WalletRechargeService : IWalletRechargeService
 
         var amountMinor = (long)decimal.Round(quote.Total * 100m, 0, MidpointRounding.AwayFromZero);
         var reference = $"wr-{_clock.UtcNow:yyyyMMddHHmmss}-{RandomNumberGenerator.GetHexString(8).ToLowerInvariant()}";
-        var notes = new Dictionary<string, string> { ["source"] = "wallet-recharge", ["reference"] = reference, ["tenant"] = tenantId.ToString("N") };
+        var notes = new Dictionary<string, string> { ["source"] = creditPackId is null ? "wallet-recharge" : "credit-pack", ["reference"] = reference, ["tenant"] = tenantId.ToString("N") };
+        if (creditPackId is { } packRef)
+            notes["credit_pack"] = packRef.ToString("N");
 
         var created = await _gateway.CreateOrderAsync(credentials, amountMinor, "INR", reference, notes, cancellationToken);
         if (!created.Success || created.Value is null)
@@ -169,7 +212,8 @@ public class WalletRechargeService : IWalletRechargeService
             AmountMinor = amountMinor,
             Currency = "INR",
             Credits = credits,
-            CreditsPerRupee = Options.CreditsPerRupee,
+            CreditsPerRupee = creditsPerRupee,
+            CreditPackId = creditPackId,
             TaxLinesJson = quote.TaxLinesJson,
             AmountUsdCents = quote.SubtotalUsdCents,
             FxRateToInr = quote.FxRateToInr,
@@ -188,7 +232,7 @@ public class WalletRechargeService : IWalletRechargeService
 
         return new RechargeCheckoutDto(
             txn.Id, reference, txn.RazorpayOrderId, credentials.KeyId, txn.Mode, amountMinor, "INR", Options.BusinessName,
-            $"Wallet recharge ({credits:#,##0.##} credits)", txn.Amount, txn.TaxAmount, txn.TotalAmount, txn.Credits, new RechargePrefillDto(tenant.Name, null, null));
+            description, txn.Amount, txn.TaxAmount, txn.TotalAmount, txn.Credits, new RechargePrefillDto(tenant.Name, null, null));
     }
 
     // ── Verify what the browser reports ─────────────────────────────────────────────────
@@ -216,7 +260,7 @@ public class WalletRechargeService : IWalletRechargeService
         if (IsCredited(txn) && txn.RazorpayPaymentId == paymentId)
             return await Result(true, false, "This payment was already confirmed and your wallet credited.");
 
-        var credentials = await RequireCredentialsAsync(cancellationToken);
+        var credentials = await RequireCredentialsAsync(txn.Mode, cancellationToken);
         if (!RazorpaySignatures.IsValidPaymentSignature(txn.RazorpayOrderId, paymentId, request.RazorpaySignature, credentials.KeySecret))
         {
             _logger.LogWarning("Wallet recharge {Reference}: checkout signature did not match (tenant {TenantId}); nothing credited", txn.InternalTransactionId, tenantId);
@@ -263,7 +307,7 @@ public class WalletRechargeService : IWalletRechargeService
                     var authorized = new RazorpayPaymentInfo(
                         webhook.PaymentId, webhook.OrderId, webhook.PaymentAmount.Value, webhook.PaymentCurrency ?? "INR", webhook.PaymentStatus ?? "authorized",
                         webhook.Method, webhook.PaymentAmountRefunded ?? 0, webhook.ErrorDescription);
-                    var settled = await SettlePaymentAsync(txn, authorized, await RequireCredentialsAsync(cancellationToken), cancellationToken);
+                    var settled = await SettlePaymentAsync(txn, authorized, await RequireCredentialsAsync(txn.Mode, cancellationToken), cancellationToken);
                     return new WalletWebhookResult(true, settled == Settlement.Credited, settled switch
                     {
                         Settlement.Credited => "Payment authorized and captured - wallet credited.",
@@ -297,7 +341,7 @@ public class WalletRechargeService : IWalletRechargeService
                 var payment = new RazorpayPaymentInfo(
                     webhook.PaymentId, webhook.OrderId, webhook.PaymentAmount.Value, webhook.PaymentCurrency ?? "INR", webhook.PaymentStatus ?? "captured",
                     webhook.Method, webhook.PaymentAmountRefunded ?? 0, webhook.ErrorDescription);
-                var credentials = await RequireCredentialsAsync(cancellationToken);
+                var credentials = await RequireCredentialsAsync(txn.Mode, cancellationToken);
                 var result = await SettlePaymentAsync(txn, payment, credentials, cancellationToken);
                 return new WalletWebhookResult(true, result == Settlement.Credited, result switch
                 {
@@ -377,7 +421,7 @@ public class WalletRechargeService : IWalletRechargeService
         var id = txn.Id;
         var tenantId = txn.TenantId;
         var before = txn.Status;
-        var credentials = await TryCredentialsAsync(cancellationToken);
+        var credentials = await TryCredentialsAsync(txn.Mode, cancellationToken);
         if (credentials is null)
             return false;
 
@@ -485,6 +529,9 @@ public class WalletRechargeService : IWalletRechargeService
     private async Task<bool> CompleteAsync(PaymentTransaction txn, RazorpayPaymentInfo paid, CancellationToken cancellationToken)
     {
         var id = txn.Id;
+        var packName = txn.CreditPackId is { } packId
+            ? await _context.CreditPacks.IgnoreQueryFilters().AsNoTracking().Where(p => p.Id == packId).Select(p => p.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
         for (var attempt = 1; ; attempt++)
         {
             var now = _clock.UtcNow;
@@ -494,8 +541,9 @@ public class WalletRechargeService : IWalletRechargeService
                 var payment = new Payment
                 {
                     TenantId = txn.TenantId,
-                    Kind = PaymentKind.WalletTopUp,
-                    PlanName = "Wallet top-up",
+                    Kind = txn.CreditPackId is null ? PaymentKind.WalletTopUp : PaymentKind.CreditPack,
+                    CreditPackId = txn.CreditPackId,
+                    PlanName = txn.CreditPackId is null ? "Wallet top-up" : packName ?? "Credit pack",
                     AmountCents = txn.AmountUsdCents,
                     CurrencyCode = txn.Currency,
                     CurrencySymbol = "₹",
@@ -524,8 +572,10 @@ public class WalletRechargeService : IWalletRechargeService
                 txn.FailureReason = null;
                 await _context.SaveChangesAsync(cancellationToken);
 
-                await _ledger.GrantTopUpAsync(txn.TenantId, txn.Credits, txn.Id, payment.Id, $"{Source} wallet top-up {paid.Id}", cancellationToken);
+                await _ledger.GrantTopUpAsync(txn.TenantId, txn.Credits, txn.Id, payment.Id,
+                    txn.CreditPackId is null ? $"{Source} wallet top-up {paid.Id}" : $"{packName ?? "Credit pack"} ({Source} {paid.Id})", cancellationToken);
                 await tx.CommitAsync(cancellationToken);
+                await NotifyCreditedAsync(txn, payment.Id, packName, cancellationToken);
 
                 _logger.LogInformation("Wallet recharge {Reference} credited: tenant {TenantId} +{Credits} credits (payment {PaymentId})", txn.InternalTransactionId, txn.TenantId, txn.Credits, paid.Id);
                 return true;
@@ -608,6 +658,27 @@ public class WalletRechargeService : IWalletRechargeService
         }
     }
 
+    /// <summary>Tells the tenant its credits arrived - once per payment (the episode is the payment). Never throws.</summary>
+    private async Task NotifyCreditedAsync(PaymentTransaction txn, Guid paymentId, string? packName, CancellationToken cancellationToken)
+    {
+        if (_tenantNotifier is null)
+            return;
+        try
+        {
+            var units = txn.Credits.ToString("#,##0.##", CultureInfo.InvariantCulture);
+            var what = packName is null ? "wallet recharge" : $"purchase of {packName}";
+            await _tenantNotifier.NotifyAsync(new TenantNotificationRequest(
+                txn.TenantId, TenantNotificationKind.CreditsAdded, QuotaType.Credits, paymentId.ToString("N"),
+                $"{units} credits added",
+                $"Your {what} is paid and {units} credits are in your wallet. They are valid for {QuotaLedgerService.CreditValidityMonths} months.",
+                AlsoWhatsApp: false), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Wallet recharge {Reference}: the credits-added notice could not be sent", txn.InternalTransactionId);
+        }
+    }
+
     /// <summary>
     /// Tells the platform operators about money Razorpay holds for a top-up that was NOT credited - a second payment on a paid order, or a payment
     /// that did not match the order. A captured one has to be refunded by hand; an authorized one is released by Razorpay on its own. Never throws.
@@ -683,16 +754,15 @@ public class WalletRechargeService : IWalletRechargeService
         return (quote, credits);
     }
 
+    /// <summary>The active mode's keys for a new order; for a top-up already made, the keys of the mode (test/live) it was made in.</summary>
     private async Task<RazorpayCredentials> RequireCredentialsAsync(CancellationToken cancellationToken) =>
-        await TryCredentialsAsync(cancellationToken) ?? throw new ConflictException("Online payment is not set up yet. Please contact support.");
+        await RequireCredentialsAsync(null, cancellationToken);
 
-    private async Task<RazorpayCredentials?> TryCredentialsAsync(CancellationToken cancellationToken)
-    {
-        var stored = await _store.GetAllAsync(cancellationToken);
-        var keyId = stored.TryGetValue(RazorpayService.KeyIdKey, out var k) ? k?.Trim() ?? string.Empty : string.Empty;
-        var secret = stored.TryGetValue(RazorpayService.KeySecretKey, out var s) ? s?.Trim() ?? string.Empty : string.Empty;
-        return keyId.Length == 0 || secret.Length == 0 ? null : new RazorpayCredentials(keyId, secret);
-    }
+    private async Task<RazorpayCredentials> RequireCredentialsAsync(string? mode, CancellationToken cancellationToken) =>
+        await TryCredentialsAsync(mode, cancellationToken) ?? throw new ConflictException("Online payment is not set up yet. Please contact support.");
+
+    private async Task<RazorpayCredentials?> TryCredentialsAsync(string? mode, CancellationToken cancellationToken) =>
+        RazorpayKeyStore.CredentialsFor(await _store.GetAllAsync(cancellationToken), mode);
 
     private async Task<List<RechargeTransactionDto>> ToDtosAsync(Guid tenantId, IReadOnlyList<PaymentTransaction> rows, CancellationToken cancellationToken)
     {

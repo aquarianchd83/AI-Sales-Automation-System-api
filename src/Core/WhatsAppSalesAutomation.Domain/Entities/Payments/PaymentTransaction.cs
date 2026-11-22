@@ -81,6 +81,10 @@ public class PaymentTransaction : BaseEntity, ITenantOwned
 
     public long RefundedMinor { get; set; }
 
+    /// <summary>Set when this is the purchase of a credit pack (the "Buy" buttons) rather than a free-amount top-up: the price is the pack's, the
+    /// credits are the pack's units, and the <c>Payment</c> row is a credit-pack payment.</summary>
+    public Guid? CreditPackId { get; set; }
+
     /// <summary>Optimistic concurrency: two deliveries settling or refunding the same top-up at once (browser and webhook, or refund.created and
     /// refund.processed arriving together) cannot both write - the loser's save fails and it re-reads the row.</summary>
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();

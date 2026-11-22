@@ -5794,6 +5794,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("CreditPackId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("CreditedAt")
                         .HasColumnType("datetime2");
 
