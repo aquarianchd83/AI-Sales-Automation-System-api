@@ -207,6 +207,21 @@ public sealed class PlanAndCreditFlowTests : IDisposable
             Assert.True(await premiumAccess.HasAsync(_tenant.Id, feature));
     }
 
+    [Fact]
+    public async Task An_unpublished_feature_is_unavailable_to_every_plan_with_its_own_message()
+    {
+        await _credits.AssignPlanAsync(_tenant.Id, _premium.Id);
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [PlatformFeatureSwitches.KeyOf(PlatformFeature.ContentStudio)] = "false" })
+            .Build();
+        var access = new FeatureAccessService(_db, config);
+
+        Assert.False(await access.HasAsync(_tenant.Id, PlatformFeature.ContentStudio));
+        Assert.True(await access.HasAsync(_tenant.Id, PlatformFeature.LeadDiscovery)); // others stay published
+        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireAsync(_tenant.Id, PlatformFeature.ContentStudio));
+        Assert.Contains("not available right now", ex.Message);
+    }
+
     // ---- Buying credits
 
     [Fact]

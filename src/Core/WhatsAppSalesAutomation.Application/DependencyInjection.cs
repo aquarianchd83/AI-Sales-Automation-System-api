@@ -211,6 +211,7 @@ public static class DependencyInjection
         services.AddScoped<IPlatformDeliverySettingsService, PlatformDeliverySettingsService>();
         services.AddScoped<IPlatformIntegrationSettingsService, PlatformIntegrationSettingsService>();
         services.AddScoped<IPlatformAiFeatureSettingsService, PlatformAiFeatureSettingsService>();
+        services.AddScoped<IPlatformFeatureSwitchService, PlatformFeatureSwitchService>();
         services.AddScoped<WhatsAppSalesAutomation.Application.Ai.Tasks.IAiTaskRunner, WhatsAppSalesAutomation.Application.Ai.Tasks.AiTaskRunner>();
 
         // Product knowledge, phase 2: the tenant's sources (documents and website) read into page-referenced passages.

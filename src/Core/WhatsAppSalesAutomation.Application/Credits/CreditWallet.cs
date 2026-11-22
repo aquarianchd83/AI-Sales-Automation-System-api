@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
@@ -66,9 +68,14 @@ public interface IFeatureAccessService
 public class FeatureAccessService : IFeatureAccessService
 {
     private readonly IApplicationDbContext _context;
+    private readonly IConfiguration? _configuration;
     private readonly Dictionary<Guid, IReadOnlySet<PlatformFeature>> _cache = new();
 
-    public FeatureAccessService(IApplicationDbContext context) => _context = context;
+    public FeatureAccessService(IApplicationDbContext context, IConfiguration? configuration = null)
+    {
+        _context = context;
+        _configuration = configuration;
+    }
 
     public async Task<IReadOnlySet<PlatformFeature>> GetFeaturesAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
@@ -84,6 +91,9 @@ public class FeatureAccessService : IFeatureAccessService
             ? new HashSet<PlatformFeature>()
             : (await _context.PlanFeatures.AsNoTracking().Where(f => f.PlanId == planId).Select(f => f.Feature).ToListAsync(cancellationToken)).ToHashSet();
 
+        // A feature the platform admin has unpublished is unavailable to every tenant, whatever its plan includes.
+        features.ExceptWith(PlatformFeatureSwitches.Unpublished(_configuration));
+
         return _cache[tenantId] = features;
     }
 
@@ -92,8 +102,12 @@ public class FeatureAccessService : IFeatureAccessService
 
     public async Task RequireAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
     {
-        if (!await HasAsync(tenantId, feature, cancellationToken))
-            throw new FeatureDisabledException($"{PlatformFeatureCatalog.For(feature).Label} is not part of your plan. Upgrade to Premium to use it.");
+        if (await HasAsync(tenantId, feature, cancellationToken))
+            return;
+        var label = PlatformFeatureCatalog.For(feature).Label;
+        throw new FeatureDisabledException(PlatformFeatureSwitches.Unpublished(_configuration).Contains(feature)
+            ? $"{label} is not available right now."
+            : $"{label} is not part of your plan. Upgrade to Premium to use it.");
     }
 }
 
