@@ -192,7 +192,8 @@ public class CreditWalletService : ICreditWalletService
         var spent = await SpentThisMonthAsync(tenantId, monthStart, ct);
         var caps = await _context.TenantFeatureCaps.IgnoreQueryFilters().AsNoTracking().Where(c => c.TenantId == tenantId).ToDictionaryAsync(c => c.Feature, c => c.MonthlyLimit, ct);
 
-        var features = PlatformFeatureCatalog.All.Select(f => new FeatureWalletDto(
+        // Campaigns spends nothing of its own (its sends are WhatsApp messaging), so it has no wallet, cap or ledger.
+        var features = PlatformFeatureCatalog.All.Where(f => f.Scenarios.Count > 0).Select(f => new FeatureWalletDto(
             f.Feature, f.Label, f.Description, included.Contains(f.Feature),
             spent.GetValueOrDefault(f.Feature), caps.TryGetValue(f.Feature, out var cap) ? cap : null,
             f.Scenarios.Select(s =>
@@ -278,6 +279,7 @@ public class CreditWalletService : ICreditWalletService
         PlatformFeature.LeadDiscovery => "Lead discovery",
         PlatformFeature.ContentStudio => "Content Studio",
         PlatformFeature.ProductKnowledge => "Product knowledge",
+        PlatformFeature.Campaigns => "Campaigns",
         _ => feature.ToString()
     };
 

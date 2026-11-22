@@ -11,7 +11,7 @@ using WhatsAppSalesAutomation.Domain.Constants;
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
 [ApiController]
-[RequiresFeature(PlatformFeature.WhatsAppMessaging)]
+[RequiresFeature(PlatformFeature.Campaigns)]
 [Route("api/v1/campaigns")]
 [Authorize]
 public class CampaignsController : ControllerBase
@@ -142,7 +142,7 @@ public class CampaignsController : ControllerBase
 /// CRUD policy.
 /// </summary>
 [ApiController]
-[RequiresFeature(PlatformFeature.WhatsAppMessaging)]
+[RequiresFeature(PlatformFeature.Campaigns)]
 [Route("api/v1/campaigns/ops")]
 [Authorize(Roles = AppRoles.Admin)]
 public class CampaignOpsController : ControllerBase

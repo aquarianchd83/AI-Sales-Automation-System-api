@@ -22,5 +22,8 @@ public enum PlatformFeature
     ContentStudio = 3,
 
     /// <summary>Reading sources and drafting product knowledge.</summary>
-    ProductKnowledge = 4
+    ProductKnowledge = 4,
+
+    /// <summary>Creating and sending WhatsApp campaigns. Sends are paid as WhatsApp messaging; this feature only gates access and the campaign limit.</summary>
+    Campaigns = 5
 }
