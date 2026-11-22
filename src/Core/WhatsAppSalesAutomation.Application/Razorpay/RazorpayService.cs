@@ -23,6 +23,9 @@ public interface IRazorpayService
     /// would be sent to Razorpay to authorise a mandate whose payments this platform could never confirm. Turning it off is always allowed.</summary>
     Task<RazorpaySettingsDto> SetAutoPayEnabledAsync(bool enabled, Guid? userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Chooses how payments and orders are read: "Mcp" (Razorpay's MCP server) or "Rest". Writes always use the REST API.</summary>
+    Task<RazorpaySettingsDto> SetReadTransportAsync(string transport, Guid? userId, CancellationToken cancellationToken = default);
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Never throws on a Razorpay error.</summary>
     Task<RazorpayCheckResultDto> TestKeysAsync(TestRazorpayKeysRequest request, CancellationToken cancellationToken = default);
 
@@ -54,6 +57,10 @@ public class RazorpayService : IRazorpayService
     public const string KeyIdKey = "Razorpay:KeyId";
     public const string KeySecretKey = "Razorpay:KeySecret";
     public const string WebhookSecretKey = "Razorpay:WebhookSecret";
+    // Read by RazorpayMcpGateway (Infrastructure), which names the same key.
+    public const string TransportKey = "Razorpay:Transport";
+    public const string TransportMcp = "Mcp";
+    public const string TransportRest = "Rest";
     public const string WebhookPath = "/api/v1/webhooks/razorpay";
 
     public const decimal MinAmount = 1m;
@@ -93,12 +100,13 @@ public class RazorpayService : IRazorpayService
         var secret = Get(stored, KeySecretKey);
         var webhook = Get(stored, WebhookSecretKey);
         var autoPay = string.Equals(Get(stored, Billing.AutoPay.AutoPaySettings.EnabledKey), "true", StringComparison.OrdinalIgnoreCase);
+        var transport = string.Equals(Get(stored, TransportKey), TransportRest, StringComparison.OrdinalIgnoreCase) ? TransportRest : TransportMcp;
 
         return new RazorpaySettingsDto(
             keyId, keyId.Length == 0 ? "test" : RazorpayKeys.ModeOf(keyId),
             secret.Length > 0, Mask(secret), webhook.Length > 0, Mask(webhook),
             keyId.Length > 0 && secret.Length > 0, WebhookPath,
-            autoPay, autoPay && keyId.Length > 0 && secret.Length > 0 && webhook.Length > 0);
+            autoPay, autoPay && keyId.Length > 0 && secret.Length > 0 && webhook.Length > 0, transport);
     }
 
     public async Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default)
@@ -134,6 +142,18 @@ public class RazorpayService : IRazorpayService
         await _store.UpsertAsync(
             new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [Billing.AutoPay.AutoPaySettings.EnabledKey] = enabled ? "true" : "false" }, userId, cancellationToken);
         _logger.LogInformation("UPI AutoPay switched {State} by {UserId}", enabled ? "on" : "off", userId);
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<RazorpaySettingsDto> SetReadTransportAsync(string transport, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        var value = (transport ?? string.Empty).Trim();
+        value = string.Equals(value, TransportRest, StringComparison.OrdinalIgnoreCase) ? TransportRest
+            : string.Equals(value, TransportMcp, StringComparison.OrdinalIgnoreCase) ? TransportMcp
+            : throw Invalid(nameof(transport), "Choose \"Mcp\" or \"Rest\".");
+
+        await _store.UpsertAsync(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [TransportKey] = value }, userId, cancellationToken);
+        _logger.LogInformation("Razorpay reads switched to {Transport} by {UserId}", value, userId);
         return await GetSettingsAsync(cancellationToken);
     }
 

@@ -14,17 +14,17 @@ namespace WhatsAppSalesAutomation.Infrastructure.Payments;
 /// subscriptions and invoices (UPI AutoPay) have no MCP tools and use REST too.
 /// </para>
 /// <para>
-/// <c>Razorpay:Transport</c> = <c>Rest</c> (Platform Admin Console &gt; Razorpay) sends everything straight to the REST API again - a switch for an
+/// <c>Razorpay:Transport</c> = <c>Rest</c> (Platform &gt; Configuration &gt; Razorpay Test, "Read payments through") sends the reads straight to the REST API again - a switch for an
 /// MCP outage, no redeploy. <c>Razorpay:McpUrl</c> points at another MCP server (e.g. a self-hosted one).
 /// </para>
 /// Signatures (checkout and webhook) are never Razorpay calls: they are checked in the backend with the key secret and webhook secret, whichever transport is used.
 /// </summary>
 public class RazorpayMcpGateway : IRazorpayGateway
 {
-    public const string TransportKey = "Razorpay:Transport";
+    public const string TransportKey = RazorpayService.TransportKey;
     public const string McpUrlKey = "Razorpay:McpUrl";
-    public const string TransportMcp = "Mcp";
-    public const string TransportRest = "Rest";
+    public const string TransportMcp = RazorpayService.TransportMcp;
+    public const string TransportRest = RazorpayService.TransportRest;
 
     private readonly RazorpayMcpClient _mcp;
     private readonly RazorpayGateway _rest;

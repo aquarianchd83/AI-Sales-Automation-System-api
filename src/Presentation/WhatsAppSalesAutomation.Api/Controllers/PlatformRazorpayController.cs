@@ -56,6 +56,15 @@ public class PlatformRazorpayController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Chooses how payments and orders are read: "Mcp" (Razorpay's MCP server) or "Rest". Creating orders, capture and refunds always use REST.</summary>
+    [HttpPut("transport")]
+    public async Task<ActionResult<RazorpaySettingsDto>> SetTransport([FromBody] SetRazorpayTransportRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _razorpay.SetReadTransportAsync(request.Transport, _currentUser.UserId, cancellationToken);
+        await LogAsync(PlatformAuditActions.RazorpayTransportChanged, $"Razorpay reads switched to {result.ReadTransport}", cancellationToken);
+        return Ok(result);
+    }
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Always 200: the result says whether it worked.</summary>
     [HttpPost("settings/test")]
     public async Task<ActionResult<RazorpayCheckResultDto>> TestKeys([FromBody] TestRazorpayKeysRequest request, CancellationToken cancellationToken)

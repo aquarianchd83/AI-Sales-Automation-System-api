@@ -138,6 +138,26 @@ public sealed class RazorpayServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Reads_go_through_mcp_by_default_and_can_be_switched_to_rest_and_back_under_the_key_the_gateway_reads()
+    {
+        Assert.Equal("Mcp", (await _service.GetSettingsAsync()).ReadTransport);
+
+        var rest = await _service.SetReadTransportAsync("rest", Guid.NewGuid());
+        Assert.Equal("Rest", rest.ReadTransport);
+        Assert.Equal("Rest", _store.Rows[WhatsAppSalesAutomation.Infrastructure.Payments.RazorpayMcpGateway.TransportKey]);
+
+        var mcp = await _service.SetReadTransportAsync("Mcp", null);
+        Assert.Equal("Mcp", mcp.ReadTransport);
+    }
+
+    [Fact]
+    public async Task An_unknown_read_transport_is_refused_and_nothing_is_saved()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() => _service.SetReadTransportAsync("grpc", null));
+        Assert.False(_store.Rows.ContainsKey(RazorpayService.TransportKey));
+    }
+
+    [Fact]
     public async Task AutoPay_cannot_be_turned_on_before_the_keys_are_saved()
     {
         var ex = await Assert.ThrowsAsync<ConflictException>(() => _service.SetAutoPayEnabledAsync(true, null));
