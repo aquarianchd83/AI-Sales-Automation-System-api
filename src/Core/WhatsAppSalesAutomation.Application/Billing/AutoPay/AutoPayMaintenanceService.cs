@@ -214,60 +214,18 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
         if (mandate.Status != previous)
             await _entitlements.MandateChangedAsync(mandate, previous, cancellationToken);
 
-        // Razorpay has counted payments that are not on record here: a charge event never arrived or never applied.
-        var recovered = 0;
-        var paymentsMissing = fetched.Value.PaidCount > await RecordedPaymentsAsync(mandate.RazorpaySubscriptionId, cancellationToken);
+        // Razorpay has counted payments that are not on record here (a charge event never arrived or never applied), or the tenant's plan
+        // is not on a mandate it has paid: both are put right from Razorpay's own record.
+        var (recovered, _) = await AutoPayPaymentSync.SyncAsync(
+            _context, _gateway, _entitlements, _clock, _logger, mandate, credentials, fetched.Value.PaidCount, cancellationToken);
+        var recorded = await AutoPayPaymentSync.RecordedPaymentsAsync(_context, mandate.RazorpaySubscriptionId, cancellationToken);
+        var paymentsMissing = fetched.Value.PaidCount > recorded;
         if (paymentsMissing)
-        {
-            recovered = await RecoverPaymentsAsync(mandate, credentials, cancellationToken);
-            var recorded = await RecordedPaymentsAsync(mandate.RazorpaySubscriptionId, cancellationToken);
-            paymentsMissing = fetched.Value.PaidCount > recorded;
-            if (paymentsMissing)
-                _logger.LogError(
-                    "AutoPay reconciliation: Razorpay counts {Paid} payments on {SubscriptionId} but {Recorded} are recorded here, and its invoices did not account for the rest",
-                    fetched.Value.PaidCount, mandate.RazorpaySubscriptionId, recorded);
-        }
+            _logger.LogError(
+                "AutoPay reconciliation: Razorpay counts {Paid} payments on {SubscriptionId} but {Recorded} are recorded here, and its invoices did not account for the rest",
+                fetched.Value.PaidCount, mandate.RazorpaySubscriptionId, recorded);
 
         return (repaired, abandoned, paymentsMissing, recovered);
-    }
-
-    private Task<int> RecordedPaymentsAsync(string razorpaySubscriptionId, CancellationToken cancellationToken) =>
-        _context.Payments.IgnoreQueryFilters()
-            .CountAsync(p => p.ProviderSubscriptionId == razorpaySubscriptionId && p.Status == PaymentStatus.Succeeded && p.Kind == PaymentKind.Subscription, cancellationToken);
-
-    /// <summary>
-    /// Records the payments Razorpay took that never reached us. Razorpay raises an invoice for each billing cycle and a paid one names its
-    /// payment, so each paid invoice whose payment is not on record is handed to the same code a charge webhook reaches - which records a
-    /// payment and grants its credits exactly once, so a payment whose webhook is merely late, and arrives afterwards, is not counted twice.
-    /// </summary>
-    private async Task<int> RecoverPaymentsAsync(RazorpaySubscription mandate, RazorpayCredentials credentials, CancellationToken cancellationToken)
-    {
-        var invoices = await _gateway.FetchSubscriptionInvoicesAsync(credentials, mandate.RazorpaySubscriptionId, cancellationToken);
-        if (!invoices.Success || invoices.Value is null)
-            throw new InvalidOperationException($"The invoices of {mandate.RazorpaySubscriptionId} could not be read from Razorpay: {invoices.Error}");
-
-        var known = await _context.Payments.IgnoreQueryFilters()
-            .Where(p => p.ProviderSubscriptionId == mandate.RazorpaySubscriptionId && p.Status == PaymentStatus.Succeeded && p.ProviderPaymentId != null)
-            .Select(p => p.ProviderPaymentId!)
-            .ToListAsync(cancellationToken);
-
-        var recovered = 0;
-        foreach (var invoice in invoices.Value.Where(i => i.Status == "paid" && !string.IsNullOrEmpty(i.PaymentId)).OrderBy(i => i.PaidAt ?? 0))
-        {
-            if (known.Contains(invoice.PaymentId!))
-                continue;
-
-            var payment = new RazorpayWebhookPayment(
-                invoice.PaymentId!, invoice.AmountPaid, invoice.Currency, "captured", null, invoice.Id, invoice.OrderId, null,
-                RazorpayMandateState.FromUnix(invoice.PaidAt), RazorpayMandateState.FromUnix(invoice.BillingStart), RazorpayMandateState.FromUnix(invoice.BillingEnd));
-            await _entitlements.ChargeSucceededAsync(mandate, payment, cancellationToken);
-            recovered++;
-            _logger.LogWarning(
-                "AutoPay reconciliation: payment {PaymentId} on {SubscriptionId} had never been recorded; recovered from invoice {InvoiceId}",
-                invoice.PaymentId, mandate.RazorpaySubscriptionId, invoice.Id);
-        }
-
-        return recovered;
     }
 
     // ── Lapsed plans ────────────────────────────────────────────────────────────────────

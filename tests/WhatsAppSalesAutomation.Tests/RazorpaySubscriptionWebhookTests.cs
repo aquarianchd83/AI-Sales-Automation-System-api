@@ -785,7 +785,8 @@ public sealed class RazorpaySubscriptionWebhookTests : IDisposable
         var result = await _maintenance.ReconcileAsync();
 
         Assert.Equal(1, result.PaymentsMissing);
-        Assert.Empty(_entitlements.Charges);
+        // Nothing new is invented: the only payment handed on is the one already on record, re-applied so the tenant's plan rests on it.
+        Assert.All(_entitlements.Charges, c => Assert.Equal("pay_1", c.Item2.Id));
         Assert.Equal(1, await _db.Payments.IgnoreQueryFilters().CountAsync());
     }
 

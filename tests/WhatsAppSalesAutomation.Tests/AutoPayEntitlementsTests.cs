@@ -944,4 +944,74 @@ public sealed class AutoPayEntitlementsTests : IDisposable
 
         await Assert.ThrowsAsync<ConflictException>(() => service.GetInvoicesAsync(_tenant.Id, mandate.Id));
     }
+
+    // ── The plan follows the payment, even without its webhook ──────────────────────────
+
+    private AutoPayService ServiceWithEntitlements() =>
+        new(_db, _store, _gateway, TestPricing.Default(), _clock, new FixedOptions<AutoPayOptions>(new()), NullLogger<AutoPayService>.Instance, _entitlements);
+
+    [Fact]
+    public async Task Check_status_records_a_payment_whose_charge_webhook_never_came_and_moves_the_tenant_onto_the_plan()
+    {
+        var mandate = await MandateAsync(status: RazorpaySubscriptionStatus.Created);
+        _gateway.Subscriptions[Sub] = _gateway.Subscriptions[Sub] with { Status = "active", PaidCount = 1 };
+        Invoice("inv_1", "pay_1", 0);
+
+        var dto = await ServiceWithEntitlements().RefreshAsync(_tenant.Id, mandate.Id);
+
+        Assert.Equal(AutoPayDisplayStatus.Active, dto.Status);
+        var subscription = await SubscriptionAsync();
+        Assert.Equal((_premium.Id, SubscriptionStatus.Active, mandate.Id), (subscription.PlanId, subscription.Status, subscription.RazorpaySubscriptionRowId));
+        Assert.Equal("pay_1", Assert.Single(await PaymentsAsync()).ProviderPaymentId);
+        Assert.Equal(100m, await BalanceAsync());
+    }
+
+    [Fact]
+    public async Task Check_status_puts_a_paid_tenant_back_on_its_plan_without_recording_or_crediting_twice()
+    {
+        var mandate = await MandateAsync();
+        _gateway.Subscriptions[Sub] = _gateway.Subscriptions[Sub] with { PaidCount = 1 };
+        await _entitlements.ChargeSucceededAsync(mandate, Pay("pay_1", cycle: 0));
+        // Something put the tenant back on the free plan while the mandate kept paying.
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+        Assert.Equal(_trial.Id, (await SubscriptionAsync()).PlanId);
+        var balance = await BalanceAsync();
+        var notices = _notifier.Sent.Count;
+
+        await ServiceWithEntitlements().RefreshAsync(_tenant.Id, mandate.Id);
+
+        var subscription = await SubscriptionAsync();
+        Assert.Equal((_premium.Id, SubscriptionStatus.Active, mandate.Id), (subscription.PlanId, subscription.Status, subscription.RazorpaySubscriptionRowId));
+        Assert.Equal(_clock.UtcNow.AddMonths(1), subscription.CurrentPeriodEndUtc);
+        Assert.Single(await PaymentsAsync());
+        Assert.Equal(balance, await BalanceAsync());
+        Assert.Equal(notices, _notifier.Sent.Count);
+    }
+
+    [Fact]
+    public async Task Reconciliation_puts_a_paid_tenant_back_on_its_plan()
+    {
+        var mandate = await MandateAsync();
+        _gateway.Subscriptions[Sub] = _gateway.Subscriptions[Sub] with { PaidCount = 1 };
+        await _entitlements.ChargeSucceededAsync(mandate, Pay("pay_1", cycle: 0));
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+
+        await _maintenance.ReconcileAsync();
+
+        Assert.Equal(_premium.Id, (await SubscriptionAsync()).PlanId);
+        Assert.Single(await PaymentsAsync());
+    }
+
+    [Fact]
+    public async Task A_mandate_that_has_not_paid_yet_does_not_move_the_plan()
+    {
+        var mandate = await MandateAsync(status: RazorpaySubscriptionStatus.Created);
+        _gateway.Subscriptions[Sub] = _gateway.Subscriptions[Sub] with { Status = "authenticated", PaidCount = 0 };
+        await _credits.AssignTrialPlanAsync(_tenant.Id);
+
+        await ServiceWithEntitlements().RefreshAsync(_tenant.Id, mandate.Id);
+
+        Assert.Equal(_trial.Id, (await SubscriptionAsync()).PlanId);
+        Assert.Empty(await PaymentsAsync());
+    }
 }
