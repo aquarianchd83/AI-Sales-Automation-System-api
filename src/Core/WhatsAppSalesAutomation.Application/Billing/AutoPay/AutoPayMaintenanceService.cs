@@ -128,20 +128,27 @@ public class AutoPayMaintenanceService : IAutoPayMaintenanceService
 
     public async Task<AutoPayReconciliationResult> ReconcileAsync(CancellationToken cancellationToken = default)
     {
-        var credentials = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).Credentials;
-        if (credentials is null)
+        // Test and Live keys are both kept: each mandate is checked with the keys of the mode it was made in (a test mandate does not exist
+        // for the live account), so switching the active mode does not leave the other mode's mandates unwatched.
+        var all = (await AutoPaySettings.ReadAsync(_store, cancellationToken)).AllCredentials;
+        if (all.Count == 0)
             return new AutoPayReconciliationResult(0, 0, 0, 0, 0);
 
-        // Only what these keys can see: a test mandate does not exist for the live account.
         var ended = RazorpayMandateState.Ended;
-        var ids = await _context.RazorpaySubscriptions.IgnoreQueryFilters().AsNoTracking()
-            .Where(s => !ended.Contains(s.Status) && s.Mode == credentials.Mode)
-            .OrderBy(s => s.LastReconciledAtUtc)
-            .Select(s => s.Id)
-            .ToListAsync(cancellationToken);
+        var work = new List<(Guid Id, RazorpayCredentials Credentials)>();
+        foreach (var keys in all)
+        {
+            var mode = keys.Mode;
+            var modeIds = await _context.RazorpaySubscriptions.IgnoreQueryFilters().AsNoTracking()
+                .Where(s => !ended.Contains(s.Status) && s.Mode == mode)
+                .OrderBy(s => s.LastReconciledAtUtc)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+            work.AddRange(modeIds.Select(i => (i, keys)));
+        }
 
         int checkedCount = 0, repaired = 0, abandoned = 0, missing = 0, errors = 0, recovered = 0;
-        foreach (var id in ids)
+        foreach (var (id, credentials) in work)
         {
             cancellationToken.ThrowIfCancellationRequested();
             _context.ResetChangeTracker();

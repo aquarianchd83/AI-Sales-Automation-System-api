@@ -26,6 +26,10 @@ public interface IRazorpayService
     /// <summary>Chooses how payments and orders are read: "Mcp" (Razorpay's MCP server) or "Rest". Writes always use the REST API.</summary>
     Task<RazorpaySettingsDto> SetReadTransportAsync(string transport, Guid? userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Chooses which saved key set - "test" or "live" - new payments use. Needs that set's key id and key secret, and for Live the webhook
+    /// secret too: live money must be confirmable. Orders, top-ups and mandates already created keep the keys of the mode they were made in.</summary>
+    Task<RazorpaySettingsDto> SetActiveModeAsync(string mode, Guid? userId, CancellationToken cancellationToken = default);
+
     /// <summary>Checks a key pair against Razorpay, saved or not. Never throws on a Razorpay error.</summary>
     Task<RazorpayCheckResultDto> TestKeysAsync(TestRazorpayKeysRequest request, CancellationToken cancellationToken = default);
 
@@ -54,9 +58,7 @@ public interface IRazorpayService
 /// </summary>
 public class RazorpayService : IRazorpayService
 {
-    public const string KeyIdKey = "Razorpay:KeyId";
-    public const string KeySecretKey = "Razorpay:KeySecret";
-    public const string WebhookSecretKey = "Razorpay:WebhookSecret";
+    // The keys themselves live in two slots, Test and Live, plus the active mode: see RazorpayKeyStore.
     // Read by RazorpayMcpGateway (Infrastructure), which names the same key.
     public const string TransportKey = "Razorpay:Transport";
     public const string TransportMcp = "Mcp";
@@ -96,17 +98,18 @@ public class RazorpayService : IRazorpayService
     public async Task<RazorpaySettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
         var stored = await _store.GetAllAsync(cancellationToken);
-        var keyId = Get(stored, KeyIdKey);
-        var secret = Get(stored, KeySecretKey);
-        var webhook = Get(stored, WebhookSecretKey);
+        var active = RazorpayKeyStore.Active(stored);
         var autoPay = string.Equals(Get(stored, Billing.AutoPay.AutoPaySettings.EnabledKey), "true", StringComparison.OrdinalIgnoreCase);
         var transport = string.Equals(Get(stored, TransportKey), TransportRest, StringComparison.OrdinalIgnoreCase) ? TransportRest : TransportMcp;
 
         return new RazorpaySettingsDto(
-            keyId, keyId.Length == 0 ? "test" : RazorpayKeys.ModeOf(keyId),
-            secret.Length > 0, Mask(secret), webhook.Length > 0, Mask(webhook),
-            keyId.Length > 0 && secret.Length > 0, WebhookPath,
-            autoPay, autoPay && keyId.Length > 0 && secret.Length > 0 && webhook.Length > 0, transport);
+            active.KeyId, active.Mode,
+            active.KeySecret.Length > 0, Mask(active.KeySecret), active.WebhookSecret.Length > 0, Mask(active.WebhookSecret),
+            active.IsConfigured, WebhookPath,
+            autoPay, autoPay && active.IsComplete, transport,
+            active.Mode,
+            ToDto(RazorpayKeyStore.For(stored, RazorpayKeyStore.Test)),
+            ToDto(RazorpayKeyStore.For(stored, RazorpayKeyStore.Live)));
     }
 
     public async Task<RazorpaySettingsDto> UpdateSettingsAsync(UpdateRazorpaySettingsRequest request, Guid? userId, CancellationToken cancellationToken = default)
@@ -117,14 +120,52 @@ public class RazorpayService : IRazorpayService
         if (request.KeySecret is { Length: > 200 } || request.WebhookSecret is { Length: > 200 })
             throw Invalid(nameof(request.KeySecret), "That secret is too long.");
 
-        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [KeyIdKey] = keyId };
+        string mode;
+        if (request.Mode is null)
+            mode = keyId.Length > 0 ? RazorpayKeys.ModeOf(keyId) : RazorpayKeyStore.ActiveMode(await _store.GetAllAsync(cancellationToken));
+        else
+            mode = RazorpayKeyStore.Normalize(request.Mode) ?? throw Invalid(nameof(request.Mode), "Choose \"test\" or \"live\".");
+        if (keyId.Length > 0 && RazorpayKeys.ModeOf(keyId) != mode)
+            throw Invalid(nameof(request.KeyId), mode == RazorpayKeyStore.Live
+                ? "Live keys start with rzp_live_. Save a rzp_test_ key under Test keys."
+                : "Test keys start with rzp_test_. Save a rzp_live_ key under Live keys.");
+
+        var stored = await _store.GetAllAsync(cancellationToken);
+        var values = RazorpayKeyStore.LegacyMigration(stored);
+        values[RazorpayKeyStore.KeyIdKey(mode)] = keyId;
         // Only touch a secret when the caller said something about it.
         if (request.KeySecret is not null)
-            values[KeySecretKey] = request.KeySecret.Trim();
+            values[RazorpayKeyStore.KeySecretKey(mode)] = request.KeySecret.Trim();
         if (request.WebhookSecret is not null)
-            values[WebhookSecretKey] = request.WebhookSecret.Trim();
+            values[RazorpayKeyStore.WebhookSecretKey(mode)] = request.WebhookSecret.Trim();
+
+        // Emptying the keys of the mode in use would leave payments with nothing to run on while AutoPay is switched on; refuse instead.
+        var activeMode = values.TryGetValue(RazorpayKeyStore.ActiveModeKey, out var am) ? am! : RazorpayKeyStore.ActiveMode(stored);
+        if (mode == activeMode && mode == RazorpayKeyStore.Live)
+        {
+            var after = RazorpayKeyStore.For(Merge(stored, values), mode);
+            if (!after.IsComplete)
+                throw new ConflictException("Live mode is in use. Switch to Test before removing a Live key.");
+        }
 
         await _store.UpsertAsync(values, userId, cancellationToken);
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<RazorpaySettingsDto> SetActiveModeAsync(string mode, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        var target = RazorpayKeyStore.Normalize(mode) ?? throw Invalid(nameof(mode), "Choose \"test\" or \"live\".");
+        var stored = await _store.GetAllAsync(cancellationToken);
+        var keys = RazorpayKeyStore.For(stored, target);
+        if (!keys.IsConfigured)
+            throw new ConflictException($"Save the {target} key id and key secret first.");
+        if (target == RazorpayKeyStore.Live && !keys.IsComplete)
+            throw new ConflictException("Save the live webhook secret first: without it live payments cannot be confirmed.");
+
+        var values = RazorpayKeyStore.LegacyMigration(stored);
+        values[RazorpayKeyStore.ActiveModeKey] = target;
+        await _store.UpsertAsync(values, userId, cancellationToken);
+        _logger.LogWarning("Razorpay active mode switched to {Mode} by {UserId}", target, userId);
         return await GetSettingsAsync(cancellationToken);
     }
 
@@ -165,7 +206,7 @@ public class RazorpayService : IRazorpayService
 
         var secret = request.KeySecret?.Trim();
         if (string.IsNullOrEmpty(secret))
-            secret = Get(await _store.GetAllAsync(cancellationToken), KeySecretKey);
+            secret = RazorpayKeyStore.For(await _store.GetAllAsync(cancellationToken), RazorpayKeys.ModeOf(keyId)).KeySecret;
         if (secret.Length == 0)
             throw Invalid(nameof(request.KeySecret), "Enter the key secret to test.");
 
@@ -236,7 +277,7 @@ public class RazorpayService : IRazorpayService
         }
         steps.Add(new RazorpayStepDto("Order matches", true, order.OrderId));
 
-        var credentials = await RequireCredentialsAsync(cancellationToken);
+        var credentials = await RequireCredentialsAsync(order.Mode, cancellationToken);
 
         if (!RazorpaySignatures.IsValidPaymentSignature(order.OrderId, request.RazorpayPaymentId ?? string.Empty, request.RazorpaySignature, credentials.KeySecret))
         {
@@ -336,7 +377,7 @@ public class RazorpayService : IRazorpayService
                 throw Invalid(nameof(request.Amount), $"At most {Format(remaining, order.Currency)} is left to refund.");
         }
 
-        var credentials = await RequireCredentialsAsync(cancellationToken);
+        var credentials = await RequireCredentialsAsync(order.Mode, cancellationToken);
         var refund = await _gateway.RefundAsync(credentials, order.PaymentId, amountMinor, cancellationToken);
         if (!refund.Success || refund.Value is null)
             throw new ConflictException($"Razorpay refused the refund: {refund.Error}");
@@ -361,10 +402,11 @@ public class RazorpayService : IRazorpayService
 
     public async Task<RazorpayWebhookOutcome> HandleWebhookAsync(byte[] body, string? signature, string? eventId, CancellationToken cancellationToken = default)
     {
-        var secret = Get(await _store.GetAllAsync(cancellationToken), WebhookSecretKey);
-        if (secret.Length == 0)
+        // Test and Live webhooks arrive at the same URL, each signed with its own mode's secret: the active one is tried first.
+        var secrets = RazorpayKeyStore.WebhookSecrets(await _store.GetAllAsync(cancellationToken));
+        if (secrets.Count == 0)
             return RazorpayWebhookOutcome.NotConfigured;
-        if (!RazorpaySignatures.IsValidWebhookSignature(body, signature, secret))
+        if (!secrets.Any(x => RazorpaySignatures.IsValidWebhookSignature(body, signature, x.Secret)))
             return RazorpayWebhookOutcome.InvalidSignature;
 
         // Razorpay always sends an event id; without one, the body's own hash keeps a redelivery from applying twice.
@@ -622,14 +664,28 @@ public class RazorpayService : IRazorpayService
             order.PaidAtUtc ??= _clock.UtcNow;
     }
 
-    private async Task<RazorpayCredentials> RequireCredentialsAsync(CancellationToken cancellationToken)
+    /// <summary>The active mode's keys, or - for an order already made - the keys of the mode it was made in.</summary>
+    private async Task<RazorpayCredentials> RequireCredentialsAsync(CancellationToken cancellationToken) =>
+        await RequireCredentialsAsync(null, cancellationToken);
+
+    private async Task<RazorpayCredentials> RequireCredentialsAsync(string? mode, CancellationToken cancellationToken)
     {
         var stored = await _store.GetAllAsync(cancellationToken);
-        var keyId = Get(stored, KeyIdKey);
-        var secret = Get(stored, KeySecretKey);
-        if (keyId.Length == 0 || secret.Length == 0)
-            throw new ConflictException("Razorpay is not set up: save the key id and key secret first.");
-        return new RazorpayCredentials(keyId, secret);
+        return RazorpayKeyStore.CredentialsFor(stored, mode)
+            ?? throw new ConflictException(mode is null
+                ? "Razorpay is not set up: save the key id and key secret first."
+                : $"This order was made with {mode} keys, and no {mode} key id and key secret are saved now.");
+    }
+
+    private static RazorpayKeySetDto ToDto(RazorpayKeySet k) => new(
+        k.Mode, k.KeyId, k.KeySecret.Length > 0, Mask(k.KeySecret), k.WebhookSecret.Length > 0, Mask(k.WebhookSecret), k.IsConfigured, k.IsComplete);
+
+    private static IReadOnlyDictionary<string, string?> Merge(IReadOnlyDictionary<string, string?> stored, IReadOnlyDictionary<string, string?> values)
+    {
+        var merged = new Dictionary<string, string?>(stored, StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in values)
+            merged[k] = v;
+        return merged;
     }
 
     private async Task<RazorpayOrder> FindAsync(Guid id, CancellationToken cancellationToken) =>

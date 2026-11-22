@@ -61,8 +61,8 @@ public sealed class AutoPayEntitlementsTests : IDisposable
         _db = new SqliteApplicationDbContext(_dbOptions, new PlatformContext(), new AnonymousUser());
         _db.Database.EnsureCreated();
 
-        _store.Rows[RazorpayService.KeyIdKey] = KeyId;
-        _store.Rows[RazorpayService.KeySecretKey] = "key-secret-123";
+        _store.Rows[RazorpayKeyStore.LegacyKeyIdKey] = KeyId;
+        _store.Rows[RazorpayKeyStore.LegacyKeySecretKey] = "key-secret-123";
 
         _ledger = new QuotaLedgerService(_db, _clock);
         _credits = new CreditAllocationService(_db, _ledger, _clock);
@@ -582,7 +582,7 @@ public sealed class AutoPayEntitlementsTests : IDisposable
     public async Task The_webhook_endpoint_queues_a_failed_payment_that_has_an_invoice()
     {
         var queue = new RecordingWebhookQueue();
-        _store.Rows[RazorpayService.WebhookSecretKey] = "whsec";
+        _store.Rows[RazorpayKeyStore.LegacyWebhookSecretKey] = "whsec";
         var receiver = new RazorpayService(_db, _store, _gateway, _clock, NullLogger<RazorpayService>.Instance, queue);
         var body = System.Text.Encoding.UTF8.GetBytes("{\"event\":\"payment.failed\",\"payload\":{\"payment\":{\"entity\":{\"id\":\"pay_9\",\"order_id\":\"order_9\",\"status\":\"failed\",\"invoice_id\":\"inv_9\"}}}}");
 

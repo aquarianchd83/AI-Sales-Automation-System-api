@@ -58,8 +58,8 @@ public sealed class WalletRechargeTests : IDisposable
         _db.Tenants.Add(new Tenant { Id = _other, Name = "Globex", Slug = "globex", CountryCode = "IN", StateCode = "KA" });
         _db.SaveChanges();
 
-        _store.Rows[RazorpayService.KeyIdKey] = KeyId;
-        _store.Rows[RazorpayService.KeySecretKey] = KeySecret;
+        _store.Rows[RazorpayKeyStore.LegacyKeyIdKey] = KeyId;
+        _store.Rows[RazorpayKeyStore.LegacyKeySecretKey] = KeySecret;
     }
 
     public void Dispose()

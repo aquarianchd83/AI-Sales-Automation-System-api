@@ -77,8 +77,8 @@ public sealed class AutoPayServiceTests : IDisposable
 
     private void SwitchOn(string keyId)
     {
-        _store.Rows[RazorpayService.KeyIdKey] = keyId;
-        _store.Rows[RazorpayService.KeySecretKey] = "key-secret-123";
+        _store.Rows[RazorpayKeyStore.LegacyKeyIdKey] = keyId;
+        _store.Rows[RazorpayKeyStore.LegacyKeySecretKey] = "key-secret-123";
         _store.Rows[AutoPayService.EnabledKey] = "true";
     }
 
@@ -210,7 +210,7 @@ public sealed class AutoPayServiceTests : IDisposable
     [Fact]
     public async Task Checkout_is_refused_without_razorpay_keys()
     {
-        _store.Rows.Remove(RazorpayService.KeySecretKey);
+        _store.Rows.Remove(RazorpayKeyStore.LegacyKeySecretKey);
 
         var ex = await Assert.ThrowsAsync<ConflictException>(() => CheckoutAsync());
 
@@ -736,7 +736,7 @@ public sealed class AutoPayServiceTests : IDisposable
         Assert.True(await _service.IsRequiredAsync("INR"));
         Assert.False(await _service.IsRequiredAsync("GBP"));
 
-        _store.Rows.Remove(RazorpayService.KeyIdKey);
+        _store.Rows.Remove(RazorpayKeyStore.LegacyKeyIdKey);
         Assert.False(await _service.IsRequiredAsync("INR"));
     }
 

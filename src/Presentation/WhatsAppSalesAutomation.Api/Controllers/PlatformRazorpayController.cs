@@ -35,12 +35,14 @@ public class PlatformRazorpayController : ControllerBase
     public async Task<ActionResult<RazorpaySettingsDto>> UpdateSettings([FromBody] UpdateRazorpaySettingsRequest request, CancellationToken cancellationToken)
     {
         var result = await _razorpay.UpdateSettingsAsync(request, _currentUser.UserId, cancellationToken);
+        var savedMode = RazorpayKeyStore.Normalize(request.Mode) ?? (string.IsNullOrWhiteSpace(request.KeyId) ? result.ActiveMode : RazorpayKeys.ModeOf(request.KeyId.Trim()));
+        var savedKeyId = (savedMode == RazorpayKeyStore.Live ? result.LiveKeys : result.TestKeys)?.KeyId ?? string.Empty;
 
         var secrets = new List<string>();
         if (request.KeySecret is not null) secrets.Add("key secret");
         if (request.WebhookSecret is not null) secrets.Add("webhook secret");
         await LogAsync(PlatformAuditActions.RazorpaySettingsUpdated,
-            $"Razorpay key id '{result.KeyId}' ({result.Mode}); {(secrets.Count == 0 ? "secrets unchanged" : string.Join(" and ", secrets) + " updated")}",
+            $"Razorpay {savedMode} key id '{savedKeyId}'; {(secrets.Count == 0 ? "secrets unchanged" : string.Join(" and ", secrets) + " updated")}",
             cancellationToken);
 
         return Ok(result);
@@ -57,6 +59,15 @@ public class PlatformRazorpayController : ControllerBase
     }
 
     /// <summary>Chooses how payments and orders are read: "Mcp" (Razorpay's MCP server) or "Rest". Creating orders, capture and refunds always use REST.</summary>
+    /// <summary>Chooses which saved key set - test or live - new payments use. 409 when that set is not saved (Live also needs its webhook secret).</summary>
+    [HttpPut("mode")]
+    public async Task<ActionResult<RazorpaySettingsDto>> SetActiveMode([FromBody] SetRazorpayActiveModeRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _razorpay.SetActiveModeAsync(request.Mode, _currentUser.UserId, cancellationToken);
+        await LogAsync(PlatformAuditActions.RazorpayActiveModeChanged, $"Razorpay active mode switched to {result.ActiveMode} (key id '{result.KeyId}')", cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPut("transport")]
     public async Task<ActionResult<RazorpaySettingsDto>> SetTransport([FromBody] SetRazorpayTransportRequest request, CancellationToken cancellationToken)
     {

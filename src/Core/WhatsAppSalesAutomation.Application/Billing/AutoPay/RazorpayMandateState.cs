@@ -83,8 +83,22 @@ public static class RazorpayMandateState
 }
 
 /// <summary>What AutoPay reads from the settings table: the operator's switch and the platform's Razorpay keys.</summary>
+/// <param name="Credentials">The ACTIVE mode's keys: what a new mandate is created with.</param>
 public record AutoPaySettings(bool Enabled, RazorpayCredentials? Credentials)
 {
+    /// <summary>Keys for a mandate already made, by the mode (test/live) it was made in. Null when that mode has no keys saved.</summary>
+    public RazorpayCredentials? CredentialsFor(string? mode) =>
+        RazorpayKeyStore.Normalize(mode) is { } m && _stored is not null ? RazorpayKeyStore.CredentialsFor(_stored, m) : Credentials;
+
+    /// <summary>Every mode that has keys saved, the active one first.</summary>
+    public IReadOnlyList<RazorpayCredentials> AllCredentials =>
+        _stored is null
+            ? (Credentials is null ? Array.Empty<RazorpayCredentials>() : new[] { Credentials })
+            : new[] { RazorpayKeyStore.ActiveMode(_stored), RazorpayKeyStore.Other(RazorpayKeyStore.ActiveMode(_stored)) }
+                .Select(m => RazorpayKeyStore.CredentialsFor(_stored, m)).OfType<RazorpayCredentials>().ToList();
+
+    private IReadOnlyDictionary<string, string?>? _stored;
+
     /// <summary>The operator's switch, kept with the Razorpay keys. Off until someone turns it on: keys alone (the test page has them) must
     /// not start routing tenants to a mandate.</summary>
     public const string EnabledKey = "Razorpay:AutoPayEnabled";
@@ -94,10 +108,8 @@ public record AutoPaySettings(bool Enabled, RazorpayCredentials? Credentials)
         var stored = await store.GetAllAsync(cancellationToken);
         string Get(string key) => stored.TryGetValue(key, out var value) ? value?.Trim() ?? string.Empty : string.Empty;
 
-        var keyId = Get(RazorpayService.KeyIdKey);
-        var secret = Get(RazorpayService.KeySecretKey);
         return new AutoPaySettings(
             string.Equals(Get(EnabledKey), "true", StringComparison.OrdinalIgnoreCase),
-            keyId.Length > 0 && secret.Length > 0 ? new RazorpayCredentials(keyId, secret) : null);
+            RazorpayKeyStore.Active(stored).Credentials) { _stored = stored };
     }
 }

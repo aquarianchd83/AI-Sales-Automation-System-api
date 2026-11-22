@@ -70,6 +70,7 @@ public static class PlatformAuditActions
     public const string RazorpaySettingsUpdated = "RazorpaySettingsUpdated";
     public const string RazorpayAutoPayToggled = "RazorpayAutoPayToggled";
     public const string RazorpayTransportChanged = "RazorpayTransportChanged";
+    public const string RazorpayActiveModeChanged = "RazorpayActiveModeChanged";
     public const string RazorpayRefundIssued = "RazorpayRefundIssued";
     public const string FlowchartCreated = "FlowchartCreated";
     public const string FlowchartUpdated = "FlowchartUpdated";

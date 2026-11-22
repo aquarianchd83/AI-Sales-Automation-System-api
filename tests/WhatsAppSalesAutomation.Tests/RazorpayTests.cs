@@ -93,9 +93,9 @@ public sealed class RazorpayServiceTests : IDisposable
 
     private void Configure()
     {
-        _store.Rows[RazorpayService.KeyIdKey] = KeyId;
-        _store.Rows[RazorpayService.KeySecretKey] = KeySecret;
-        _store.Rows[RazorpayService.WebhookSecretKey] = WebhookSecret;
+        _store.Rows[RazorpayKeyStore.LegacyKeyIdKey] = KeyId;
+        _store.Rows[RazorpayKeyStore.LegacyKeySecretKey] = KeySecret;
+        _store.Rows[RazorpayKeyStore.LegacyWebhookSecretKey] = WebhookSecret;
     }
 
     private async Task<RazorpayCheckoutDto> OrderAsync(decimal amount = 499.50m)
@@ -120,10 +120,110 @@ public sealed class RazorpayServiceTests : IDisposable
         Assert.Equal("••••9876", saved.WebhookSecretHint);
         Assert.Equal("/api/v1/webhooks/razorpay", saved.WebhookPath);
 
-        var kept = await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest("rzp_live_ILgsfZCZoFIKMb", null, ""), null);
-        Assert.Equal("live", kept.Mode);
-        Assert.Equal("abcdefgh1234", _store.Rows[RazorpayService.KeySecretKey]);
+        var kept = await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, null, ""), null);
+        Assert.Equal("abcdefgh1234", _store.Rows[RazorpayKeyStore.KeySecretKey("test")]);
         Assert.False(kept.HasWebhookSecret);
+    }
+
+    // ── Test and Live keys side by side ─────────────────────────────────────────────────
+
+    private const string LiveKeyId = "rzp_live_ILgsfZCZoFIKMb";
+
+    [Fact]
+    public async Task Test_and_live_keys_are_saved_in_their_own_slots_and_test_stays_active()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "test-secret-1111", "test-wh-2222", "test"), null);
+        var saved = await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "live-secret-3333", "live-wh-4444", "live"), null);
+
+        Assert.Equal("test", saved.ActiveMode);
+        Assert.Equal(KeyId, saved.KeyId);
+        Assert.Equal("••••1111", saved.KeySecretHint);
+        Assert.Equal(KeyId, saved.TestKeys!.KeyId);
+        Assert.True(saved.TestKeys.IsComplete);
+        Assert.Equal(LiveKeyId, saved.LiveKeys!.KeyId);
+        Assert.Equal("••••3333", saved.LiveKeys.KeySecretHint);
+        Assert.True(saved.LiveKeys.IsComplete);
+    }
+
+    [Fact]
+    public async Task A_key_id_must_carry_its_slots_prefix()
+    {
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() =>
+            _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "s", null, "live"), null));
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(() =>
+            _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "s", null, "test"), null));
+    }
+
+    [Fact]
+    public async Task The_old_single_key_set_is_read_as_its_slot_and_moved_there_on_the_first_save()
+    {
+        Configure();
+        var before = await _service.GetSettingsAsync();
+        Assert.Equal("test", before.ActiveMode);
+        Assert.Equal(KeyId, before.TestKeys!.KeyId);
+        Assert.True(before.TestKeys.IsComplete);
+        Assert.False(before.LiveKeys!.IsConfigured);
+
+        var after = await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "live-secret", "live-wh", "live"), null);
+
+        Assert.Equal(KeyId, _store.Rows[RazorpayKeyStore.KeyIdKey("test")]);
+        Assert.Equal(KeySecret, _store.Rows[RazorpayKeyStore.KeySecretKey("test")]);
+        Assert.Equal(WebhookSecret, _store.Rows[RazorpayKeyStore.WebhookSecretKey("test")]);
+        Assert.Equal("", _store.Rows[RazorpayKeyStore.LegacyKeyIdKey]);
+        Assert.Equal("test", _store.Rows[RazorpayKeyStore.ActiveModeKey]);
+        Assert.Equal("test", after.ActiveMode);
+        Assert.True(after.TestKeys!.IsComplete);
+    }
+
+    [Fact]
+    public async Task Live_needs_all_three_keys_before_it_can_be_made_active()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, "test-secret", "test-wh", "test"), null);
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "live-secret", null, "live"), null);
+
+        await Assert.ThrowsAsync<ConflictException>(() => _service.SetActiveModeAsync("live", null));
+
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, null, "live-wh", "live"), null);
+        var live = await _service.SetActiveModeAsync("live", null);
+        Assert.Equal("live", live.ActiveMode);
+        Assert.Equal("live", live.Mode);
+        Assert.Equal(LiveKeyId, live.KeyId);
+
+        // The keys of the mode in use cannot be emptied out from under it.
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "", null, "live"), null));
+
+        var back = await _service.SetActiveModeAsync("TEST", null);
+        Assert.Equal("test", back.ActiveMode);
+    }
+
+    [Fact]
+    public async Task An_order_made_in_test_mode_is_still_verified_with_test_keys_after_switching_to_live()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, KeySecret, WebhookSecret, "test"), null);
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "live-secret", "live-wh", "live"), null);
+        var checkout = await _service.CreateOrderAsync(new CreateRazorpayOrderRequest(499.50m, "INR", "Test", null, null, null), null);
+        Assert.Equal("test", checkout.Mode);
+
+        await _service.SetActiveModeAsync("live", null);
+        _gateway.Payments["pay_t1"] = new RazorpayPaymentInfo("pay_t1", checkout.OrderId, checkout.Amount, "INR", "captured", "card", 0, null);
+        var verified = await _service.VerifyAsync(checkout.Id, Signed(checkout.OrderId, "pay_t1"));
+
+        Assert.True(verified.Success);
+        Assert.Equal(KeyId, _gateway.LastCredentials!.KeyId);
+    }
+
+    [Fact]
+    public async Task Webhooks_are_accepted_with_either_modes_secret()
+    {
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(KeyId, KeySecret, WebhookSecret, "test"), null);
+        await _service.UpdateSettingsAsync(new UpdateRazorpaySettingsRequest(LiveKeyId, "live-secret", "live-wh", "live"), null);
+        await _service.SetActiveModeAsync("live", null);
+        var checkout = await _service.CreateOrderAsync(new CreateRazorpayOrderRequest(499.50m, "INR", "Test", null, null, null), null);
+
+        Assert.Equal(RazorpayWebhookOutcome.Applied, await DeliverAsync(PaymentEvent("payment.captured", checkout.OrderId, "pay_l1", "captured"), "evt_live", "live-wh"));
+        Assert.NotEqual(RazorpayWebhookOutcome.InvalidSignature, await DeliverAsync(PaymentEvent("payment.failed", "order_other", "pay_x", "failed"), "evt_test", WebhookSecret));
+        Assert.Equal(RazorpayWebhookOutcome.InvalidSignature, await DeliverAsync(PaymentEvent("payment.failed", "order_other", "pay_y", "failed"), "evt_bad", "nope"));
     }
 
     // ── The UPI AutoPay switch ──────────────────────────────────────────────────────────
@@ -410,10 +510,10 @@ public sealed class RazorpayServiceTests : IDisposable
     public async Task Nothing_is_trusted_without_a_secret_or_with_a_wrong_signature()
     {
         var checkout = await OrderAsync();
-        _store.Rows[RazorpayService.WebhookSecretKey] = "";
+        _store.Rows[RazorpayKeyStore.LegacyWebhookSecretKey] = "";
         Assert.Equal(RazorpayWebhookOutcome.NotConfigured, await DeliverAsync(PaymentEvent("payment.captured", checkout.OrderId, "pay_1", "captured"), "evt_1"));
 
-        _store.Rows[RazorpayService.WebhookSecretKey] = WebhookSecret;
+        _store.Rows[RazorpayKeyStore.LegacyWebhookSecretKey] = WebhookSecret;
         Assert.Equal(RazorpayWebhookOutcome.InvalidSignature, await DeliverAsync(PaymentEvent("payment.captured", checkout.OrderId, "pay_1", "captured"), "evt_1", "not-the-secret"));
 
         Assert.Empty(await _db.RazorpayWebhookEvents.ToListAsync());
@@ -543,6 +643,7 @@ public sealed class RazorpayServiceTests : IDisposable
         public Task<RazorpayResult<RazorpayPaymentInfo>> FetchPaymentAsync(RazorpayCredentials credentials, string paymentId, CancellationToken cancellationToken = default)
         {
             FetchCalls++;
+            LastCredentials = credentials;
             return Task.FromResult(Payments.TryGetValue(paymentId, out var p) ? RazorpayResult<RazorpayPaymentInfo>.Ok(p) : RazorpayResult<RazorpayPaymentInfo>.Fail("The id provided does not exist"));
         }
 

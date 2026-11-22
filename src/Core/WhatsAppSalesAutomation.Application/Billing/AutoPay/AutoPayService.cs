@@ -325,7 +325,7 @@ public class AutoPayService : IAutoPayService
         if (Ended.Contains(row.Status))
             return await ToDtoAsync(row, cancellationToken);
 
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the subscription cannot be checked.");
         var fetched = await _gateway.FetchSubscriptionAsync(credentials, row.RazorpaySubscriptionId, cancellationToken);
         if (!fetched.Success || fetched.Value is null)
@@ -339,7 +339,7 @@ public class AutoPayService : IAutoPayService
     public async Task<IReadOnlyList<AutoPayInvoiceDto>> GetInvoicesAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
         var row = await FindAsync(tenantId, id, cancellationToken);
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the invoices cannot be read.");
         if (credentials.Mode != row.Mode)
             return Array.Empty<AutoPayInvoiceDto>();
@@ -369,7 +369,7 @@ public class AutoPayService : IAutoPayService
         if (Ended.Contains(row.Status) || (cancelAtCycleEnd && row.CancelAtCycleEnd))
             return await ToDtoAsync(row, cancellationToken);
 
-        var credentials = (await ReadSettingsAsync(cancellationToken)).Credentials
+        var credentials = (await ReadSettingsAsync(cancellationToken)).CredentialsFor(row.Mode)
             ?? throw new ConflictException("Razorpay is not set up, so the subscription cannot be cancelled.");
 
         // "At the end of the cycle" needs a paid cycle in progress. One never authorised, or one whose payments have stopped, has none.

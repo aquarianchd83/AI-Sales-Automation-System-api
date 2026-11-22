@@ -16,11 +16,31 @@ public record RazorpaySettingsDto(
     // Switched on AND able to work: keys and the webhook secret are saved. Switched on but not ready means tenants still see the old buttons.
     bool AutoPayReady = false,
     // How payments and orders are READ: "Mcp" (Razorpay's MCP server, default) or "Rest". Creating orders, capture and refunds always use REST.
-    string ReadTransport = "Mcp");
+    string ReadTransport = "Mcp",
+    // Which key set new payments use: "test" or "live". KeyId, Mode and the secret fields above describe this set.
+    string ActiveMode = "test",
+    RazorpayKeySetDto? TestKeys = null,
+    RazorpayKeySetDto? LiveKeys = null);
+
+/// <summary>One mode's saved keys, secrets masked. IsComplete = key id, key secret and webhook secret all saved.</summary>
+public record RazorpayKeySetDto(
+    string Mode,
+    string KeyId,
+    bool HasKeySecret,
+    string? KeySecretHint,
+    bool HasWebhookSecret,
+    string? WebhookSecretHint,
+    bool IsConfigured,
+    bool IsComplete);
 
 /// <param name="KeySecret">null keeps the stored secret, "" clears it, anything else replaces it.</param>
 /// <param name="WebhookSecret">Same convention as <paramref name="KeySecret"/>.</param>
-public record UpdateRazorpaySettingsRequest(string KeyId, string? KeySecret, string? WebhookSecret);
+/// <param name="Mode">"test" or "live": which key set to save. The key id, when given, must carry that mode's prefix. Left out, the key id's prefix
+/// decides (older clients).</param>
+public record UpdateRazorpaySettingsRequest(string KeyId, string? KeySecret, string? WebhookSecret, string? Mode = null);
+
+/// <param name="Mode">"test" or "live".</param>
+public record SetRazorpayActiveModeRequest(string Mode);
 
 /// <param name="Enabled">True makes a paid plan, for a tenant billed in rupees, bought through UPI AutoPay.</param>
 public record SetRazorpayAutoPayRequest(bool Enabled);
@@ -28,7 +48,7 @@ public record SetRazorpayAutoPayRequest(bool Enabled);
 /// <param name="Transport">"Mcp" reads payments and orders through Razorpay's MCP server; "Rest" reads them through the REST API.</param>
 public record SetRazorpayTransportRequest(string Transport);
 
-/// <param name="KeySecret">null tests with the stored secret.</param>
+/// <param name="KeySecret">Left blank, the secret saved for the key id's mode is used.</param>
 public record TestRazorpayKeysRequest(string KeyId, string? KeySecret);
 
 public record RazorpayCheckResultDto(bool Success, string Message);

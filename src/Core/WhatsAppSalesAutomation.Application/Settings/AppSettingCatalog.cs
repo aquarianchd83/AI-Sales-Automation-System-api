@@ -299,9 +299,18 @@ public static class AppSettingCatalog
         new("PlatformWhatsApp:ApiBaseUrl", "PlatformWhatsApp", IsSecret: false),
 
         // The platform's Razorpay account, kept on the Platform Admin Console's Razorpay test page (RazorpayService) and only in this table.
-        new("Razorpay:KeyId", "Razorpay", IsSecret: false, Description: "API key id - rzp_test_... or rzp_live_..."),
-        new("Razorpay:KeySecret", "Razorpay", IsSecret: true, Description: "API key secret. Signs checkout responses; never sent to a browser."),
-        new("Razorpay:WebhookSecret", "Razorpay", IsSecret: true, Description: "The secret set on the Razorpay webhook; verifies every webhook delivery."),
+        // Test and Live keys are kept side by side; Razorpay:ActiveMode picks which set new payments use (RazorpayKeyStore).
+        new("Razorpay:ActiveMode", "Razorpay", IsSecret: false, DefaultValue: "test", Options: new[] { "test", "live" }, Description: "Which key set new payments, wallet top-ups, credit packs and AutoPay mandates use. Ones already made keep the keys of their own mode."),
+        new("Razorpay:Test:KeyId", "Razorpay", IsSecret: false, Description: "Test API key id - rzp_test_..."),
+        new("Razorpay:Test:KeySecret", "Razorpay", IsSecret: true, Description: "Test API key secret. Signs checkout responses; never sent to a browser."),
+        new("Razorpay:Test:WebhookSecret", "Razorpay", IsSecret: true, Description: "The secret set on the Test-mode Razorpay webhook."),
+        new("Razorpay:Live:KeyId", "Razorpay", IsSecret: false, Description: "Live API key id - rzp_live_..."),
+        new("Razorpay:Live:KeySecret", "Razorpay", IsSecret: true, Description: "Live API key secret. Signs checkout responses; never sent to a browser."),
+        new("Razorpay:Live:WebhookSecret", "Razorpay", IsSecret: true, Description: "The secret set on the Live-mode Razorpay webhook."),
+        // The single key set from before Test and Live were kept apart. Still read until the first save on the Razorpay Test page moves it into its slot.
+        new("Razorpay:KeyId", "Razorpay", IsSecret: false, Description: "Legacy: API key id - rzp_test_... or rzp_live_... Use the Test/Live keys above instead."),
+        new("Razorpay:KeySecret", "Razorpay", IsSecret: true, Description: "Legacy: API key secret. Use the Test/Live keys above instead."),
+        new("Razorpay:WebhookSecret", "Razorpay", IsSecret: true, Description: "Legacy: webhook secret. Use the Test/Live keys above instead."),
         // How the backend reaches Razorpay for orders, payments, capture and refunds (RazorpayMcpGateway). Read on every request - no restart.
         new("Razorpay:Transport", "Razorpay", IsSecret: false, DefaultValue: "Mcp", Options: new[] { "Mcp", "Rest" }, Description: "\"Mcp\" reads payments and orders through Razorpay's MCP server (fetch_payment, fetch_order_payments, fetch_all_orders); \"Rest\" sends those reads to the REST API too. Creating orders, capture, refunds and AutoPay always use the REST API, because Razorpay's MCP server is read-only."),
         new("Razorpay:McpUrl", "Razorpay", IsSecret: false, DefaultValue: "https://mcp.razorpay.com/mcp", Description: "Razorpay MCP server endpoint (https). The API key id and secret above are sent to it as the merchant token."),

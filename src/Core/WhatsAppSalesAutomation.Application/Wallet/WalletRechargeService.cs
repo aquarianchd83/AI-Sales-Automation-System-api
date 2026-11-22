@@ -260,7 +260,7 @@ public class WalletRechargeService : IWalletRechargeService
         if (IsCredited(txn) && txn.RazorpayPaymentId == paymentId)
             return await Result(true, false, "This payment was already confirmed and your wallet credited.");
 
-        var credentials = await RequireCredentialsAsync(cancellationToken);
+        var credentials = await RequireCredentialsAsync(txn.Mode, cancellationToken);
         if (!RazorpaySignatures.IsValidPaymentSignature(txn.RazorpayOrderId, paymentId, request.RazorpaySignature, credentials.KeySecret))
         {
             _logger.LogWarning("Wallet recharge {Reference}: checkout signature did not match (tenant {TenantId}); nothing credited", txn.InternalTransactionId, tenantId);
@@ -307,7 +307,7 @@ public class WalletRechargeService : IWalletRechargeService
                     var authorized = new RazorpayPaymentInfo(
                         webhook.PaymentId, webhook.OrderId, webhook.PaymentAmount.Value, webhook.PaymentCurrency ?? "INR", webhook.PaymentStatus ?? "authorized",
                         webhook.Method, webhook.PaymentAmountRefunded ?? 0, webhook.ErrorDescription);
-                    var settled = await SettlePaymentAsync(txn, authorized, await RequireCredentialsAsync(cancellationToken), cancellationToken);
+                    var settled = await SettlePaymentAsync(txn, authorized, await RequireCredentialsAsync(txn.Mode, cancellationToken), cancellationToken);
                     return new WalletWebhookResult(true, settled == Settlement.Credited, settled switch
                     {
                         Settlement.Credited => "Payment authorized and captured - wallet credited.",
@@ -341,7 +341,7 @@ public class WalletRechargeService : IWalletRechargeService
                 var payment = new RazorpayPaymentInfo(
                     webhook.PaymentId, webhook.OrderId, webhook.PaymentAmount.Value, webhook.PaymentCurrency ?? "INR", webhook.PaymentStatus ?? "captured",
                     webhook.Method, webhook.PaymentAmountRefunded ?? 0, webhook.ErrorDescription);
-                var credentials = await RequireCredentialsAsync(cancellationToken);
+                var credentials = await RequireCredentialsAsync(txn.Mode, cancellationToken);
                 var result = await SettlePaymentAsync(txn, payment, credentials, cancellationToken);
                 return new WalletWebhookResult(true, result == Settlement.Credited, result switch
                 {
@@ -421,7 +421,7 @@ public class WalletRechargeService : IWalletRechargeService
         var id = txn.Id;
         var tenantId = txn.TenantId;
         var before = txn.Status;
-        var credentials = await TryCredentialsAsync(cancellationToken);
+        var credentials = await TryCredentialsAsync(txn.Mode, cancellationToken);
         if (credentials is null)
             return false;
 
@@ -754,16 +754,15 @@ public class WalletRechargeService : IWalletRechargeService
         return (quote, credits);
     }
 
+    /// <summary>The active mode's keys for a new order; for a top-up already made, the keys of the mode (test/live) it was made in.</summary>
     private async Task<RazorpayCredentials> RequireCredentialsAsync(CancellationToken cancellationToken) =>
-        await TryCredentialsAsync(cancellationToken) ?? throw new ConflictException("Online payment is not set up yet. Please contact support.");
+        await RequireCredentialsAsync(null, cancellationToken);
 
-    private async Task<RazorpayCredentials?> TryCredentialsAsync(CancellationToken cancellationToken)
-    {
-        var stored = await _store.GetAllAsync(cancellationToken);
-        var keyId = stored.TryGetValue(RazorpayService.KeyIdKey, out var k) ? k?.Trim() ?? string.Empty : string.Empty;
-        var secret = stored.TryGetValue(RazorpayService.KeySecretKey, out var s) ? s?.Trim() ?? string.Empty : string.Empty;
-        return keyId.Length == 0 || secret.Length == 0 ? null : new RazorpayCredentials(keyId, secret);
-    }
+    private async Task<RazorpayCredentials> RequireCredentialsAsync(string? mode, CancellationToken cancellationToken) =>
+        await TryCredentialsAsync(mode, cancellationToken) ?? throw new ConflictException("Online payment is not set up yet. Please contact support.");
+
+    private async Task<RazorpayCredentials?> TryCredentialsAsync(string? mode, CancellationToken cancellationToken) =>
+        RazorpayKeyStore.CredentialsFor(await _store.GetAllAsync(cancellationToken), mode);
 
     private async Task<List<RechargeTransactionDto>> ToDtosAsync(Guid tenantId, IReadOnlyList<PaymentTransaction> rows, CancellationToken cancellationToken)
     {

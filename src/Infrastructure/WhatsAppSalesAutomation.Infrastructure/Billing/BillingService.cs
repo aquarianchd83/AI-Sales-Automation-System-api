@@ -258,8 +258,7 @@ public class BillingService : IBillingService
         if (_settings is not null)
         {
             var stored = await _settings.GetAllAsync(cancellationToken);
-            if (stored.TryGetValue("Razorpay:KeyId", out var keyId) && !string.IsNullOrWhiteSpace(keyId)
-                && stored.TryGetValue("Razorpay:KeySecret", out var secret) && !string.IsNullOrWhiteSpace(secret))
+            if (WhatsAppSalesAutomation.Application.Razorpay.RazorpayKeyStore.Active(stored).IsConfigured)
                 throw new ConflictException("Credit packs are paid through Razorpay. Refresh the page and press Buy again.");
         }
 

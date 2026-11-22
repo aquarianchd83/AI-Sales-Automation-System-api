@@ -110,9 +110,9 @@ public sealed class RazorpaySubscriptionWebhookTests : IDisposable
         _db = new SqliteApplicationDbContext(options, new PlatformContext(), new AnonymousUser());
         _db.Database.EnsureCreated();
 
-        _store.Rows[RazorpayService.KeyIdKey] = KeyId;
-        _store.Rows[RazorpayService.KeySecretKey] = "key-secret-123";
-        _store.Rows[RazorpayService.WebhookSecretKey] = WebhookSecret;
+        _store.Rows[RazorpayKeyStore.LegacyKeyIdKey] = KeyId;
+        _store.Rows[RazorpayKeyStore.LegacyKeySecretKey] = "key-secret-123";
+        _store.Rows[RazorpayKeyStore.LegacyWebhookSecretKey] = WebhookSecret;
 
         _receiver = new RazorpayService(_db, _store, _gateway, _clock, NullLogger<RazorpayService>.Instance, _queue);
         _processor = new RazorpaySubscriptionEventProcessor(_db, _store, _gateway, _entitlements, _clock, NullLogger<RazorpaySubscriptionEventProcessor>.Instance);
@@ -873,7 +873,7 @@ public sealed class RazorpaySubscriptionWebhookTests : IDisposable
     public async Task Without_razorpay_keys_reconciliation_does_nothing()
     {
         Mandate();
-        _store.Rows.Remove(RazorpayService.KeySecretKey);
+        _store.Rows.Remove(RazorpayKeyStore.LegacyKeySecretKey);
 
         Assert.Equal(new AutoPayReconciliationResult(0, 0, 0, 0, 0), await _maintenance.ReconcileAsync());
         Assert.Empty(_gateway.FetchCalls);
