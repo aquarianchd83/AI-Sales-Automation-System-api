@@ -80,6 +80,10 @@ public class PricingService : IPricingService
 
     public IReadOnlyList<TaxLineDto> TaxOn(decimal subtotal, string countryCode, string? stateCode)
     {
+        // The platform's GST switch: off means no tax line anywhere - quotes, orders, AutoPay plans and invoices.
+        if (!_tax.Enabled)
+            return Array.Empty<TaxLineDto>();
+
         if (!_tax.Countries.TryGetValue(countryCode, out var rule) || rule.RatePercent <= 0)
             return Array.Empty<TaxLineDto>();
 

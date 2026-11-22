@@ -118,7 +118,8 @@ public class PlatformConfigurationService : IPlatformConfigurationService
                 {
                     var rule = _tax.Countries.GetValueOrDefault(r.CountryCode);
                     return new TaxCountryConfigDto(r.CountryCode, r.CountryName, rule?.Name ?? "Tax", rule?.RatePercent ?? 0m, rule?.SplitByState ?? false);
-                }).ToList()),
+                }).ToList(),
+                _tax.Enabled),
             new FxConfigDto(_fx.InrPerUsd),
             new PlanCostAssumptionsDto(
                 _costing.MarketingSharePercent, _costing.UtilitySharePercent, _costing.AuthenticationSharePercent,
@@ -172,6 +173,7 @@ public class PlatformConfigurationService : IPlatformConfigurationService
         if (request.Tax is { } taxConfig)
         {
             prefixes.Add("Tax:");
+            Set("Tax:Enabled", taxConfig.Enabled);
             Set("Tax:SupplierStateCode", taxConfig.SupplierStateCode.Trim().ToUpperInvariant());
             foreach (var country in taxConfig.Countries)
             {

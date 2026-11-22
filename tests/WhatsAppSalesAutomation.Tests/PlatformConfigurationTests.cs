@@ -313,6 +313,27 @@ public class PlatformConfigurationTests
         Assert.All(store.Saved.Keys.Where(k => k.StartsWith("Tax:") || k.StartsWith("Fx:")), k => Assert.Contains(store.Prefixes, p => k.StartsWith(p)));
     }
 
+    [Fact]
+    public async Task The_GST_switch_is_on_by_default_saves_off_and_binds_back_into_pricing()
+    {
+        var store = new CapturingStore();
+        var initial = await Service(store).GetAsync();
+        Assert.True(initial.Tax!.Enabled);
+
+        await Service(store).UpdateAsync(initial with { Tax = initial.Tax with { Enabled = false } }, null);
+        Assert.Equal("False", store.Saved["Tax:Enabled"]);
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(store.Saved).Build();
+        Assert.False((await Service(new CapturingStore(), config).GetAsync()).Tax!.Enabled);
+
+        var options = new TaxOptions();
+        config.GetSection("Tax").Bind(options);
+        var pricing = new PricingService(Snapshot.Of(options), Snapshot.Of(new FxOptions()));
+        Assert.Equal(0m, pricing.Quote(1000m, "IN", "MH")!.Tax);
+        // Switching off GST keeps the rates, so switching it back on restores them.
+        Assert.Equal(18m, options.Countries["IN"].RatePercent);
+    }
+
     [Theory]
     [InlineData("state")]
     [InlineData("rate")]
