@@ -48,9 +48,10 @@ public record CountryConfigDto(string CountryCode, string CountryName, string Cu
 /// state, IGST anywhere else. A rate of 0 means no tax.</summary>
 public record TaxCountryConfigDto(string CountryCode, string CountryName, string TaxName, decimal RatePercent, bool SplitByState);
 
-/// <summary>Tax is always added on top. <see cref="SupplierStateCode"/> is the state the platform is registered in - it
-/// decides CGST + SGST versus IGST.</summary>
-public record TaxConfigDto(string SupplierStateCode, IReadOnlyList<TaxCountryConfigDto> Countries);
+/// <summary>Tax is added on top while <see cref="Enabled"/> (the platform's GST switch) is on; off, nothing new is taxed and
+/// no invoice shows tax. <see cref="SupplierStateCode"/> is the state the platform is registered in - it decides CGST + SGST
+/// versus IGST. <see cref="Enabled"/> defaults to on so an older client that doesn't send it never switches GST off.</summary>
+public record TaxConfigDto(string SupplierStateCode, IReadOnlyList<TaxCountryConfigDto> Countries, bool Enabled = true);
 
 /// <summary>The one exchange rate set by hand: rupees per US dollar. It turns USD provider costs into rupees and stamps
 /// each payment's INR equivalent. It never changes what a tenant pays.</summary>

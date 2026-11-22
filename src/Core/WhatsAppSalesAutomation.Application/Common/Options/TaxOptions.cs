@@ -19,6 +19,11 @@ public class TaxCountryRule
 /// </summary>
 public class TaxOptions
 {
+    /// <summary>The platform's GST / tax switch. On: every new payment (plans, AutoPay, credit packs, wallet recharges)
+    /// adds the country's tax on top and its invoice shows the tax lines. Off: no tax is charged or shown on anything new.
+    /// Payments already made keep the tax they were charged - their invoices are a snapshot.</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>The state the platform is registered in (a code from <c>IndianStates</c>) - decides CGST + SGST versus IGST.</summary>
     public string SupplierStateCode { get; set; } = "MH";
 

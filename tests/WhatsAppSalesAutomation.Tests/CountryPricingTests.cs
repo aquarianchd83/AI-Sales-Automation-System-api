@@ -262,4 +262,23 @@ public sealed class CountryPricingTests : IDisposable
         // The rupee rate is the one set by hand.
         Assert.Equal(Math.Round(90m / 0.92m, 6), de.FxRateToInr);
     }
+
+    [Fact]
+    public void With_the_GST_switch_off_nothing_is_taxed_and_with_it_on_the_rules_apply()
+    {
+        PricingService Pricing(bool enabled) => new(
+            new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.TaxOptions>(new() { Enabled = enabled }),
+            new FixedOptions<WhatsAppSalesAutomation.Application.Common.Options.FxOptions>(new()));
+
+        var on = Pricing(true).Quote(1000m, "IN", "KA")!;
+        Assert.Equal("IGST", Assert.Single(on.TaxLines).Name);
+        Assert.Equal(180m, on.Tax);
+        Assert.Equal(1180m, on.Total);
+
+        var off = Pricing(false).Quote(1000m, "IN", "MH")!;
+        Assert.Empty(off.TaxLines);
+        Assert.Equal(0m, off.Tax);
+        Assert.Equal(1000m, off.Total);
+        Assert.Empty(Pricing(false).TaxOn(1000m, "IN", "KA"));
+    }
 }
