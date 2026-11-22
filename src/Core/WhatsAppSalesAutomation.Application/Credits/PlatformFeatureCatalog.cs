@@ -24,6 +24,9 @@ public static class PlatformFeatureCatalog
             new[] { CreditScenario.ContentStudioGeneration, CreditScenario.ContentStudioVideoRender }),
         new(PlatformFeature.ProductKnowledge, "Product knowledge", "Reading your sources and drafting product knowledge with AI.",
             new[] { CreditScenario.ProductKnowledgeReading, CreditScenario.ProductKnowledgeAnswering }),
+        // Campaign sends are paid as WhatsApp messaging, so this feature spends nothing of its own: it only gates access and the campaign limit.
+        new(PlatformFeature.Campaigns, "Campaigns", "Bulk and scheduled WhatsApp campaigns. Sends are paid as WhatsApp messaging.",
+            Array.Empty<CreditScenario>()),
     };
 
     public static PlatformFeatureInfo For(PlatformFeature feature) => All.Single(f => f.Feature == feature);
@@ -43,7 +46,7 @@ public static class PlatformFeatureCatalog
     public const decimal PremiumMonthlyCredits = 100m;
 
     /// <summary>The Trial plan is the minimum: you can message customers and have the AI answer them. Everything else is Premium.</summary>
-    public static readonly IReadOnlyList<PlatformFeature> TrialFeatures = new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations };
+    public static readonly IReadOnlyList<PlatformFeature> TrialFeatures = new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations, PlatformFeature.Campaigns };
 
     public static readonly IReadOnlyList<PlatformFeature> PremiumFeatures = All.Select(f => f.Feature).ToList();
 }
