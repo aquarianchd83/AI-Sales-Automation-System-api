@@ -175,6 +175,7 @@ public static class DependencyInjection
         services.AddScoped<ICreditPayerService, CreditPayerService>();
         services.AddScoped<IPlatformWalletService, PlatformWalletService>();
         services.AddScoped<ICreditCostService, CreditCostService>();
+        services.AddSingleton<FeatureAccessCache>();
         services.AddScoped<IFeatureAccessService, FeatureAccessService>();
         services.AddScoped<ICreditWalletService, CreditWalletService>();
         services.AddScoped<ICreditAllocationService, CreditAllocationService>();

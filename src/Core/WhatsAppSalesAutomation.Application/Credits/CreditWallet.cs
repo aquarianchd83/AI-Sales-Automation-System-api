@@ -69,18 +69,25 @@ public class FeatureAccessService : IFeatureAccessService
 {
     private readonly IApplicationDbContext _context;
     private readonly IConfiguration? _configuration;
+    private readonly FeatureAccessCache? _shared;
     private readonly Dictionary<Guid, IReadOnlySet<PlatformFeature>> _cache = new();
 
-    public FeatureAccessService(IApplicationDbContext context, IConfiguration? configuration = null)
+    public FeatureAccessService(IApplicationDbContext context, IConfiguration? configuration = null, FeatureAccessCache? shared = null)
     {
         _context = context;
         _configuration = configuration;
+        _shared = shared;
     }
 
     public async Task<IReadOnlySet<PlatformFeature>> GetFeaturesAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         if (_cache.TryGetValue(tenantId, out var cached))
             return cached;
+
+        // The plan's features come from the process-wide cache when it has them; the unpublished switches are applied
+        // fresh every time below, so a platform admin's switch is never held back by the cache.
+        if (_shared is not null && _shared.TryGet(tenantId, out var planFeatures))
+            return _cache[tenantId] = WithoutUnpublished(planFeatures);
 
         // A tenant with no plan row yet is on the Trial plan - the minimum - not on nothing.
         var planId = await _context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
@@ -91,10 +98,16 @@ public class FeatureAccessService : IFeatureAccessService
             ? new HashSet<PlatformFeature>()
             : (await _context.PlanFeatures.AsNoTracking().Where(f => f.PlanId == planId).Select(f => f.Feature).ToListAsync(cancellationToken)).ToHashSet();
 
-        // A feature the platform admin has unpublished is unavailable to every tenant, whatever its plan includes.
-        features.ExceptWith(PlatformFeatureSwitches.Unpublished(_configuration));
+        _shared?.Set(tenantId, features);
+        return _cache[tenantId] = WithoutUnpublished(features);
+    }
 
-        return _cache[tenantId] = features;
+    /// <summary>A feature the platform admin has unpublished is unavailable to every tenant, whatever its plan includes.</summary>
+    private IReadOnlySet<PlatformFeature> WithoutUnpublished(IReadOnlySet<PlatformFeature> planFeatures)
+    {
+        var features = new HashSet<PlatformFeature>(planFeatures);
+        features.ExceptWith(PlatformFeatureSwitches.Unpublished(_configuration));
+        return features;
     }
 
     public async Task<bool> HasAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default) =>
