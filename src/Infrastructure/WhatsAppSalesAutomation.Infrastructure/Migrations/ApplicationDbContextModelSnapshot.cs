@@ -2823,6 +2823,11 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime>("ActivityAt")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("datetime2")
+                        .HasComputedColumnSql("COALESCE([LastMessageAt], [CreatedAt])", true);
+
                     b.Property<double?>("AiConfidenceLast")
                         .HasColumnType("float");
 
@@ -2875,7 +2880,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("CustomerId", "Status");
 
-                    b.HasIndex("TenantId", "Status", "LastMessageAt");
+                    b.HasIndex("TenantId", "ActivityAt");
+
+                    b.HasIndex("TenantId", "Status", "ActivityAt");
 
                     b.ToTable("Conversations", (string)null);
                 });

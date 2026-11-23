@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<WhatsAppSalesAutomation.Application.ContentStudio.Cinematic.ISceneVideoProviderFactory, WhatsAppSalesAutomation.Infrastructure.Cinematic.SceneVideoProviderFactory>();        services.AddScoped<AuditTrailSaveChangesInterceptor>();
         services.AddScoped<AuditableEntitySaveChangesInterceptor>();
         services.AddScoped<TenantStampingSaveChangesInterceptor>();
+        services.AddScoped<FeatureAccessInvalidationInterceptor>();
         services.AddScoped<ITenantContext, TenantContext>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
@@ -66,7 +67,9 @@ public static class DependencyInjection
             options.AddInterceptors(
                 sp.GetRequiredService<AuditTrailSaveChangesInterceptor>(),
                 sp.GetRequiredService<AuditableEntitySaveChangesInterceptor>(),
-                sp.GetRequiredService<TenantStampingSaveChangesInterceptor>());
+                sp.GetRequiredService<TenantStampingSaveChangesInterceptor>(),
+                // Last: it only reads what is about to be saved, and clears the plan-features cache once the save commits.
+                sp.GetRequiredService<FeatureAccessInvalidationInterceptor>());
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());

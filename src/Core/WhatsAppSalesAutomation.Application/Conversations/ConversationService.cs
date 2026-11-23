@@ -70,7 +70,9 @@ public class ConversationService : IConversationService
 
         var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
-            .OrderByDescending(x => x.Conversation.LastMessageAt ?? x.Conversation.CreatedAt)
+            // "ActivityAt" is the persisted COALESCE(LastMessageAt, CreatedAt) column (see ConversationConfiguration), so the
+            // newest-activity-first order comes straight off the (TenantId[, Status], ActivityAt) index instead of a sort.
+            .OrderByDescending(x => EF.Property<DateTime>(x.Conversation, "ActivityAt"))
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
