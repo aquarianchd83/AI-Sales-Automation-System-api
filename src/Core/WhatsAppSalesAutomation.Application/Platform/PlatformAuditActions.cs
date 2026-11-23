@@ -55,6 +55,8 @@ public static class PlatformAuditActions
     public const string DeliverySettingsUpdated = "DeliverySettingsUpdated";
     public const string IntegrationSettingsUpdated = "IntegrationSettingsUpdated";
     public const string AiFeatureSettingsUpdated = "AiFeatureSettingsUpdated";
+    public const string FeaturePublished = "FeaturePublished";
+    public const string FeatureUnpublished = "FeatureUnpublished";
     public const string PlatformWhatsAppSettingsUpdated = "PlatformWhatsAppSettingsUpdated";
     public const string WhatsAppProviderChanged = "WhatsAppProviderChanged";
     public const string WhatsAppBridgeSettingsUpdated = "WhatsAppBridgeSettingsUpdated";
