@@ -104,6 +104,18 @@ public sealed class LatencyCacheAndInboxTests : IDisposable
     }
 
     [Fact]
+    public void A_plan_read_before_a_plan_change_is_not_cached()
+    {
+        var tenantId = Guid.NewGuid();
+        var generation = _cache.Generation;
+        _cache.InvalidateTenant(Guid.NewGuid()); // a plan change saved while this request was still reading the old plan
+
+        _cache.Set(tenantId, new HashSet<PlatformFeature> { PlatformFeature.Campaigns }, generation);
+
+        Assert.False(_cache.TryGet(tenantId, out _));
+    }
+
+    [Fact]
     public async Task An_unpublished_feature_is_withheld_at_once_even_when_the_plan_is_cached()
     {
         Assert.Contains(PlatformFeature.Campaigns, await FeaturesInNewRequestAsync());

@@ -20,6 +20,14 @@ public sealed class FeatureAccessCache
 
     private readonly IMemoryCache _cache;
     private CancellationTokenSource _all = new();
+    private long _generation;
+
+    /// <summary>
+    /// Bumped by every invalidation. A caller reads it before loading a plan from the database and hands it back to
+    /// <see cref="Set"/>, which then refuses to store the result if a plan change was saved in between - otherwise a
+    /// request that read the old plan just before the save could put it straight back into the cache.
+    /// </summary>
+    public long Generation => Interlocked.Read(ref _generation);
 
     public FeatureAccessCache(IMemoryCache cache) => _cache = cache;
 
@@ -37,20 +45,32 @@ public sealed class FeatureAccessCache
         return false;
     }
 
-    public void Set(Guid tenantId, IReadOnlySet<PlatformFeature> planFeatures)
+    public void Set(Guid tenantId, IReadOnlySet<PlatformFeature> planFeatures, long generationBeforeRead)
     {
+        if (Generation != generationBeforeRead)
+            return;
+
         var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = Lifetime, Size = 1 }
             .AddExpirationToken(new CancellationChangeToken(Volatile.Read(ref _all).Token));
         _cache.Set(Key(tenantId), planFeatures, options);
+
+        // An invalidation that landed between the check above and this write must still win.
+        if (Generation != generationBeforeRead)
+            _cache.Remove(Key(tenantId));
     }
 
-    public void InvalidateTenant(Guid tenantId) => _cache.Remove(Key(tenantId));
+    public void InvalidateTenant(Guid tenantId)
+    {
+        Interlocked.Increment(ref _generation);
+        _cache.Remove(Key(tenantId));
+    }
 
     /// <summary>Drops every tenant's entry - for a change to a plan's features, which every tenant on that plan sees.</summary>
     public void InvalidateAll()
     {
         // Cancelled, not disposed: a Set racing with this may still be reading the old source's token, and a cancelled
         // token just makes that entry expire at once.
+        Interlocked.Increment(ref _generation);
         Interlocked.Exchange(ref _all, new CancellationTokenSource()).Cancel();
     }
 }

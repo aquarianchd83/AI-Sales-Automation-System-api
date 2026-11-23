@@ -89,6 +89,8 @@ public class FeatureAccessService : IFeatureAccessService
         if (_shared is not null && _shared.TryGet(tenantId, out var planFeatures))
             return _cache[tenantId] = WithoutUnpublished(planFeatures);
 
+        var generation = _shared?.Generation ?? 0;
+
         // A tenant with no plan row yet is on the Trial plan - the minimum - not on nothing.
         var planId = await _context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
             .Where(s => s.TenantId == tenantId).Select(s => s.PlanId).FirstOrDefaultAsync(cancellationToken);
@@ -98,7 +100,7 @@ public class FeatureAccessService : IFeatureAccessService
             ? new HashSet<PlatformFeature>()
             : (await _context.PlanFeatures.AsNoTracking().Where(f => f.PlanId == planId).Select(f => f.Feature).ToListAsync(cancellationToken)).ToHashSet();
 
-        _shared?.Set(tenantId, features);
+        _shared?.Set(tenantId, features, generation);
         return _cache[tenantId] = WithoutUnpublished(features);
     }
 
