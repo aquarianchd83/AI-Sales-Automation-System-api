@@ -309,11 +309,27 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     // same reasoning as TenantWhatsAppConfigs above.
     public DbSet<TenantAppSettingOverride> TenantAppSettingOverrides => Set<TenantAppSettingOverride>();
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        // Every DateTime column is UTC: read it back as Kind Utc so it serialises with a trailing Z. See UtcDateTimeConverter.
+        configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+        configurationBuilder.Properties<DateTime?>().HaveConversion<UtcDateTimeConverter>();
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
 
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        // The wall-clock columns (tenant-local digits or calendar dates, not instants) opt out of the UTC convention above.
+        builder.Entity<Campaign>().Property(c => c.ScheduledStartAt).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<AutoCampaignEnrollment>().Property(e => e.ExecutionDateLocal).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryExecution>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryLockTransition>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryGeneratedCampaign>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
 
         // Rename Identity's default AspNet* tables to match the design doc's naming.
         builder.Entity<ApplicationUser>(user =>

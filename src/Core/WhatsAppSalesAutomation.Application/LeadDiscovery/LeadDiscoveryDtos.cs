@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using WhatsAppSalesAutomation.Application.Common.Serialization;
+
 namespace WhatsAppSalesAutomation.Application.LeadDiscovery;
 
 public static class LeadDiscoveryLimits
@@ -191,7 +194,7 @@ public record AutoCampaignEnrollmentDto(
     string? SourceCampaignName,
     Guid? ExecutionCampaignId,
     string? ExecutionCampaignName,
-    DateTime ExecutionDateLocal,
+    [property: JsonConverter(typeof(WallClockDateTimeJsonConverter))] DateTime ExecutionDateLocal,
     string Status,
     string? Reason,
     DateTime CreatedAt);

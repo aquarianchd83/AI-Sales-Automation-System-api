@@ -53,9 +53,23 @@ public static class UtcDateTimeJsonExtensions
 {
     /// <summary>Makes every controller write UTC timestamps with a trailing Z. See <see cref="UtcDateTimeJsonConverter"/>.</summary>
     public static IMvcBuilder AddUtcDateTimeJson(this IMvcBuilder builder) =>
-        builder.AddJsonOptions(json =>
-        {
-            json.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter());
-            json.JsonSerializerOptions.Converters.Add(new UtcNullableDateTimeJsonConverter());
-        });
+        builder.AddJsonOptions(json => AddUtcDateTimeConverters(json.JsonSerializerOptions));
+
+    /// <summary>
+    /// The same UTC-with-Z rule for the two JSON writers that are not controllers: minimal-API endpoints (Results.Json, the health
+    /// endpoints) and the SignalR hubs, whose pushes (a new notification's createdAt, for one) the browser shows next to the same
+    /// rows fetched through a controller.
+    /// </summary>
+    public static IServiceCollection AddUtcDateTimeJsonForEndpointsAndHubs(this IServiceCollection services)
+    {
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(json => AddUtcDateTimeConverters(json.SerializerOptions));
+        services.Configure<Microsoft.AspNetCore.SignalR.JsonHubProtocolOptions>(json => AddUtcDateTimeConverters(json.PayloadSerializerOptions));
+        return services;
+    }
+
+    public static void AddUtcDateTimeConverters(JsonSerializerOptions options)
+    {
+        options.Converters.Add(new UtcDateTimeJsonConverter());
+        options.Converters.Add(new UtcNullableDateTimeJsonConverter());
+    }
 }

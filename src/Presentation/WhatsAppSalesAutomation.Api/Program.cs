@@ -116,6 +116,7 @@ try
 
     // UTC timestamps always carry a trailing Z, so the client shows them in the user's timezone rather than reading the digits as local time.
     builder.Services.AddControllers().AddUtcDateTimeJson();
+    builder.Services.AddUtcDateTimeJsonForEndpointsAndHubs();
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerDocumentation();
 
