@@ -26,6 +26,10 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.HasIndex(l => l.CustomerId);
         builder.HasIndex(l => l.Stage);
 
+        // The leads list: tenant filter, optional stage, sorted by score.
+        builder.HasIndex(l => new { l.TenantId, l.Stage, l.ScoreNumeric });
+        builder.HasIndex(l => new { l.TenantId, l.ScoreNumeric });
+
         // Filtered: the hot-lead queue is a small slice of a large table, and the pipeline board's
         // "needs attention" view reads exactly this.
         builder.HasIndex(l => new { l.TenantId, l.HotLeadDetectedAt })

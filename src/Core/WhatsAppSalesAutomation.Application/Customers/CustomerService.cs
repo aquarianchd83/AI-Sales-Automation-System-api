@@ -45,7 +45,7 @@ public class CustomerService : ICustomerService
 
     public async Task<PagedResult<CustomerDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _context.Customers.Include(c => c.Tags).AsQueryable();
+        var query = _context.Customers.AsNoTracking().Include(c => c.Tags).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {

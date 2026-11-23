@@ -26,7 +26,7 @@ public class MediaService : IMediaService
 
     public async Task<PagedResult<MediaAssetDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _context.MediaAssets.AsQueryable();
+        var query = _context.MediaAssets.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {

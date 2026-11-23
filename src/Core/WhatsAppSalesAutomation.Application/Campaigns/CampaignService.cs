@@ -75,9 +75,34 @@ public class CampaignService : ICampaignService
             .Select(c => c.Id)
             .ToListAsync(cancellationToken);
 
-        var dtos = new List<CampaignDto>(ids.Count);
-        foreach (var id in ids)
-            dtos.Add(await BuildDtoAsync(await LoadCampaignAsync(id, cancellationToken), cancellationToken));
+        if (ids.Count == 0)
+            return new PagedResult<CampaignDto>(new List<CampaignDto>(), totalCount, request.Page, request.PageSize);
+
+        // One round trip per kind of data for the whole page (campaigns with steps, audience sizes, template names),
+        // not three per campaign - a full page used to cost ~60 queries.
+        var campaigns = await _context.Campaigns.AsNoTracking()
+            .Include(c => c.Steps).ThenInclude(s => s.StepMedia)
+            .Where(c => ids.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, cancellationToken);
+
+        var audienceCounts = await _context.CampaignCustomers.AsNoTracking()
+            .Where(cc => ids.Contains(cc.CampaignId))
+            .GroupBy(cc => cc.CampaignId)
+            .Select(g => new { CampaignId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CampaignId, x => x.Count, cancellationToken);
+
+        List<Guid> templateIds = Enumerable.ToList(campaigns.Values.SelectMany(c => c.Steps)
+            .Where(s => s.MessageTemplateId.HasValue).Select(s => s.MessageTemplateId!.Value).Distinct());
+        var templateNames = templateIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _context.MessageTemplates.AsNoTracking()
+                .Where(t => templateIds.Contains(t.Id))
+                .ToDictionaryAsync(t => t.Id, t => t.Name, cancellationToken);
+
+        var dtos = ids
+            .Where(campaigns.ContainsKey)
+            .Select(id => campaigns[id].ToDto(audienceCounts.GetValueOrDefault(id), templateNames))
+            .ToList();
 
         return new PagedResult<CampaignDto>(dtos, totalCount, request.Page, request.PageSize);
     }

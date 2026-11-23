@@ -33,7 +33,7 @@ public class PackageService : IPackageService
 
     public async Task<PagedResult<PackageDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _context.SalesPackages.AsQueryable();
+        var query = _context.SalesPackages.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
