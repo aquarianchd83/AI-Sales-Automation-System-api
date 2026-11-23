@@ -114,9 +114,13 @@ public sealed class UtcDateTimePersistenceTests : IDisposable
     }
 
     [Fact]
-    public void Every_datetime_column_is_read_as_utc_except_the_two_wall_clock_ones()
+    public void Every_datetime_column_is_read_as_utc_except_the_wall_clock_ones()
     {
-        var wallClock = new HashSet<string> { "Campaign.ScheduledStartAt", "AutoCampaignEnrollment.ExecutionDateLocal" };
+        var wallClock = new HashSet<string>
+        {
+            "Campaign.ScheduledStartAt", "AutoCampaignEnrollment.ExecutionDateLocal",
+            "LeadDiscoveryExecution.ProcessingDate", "LeadDiscoveryLockTransition.ProcessingDate", "LeadDiscoveryGeneratedCampaign.ProcessingDate"
+        };
 
         var properties = _db.Model.GetEntityTypes()
             .SelectMany(e => e.GetProperties().Select(p => (Name: $"{e.ClrType.Name}.{p.Name}", Property: p)))
@@ -129,6 +133,30 @@ public sealed class UtcDateTimePersistenceTests : IDisposable
             var expected = wallClock.Contains(name) ? typeof(WallClockDateTimeConverter) : typeof(UtcDateTimeConverter);
             Assert.True(property.GetValueConverter()?.GetType() == expected, $"{name} should use {expected.Name}, has {property.GetValueConverter()?.GetType().Name ?? "none"}");
         }
+    }
+
+    [Fact]
+    public async Task A_local_kind_value_is_stored_with_its_digits_unshifted()
+    {
+        // A tenant-local "now" carries Kind Local when the server shares the tenant's zone; storing must not move it by the offset.
+        var campaign = NewCampaign();
+        campaign.StartedAt = new DateTime(2026, 11, 23, 0, 0, 0, DateTimeKind.Local);
+        campaign.ScheduledStartAt = new DateTime(2026, 11, 25, 10, 0, 0, DateTimeKind.Local);
+
+        var loaded = await SaveAndReloadAsync(campaign);
+
+        Assert.Equal(new DateTime(2026, 11, 23, 0, 0, 0), loaded.StartedAt!.Value);
+        Assert.Equal(new DateTime(2026, 11, 25, 10, 0, 0), loaded.ScheduledStartAt!.Value);
+    }
+
+    [Fact]
+    public void A_lead_discovery_processing_date_is_written_without_a_zone()
+    {
+        var dto = new LeadDiscoveryHistoryDayDto(new DateTime(2026, 11, 23), Array.Empty<LeadDiscoveryExecutionSummaryDto>());
+
+        var json = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(dto, ControllerOptions()));
+
+        Assert.Equal("2026-11-23T00:00:00", json.GetProperty("processingDate").GetString());
     }
 
     [Theory]

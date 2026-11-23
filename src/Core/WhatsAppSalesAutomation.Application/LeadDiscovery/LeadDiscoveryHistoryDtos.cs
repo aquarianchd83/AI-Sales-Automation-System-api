@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using WhatsAppSalesAutomation.Application.Common.Serialization;
 using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Application.Common.Models;
 
@@ -18,7 +20,7 @@ public record LeadDiscoveryHistoryQuery : PagedRequest
 /// <paramref name="CurrencySymbol"/> are the tenant's currency regardless, so a zero still reads correctly.</summary>
 public record LeadDiscoveryExecutionSummaryDto(
     Guid Id,
-    DateTime ProcessingDate,
+    [property: JsonConverter(typeof(WallClockDateTimeJsonConverter))] DateTime ProcessingDate,
     Guid LeadDiscoveryProfileId,
     string ProfileName,
     string Trigger,
@@ -64,7 +66,7 @@ public record LeadDiscoveryExecutionSummaryDto(
     string? AiModel = null);
 
 /// <summary>One processing date and every execution that belongs to it, newest first.</summary>
-public record LeadDiscoveryHistoryDayDto(DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);
+public record LeadDiscoveryHistoryDayDto([property: JsonConverter(typeof(WallClockDateTimeJsonConverter))] DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);
 
 public record LeadDiscoveryExecutionCustomerDto(
     Guid Id,

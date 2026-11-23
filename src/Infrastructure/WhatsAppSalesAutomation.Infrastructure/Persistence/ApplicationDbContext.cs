@@ -324,9 +324,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         builder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
-        // The two wall-clock columns (tenant-local digits, not an instant) opt out of the UTC convention above.
+        // The wall-clock columns (tenant-local digits or calendar dates, not instants) opt out of the UTC convention above.
         builder.Entity<Campaign>().Property(c => c.ScheduledStartAt).HasConversion<WallClockDateTimeConverter>();
         builder.Entity<AutoCampaignEnrollment>().Property(e => e.ExecutionDateLocal).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryExecution>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryLockTransition>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
+        builder.Entity<LeadDiscoveryGeneratedCampaign>().Property(e => e.ProcessingDate).HasConversion<WallClockDateTimeConverter>();
 
         // Rename Identity's default AspNet* tables to match the design doc's naming.
         builder.Entity<ApplicationUser>(user =>

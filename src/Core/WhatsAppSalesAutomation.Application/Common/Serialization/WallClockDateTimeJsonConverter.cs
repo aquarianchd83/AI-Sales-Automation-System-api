@@ -6,7 +6,7 @@ namespace WhatsAppSalesAutomation.Application.Common.Serialization;
 
 /// <summary>
 /// For the few fields that are a tenant's own wall-clock time rather than an instant - <c>Campaign.ScheduledStartAt</c> and
-/// <c>AutoCampaignEnrollment.ExecutionDateLocal</c>. The API writes every other <see cref="DateTime"/> as UTC with a trailing Z
+/// <c>AutoCampaignEnrollment.ExecutionDateLocal</c> and the Lead Discovery <c>ProcessingDate</c>. The API writes every other <see cref="DateTime"/> as UTC with a trailing Z
 /// (UtcDateTimeJsonConverter); a wall-clock value must not get one, or the browser shifts "10:00 in the tenant's zone" by the
 /// viewer's offset. Writing leaves the zone off; reading keeps the literal digits and ignores any offset or Z, as the DTOs document.
 /// Put it on the property: <c>[property: JsonConverter(typeof(WallClockDateTimeJsonConverter))]</c>, which wins over the global
