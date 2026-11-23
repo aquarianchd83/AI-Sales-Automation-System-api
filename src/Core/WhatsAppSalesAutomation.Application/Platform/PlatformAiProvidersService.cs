@@ -383,8 +383,8 @@ public class PlatformAiProvidersService : IPlatformAiProvidersService
         if (!string.IsNullOrWhiteSpace(query.Task)) rows = rows.Where(e => e.Task == query.Task);
         if (Enum.TryParse<AiExecutionStatus>(query.Status, true, out var status)) rows = rows.Where(e => e.Status == status);
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(e => e.CreatedAt).Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         return new PagedResult<AiExecutionDto>(
             page.Select(e => new AiExecutionDto(

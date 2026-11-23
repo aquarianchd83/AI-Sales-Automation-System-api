@@ -80,13 +80,13 @@ public class PlatformNotificationService : IPlatformNotificationService
             query = query.Where(n => n.Title.ToLower().Contains(term) || n.Body.ToLower().Contains(term) || (n.TenantId != null && tenantIds.Contains(n.TenantId.Value)));
         }
 
-        var total = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(n => n.CreatedAt)
             .ThenByDescending(n => n.Id)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         return new PagedResult<PlatformNotificationDto>(await ToDtosAsync(rows, cancellationToken), total, request.Page, request.PageSize);
     }

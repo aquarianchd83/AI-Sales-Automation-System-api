@@ -49,8 +49,6 @@ public class PlatformAuditService : IPlatformAuditService
             entries = entries.Where(e => e.ActorEmail.Contains(search) || e.Action.Contains(search));
         }
 
-        var totalCount = await entries.CountAsync(cancellationToken);
-
         // Left join, not Include - PlatformAuditLogEntry has no navigation property to Tenant (it
         // isn't ITenantOwned, so wiring one up would be solely for this display convenience).
         var items = await entries
@@ -61,6 +59,7 @@ public class PlatformAuditService : IPlatformAuditService
             .SelectMany(x => x.tenants.DefaultIfEmpty(), (x, t) => new PlatformAuditLogEntryDto(
                 x.e.Id, x.e.ActorUserId, x.e.ActorEmail, x.e.Action, x.e.TargetTenantId, t == null ? null : t.Name, x.e.TargetUserId, x.e.Details, x.e.CreatedAt))
             .ToListAsync(cancellationToken);
+        var totalCount = await entries.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<PlatformAuditLogEntryDto>(items, totalCount, query.Page, query.PageSize);
     }

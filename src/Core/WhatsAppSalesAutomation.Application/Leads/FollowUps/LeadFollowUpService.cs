@@ -80,8 +80,6 @@ public class LeadFollowUpService : ILeadFollowUpService
                 (x.Customer.LastName != null && x.Customer.LastName.Contains(search)));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         // Scheduled: soonest due first, so the top of the list is what needs attention. History: newest first.
         var ordered = wanted == LeadFollowUpStatus.Scheduled
             ? query.OrderBy(x => x.FollowUp.DueAt)
@@ -91,6 +89,7 @@ public class LeadFollowUpService : ILeadFollowUpService
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         return new PagedResult<LeadFollowUpDto>(rows.Select(x => ToDto(x.FollowUp, x.Customer, x.Lead, x.TemplateName)).ToList(), totalCount, request.Page, request.PageSize);
     }

@@ -34,12 +34,12 @@ public class MediaService : IMediaService
             query = query.Where(m => m.FileName.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
             .OrderByDescending(m => m.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<MediaAssetDto>(items.Select(ToDto).ToList(), totalCount, request.Page, request.PageSize);
     }

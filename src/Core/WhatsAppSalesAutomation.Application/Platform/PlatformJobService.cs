@@ -61,8 +61,6 @@ public class PlatformJobService : IPlatformJobService
             rows = rows.Where(r => r.Tenant.Name.Contains(search) || r.Tenant.Slug.Contains(search));
         }
 
-        var totalCount = await rows.CountAsync(cancellationToken);
-
         var page = await rows
             // Failing first, then by tenant, then by job type - an operator opens this screen looking
             // for what is broken, not for alphabetical order.
@@ -72,6 +70,7 @@ public class PlatformJobService : IPlatformJobService
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var materialized = page.Select(r => new ScheduleRow(r.Schedule, r.Tenant)).ToList();
         var registrations = GetRegistrationsFor(materialized);

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Users;
 using WhatsAppSalesAutomation.Domain.Entities.Identity;
 
 namespace WhatsAppSalesAutomation.Application.Platform;
@@ -51,17 +52,14 @@ public class PlatformUserSearchService : IPlatformUserSearchService
             .Where(t => tenantIds.Contains(t.Id))
             .ToDictionaryAsync(t => t.Id, t => t.Name, cancellationToken);
 
-        var results = new List<PlatformUserSearchResultDto>(matches.Count);
-        foreach (var user in matches)
-        {
-            var roles = await _userManager.GetRolesAsync(user);
-            results.Add(new PlatformUserSearchResultDto(
+        // Roles for every match in one query, not a GetRolesAsync round trip per user.
+        var rolesByUser = await _context.RolesByUserAsync(matches.Select(u => u.Id), cancellationToken);
+
+        return matches.Select(user => new PlatformUserSearchResultDto(
                 user.Id, user.Email ?? string.Empty, user.FullName,
                 user.TenantId, user.TenantId is { } userTenantId ? tenantNames.GetValueOrDefault(userTenantId) : null,
-                roles as IReadOnlyList<string> ?? roles.ToList(),
-                user.IsActive, user.CreatedAt, user.LastLoginAt));
-        }
-
-        return results;
+                rolesByUser.For(user.Id),
+                user.IsActive, user.CreatedAt, user.LastLoginAt))
+            .ToList();
     }
 }

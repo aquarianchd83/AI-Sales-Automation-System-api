@@ -89,14 +89,13 @@ public class PlatformTenantService : IPlatformTenantService
             tenants = tenants.Where(t => t.Name.Contains(search) || t.Slug.Contains(search));
         }
 
-        var totalCount = await tenants.CountAsync(cancellationToken);
-
         var page = await tenants
             .OrderByDescending(t => t.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(t => new { t.Id, t.Name, t.Slug, t.Status, t.CreatedAt, t.TrialEndsAtUtc })
             .ToListAsync(cancellationToken);
+        var totalCount = await tenants.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var tenantIds = page.Select(t => t.Id).ToList();
 
@@ -459,18 +458,16 @@ public class PlatformTenantService : IPlatformTenantService
 
     private async Task<ApplicationUser?> FindFallbackAdminAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var candidates = await _userManager.Users.IgnoreQueryFilters()
-            .Where(u => u.TenantId == tenantId && u.IsActive)
+        // The oldest active admin in one query, not an IsInRoleAsync round trip per user of the tenant.
+        // IsInRoleAsync matches on the normalized role name, so this does too.
+        var adminRole = AppRoles.Admin.ToUpperInvariant();
+        var adminRoleIds = _context.Roles.Where(r => r.NormalizedName == adminRole).Select(r => r.Id);
+
+        return await _context.Users.IgnoreQueryFilters()
+            .Where(u => u.TenantId == tenantId && u.IsActive
+                && _context.UserRoles.Any(ur => ur.UserId == u.Id && adminRoleIds.Contains(ur.RoleId)))
             .OrderBy(u => u.CreatedAt)
-            .ToListAsync(cancellationToken);
-
-        foreach (var candidate in candidates)
-        {
-            if (await _userManager.IsInRoleAsync(candidate, AppRoles.Admin))
-                return candidate;
-        }
-
-        return null;
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task<Dictionary<Guid, string?>> GetPlanNamesByTenantAsync(IReadOnlyList<Guid> tenantIds, CancellationToken cancellationToken)

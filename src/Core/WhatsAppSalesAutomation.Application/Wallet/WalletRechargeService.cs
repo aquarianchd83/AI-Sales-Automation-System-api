@@ -129,8 +129,8 @@ public class WalletRechargeService : IWalletRechargeService
     public async Task<PagedResult<RechargeTransactionDto>> GetHistoryAsync(Guid tenantId, PagedRequest paging, CancellationToken cancellationToken = default)
     {
         var rows = _context.PaymentTransactions.IgnoreQueryFilters().AsNoTracking().Where(t => t.TenantId == tenantId);
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(t => t.CreatedAt).Skip((paging.Page - 1) * paging.PageSize).Take(paging.PageSize).ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(paging.Page, paging.PageSize, page.Count, cancellationToken);
         return new PagedResult<RechargeTransactionDto>(await ToDtosAsync(tenantId, page, cancellationToken), total, paging.Page, paging.PageSize);
     }
 

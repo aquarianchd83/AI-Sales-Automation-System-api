@@ -85,13 +85,12 @@ public sealed class AuditLogService : IAuditLogService
         if (query.From is { } f) logs = logs.Where(a => a.PerformedAt >= f);
         if (query.To is { } t) logs = logs.Where(a => a.PerformedAt <= t);
 
-        var total = await logs.CountAsync(cancellationToken);
-
         var rows = await logs
             .OrderByDescending(a => a.PerformedAt).ThenByDescending(a => a.Id)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await logs.CountForPageAsync(query.Page, query.PageSize, rows.Count, cancellationToken);
 
         // Names in one extra query for the page, not a join per row.
         var actorIds = rows.Where(r => r.PerformedBy is not null).Select(r => r.PerformedBy!.Value).Distinct().ToList();

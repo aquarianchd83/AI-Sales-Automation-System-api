@@ -67,8 +67,6 @@ public class PlatformBillingService : IPlatformBillingService
             joined = joined.Where(x => x.t.Name.Contains(search) || x.t.Slug.Contains(search));
         }
 
-        var totalCount = await joined.CountAsync(cancellationToken);
-
         var items = await joined
             .OrderByDescending(x => x.s.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
@@ -76,6 +74,7 @@ public class PlatformBillingService : IPlatformBillingService
             .Select(x => new PlatformSubscriptionListItemDto(
                 x.t.Id, x.t.Name, x.p == null ? null : x.p.Name, x.s.Status, x.s.CurrentPeriodEndUtc, x.s.Status == SubscriptionStatus.PastDue))
             .ToListAsync(cancellationToken);
+        var totalCount = await joined.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<PlatformSubscriptionListItemDto>(items, totalCount, query.Page, query.PageSize);
     }

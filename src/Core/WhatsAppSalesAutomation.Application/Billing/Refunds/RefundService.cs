@@ -136,12 +136,12 @@ public class RefundService : IRefundService
         if (query.TenantId is { } tenantId)
             requests = requests.Where(r => r.TenantId == tenantId);
 
-        var total = await requests.CountAsync(cancellationToken);
         var page = await requests
             .OrderByDescending(r => r.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await requests.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         return new PagedResult<RefundRequestDto>(await ToDtosAsync(page, cancellationToken), total, query.Page, query.PageSize);
     }

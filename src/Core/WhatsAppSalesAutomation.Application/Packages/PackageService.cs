@@ -41,14 +41,13 @@ public class PackageService : IPackageService
             query = query.Where(p => p.Name.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         var rows = await query
             .OrderByDescending(p => p.IsActive)
             .ThenBy(p => p.Name)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         return new PagedResult<PackageDto>(rows.Select(ToDto).ToList(), totalCount, request.Page, request.PageSize);
     }
@@ -159,7 +158,6 @@ public class PackageService : IPackageService
     public async Task<PagedResult<PackageSaleDto>> GetSalesPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
         var query = _context.PackageSales.AsQueryable();
-        var totalCount = await query.CountAsync(cancellationToken);
 
         var rows = await query
             .OrderByDescending(s => s.SoldAt)
@@ -167,6 +165,7 @@ public class PackageService : IPackageService
             .Take(request.PageSize)
             .Select(s => new { s.Id, s.PackageId, s.CustomerId, s.Amount, s.SoldAt })
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         var packageIds = rows.Select(r => r.PackageId).Distinct().ToList();
         var packageNames = await _context.SalesPackages

@@ -402,7 +402,6 @@ public class QuotaLedgerService : IQuotaLedgerService
             entries = entries.Where(e => e.OccurredAtUtc < endExclusive);
         }
 
-        var total = await entries.CountAsync(cancellationToken);
         var items = await entries
             .OrderByDescending(e => e.OccurredAtUtc).ThenByDescending(e => e.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
@@ -410,6 +409,7 @@ public class QuotaLedgerService : IQuotaLedgerService
             .Select(e => new QuotaLedgerEntryDto(
                 e.Id, e.QuotaType, e.Feature, e.EntryType, e.UnitsDelta, e.BalanceAfter, e.GrantId, e.ReferenceType, e.ReferenceId, e.Note, e.OccurredAtUtc, null))
             .ToListAsync(cancellationToken);
+        var total = await entries.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         if (query.WithConversationText)
             items = await WithCustomerTextAsync(tenantId, items, cancellationToken);
@@ -470,13 +470,13 @@ public class QuotaLedgerService : IQuotaLedgerService
         var zone = await ZoneOfAsync(tenantId, cancellationToken);
         var calls = InRange(TestChatReplies(tenantId), query.From, query.To, zone);
 
-        var total = await calls.CountAsync(cancellationToken);
         var items = await calls
             .OrderByDescending(e => e.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(e => new TestChatCallDto(e.Id, e.CreatedAt, e.Model, e.Detail))
             .ToListAsync(cancellationToken);
+        var total = await calls.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<TestChatCallDto>(items, total, query.Page, query.PageSize);
     }

@@ -174,12 +174,12 @@ public class LeadService : ILeadService
 
         var query = _context.LeadActivities.Where(a => a.LeadId == id);
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(a => a.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         return new PagedResult<LeadActivityDto>(rows.Select(a => a.ToDto()).ToList(), totalCount, request.Page, request.PageSize);
     }

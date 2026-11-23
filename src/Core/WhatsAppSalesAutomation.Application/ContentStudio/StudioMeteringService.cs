@@ -151,10 +151,10 @@ public class StudioMeteringService : IStudioMeteringService
             rows = rows.Where(a => a.Description.Contains(term) || (a.Provider != null && a.Provider.Contains(term)));
         }
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(a => a.RequestedAtUtc).ThenByDescending(a => a.Id)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var actorIds = page.Where(a => a.ActorUserId != null).Select(a => a.ActorUserId!.Value).Distinct().ToList();
         var names = actorIds.Count == 0

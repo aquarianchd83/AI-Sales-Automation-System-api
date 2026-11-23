@@ -33,8 +33,6 @@ public class TagService : ITagService
             query = query.Where(t => t.Name.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         // Projecting the count in SQL rather than loading Customers - a popular tag could otherwise
         // drag thousands of rows into memory just to call .Count on them.
         var items = await query
@@ -43,6 +41,7 @@ public class TagService : ITagService
             .Take(request.PageSize)
             .Select(t => new TagDto(t.Id, t.Name, t.Customers.Count, t.CreatedAt))
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<TagDto>(items, totalCount, request.Page, request.PageSize);
     }

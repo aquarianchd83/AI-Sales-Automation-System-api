@@ -159,13 +159,12 @@ public class LeadDiscoveryService : ILeadDiscoveryService
                     r => r.DiscoveredLeadId == l.Id && r.VerificationStatus == status));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         var leads = await query
             .OrderByDescending(l => l.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, leads.Count, cancellationToken);
 
         return new PagedResult<DiscoveredLeadDto>(await WithResultsAsync(leads, cancellationToken), totalCount, request.Page, request.PageSize);
     }
@@ -232,13 +231,12 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         var pricing = await ResolvePricingAsync(cancellationToken);
         var query = _context.LeadDiscoveryRuns.AsNoTracking();
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         var runs = await query
             .OrderByDescending(r => r.RanAtUtc)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, runs.Count, cancellationToken);
 
         return new PagedResult<LeadDiscoveryRunDto>(
             runs.Select(r => ToDto(r, pricing)).ToList(), totalCount, request.Page, request.PageSize);
@@ -248,13 +246,12 @@ public class LeadDiscoveryService : ILeadDiscoveryService
     {
         var query = _context.AutoCampaignEnrollments.AsNoTracking();
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         var page = await query
             .OrderByDescending(e => e.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, page.Count, cancellationToken);
 
         var leadIds = page.Select(e => e.DiscoveredLeadId).Distinct().ToList();
         var campaignIds = page.SelectMany(e => new[] { e.SourceCampaignId, e.ExecutionCampaignId })

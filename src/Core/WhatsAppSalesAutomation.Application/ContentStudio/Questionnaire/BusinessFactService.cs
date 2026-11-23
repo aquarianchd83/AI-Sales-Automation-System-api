@@ -58,10 +58,10 @@ public class BusinessFactService : IBusinessFactService
             rows = rows.Where(f => f.Statement.Contains(term) || f.Category.Contains(term) || (f.Subject != null && f.Subject.Contains(term)));
         }
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderBy(f => f.Status == BusinessFactStatus.Retired).ThenBy(f => f.Category).ThenBy(f => f.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var names = await NamesAsync(page.Where(f => f.VerifiedBy != null).Select(f => f.VerifiedBy!.Value).Distinct().ToList(), cancellationToken);
         return new PagedResult<BusinessFactDto>(page.Select(f => ToDto(f, names, now)).ToList(), total, query.Page, query.PageSize);

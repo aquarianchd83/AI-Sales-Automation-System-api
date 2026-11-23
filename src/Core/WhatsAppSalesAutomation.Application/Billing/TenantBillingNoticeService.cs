@@ -127,13 +127,13 @@ public partial class TenantBillingNoticeService : ITenantBillingNoticeService
             query = query.Where(n => n.Title.Contains(term) || n.Body.Contains(term));
         }
 
-        var total = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(n => n.CreatedAt)
             .ThenByDescending(n => n.Id)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         var items = rows.Select(n => new TenantNotificationDto(
             n.Id, n.Kind, n.QuotaType, n.Title, n.Body, n.EmailStatus, n.WhatsAppStatus, n.CreatedAt, n.AcknowledgedAtUtc is not null)).ToList();

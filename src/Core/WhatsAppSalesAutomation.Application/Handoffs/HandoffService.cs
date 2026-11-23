@@ -36,8 +36,6 @@ public class HandoffService : IHandoffService
 
         var filtered = _context.HumanHandoffs.Where(h => parsedStatus == null || h.Status == parsedStatus);
 
-        var totalCount = await filtered.CountAsync(cancellationToken);
-
         // Ordering and paging happen entirely on the raw HumanHandoffs queryable - plain column
         // access, fully translatable. Only the Id survives into pagedIds; see BaseQuery's comment
         // for why NOTHING (not Where, not OrderBy, not Skip/Take) may be chained after a Select
@@ -50,6 +48,7 @@ public class HandoffService : IHandoffService
             .Take(request.PageSize)
             .Select(h => h.Id)
             .ToListAsync(cancellationToken);
+        var totalCount = await filtered.CountForPageAsync(request.Page, request.PageSize, pagedIds.Count, cancellationToken);
 
         var rows = await BaseQuery(h => pagedIds.Contains(h.Id)).ToListAsync(cancellationToken);
 

@@ -166,10 +166,10 @@ public class CreditPayerService : ICreditPayerService
         if (query.QuotaType is { } type)
             rows = rows.Where(e => e.QuotaType == type);
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(e => e.OccurredAtUtc).ThenByDescending(e => e.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var names = await TenantNamesAsync(page.Where(e => e.TenantId != null).Select(e => e.TenantId!.Value), cancellationToken);
         var items = page.Select(e => new PlatformCreditEntryDto(
@@ -195,10 +195,10 @@ public class CreditPayerService : ICreditPayerService
             rows = rows.Where(u => (u.Description != null && u.Description.Contains(term)) || matching.Contains(u.TenantId));
         }
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(u => u.OccurredAtUtc).ThenByDescending(u => u.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var names = await TenantNamesAsync(page.Select(u => u.TenantId), cancellationToken);
         var items = page.Select(u => ToDto(u, names.GetValueOrDefault(u.TenantId) ?? string.Empty)).ToList();
@@ -271,10 +271,10 @@ public class CreditPayerService : ICreditPayerService
         if (query.FromUtc is { } from) rows = rows.Where(u => u.OccurredAtUtc >= from);
         if (query.ToUtc is { } to) rows = rows.Where(u => u.OccurredAtUtc < to);
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(u => u.OccurredAtUtc).ThenByDescending(u => u.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var items = page.Select(u => new TenantCreditUsageDto(
             u.Id, u.Scenario, CreditScenarioCatalog.For(u.Scenario).Title, u.QuotaType, u.Units,
