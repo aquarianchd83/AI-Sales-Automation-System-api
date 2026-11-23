@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Entities.Leads;
@@ -60,20 +61,18 @@ public class LeadService : ILeadService
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var search = request.Search.Trim();
-            query = query.Where(x =>
-                x.Customer.PhoneNumberE164.Contains(search) ||
-                (x.Customer.FirstName != null && x.Customer.FirstName.Contains(search)) ||
-                (x.Customer.LastName != null && x.Customer.LastName.Contains(search)));
+            // Match customers first (over the narrow customer index), then keep the rows whose customer matched.
+            var matchingCustomerIds = CustomerSearch.Matching(_context.Customers, request.Search).Select(c => c.Id);
+            query = query.Where(x => matchingCustomerIds.Contains(x.Customer.Id));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(x => x.Lead.ScoreNumeric)
             .ThenByDescending(x => x.Lead.LastActivityAt ?? x.Lead.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request, rows.Count, cancellationToken);
 
         var items = rows.Select(x => x.Lead.ToDto(x.Customer)).ToList();
 

@@ -18,8 +18,12 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         // delete would leave that number permanently unusable by anyone (there is no restore).
         builder.HasIndex(c => new { c.TenantId, c.PhoneNumberE164 }).IsUnique().HasFilter("[IsDeleted] = 0");
 
-        // The customers list: tenant filter, live rows only, newest first.
-        builder.HasIndex(c => new { c.TenantId, c.CreatedAt }).HasFilter("[IsDeleted] = 0");
+        // The customers list: tenant filter, live rows only, newest first. It also carries every column the free-text search
+        // reads (CustomerSearch), so a LIKE '%term%' search on customers, the inbox or leads scans this narrow index for one
+        // tenant instead of the wide customer rows, and only the page's rows are looked up in full.
+        builder.HasIndex(c => new { c.TenantId, c.CreatedAt })
+            .HasFilter("[IsDeleted] = 0")
+            .IncludeProperties(c => new { c.PhoneNumberE164, c.FirstName, c.LastName, c.Email });
 
         builder.Property(c => c.FirstName).HasMaxLength(100);
         builder.Property(c => c.LastName).HasMaxLength(100);
