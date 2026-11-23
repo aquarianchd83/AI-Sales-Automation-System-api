@@ -22,6 +22,9 @@ public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
         // just indexed for the "does this customer already have an active thread" lookup.
         builder.HasIndex(c => new { c.CustomerId, c.Status });
 
+        // The inbox list: every read is scoped by the tenant filter, optionally narrowed by status, newest activity first.
+        builder.HasIndex(c => new { c.TenantId, c.Status, c.LastMessageAt });
+
         // Restrict, matching Customer's other references (CampaignCustomer, Message): customers are
         // soft-deleted, never hard-deleted, so this should never actually need to cascade or null out.
         builder.HasOne<Customer>()

@@ -114,6 +114,37 @@ public sealed class CampaignRetireTests : IDisposable
         Assert.Equal(new[] { "active-new", "active-old", "retired-newest" }, page.Items.Select(c => c.Name));
     }
 
+    [Fact]
+    public async Task The_list_carries_each_campaigns_steps_template_names_and_audience_size()
+    {
+        // The list loads a whole page in a few batched queries rather than per campaign; this pins what each row still carries.
+        var template = new WhatsAppSalesAutomation.Domain.Entities.Messaging.MessageTemplate { Name = "Welcome", WhatsAppTemplateName = "welcome", BodyText = "Hi" };
+        _db.MessageTemplates.Add(template);
+        var first = await SeedAsync("first", CampaignStatus.Draft, new DateTime(2026, 1, 1));
+        var second = await SeedAsync("second", CampaignStatus.Draft, new DateTime(2026, 2, 1));
+        _db.CampaignSteps.AddRange(
+            new CampaignStep { CampaignId = first.Id, StepNumber = 1, MessageText = "later", DelayDaysAfterPrevious = 2 },
+            new CampaignStep { CampaignId = first.Id, StepNumber = 0, MessageTemplateId = template.Id });
+        for (var i = 0; i < 3; i++)
+        {
+            var customer = new WhatsAppSalesAutomation.Domain.Entities.Customers.Customer { PhoneNumberE164 = $"+9198000000{i}" };
+            _db.Customers.Add(customer);
+            _db.CampaignCustomers.Add(new CampaignCustomer { CampaignId = i < 2 ? first.Id : second.Id, CustomerId = customer.Id });
+        }
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        var page = await _service.GetPagedAsync(new PagedRequest { Page = 1, PageSize = 10 });
+
+        Assert.Equal(new[] { "second", "first" }, page.Items.Select(c => c.Name));
+        var firstDto = page.Items.Single(c => c.Id == first.Id);
+        Assert.Equal(2, firstDto.AudienceCount);
+        Assert.Equal(1, page.Items.Single(c => c.Id == second.Id).AudienceCount);
+        Assert.Equal(new[] { 0, 1 }, firstDto.Steps.Select(s => s.StepNumber));
+        Assert.Equal("Welcome", firstDto.Steps[0].MessageTemplateName);
+        Assert.Null(firstDto.Steps[1].MessageTemplateName);
+    }
+
     private sealed class Clock : IDateTimeProvider
     {
         public DateTime UtcNow => new(2026, 10, 15, 6, 0, 0);

@@ -18,6 +18,9 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Ignore(c => c.IsRetired);
         builder.Property(c => c.TargetAudienceFilterJson).HasColumnType("nvarchar(max)");
 
+        // The campaigns grid: tenant filter, newest first.
+        builder.HasIndex(c => new { c.TenantId, c.CreatedAt });
+
         builder.HasMany(c => c.Steps)
             .WithOne()
             .HasForeignKey(s => s.CampaignId)

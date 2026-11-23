@@ -47,8 +47,8 @@ public class ConversationService : IConversationService
     public async Task<PagedResult<ConversationDto>> GetPagedAsync(PagedRequest request, string? status = null, CancellationToken cancellationToken = default)
     {
         var query =
-            from c in _context.Conversations
-            join cust in _context.Customers on c.CustomerId equals cust.Id
+            from c in _context.Conversations.AsNoTracking()
+            join cust in _context.Customers.AsNoTracking() on c.CustomerId equals cust.Id
             select new { Conversation = c, Customer = cust };
 
         if (!string.IsNullOrWhiteSpace(status))
@@ -97,7 +97,7 @@ public class ConversationService : IConversationService
     /// the agent has dealt with the moment and the draft is stale.</summary>
     private async Task<string?> GetSuggestedReplyAsync(Guid conversationId, CancellationToken cancellationToken)
     {
-        var draft = await _context.AiInteractions
+        var draft = await _context.AiInteractions.AsNoTracking()
             .Where(i => i.ConversationId == conversationId && i.ActionTaken == AiActionTaken.Drafted)
             .OrderByDescending(i => i.CreatedAt)
             .Select(i => new { i.ProposedResponseText, i.CreatedAt })
@@ -119,7 +119,7 @@ public class ConversationService : IConversationService
         if (!exists)
             throw new NotFoundException(nameof(Conversation), conversationId);
 
-        var query = _context.Messages.Where(m => m.ConversationId == conversationId);
+        var query = _context.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId);
 
         var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query

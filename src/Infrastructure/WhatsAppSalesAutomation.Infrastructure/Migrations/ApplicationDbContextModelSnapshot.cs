@@ -215,9 +215,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConversationId");
-
                     b.HasIndex("InboundMessageId");
+
+                    b.HasIndex("ConversationId", "ActionTaken", "CreatedAt");
 
                     b.ToTable("AiInteractions", (string)null);
                 });
@@ -1492,6 +1492,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt");
 
                     b.ToTable("Campaigns", (string)null);
                 });
@@ -2873,6 +2875,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("CustomerId", "Status");
 
+                    b.HasIndex("TenantId", "Status", "LastMessageAt");
+
                     b.ToTable("Conversations", (string)null);
                 });
 
@@ -2925,6 +2929,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("ConversationId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "Status");
 
                     b.ToTable("HumanHandoffs", (string)null);
                 });
@@ -3293,6 +3299,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "PhoneNumberE164")
                         .IsUnique()
@@ -5050,6 +5059,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("TenantId", "HotLeadDetectedAt")
                         .HasFilter("[HotLeadDetectedAt] IS NOT NULL");
 
+                    b.HasIndex("TenantId", "ScoreNumeric");
+
+                    b.HasIndex("TenantId", "Stage", "ScoreNumeric");
+
                     b.ToTable("Leads", (string)null);
                 });
 
@@ -5586,12 +5599,12 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
 
                     b.HasIndex("CampaignCustomerId");
 
-                    b.HasIndex("ConversationId");
-
                     b.HasIndex("CustomerId");
 
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
+
+                    b.HasIndex("ConversationId", "CreatedAt");
 
                     b.HasIndex("Provider", "WhatsAppMessageId")
                         .IsUnique()

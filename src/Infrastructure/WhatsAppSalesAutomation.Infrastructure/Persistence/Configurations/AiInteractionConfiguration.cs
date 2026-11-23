@@ -22,7 +22,9 @@ public class AiInteractionConfiguration : IEntityTypeConfiguration<AiInteraction
         builder.Property(a => a.AskedFieldKey).HasMaxLength(60);
         builder.Property(a => a.DetectedLanguage).HasMaxLength(20);
 
-        builder.HasIndex(a => a.ConversationId);
+        // Composite: the conversation screen's "latest AI draft" lookup filters by conversation and action, newest first.
+        // Leading ConversationId keeps covering every other lookup by conversation, including the FK.
+        builder.HasIndex(a => new { a.ConversationId, a.ActionTaken, a.CreatedAt });
 
         // Cascade: an AI turn is an owned child of its conversation - matches HumanHandoff.
         builder.HasOne<Conversation>()

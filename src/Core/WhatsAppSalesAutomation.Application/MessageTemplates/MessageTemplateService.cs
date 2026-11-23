@@ -41,7 +41,7 @@ public class MessageTemplateService : IMessageTemplateService
 
     public async Task<PagedResult<MessageTemplateDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _context.MessageTemplates.AsQueryable();
+        var query = _context.MessageTemplates.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {

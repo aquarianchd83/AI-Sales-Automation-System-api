@@ -47,6 +47,8 @@ public class MessageConfiguration : IEntityTypeConfiguration<Message>
             .HasForeignKey(m => m.ConversationId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasIndex(m => m.ConversationId);
+        // Composite rather than ConversationId alone: the chat thread pages a conversation's messages newest first, which this
+        // serves straight from the index. It still covers every lookup by ConversationId (leading column), including the FK.
+        builder.HasIndex(m => new { m.ConversationId, m.CreatedAt });
     }
 }

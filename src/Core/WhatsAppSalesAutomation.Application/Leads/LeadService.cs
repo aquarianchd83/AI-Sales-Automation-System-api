@@ -38,8 +38,8 @@ public class LeadService : ILeadService
         // on this freely. A custom record here would break exactly like HandoffService's did before
         // its fix: see that class's BaseQuery doc comment for the full explanation.
         var query =
-            from l in _context.Leads
-            join cust in _context.Customers on l.CustomerId equals cust.Id
+            from l in _context.Leads.AsNoTracking()
+            join cust in _context.Customers.AsNoTracking() on l.CustomerId equals cust.Id
             select new { Lead = l, Customer = cust };
 
         if (!string.IsNullOrWhiteSpace(stage))

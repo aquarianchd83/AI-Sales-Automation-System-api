@@ -18,6 +18,9 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         // delete would leave that number permanently unusable by anyone (there is no restore).
         builder.HasIndex(c => new { c.TenantId, c.PhoneNumberE164 }).IsUnique().HasFilter("[IsDeleted] = 0");
 
+        // The customers list: tenant filter, live rows only, newest first.
+        builder.HasIndex(c => new { c.TenantId, c.CreatedAt }).HasFilter("[IsDeleted] = 0");
+
         builder.Property(c => c.FirstName).HasMaxLength(100);
         builder.Property(c => c.LastName).HasMaxLength(100);
         builder.Property(c => c.Email).HasMaxLength(256);

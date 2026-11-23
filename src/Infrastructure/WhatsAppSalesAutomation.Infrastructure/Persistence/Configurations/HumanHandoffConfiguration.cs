@@ -17,6 +17,8 @@ public class HumanHandoffConfiguration : IEntityTypeConfiguration<HumanHandoff>
         builder.Property(h => h.SummaryJson).HasColumnType("nvarchar(max)");
 
         builder.HasIndex(h => h.Status);
+        // The handoff queue and agent reports always filter by tenant first, then status.
+        builder.HasIndex(h => new { h.TenantId, h.Status });
 
         // Cascade: a handoff is an owned child of its conversation, not an independent record -
         // matches Campaign -> CampaignSteps.

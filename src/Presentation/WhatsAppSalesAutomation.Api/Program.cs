@@ -143,7 +143,10 @@ try
     // than writing immediately - see SecurityHeadersMiddleware for why that ordering matters.
     app.UseMiddleware<SecurityHeadersMiddleware>();
 
-    app.UseSerilogRequestLogging();
+    // Server-Timing header on every response, and slow requests (RequestTiming:SlowRequestThresholdMs, default 500) logged
+    // at Warning instead of Information - see RequestTimingMiddleware.
+    app.UseMiddleware<RequestTimingMiddleware>();
+    app.UseSerilogRequestLogging(options => options.GetLevel = RequestTimingMiddleware.LevelFor(app.Configuration));
 
     // Must run before UseHttpsRedirection: a TLS-terminating tunnel (ngrok, or any reverse proxy)
     // forwards plain HTTP to Kestrel on localhost, so without this the app sees an "insecure"
