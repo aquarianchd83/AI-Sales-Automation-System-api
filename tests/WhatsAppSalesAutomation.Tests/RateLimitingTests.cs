@@ -55,13 +55,13 @@ public class RateLimitingTests
     }
 
     private static Dictionary<string, string?> Settings(
-        bool enabled = true, int authLimit = 3, string? exemptIp = null)
+        bool enabled = true, int authLimit = 3, string? exemptIp = null, int authWindowSeconds = 60)
     {
         var settings = new Dictionary<string, string?>
         {
             ["RateLimiting:Enabled"] = enabled.ToString(),
             ["RateLimiting:Auth:PermitLimit"] = authLimit.ToString(),
-            ["RateLimiting:Auth:WindowSeconds"] = "60",
+            ["RateLimiting:Auth:WindowSeconds"] = authWindowSeconds.ToString(),
             ["RateLimiting:Webhook:PermitLimit"] = "600",
             ["RateLimiting:Webhook:WindowSeconds"] = "60",
             ["RateLimiting:Api:PermitLimit"] = "300",
@@ -177,7 +177,10 @@ public class RateLimitingTests
     {
         // ::ffff:198.51.100.4 and 198.51.100.4 are the same caller. Partitioning them separately
         // would silently double every per-IP budget on a dual-stack socket.
-        using var host = await StartHostAsync(Settings(authLimit: 1));
+        // An hour-long window: this test is about partitioning, not expiry. With the 60 s default, a loaded CI runner that took
+        // over a minute between the two requests (seen in CI: 1m11s to 1m59s) let the window roll over and the second request
+        // through with a 200.
+        using var host = await StartHostAsync(Settings(authLimit: 1, authWindowSeconds: 3600));
         var server = host.GetTestServer();
 
         var first = await server.SendAsync(ctx =>
