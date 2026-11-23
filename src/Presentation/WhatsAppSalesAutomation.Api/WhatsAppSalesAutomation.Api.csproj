@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>WhatsAppSalesAutomation.Api</RootNamespace>
     <UserSecretsId>a6f0a6d2-8f1b-4b7a-9e3a-8f7a2e6b8f10</UserSecretsId>
+    <!-- Don't generate/transform web.config during publish; the server's web.config is managed separately. -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
   </PropertyGroup>
 
   <ItemGroup>
