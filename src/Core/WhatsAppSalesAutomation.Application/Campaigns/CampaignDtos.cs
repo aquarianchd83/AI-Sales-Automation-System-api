@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Common.Serialization;
 
 namespace WhatsAppSalesAutomation.Application.Campaigns;
 
@@ -11,7 +13,7 @@ public record CampaignDto(
     string Name,
     string? Description,
     string Status,
-    DateTime? ScheduledStartAt,
+    [property: JsonConverter(typeof(WallClockNullableDateTimeJsonConverter))] DateTime? ScheduledStartAt,
     Guid CreatedBy,
     DateTime? StartedAt,
     DateTime? StoppedAt,
@@ -40,7 +42,8 @@ public record CampaignStepDto(
 
 /// <summary><paramref name="ScheduledStartAt"/> is interpreted as the tenant's own local time -
 /// see <c>Campaign.ScheduledStartAt</c>.</summary>
-public record CreateCampaignRequest(string Name, string? Description, DateTime? ScheduledStartAt);
+public record CreateCampaignRequest(
+    string Name, string? Description, [property: JsonConverter(typeof(WallClockNullableDateTimeJsonConverter))] DateTime? ScheduledStartAt);
 
 /// <summary>
 /// <paramref name="ScheduledStartAt"/> is the tenant's own local time - see
@@ -49,7 +52,8 @@ public record CreateCampaignRequest(string Name, string? Description, DateTime? 
 /// <c>CampaignService.UpdateAsync</c>), since a Scheduled campaign with no date would otherwise never
 /// come up for promotion again.
 /// </summary>
-public record UpdateCampaignRequest(string Name, string? Description, DateTime? ScheduledStartAt);
+public record UpdateCampaignRequest(
+    string Name, string? Description, [property: JsonConverter(typeof(WallClockNullableDateTimeJsonConverter))] DateTime? ScheduledStartAt);
 
 /// <summary><paramref name="StepType"/> is one of Initial, FollowUp1-4; a campaign may have at most one of each.
 /// <paramref name="MessageText"/> is optional and no longer drives the send: customers see the approved Meta
