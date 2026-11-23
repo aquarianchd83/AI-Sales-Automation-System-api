@@ -5,6 +5,7 @@ using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Customers;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Conversations;
 using WhatsAppSalesAutomation.Domain.Entities.Customers;
@@ -61,14 +62,11 @@ public class ConversationService : IConversationService
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var search = request.Search.Trim();
-            query = query.Where(x =>
-                x.Customer.PhoneNumberE164.Contains(search) ||
-                (x.Customer.FirstName != null && x.Customer.FirstName.Contains(search)) ||
-                (x.Customer.LastName != null && x.Customer.LastName.Contains(search)));
+            // Match customers first (over the narrow customer index), then keep the rows whose customer matched.
+            var matchingCustomerIds = CustomerSearch.Matching(_context.Customers, request.Search).Select(c => c.Id);
+            query = query.Where(x => matchingCustomerIds.Contains(x.Customer.Id));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
             // "ActivityAt" is the persisted COALESCE(LastMessageAt, CreatedAt) column (see ConversationConfiguration), so the
             // newest-activity-first order comes straight off the (TenantId[, Status], ActivityAt) index instead of a sort.
@@ -76,6 +74,7 @@ public class ConversationService : IConversationService
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request, rows.Count, cancellationToken);
 
         var items = rows.Select(x => x.Conversation.ToDto(x.Customer)).ToList();
 
@@ -123,12 +122,12 @@ public class ConversationService : IConversationService
 
         var query = _context.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId);
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(m => m.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request, rows.Count, cancellationToken);
 
         return new PagedResult<ConversationMessageDto>(rows.Select(m => m.ToDto()).ToList(), totalCount, request.Page, request.PageSize);
     }

@@ -45,24 +45,18 @@ public class CustomerService : ICustomerService
 
     public async Task<PagedResult<CustomerDto>> GetPagedAsync(PagedRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _context.Customers.AsNoTracking().Include(c => c.Tags).AsQueryable();
+        var query = _context.Customers.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(request.Search))
-        {
-            var search = request.Search.Trim();
-            query = query.Where(c =>
-                c.PhoneNumberE164.Contains(search) ||
-                (c.FirstName != null && c.FirstName.Contains(search)) ||
-                (c.LastName != null && c.LastName.Contains(search)) ||
-                (c.Email != null && c.Email.Contains(search)));
-        }
+            query = CustomerSearch.Matching(query, request.Search, includeEmail: true);
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
+            .Include(c => c.Tags)
             .OrderByDescending(c => c.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request, items.Count, cancellationToken);
 
         return new PagedResult<CustomerDto>(items.Select(c => c.ToDto()).ToList(), totalCount, request.Page, request.PageSize);
     }
@@ -261,19 +255,9 @@ public class CustomerService : ICustomerService
             .Where(c => ids.Contains(c.Id))
             .ToListAsync(cancellationToken);
 
-        // Each tag is resolved (or created) once, not once per customer.
-        var tags = new List<CustomerTag>();
-        foreach (var tagName in tagNames)
-        {
-            var tag = await _context.CustomerTags.FirstOrDefaultAsync(t => t.Name.ToLower() == tagName.ToLower(), cancellationToken);
-            if (tag is null)
-            {
-                tag = new CustomerTag { Name = tagName };
-                _context.CustomerTags.Add(tag);
-            }
-
-            tags.Add(tag);
-        }
+        // Each tag is resolved (or created) once, not once per customer, in one query for all of them.
+        var resolved = await ResolveTagsAsync(tagNames, cancellationToken);
+        var tags = tagNames.Select(n => resolved[n]).ToList();
 
         var updated = 0;
         foreach (var customer in customers)
@@ -311,15 +295,8 @@ public class CustomerService : ICustomerService
             .Where(t => t.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var tagName in requestedNames)
+        foreach (var tag in (await ResolveTagsAsync(requestedNames, cancellationToken)).Values)
         {
-            var tag = await _context.CustomerTags.FirstOrDefaultAsync(t => t.Name.ToLower() == tagName.ToLower(), cancellationToken);
-            if (tag is null)
-            {
-                tag = new CustomerTag { Name = tagName };
-                _context.CustomerTags.Add(tag);
-            }
-
             if (customer.Tags.All(t => t.Id != tag.Id))
                 customer.Tags.Add(tag);
         }
@@ -409,9 +386,13 @@ public class CustomerService : ICustomerService
         // What a row with no consent of its own starts as, from the tenant's consent-required setting.
         var initialStatus = await ConsentPolicy.InitialStatusAsync(_context, _tenantContext.TenantId, cancellationToken);
 
-        // Note: this checks/inserts row-by-row for correctness and simplicity. For very large
-        // imports (10k+ rows) this is a good candidate to batch-load existing phone numbers and
-        // tags up front - flagged here rather than optimized prematurely.
+        // Existing numbers and tags are loaded up front in a few set-based queries, not one query per row and per tag.
+        var existingNumbers = await LoadExistingPhoneNumbersAsync(rows, cancellationToken);
+        // Only existing tags are loaded here; a new one is staged the first time an imported row uses it, so a row that is
+        // skipped or rejected never creates a tag.
+        var importTags = await LoadTagsAsync(
+            rows.SelectMany(r => r.Tags).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()), cancellationToken);
+
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -439,12 +420,9 @@ public class CustomerService : ICustomerService
                 continue;
             }
 
-            // IgnoreQueryFilters: a soft-deleted customer still holds the number in the unique
-            // index, so skip it rather than letting the insert fail the whole import.
-            var exists = await _context.Customers
-                .IgnoreQueryFilters()
-                .AnyAsync(c => c.PhoneNumberE164 == phoneNumber, cancellationToken);
-            if (exists)
+            // A soft-deleted customer still holds the number in the unique index (see LoadExistingPhoneNumbersAsync), so skip
+            // it rather than letting the insert fail the whole import.
+            if (existingNumbers.Contains(phoneNumber))
             {
                 skipped++;
                 continue;
@@ -466,17 +444,8 @@ public class CustomerService : ICustomerService
                 OptOutSource = consent.Status == OptInStatus.OptedOut ? OptOutSource.Manual : null
             };
 
-            foreach (var tagName in row.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var tag = await _context.CustomerTags.FirstOrDefaultAsync(t => t.Name.ToLower() == tagName.ToLower(), cancellationToken);
-                if (tag is null)
-                {
-                    tag = new CustomerTag { Name = tagName };
-                    _context.CustomerTags.Add(tag);
-                }
-
-                customer.Tags.Add(tag);
-            }
+            foreach (var tagName in row.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+                customer.Tags.Add(GetOrStageTag(importTags, tagName));
 
             _context.Customers.Add(customer);
             imported++;
@@ -485,5 +454,79 @@ public class CustomerService : ICustomerService
         await _context.SaveChangesAsync(cancellationToken);
 
         return new CustomerImportResultDto(rows.Count, imported, skipped, errors.Count, errors);
+    }
+
+    /// <summary>
+    /// Finds the tenant's tags for these names in one query (case-insensitive, as before) and stages a new tag for any name
+    /// that has none.
+    /// </summary>
+    private async Task<Dictionary<string, CustomerTag>> ResolveTagsAsync(IEnumerable<string> names, CancellationToken cancellationToken)
+    {
+        var wanted = names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var tags = await LoadTagsAsync(wanted, cancellationToken);
+        foreach (var name in wanted)
+            GetOrStageTag(tags, name);
+
+        return tags;
+    }
+
+    /// <summary>
+    /// The tenant's existing tags for these names, in one query, keyed case-insensitively so two spellings of one name share
+    /// a tag rather than staging two rows that would collide on the (TenantId, Name) unique index.
+    /// </summary>
+    private async Task<Dictionary<string, CustomerTag>> LoadTagsAsync(IEnumerable<string> names, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, CustomerTag>(StringComparer.OrdinalIgnoreCase);
+        var lowered = names.Select(n => n.ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToList();
+        if (lowered.Count == 0)
+            return result;
+
+        var existing = await _context.CustomerTags
+            .Where(t => lowered.Contains(t.Name.ToLower()))
+            .ToListAsync(cancellationToken);
+        foreach (var tag in existing)
+            result.TryAdd(tag.Name, tag);
+
+        return result;
+    }
+
+    private CustomerTag GetOrStageTag(Dictionary<string, CustomerTag> tags, string name)
+    {
+        if (tags.TryGetValue(name, out var tag))
+            return tag;
+
+        tag = new CustomerTag { Name = name };
+        _context.CustomerTags.Add(tag);
+        tags[name] = tag;
+        return tag;
+    }
+
+    /// <summary>
+    /// The file's numbers that this tenant already holds, soft-deleted customers included (they still occupy the unique
+    /// index). Read in chunks so the IN list stays well under SQL Server's 2,100-parameter limit.
+    /// </summary>
+    private async Task<HashSet<string>> LoadExistingPhoneNumbersAsync(IReadOnlyList<CustomerImportRow> rows, CancellationToken cancellationToken)
+    {
+        var numbers = rows
+            .Select(r => PhoneNumberNormalizer.TryNormalize(r.PhoneNumber, out var n) ? n : null)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var tenantId = _tenantContext.TenantId;
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var chunk in numbers.Chunk(1000))
+        {
+            // IgnoreQueryFilters drops the soft-delete filter and the tenant filter together, so the tenant is restated here:
+            // the unique index is (TenantId, PhoneNumberE164), so another tenant's copy of a number is no reason to skip it.
+            var found = await _context.Customers
+                .IgnoreQueryFilters()
+                .Where(c => c.TenantId == tenantId && chunk.Contains(c.PhoneNumberE164))
+                .Select(c => c.PhoneNumberE164)
+                .ToListAsync(cancellationToken);
+            existing.UnionWith(found);
+        }
+
+        return existing;
     }
 }

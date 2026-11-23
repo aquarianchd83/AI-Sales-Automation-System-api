@@ -3310,6 +3310,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.HasIndex("TenantId", "CreatedAt")
                         .HasFilter("[IsDeleted] = 0");
 
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "CreatedAt"), new[] { "PhoneNumberE164", "FirstName", "LastName", "Email" });
+
                     b.HasIndex("TenantId", "PhoneNumberE164")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
