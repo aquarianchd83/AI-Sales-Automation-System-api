@@ -65,7 +65,6 @@ public class CampaignService : ICampaignService
             query = query.Where(c => c.Name.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var ids = await query
             // Retired campaigns sink to the bottom of the grid, newest first within each group.
             .OrderBy(c => c.RetiredAt != null)
@@ -74,6 +73,7 @@ public class CampaignService : ICampaignService
             .Take(request.PageSize)
             .Select(c => c.Id)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, ids.Count, cancellationToken);
 
         if (ids.Count == 0)
             return new PagedResult<CampaignDto>(new List<CampaignDto>(), totalCount, request.Page, request.PageSize);
@@ -554,8 +554,6 @@ public class CampaignService : ICampaignService
                 (x.c.LastName != null && x.c.LastName.Contains(search)));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
-
         var items = await query
             .OrderByDescending(x => x.cc.LastMessageSentAt ?? DateTime.MinValue)
             .ThenBy(x => x.c.PhoneNumberE164)
@@ -573,6 +571,7 @@ public class CampaignService : ICampaignService
                 x.cc.StoppedReason,
                 x.c.OptInStatus.ToString()))
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<CampaignAudienceMemberDto>(items, totalCount, request.Page, request.PageSize);
     }
@@ -616,8 +615,6 @@ public class CampaignService : ICampaignService
         if (query.To is { } to)
             messages = messages.Where(x => x.m.CreatedAt < to.Date.AddDays(1));
 
-        var totalCount = await messages.CountAsync(cancellationToken);
-
         var items = await messages
             .OrderByDescending(x => x.m.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
@@ -638,6 +635,7 @@ public class CampaignService : ICampaignService
                 x.m.ReadAt,
                 x.m.CreatedAt))
             .ToListAsync(cancellationToken);
+        var totalCount = await messages.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<CampaignMessageHistoryEntryDto>(items, totalCount, query.Page, query.PageSize);
     }

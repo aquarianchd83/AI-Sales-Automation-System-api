@@ -141,12 +141,12 @@ public class PlatformTenantNotificationService : IPlatformTenantNotificationServ
             rows = rows.Where(r => r.Delivery == wanted);
         }
 
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows
             .OrderByDescending(r => r.CreatedAtUtc).ThenBy(r => r.Id).ThenBy(r => r.Channel)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var items = page.Select(r => new PlatformTenantNotificationDto(
             r.Id, r.TenantId, r.TenantName, r.Kind.ToString(), r.Title, r.Body, r.Channel, r.Delivery, r.CreatedAtUtc,

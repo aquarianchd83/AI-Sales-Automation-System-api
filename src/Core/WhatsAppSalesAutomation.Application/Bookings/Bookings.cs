@@ -136,7 +136,6 @@ public class BookingService : IBookingService
             bookings = bookings.Where(b => b.Status == wanted);
         }
 
-        var total = await bookings.CountAsync(cancellationToken);
         var page = await (
                 from b in bookings
                 join c in _context.Customers.AsNoTracking() on b.CustomerId equals c.Id into customers
@@ -146,6 +145,7 @@ public class BookingService : IBookingService
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await bookings.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var items = page.Select(r =>
         {

@@ -257,10 +257,10 @@ public class StoryVideoRequestService : IStoryVideoRequestService
             rows = rows.Where(x => x.p.Title.Contains(term) || x.TenantName.Contains(term));
         }
 
-        var total = await rows.CountAsync(ct);
         // Waiting requests first, the oldest wait on top; finished and declined ones sink.
         var page = await rows.OrderBy(x => x.r.Status == StoryVideoRequestStatus.VideoReady || x.r.Status == StoryVideoRequestStatus.Rejected ? 1 : 0).ThenBy(x => x.r.RaisedAtUtc)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync(ct);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, ct);
 
         var amounts = await AmountsAsync(page.Select(x => x.r.ChargeActivityId), ct);
         var items = page.Select(x => new PlatformStoryVideoRequestRowDto(

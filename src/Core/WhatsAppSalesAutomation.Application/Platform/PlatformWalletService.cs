@@ -68,10 +68,10 @@ public class PlatformWalletService : IPlatformWalletService
     public async Task<PagedResult<WalletTopUpDto>> GetTopUpsAsync(PagedRequest query, CancellationToken cancellationToken = default)
     {
         var rows = _context.PlatformWalletTopUps.AsNoTracking();
-        var total = await rows.CountAsync(cancellationToken);
         var page = await rows.OrderByDescending(t => t.TopUpDate).ThenByDescending(t => t.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var items = page.Select(t => new WalletTopUpDto(t.Id, t.TopUpDate, t.Provider, t.AmountInr, t.CreatedAt)).ToList();
         return new PagedResult<WalletTopUpDto>(items, total, query.Page, query.PageSize);

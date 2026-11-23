@@ -58,12 +58,12 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         }
 
         var dates = executions.Select(e => e.ProcessingDate).Distinct();
-        var totalDays = await dates.CountAsync(cancellationToken);
         var pageDates = await dates
             .OrderByDescending(d => d)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var totalDays = await dates.CountForPageAsync(query.Page, query.PageSize, pageDates.Count, cancellationToken);
 
         var rows = await executions
             .Where(e => pageDates.Contains(e.ProcessingDate))

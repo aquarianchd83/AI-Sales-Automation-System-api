@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using WhatsAppSalesAutomation.Domain.Entities.Ai;
@@ -98,6 +99,13 @@ public interface IApplicationDbContext
     /// users, but a read-only name lookup through a UserManager is only ceremony, and would make these
     /// services untestable without standing up Identity.</summary>
     DbSet<ApplicationUser> Users { get; }
+
+    /// <summary>Identity roles and the user-role join, read-only, so a page of users gets its roles in one query
+    /// (<see cref="Users.UserRoleLookup"/>) instead of one <c>UserManager.GetRolesAsync</c> round trip per user.
+    /// Assigning roles still goes through UserManager.</summary>
+    DbSet<ApplicationRole> Roles { get; }
+
+    DbSet<IdentityUserRole<Guid>> UserRoles { get; }
 
     DbSet<Lead> Leads { get; }
 

@@ -49,12 +49,12 @@ public class MessageTemplateService : IMessageTemplateService
             query = query.Where(t => t.Name.Contains(search) || t.WhatsAppTemplateName.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
             .OrderByDescending(t => t.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<MessageTemplateDto>(await ToDtosAsync(items, cancellationToken), totalCount, request.Page, request.PageSize);
     }

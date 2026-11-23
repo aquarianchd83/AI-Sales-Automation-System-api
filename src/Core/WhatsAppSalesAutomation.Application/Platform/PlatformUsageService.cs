@@ -41,14 +41,13 @@ public class PlatformUsageService : IPlatformUsageService
             tenants = tenants.Where(t => t.Name.Contains(search) || t.Slug.Contains(search));
         }
 
-        var totalCount = await tenants.CountAsync(cancellationToken);
-
         var page = await tenants
             .OrderByDescending(t => t.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(t => new { t.Id, t.Name })
             .ToListAsync(cancellationToken);
+        var totalCount = await tenants.CountForPageAsync(query.Page, query.PageSize, page.Count, cancellationToken);
 
         var tenantIds = page.Select(t => t.Id).ToList();
 

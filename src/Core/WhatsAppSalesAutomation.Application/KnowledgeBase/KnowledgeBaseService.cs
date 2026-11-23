@@ -120,12 +120,12 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             query = query.Where(x => x.Article.Title.Contains(search));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var rows = await query
             .OrderByDescending(x => x.Article.UpdatedAt ?? x.Article.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, rows.Count, cancellationToken);
 
         // One batch query for every article's full multi-provider embedding list, keyed by first-chunk
         // id, rather than one query per article - same "avoid N+1" reasoning as the Models sub-select.
@@ -413,11 +413,22 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             .Where(a => a.Status == KnowledgeArticleStatus.Published)
             .ToListAsync(cancellationToken);
 
+        // Which (article, version) pairs already have chunks, in one query for every published article - not an
+        // AnyAsync round trip per article.
+        var publishedIds = published.Select(a => a.Id).ToList();
+        var embedded = publishedIds.Count == 0
+            ? new HashSet<(Guid, int)>()
+            : (await _context.KnowledgeBaseChunks
+                    .Where(c => publishedIds.Contains(c.ArticleId))
+                    .Select(c => new { c.ArticleId, c.EmbeddedFromArticleVersion })
+                    .Distinct()
+                    .ToListAsync(cancellationToken))
+                .Select(x => (x.ArticleId, x.EmbeddedFromArticleVersion))
+                .ToHashSet();
+
         foreach (var article in published)
         {
-            var isStale = !await _context.KnowledgeBaseChunks
-                .AnyAsync(c => c.ArticleId == article.Id && c.EmbeddedFromArticleVersion == article.VersionNumber, cancellationToken);
-
+            var isStale = !embedded.Contains((article.Id, article.VersionNumber));
             if (!isStale)
                 continue;
 

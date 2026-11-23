@@ -160,7 +160,6 @@ public class AiUsageService : IAiUsageService
         if (query.Status is { } status)
             rows = rows.Where(t => t.Status == status);
 
-        var total = await rows.CountAsync(cancellationToken);
         var items = await rows
             .OrderByDescending(t => t.RequestedAtUtc)
             .Skip((query.Page - 1) * query.PageSize)
@@ -169,6 +168,7 @@ public class AiUsageService : IAiUsageService
                 t.Id, t.Operation, t.Source, t.Status, t.DenialReason, t.Provider, t.Model,
                 t.CreditsBefore, t.CreditsConsumed, t.CreditsAfter, t.CreditsRefunded, t.FailureReason, t.RequestedAtUtc, t.CompletedAtUtc))
             .ToListAsync(cancellationToken);
+        var total = await rows.CountForPageAsync(query.Page, query.PageSize, items.Count, cancellationToken);
 
         return new PagedResult<AiTransactionDto>(items, total, query.Page, query.PageSize);
     }

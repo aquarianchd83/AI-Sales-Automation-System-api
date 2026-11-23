@@ -21,6 +21,7 @@ public class UserService : IUserService
     private readonly IValidator<UpdateUserRequest> _updateValidator;
     private readonly IValidator<AssignRolesRequest> _assignRolesValidator;
     private readonly IAuditTrailWriter _audit;
+    private readonly IApplicationDbContext _context;
 
     public UserService(
         UserManager<ApplicationUser> userManager,
@@ -30,9 +31,11 @@ public class UserService : IUserService
         IValidator<CreateUserRequest> createValidator,
         IValidator<UpdateUserRequest> updateValidator,
         IValidator<AssignRolesRequest> assignRolesValidator,
-        IAuditTrailWriter audit)
+        IAuditTrailWriter audit,
+        IApplicationDbContext context)
     {
         _audit = audit;
+        _context = context;
         _userManager = userManager;
         _roleManager = roleManager;
         _tenantContext = tenantContext;
@@ -52,21 +55,16 @@ public class UserService : IUserService
             query = query.Where(u => u.FullName.Contains(search) || (u.Email != null && u.Email.Contains(search)));
         }
 
-        var totalCount = await query.CountAsync(cancellationToken);
         var users = await query
             .OrderBy(u => u.FullName)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var totalCount = await query.CountForPageAsync(request.Page, request.PageSize, users.Count, cancellationToken);
 
-        // N+1 by design for now: GetRolesAsync per user keeps this simple and correct.
-        // Revisit with a single join query if admin user lists grow large.
-        var dtos = new List<UserDto>(users.Count);
-        foreach (var user in users)
-        {
-            var roles = await _userManager.GetRolesAsync(user);
-            dtos.Add(user.ToDto(roles));
-        }
+        // Roles for the whole page in one query, not a GetRolesAsync round trip per user.
+        var rolesByUser = await _context.RolesByUserAsync(users.Select(u => u.Id), cancellationToken);
+        var dtos = users.Select(user => user.ToDto(rolesByUser.For(user.Id))).ToList();
 
         return new PagedResult<UserDto>(dtos, totalCount, request.Page, request.PageSize);
     }
