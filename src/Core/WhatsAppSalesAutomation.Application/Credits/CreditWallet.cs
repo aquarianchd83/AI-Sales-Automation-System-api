@@ -81,6 +81,15 @@ public interface IFeatureAccessService
     /// <summary>Throws <see cref="FeatureDisabledException"/> (HTTP 403) when the tenant can't use the feature: not in its plan, and no free uses left.</summary>
     Task RequireAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether the tenant may still SEE what it already has of the feature: true when it can use it, and also once the free uses (or the plan's cap) of it
+    /// are used up - the leads it discovered, the stories it made stay readable; only adding new ones asks for an upgrade.
+    /// </summary>
+    Task<bool> CanViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
+    /// <summary>Throws <see cref="FeatureDisabledException"/> (HTTP 403) when the tenant can't even look at the feature (see <see cref="CanViewAsync"/>).</summary>
+    Task RequireViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
     /// <summary>The free uses the tenant's plan gives of each published feature it does not include (used up or not). Empty for a plan that gives none.</summary>
     Task<IReadOnlyList<FeatureTrialDto>> GetTrialsAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
@@ -206,6 +215,24 @@ public class FeatureAccessService : IFeatureAccessService
             throw new FeatureDisabledException(TrialUsedUpMessage(trial, (await GetPlanAccessAsync(tenantId, cancellationToken)).PlanName));
 
         throw new FeatureDisabledException($"{label} is not part of your plan. Upgrade to Premium to use it.");
+    }
+
+    public async Task<bool> CanViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    {
+        if (await HasAsync(tenantId, feature, cancellationToken))
+            return true;
+        if (PlatformFeatureSwitches.Unpublished(_configuration).Contains(feature))
+            return false;
+
+        // Used up, not taken away: a feature the plan gave free uses of (or caps) keeps what was made with it on screen.
+        return await GetTrialAsync(tenantId, feature, cancellationToken) is not null;
+    }
+
+    public async Task RequireViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    {
+        if (await CanViewAsync(tenantId, feature, cancellationToken))
+            return;
+        await RequireAsync(tenantId, feature, cancellationToken);
     }
 
     /// <summary>What a tenant is told once the free uses (or the plan's cap) of a feature are gone.</summary>

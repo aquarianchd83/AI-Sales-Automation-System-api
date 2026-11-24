@@ -2,8 +2,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Constants;
+using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -26,9 +28,11 @@ public class TenantJobsController : ControllerBase
     private readonly IPlatformJobService _jobService;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserService _currentUser;
+    private readonly IFeatureAccessService _features;
 
-    public TenantJobsController(IPlatformJobService jobService, ITenantContext tenantContext, ICurrentUserService currentUser)
+    public TenantJobsController(IPlatformJobService jobService, ITenantContext tenantContext, ICurrentUserService currentUser, IFeatureAccessService features)
     {
+        _features = features;
         _jobService = jobService;
         _tenantContext = tenantContext;
         _currentUser = currentUser;
@@ -60,6 +64,9 @@ public class TenantJobsController : ControllerBase
     public async Task<ActionResult<PlatformJobTriggerResultDto>> Trigger(string jobType, CancellationToken cancellationToken)
     {
         RequireSelfServiceJobType(jobType);
+        // A Basic tenant whose free leads are used up still sees its leads, but "Run now" would only find none: say why instead.
+        if (jobType == TenantJobTypes.LeadDiscovery)
+            await _features.RequireAsync(TenantId, PlatformFeature.LeadDiscovery, cancellationToken);
         return Ok(await _jobService.TriggerAsync(TenantId, jobType, ActorUserId, ActorEmail, cancellationToken));
     }
 

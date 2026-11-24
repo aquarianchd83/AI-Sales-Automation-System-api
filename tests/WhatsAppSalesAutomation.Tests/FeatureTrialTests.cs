@@ -160,6 +160,25 @@ public sealed class FeatureTrialTests : IDisposable
     }
 
     [Fact]
+    public async Task Used_up_free_uses_keep_the_feature_readable_but_not_usable()
+    {
+        Assert.True(await Request().Access.CanViewAsync(_tenant, PlatformFeature.LeadDiscovery));
+        for (var i = 0; i < 3; i++)
+            await ChargeLeadAsync($"lead:{i}");
+
+        var access = Request().Access;
+        Assert.False(await access.HasAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.True(await access.CanViewAsync(_tenant, PlatformFeature.LeadDiscovery));
+        await access.RequireViewAsync(_tenant, PlatformFeature.LeadDiscovery); // reads still pass
+        await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireAsync(_tenant, PlatformFeature.LeadDiscovery));
+
+        // A feature with no free uses at all stays closed to reads too.
+        Assert.False(await access.CanViewAsync(_tenant, PlatformFeature.ContentStudio));
+        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireViewAsync(_tenant, PlatformFeature.ContentStudio));
+        Assert.Contains("not part of your plan", ex.Message);
+    }
+
+    [Fact]
     public async Task Free_uses_set_to_zero_lock_the_feature_again()
     {
         var row = await _db.PlanFeatureTrials.SingleAsync();
