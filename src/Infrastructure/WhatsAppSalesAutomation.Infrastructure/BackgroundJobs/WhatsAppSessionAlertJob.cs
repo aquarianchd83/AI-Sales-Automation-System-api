@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 /// <summary>
 /// Twice a day (platform-global, like <see cref="WhatsAppBridgeHealthJob"/>): finds the QR-bridge tenants whose WhatsApp session has dropped and tells each one, once per
 /// disconnect, so they scan a new QR before follow-ups pile up. The notice goes out through the PLATFORM's own WhatsApp number (short text) and email account
-/// (full text) - the tenant's own session is the one that is down - and the tenant's credit wallet pays for it, at the price of one template message.
+/// (full text) - the tenant's own session is the one that is down - and the tenant's credit wallet pays for it - at the price of one template message, and only when the WhatsApp message was actually delivered.
 /// An alert is never held back for lack of credit: the wallet is charged what it can cover. One tenant's failure never stops the pass.
 /// </summary>
 public class WhatsAppSessionAlertJob
@@ -85,7 +86,14 @@ public class WhatsAppSessionAlertJob
         if (!sent)
             return false;
 
-        await ChargeAsync(services, tenantId, episode);
+        // The charge is for a WhatsApp message that went out: a tenant with no alert number, WhatsApp alerts off, or a failed delivery pays nothing.
+        var context = services.GetRequiredService<IApplicationDbContext>();
+        var delivered = await context.TenantNotifications.AsNoTracking().IgnoreQueryFilters().AnyAsync(n =>
+            n.TenantId == tenantId && n.Kind == TenantNotificationKind.WhatsAppSessionDisconnected && n.EpisodeKey == episode
+            && n.WhatsAppStatus == DeliveryStatus.Sent);
+        if (delivered)
+            await ChargeAsync(services, tenantId, episode);
+
         return true;
     }
 
