@@ -23,6 +23,7 @@ public class LeadFollowUpService : ILeadFollowUpService
     private readonly IWhatsAppService _whatsApp;
     private readonly IConversationService _conversations;
     private readonly ITenantContext _tenantContext;
+    private readonly ITemplateSendPolicy? _templatePolicy;
     private readonly IQuotaGate _quota;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
@@ -41,8 +42,10 @@ public class LeadFollowUpService : ILeadFollowUpService
         ITenantTimeZoneProvider tenantTimeZone,
         IValidator<ScheduleLeadFollowUpRequest> scheduleValidator,
         ILogger<LeadFollowUpService> logger,
-        IMediaStorageService? mediaStorage = null)
+        IMediaStorageService? mediaStorage = null,
+        ITemplateSendPolicy? templatePolicy = null)
     {
+        _templatePolicy = templatePolicy;
         _context = context;
         _dateTime = dateTime;
         _whatsApp = whatsApp;
@@ -496,8 +499,7 @@ public class LeadFollowUpService : ILeadFollowUpService
         return status == LeadFollowUpStatus.Cancelled ? SendOutcome.Cancelled : SendOutcome.Skipped;
     }
 
-    private static bool IsUsable(MessageTemplate template) =>
-        template.IsActive && template.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Approved;
+    private bool IsUsable(MessageTemplate template) => _templatePolicy.CanSend(template);
 
     private void AddActivity(Lead lead, LeadActivityType type, string? oldValue, string? newValue, string note, Guid? createdBy) =>
         _context.LeadActivities.Add(new LeadActivity

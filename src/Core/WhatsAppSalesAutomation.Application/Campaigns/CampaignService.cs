@@ -19,6 +19,7 @@ public class CampaignService : ICampaignService
     private readonly ILogger<CampaignService> _logger;
     private readonly IDateTimeProvider _dateTime;
     private readonly ITenantContext _tenantContext;
+    private readonly ITemplateSendPolicy? _templatePolicy;
     private readonly IPlanLimitsService _planLimits;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
@@ -39,8 +40,10 @@ public class CampaignService : ICampaignService
         IValidator<UpsertCampaignStepRequest> stepValidator,
         IValidator<SetCampaignAudienceRequest> audienceValidator,
         ITenantJobProvisioner jobProvisioner,
-        ILogger<CampaignService> logger)
+        ILogger<CampaignService> logger,
+        ITemplateSendPolicy? templatePolicy = null)
     {
+        _templatePolicy = templatePolicy;
         _jobProvisioner = jobProvisioner;
         _logger = logger;
         _context = context;
@@ -793,7 +796,7 @@ public class CampaignService : ICampaignService
             if (step.MessageTemplateId is null || !templates.TryGetValue(step.MessageTemplateId.Value, out var template))
                 throw new ConflictException($"Step '{step.StepType}' has no template assigned.");
 
-            if (template.WhatsAppTemplateStatus != WhatsAppTemplateStatus.Approved || !template.IsActive)
+            if (!_templatePolicy.CanSend(template))
                 throw new ConflictException($"Step '{step.StepType}' references template '{template.Name}', which is not an active, Approved template.");
         }
     }

@@ -42,6 +42,7 @@ public class CampaignSendService : ICampaignSendService
     private readonly IDateTimeProvider _dateTime;
     private readonly IConversationService _conversations;
     private readonly ITenantContext _tenantContext;
+    private readonly ITemplateSendPolicy? _templatePolicy;
     private readonly IQuotaGate _quota;
     private readonly ITenantConfigOverrideProvider _tenantConfig;
     private readonly ITenantTimeZoneProvider _tenantTimeZone;
@@ -57,8 +58,10 @@ public class CampaignSendService : ICampaignSendService
         ITenantConfigOverrideProvider tenantConfig,
         ITenantTimeZoneProvider tenantTimeZone,
         ILogger<CampaignSendService> logger,
-        IMediaStorageService? mediaStorage = null)
+        IMediaStorageService? mediaStorage = null,
+        ITemplateSendPolicy? templatePolicy = null)
     {
+        _templatePolicy = templatePolicy;
         _context = context;
         _mediaStorage = mediaStorage;
         _whatsApp = whatsApp;
@@ -417,7 +420,7 @@ public class CampaignSendService : ICampaignSendService
         var template = step.MessageTemplateId.HasValue
             ? await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == step.MessageTemplateId, cancellationToken)
             : null;
-        if (template is null || template.WhatsAppTemplateStatus != WhatsAppTemplateStatus.Approved || !template.IsActive)
+        if (template is null || !_templatePolicy.CanSend(template))
         {
             _logger.LogWarning(
                 "Skipping step {StepNumber} for campaign customer {CampaignCustomerId}: template is missing or not Approved",

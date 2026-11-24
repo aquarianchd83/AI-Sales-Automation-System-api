@@ -25,6 +25,8 @@ public class ConversationService : IConversationService
     private readonly IValidator<SendConversationMessageRequest> _sendValidator;
     private readonly IQuotaGate _quota;
 
+    private readonly ITemplateSendPolicy? _templatePolicy;
+
     public ConversationService(
         IApplicationDbContext context,
         IDateTimeProvider dateTime,
@@ -33,8 +35,10 @@ public class ConversationService : IConversationService
         IValidator<ChangeConversationModeRequest> modeValidator,
         IValidator<SendConversationMessageRequest> sendValidator,
         IQuotaGate quota,
-        IMediaStorageService? mediaStorage = null)
+        IMediaStorageService? mediaStorage = null,
+        ITemplateSendPolicy? templatePolicy = null)
     {
+        _templatePolicy = templatePolicy;
         _quota = quota;
         _mediaStorage = mediaStorage;
         _context = context;
@@ -241,7 +245,7 @@ public class ConversationService : IConversationService
             var template = await _context.MessageTemplates.FirstOrDefaultAsync(t => t.Id == request.MessageTemplateId, cancellationToken)
                 ?? throw new NotFoundException(nameof(MessageTemplate), request.MessageTemplateId!.Value);
 
-            if (template.WhatsAppTemplateStatus != WhatsAppTemplateStatus.Approved || !template.IsActive)
+            if (!_templatePolicy.CanSend(template))
                 throw new ConflictException($"Template '{template.Name}' is not an active, Approved template.");
 
             // The same gate every other template sender uses. An agent could previously send a template to a
