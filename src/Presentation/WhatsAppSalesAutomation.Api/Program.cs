@@ -37,6 +37,12 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // Server-only overrides that never reach git (appsettings.*.local.json is gitignored): e.g.
+    // appsettings.Production.local.json holding the production keys appsettings.Production.json leaves empty.
+    // Added here, before anything reads configuration (the Jwt guard below) and before the AppSettings table
+    // source further down, so a DB row still wins.
+    builder.Configuration.AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.local.json", optional: true, reloadOnChange: true);
+
     // A signing secret anyone can read in the repository lets them forge a token for any tenant, so a deployed instance
     // must not start with one. Development keeps the placeholder (that is what it is for) but says so every time.
     if (JwtSecretGuard.FindProblem(builder.Configuration["Jwt:Secret"]) is { } jwtProblem)
