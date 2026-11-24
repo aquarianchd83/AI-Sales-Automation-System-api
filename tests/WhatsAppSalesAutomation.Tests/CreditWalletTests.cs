@@ -315,7 +315,8 @@ public sealed class CreditWalletTests : IDisposable
 
         var entitlements = await _wallet.GetEntitlementsAsync(_tenant);
 
-        Assert.Equal(new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations }, entitlements.Features.ToArray());
+        // Campaigns too: it has no wallet of its own, but the plan includes it, so the app must not lock it.
+        Assert.Equal(new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations, PlatformFeature.Campaigns }, entitlements.Features.ToArray());
         Assert.Equal(2m, entitlements.Costs.Single(c => c.Scenario == CreditScenario.CustomerChatReply).Credits);
         Assert.DoesNotContain(entitlements.Costs, c => c.Feature == PlatformFeature.ContentStudio);
         Assert.Equal(100m, entitlements.Balance);

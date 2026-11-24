@@ -408,7 +408,10 @@ public class CreditWalletService : ICreditWalletService
         var costs = included.SelectMany(f => f.Costs.Select(c => new CreditCostItemDto(f.Feature, c.Scenario, c.Title, c.UnitLabel, c.Credits, c.PerAction))).ToList();
         // A feature open on free uses is already in `included` (the access service counts it in while uses are left).
         var trials = await _access.GetTrialsAsync(tenantId, ct);
-        return new EntitlementsDto(summary.PlanCode, summary.PlanName, included.Select(f => f.Feature).ToList(), summary.Balance, costs, trials);
+        // The features come from the access service, not the wallet summary: Campaigns has no wallet (it spends nothing of its own), so the summary
+        // leaves it out, and the app would show a plan that includes it as locked.
+        var features = (await _access.GetFeaturesAsync(tenantId, ct)).OrderBy(f => f).ToList();
+        return new EntitlementsDto(summary.PlanCode, summary.PlanName, features, summary.Balance, costs, trials);
     }
 
     public async Task<WalletSummaryDto> GetSummaryAsync(Guid tenantId, CancellationToken ct = default)

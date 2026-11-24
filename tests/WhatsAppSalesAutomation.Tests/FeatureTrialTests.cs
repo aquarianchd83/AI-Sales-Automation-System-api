@@ -131,6 +131,7 @@ public sealed class FeatureTrialTests : IDisposable
         var entitlements = await Request().Wallet.GetEntitlementsAsync(_tenant);
 
         Assert.Contains(PlatformFeature.LeadDiscovery, entitlements.Features);
+        Assert.Contains(PlatformFeature.Campaigns, entitlements.Features); // no wallet of its own, but in the plan: the app must not lock it
         var trial = Assert.Single(entitlements.Trials!);
         Assert.Equal(PlatformFeature.LeadDiscovery, trial.Feature);
         Assert.Equal(3, trial.FreeUses);
