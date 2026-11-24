@@ -286,6 +286,24 @@ environment** while the secret is missing, still the placeholder, shorter than 3
 a few repeated characters, and the startup error says which. In `Development` it only logs a warning.
 Generate one with, for example, `openssl rand -base64 48`, and supply it as `Jwt__Secret`.
 
+### `appsettings.Production.json` and the local override
+
+`appsettings.Production.json` (tracked) holds the production shape: Live Razorpay as the active mode, GST on,
+Swagger off, HSTS on, dummy seed data off, and every production key (connection string, `Jwt:Secret`, Razorpay
+Live keys, WhatsApp, AI providers, SMTP, Msg91) as an **empty** placeholder. It loads automatically when
+`ASPNETCORE_ENVIRONMENT=Production` and is published with the app (the Web SDK copies every `appsettings*.json`).
+
+Fill the real values on the server, never in that file:
+
+- environment variables (table above), or
+- `appsettings.Production.local.json` beside the published DLL - gitignored (`appsettings.*.local.json`), same
+  shape, only the keys you fill. `Program.cs` loads `appsettings.{Environment}.local.json` right after the
+  defaults, so it beats environment variables but not the `AppSettings` table.
+
+Keys that are `AppSettingCatalog` keys (Razorpay, Tax, WhatsApp, AiProviders, Email, Sms, App:PublicUrl) are only
+**seeded** from these files on the first start; after that the database row wins and they are changed from the
+Platform Admin Console.
+
 ### Settings that live in the database instead
 
 `AppSettingCatalog` keys (WhatsApp / AiProviders / Campaigns / Media / Messaging / Ai) are read from
