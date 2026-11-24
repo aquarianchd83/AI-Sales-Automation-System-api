@@ -85,13 +85,16 @@ public interface IFeatureAccessService
     /// <summary>The free uses of one feature, or null when the plan includes the feature (no counting needed) or gives no free uses of it.</summary>
     Task<FeatureTrialDto?> GetTrialAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
 
-    /// <summary>Counts one free use of a feature outside the tenant's plan. Called once a use has really been charged.</summary>
-    Task RecordTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+    /// <summary>Takes one free use of a feature outside the tenant's plan, before the spend: false when none is left (another request took the last one).</summary>
+    Task<bool> TryReserveTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
+    /// <summary>Gives one free use back: a spend that did not go through after its reservation, or a charge that was reversed (a failed generation).</summary>
+    Task ReleaseTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
 }
 
 public class FeatureAccessService : IFeatureAccessService
 {
-    private const int MaxAttempts = 3;
+    private const int MaxAttempts = 5;
 
     private readonly IApplicationDbContext _context;
     private readonly IConfiguration? _configuration;
@@ -232,27 +235,47 @@ public class FeatureAccessService : IFeatureAccessService
         return new FeatureTrialDto(feature, PlatformFeatureCatalog.For(feature).Label, freeUses, used, unit.Plural, unit.Singular);
     }
 
-    public async Task RecordTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    public async Task<bool> TryReserveTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    {
+        var access = await GetPlanAccessAsync(tenantId, cancellationToken);
+        if (!access.FreeUses.TryGetValue(feature, out var freeUses))
+            return false;
+
+        return await ChangeUsedAsync(tenantId, feature, +1, freeUses, cancellationToken);
+    }
+
+    public Task ReleaseTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default) =>
+        ChangeUsedAsync(tenantId, feature, -1, int.MaxValue, cancellationToken);
+
+    /// <summary>
+    /// Moves the count by one, never past <paramref name="limit"/> or below zero. Used is a concurrency token, so two requests racing for the last
+    /// free use cannot both get it: the loser reads the new count again and is refused.
+    /// </summary>
+    private async Task<bool> ChangeUsedAsync(Guid tenantId, PlatformFeature feature, int delta, int limit, CancellationToken cancellationToken)
     {
         var now = _dateTime?.UtcNow ?? DateTime.UtcNow;
 
-        // Used is a concurrency token, so two uses racing each other cannot both write the same count: the loser reads again and adds to it.
         for (var attempt = 1; ; attempt++)
         {
             var row = await _context.TenantFeatureTrialUsages.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(u => u.TenantId == tenantId && u.Feature == feature, cancellationToken);
+            var used = row?.Used ?? 0;
+            var next = used + delta;
+            if (next > limit || next < 0)
+                return false;
+
             if (row is null)
             {
                 row = new TenantFeatureTrialUsage { TenantId = tenantId, Feature = feature, FirstUsedAtUtc = now };
                 _context.TenantFeatureTrialUsages.Add(row);
             }
 
-            row.Used++;
+            row.Used = next;
             row.LastUsedAtUtc = now;
             try
             {
                 await _context.SaveChangesAsync(cancellationToken);
-                return;
+                return true;
             }
             catch (DbUpdateException) when (attempt < MaxAttempts)
             {

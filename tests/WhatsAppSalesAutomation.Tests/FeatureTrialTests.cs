@@ -170,4 +170,43 @@ public sealed class FeatureTrialTests : IDisposable
         var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => Request().Access.RequireAsync(_tenant, PlatformFeature.LeadDiscovery));
         Assert.Contains("not part of your plan", ex.Message);
     }
+    [Fact]
+    public async Task A_reversed_charge_gives_its_free_use_back_once()
+    {
+        await ChargeLeadAsync("lead:a");
+        await ChargeLeadAsync("lead:b");
+        Assert.Equal(2, await UsedAsync());
+
+        Assert.True(await Request().Router.ReverseAsync(_tenant, "lead:a"));
+        Assert.Equal(1, await UsedAsync());
+
+        await Request().Router.ReverseAsync(_tenant, "lead:a"); // again: nothing more to give back
+        Assert.Equal(1, await UsedAsync());
+    }
+
+    [Fact]
+    public async Task A_spend_that_takes_nothing_gives_its_reserved_use_back()
+    {
+        // No credits at all: the use is reserved, the spend takes nothing, and the use is returned.
+        var empty = Guid.NewGuid();
+        _db.Tenants.Add(new Tenant { Id = empty, Name = "Empty", Slug = "empty" });
+        _db.Subscriptions.Add(new Subscription { TenantId = empty, PlanId = _basic.Id, Status = SubscriptionStatus.Active });
+        await _db.SaveChangesAsync();
+
+        var result = await Request().Router.ConsumeAsync(new ConsumeRequest(empty, QuotaType.Credits, 1m, "lead:x", "LeadDiscoveryRun", "lead:x"));
+
+        Assert.False(result.Sufficient);
+        Assert.Equal(0, await _db.TenantFeatureTrialUsages.IgnoreQueryFilters().Where(u => u.TenantId == empty).Select(u => u.Used).FirstOrDefaultAsync());
+    }
+
+    [Fact]
+    public async Task The_last_free_use_cannot_be_reserved_twice()
+    {
+        var access = Request().Access;
+        Assert.True(await access.TryReserveTrialUseAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.True(await access.TryReserveTrialUseAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.True(await access.TryReserveTrialUseAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.False(await access.TryReserveTrialUseAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.Equal(3, await UsedAsync());
+    }
 }

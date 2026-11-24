@@ -57,7 +57,8 @@ public class CreditRouter : ICreditRouter
         if (existing is not null)
             return InCallerUnits(await AlreadySpentAsync(existing, request, cancellationToken));
 
-        // Set when the spend is one of the free uses the tenant's plan gives of a feature it does not include: counted once the spend goes through.
+        // Set when the spend is one of the free uses the tenant's plan gives of a feature it does not include. The use is taken before the spend,
+        // so two requests cannot both take the last one, and given back if the spend does not go through.
         var trialFeature = (PlatformFeature?)null;
 
         if (feature is { } f)
@@ -67,16 +68,40 @@ public class CreditRouter : ICreditRouter
                 return await RefusedAsync(original, cancellationToken);
 
             if (CountsAsTrialUse(f, request) && await _access.GetTrialAsync(request.TenantId, f, cancellationToken) is not null)
+            {
+                if (!await _access.TryReserveTrialUseAsync(request.TenantId, f, cancellationToken))
+                    return await RefusedAsync(original, cancellationToken);
                 trialFeature = f;
+            }
 
             if (await _wallet.GetCapRemainingAsync(request.TenantId, f, cancellationToken) is { } remaining && remaining < credits)
             {
                 if (!request.AllowPartial || remaining <= 0)
+                {
+                    await ReleaseTrialUseAsync(trialFeature, request.TenantId, cancellationToken);
                     return await RefusedAsync(original, cancellationToken);
+                }
                 request = request with { Units = remaining };
             }
         }
 
+        try
+        {
+            var settled = await SpendAsync(request, known, cancellationToken);
+            await SettleTrialUseAsync(trialFeature, request.TenantId, settled, cancellationToken);
+            return InCallerUnits(settled);
+        }
+        catch
+        {
+            // The spend failed outright: the free use it took is given back.
+            await ReleaseTrialUseAsync(trialFeature, request.TenantId, CancellationToken.None);
+            throw;
+        }
+    }
+
+    /// <summary>Takes the spend from whoever pays for the scenario (the platform, else the tenant) and records who did.</summary>
+    private async Task<ConsumeResult> SpendAsync(ConsumeRequest request, CreditScenario known, CancellationToken cancellationToken)
+    {
         var setting = await GetSettingAsync(known, cancellationToken);
         var description = request.Note ?? CreditScenarioCatalog.For(known).Title;
         var fellBack = false;
@@ -85,10 +110,7 @@ public class CreditRouter : ICreditRouter
         {
             var spent = await TrySpendFromPlatformAsync(request, known, description, cancellationToken);
             if (spent is not null)
-            {
-                await CountTrialUseAsync(trialFeature, request.TenantId, spent, cancellationToken);
-                return InCallerUnits(spent);
-            }
+                return spent;
 
             // The platform wallet cannot cover it. The customer still gets answered; the tenant pays, and the record says why.
             fellBack = true;
@@ -115,28 +137,48 @@ public class CreditRouter : ICreditRouter
             }, cancellationToken);
         }
 
-        await CountTrialUseAsync(trialFeature, request.TenantId, result, cancellationToken);
-        return InCallerUnits(result);
+        return result;
     }
 
     /// <summary>Whether this spend is what one free use of the feature means (a charged lead, not the AI research behind it).</summary>
     private static bool CountsAsTrialUse(PlatformFeature feature, ConsumeRequest request) =>
         PlatformFeatureCatalog.TrialUnitFor(feature) is { } unit && (unit.ReferenceType is null || string.Equals(unit.ReferenceType, request.ReferenceType, StringComparison.Ordinal));
 
-    /// <summary>Counts one free use once a spend has really gone through. Best effort, like the usage record: the credits have already moved.</summary>
-    private async Task CountTrialUseAsync(PlatformFeature? feature, Guid tenantId, ConsumeResult result, CancellationToken cancellationToken)
+    /// <summary>A free use taken for a spend that then took nothing (or had already been made) is given back.</summary>
+    private async Task SettleTrialUseAsync(PlatformFeature? feature, Guid tenantId, ConsumeResult result, CancellationToken cancellationToken)
     {
-        if (feature is not { } f || result.Consumed <= 0 || result.AlreadyApplied)
+        if (feature is not null && (result.Consumed <= 0 || result.AlreadyApplied))
+            await ReleaseTrialUseAsync(feature, tenantId, cancellationToken);
+    }
+
+    /// <summary>Gives a free use back. Best effort, like the usage record: a failure is logged, never thrown.</summary>
+    private async Task ReleaseTrialUseAsync(PlatformFeature? feature, Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (feature is not { } f)
             return;
 
         try
         {
-            await _access.RecordTrialUseAsync(tenantId, f, cancellationToken);
+            await _access.ReleaseTrialUseAsync(tenantId, f, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Could not count a free use of {Feature} for tenant {TenantId}", f, tenantId);
+            _logger.LogWarning(ex, "Could not give back a free use of {Feature} for tenant {TenantId}", f, tenantId);
         }
+    }
+
+    /// <summary>
+    /// The feature whose free use a recorded spend took, if it took one: a spend of the counted kind, on a feature the tenant's plan still only
+    /// gives free uses of. Read before a reversal, so a failed generation gives its free use back with its credits.
+    /// </summary>
+    private async Task<PlatformFeature?> TrialFeatureOfAsync(CreditUsage? usage, CancellationToken cancellationToken)
+    {
+        if (usage is not { Status: CreditUsageStatus.Charged })
+            return null;
+
+        var feature = PlatformFeatureCatalog.FeatureOf(usage.Scenario);
+        var request = new ConsumeRequest(usage.TenantId, usage.QuotaType, usage.Units, usage.OperationKey, usage.ReferenceType ?? string.Empty, usage.ReferenceId ?? string.Empty);
+        return CountsAsTrialUse(feature, request) && await _access.GetTrialAsync(usage.TenantId, feature, cancellationToken) is not null ? feature : null;
     }
 
     /// <summary>Nothing taken: the feature is not in the plan, or its monthly cap is used up. Reads as "not enough" to every caller, which already knows what to do then.</summary>
@@ -147,6 +189,21 @@ public class CreditRouter : ICreditRouter
     }
 
     public async Task<bool> ReverseAsync(Guid tenantId, string operationKey, CancellationToken cancellationToken = default)
+    {
+        var trialFeature = await TrialFeatureOfAsync(await FindUsageAsync(tenantId, operationKey, cancellationToken), cancellationToken);
+        var reversed = await ReverseSpendAsync(tenantId, operationKey, cancellationToken);
+        if (reversed && trialFeature is not null)
+        {
+            // Only if this call really moved it from charged to reversed: a second reversal of the same spend gives nothing back.
+            var after = await FindUsageAsync(tenantId, operationKey, cancellationToken);
+            if (after?.Status == CreditUsageStatus.Reversed)
+                await ReleaseTrialUseAsync(trialFeature, tenantId, cancellationToken);
+        }
+
+        return reversed;
+    }
+
+    private async Task<bool> ReverseSpendAsync(Guid tenantId, string operationKey, CancellationToken cancellationToken)
     {
         var usage = await FindUsageAsync(tenantId, operationKey, cancellationToken);
         if (usage is null)
