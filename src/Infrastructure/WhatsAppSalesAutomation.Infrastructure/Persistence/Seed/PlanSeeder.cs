@@ -31,6 +31,7 @@ public static class PlanSeeder
 
         await EnsureFeaturesAsync(db, trial, PlatformFeatureCatalog.TrialFeatures);
         await EnsureFeaturesAsync(db, premium, PlatformFeatureCatalog.PremiumFeatures);
+        await EnsureTrialFreeUsesAsync(db, trial);
         await EnsurePremiumPricesAsync(db, premium);
 
         await RetireLegacyPlansAsync(db, trial, premium);
@@ -72,6 +73,20 @@ public static class PlanSeeder
 
         foreach (var feature in features)
             db.PlanFeatures.Add(new PlanFeature { PlanId = plan.Id, Feature = feature });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The Trial (Basic) plan's free uses of the Premium-only features, so a Basic tenant can try them before being asked to upgrade. Only for a
+    /// plan with no free-use rows at all: once the platform admin has set any (0 included), they are left alone.
+    /// </summary>
+    private static async Task EnsureTrialFreeUsesAsync(ApplicationDbContext db, Plan trial)
+    {
+        if (await db.PlanFeatureTrials.AnyAsync(t => t.PlanId == trial.Id))
+            return;
+
+        foreach (var (feature, freeUses) in PlatformFeatureCatalog.TrialFreeUses)
+            db.PlanFeatureTrials.Add(new PlanFeatureTrial { PlanId = trial.Id, Feature = feature, FreeUses = freeUses });
         await db.SaveChangesAsync();
     }
 

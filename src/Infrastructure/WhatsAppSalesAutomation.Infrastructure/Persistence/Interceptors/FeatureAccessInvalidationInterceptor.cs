@@ -72,7 +72,7 @@ public class FeatureAccessInvalidationInterceptor : SaveChangesInterceptor
                 case Subscription subscription:
                     _tenants.Add(subscription.TenantId);
                     break;
-                case Plan or PlanFeature:
+                case Plan or PlanFeature or PlanFeatureTrial:
                     _all = true;
                     break;
             }

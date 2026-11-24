@@ -33,7 +33,16 @@ public record PlatformPlanDto(
     IReadOnlyList<PlatformFeature> Features,
     // Explicit prices set per country, each in that country's own currency. A country not listed here is quoted
     // the base USD price converted at the catalog rate.
-    IReadOnlyList<CountryPriceDto> CountryPrices);
+    IReadOnlyList<CountryPriceDto> CountryPrices,
+    // Free uses the plan gives of features it does NOT include: a tenant can try the feature this many times (in the feature's own unit)
+    // and is then asked to upgrade. Lifetime, per tenant.
+    IReadOnlyList<PlanFeatureTrialDto>? FreeTrials = null);
+
+/// <summary>Free uses a plan gives of one feature it does not include. <see cref="Unit"/> says what one use is ("leads", "AI generations").</summary>
+public record PlanFeatureTrialDto(PlatformFeature Feature, int FreeUses, string Unit);
+
+/// <summary>Free uses being set for one feature. 0 means none.</summary>
+public record PlanFeatureTrialInput(PlatformFeature Feature, int FreeUses);
 
 /// <summary>An explicit price for one country, in that country's currency.</summary>
 public record CountryPriceDto(string CountryCode, string CountryName, string CurrencyCode, string CurrencySymbol, decimal Amount);
@@ -76,7 +85,8 @@ public record CreatePlanRequest(
     decimal StarterCredits = 0m,
     decimal MonthlyCredits = 0m,
     IReadOnlyList<PlatformFeature>? Features = null,
-    IReadOnlyList<CountryPriceInput>? CountryPrices = null);
+    IReadOnlyList<CountryPriceInput>? CountryPrices = null,
+    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null);
 
 /// <summary>Body of PUT one plan. <see cref="IsActive"/> is how a plan is both retired ("Delete" in
 /// the admin UI sets it false) and un-retired - there is no separate reactivate endpoint.</summary>
@@ -94,7 +104,9 @@ public record UpdatePlanRequest(
     // Null leaves the plan's features as they are; a list is the complete new set.
     IReadOnlyList<PlatformFeature>? Features = null,
     // Null leaves the plan's country prices as they are; a list is the complete new set.
-    IReadOnlyList<CountryPriceInput>? CountryPrices = null);
+    IReadOnlyList<CountryPriceInput>? CountryPrices = null,
+    // Null leaves the plan's free uses as they are; a list sets each feature it names (0 for none) and leaves the rest.
+    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null);
 
 /// <summary>One credit pack in the catalog, as the operator manages it. PriceCents is the authored base USD price;
 /// the local price is a display conversion into the signed-in operator's currency, like <see cref="PlatformPlanDto"/>.</summary>

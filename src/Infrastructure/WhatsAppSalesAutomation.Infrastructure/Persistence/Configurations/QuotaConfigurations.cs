@@ -15,6 +15,30 @@ public class PlanFeatureConfiguration : IEntityTypeConfiguration<PlanFeature>
     }
 }
 
+public class PlanFeatureTrialConfiguration : IEntityTypeConfiguration<PlanFeatureTrial>
+{
+    public void Configure(EntityTypeBuilder<PlanFeatureTrial> builder)
+    {
+        builder.ToTable("PlanFeatureTrials");
+        builder.HasKey(p => p.Id);
+        builder.Property(p => p.Feature).HasConversion<string>().HasMaxLength(30);
+        builder.HasIndex(p => new { p.PlanId, p.Feature }).IsUnique();
+    }
+}
+
+public class TenantFeatureTrialUsageConfiguration : IEntityTypeConfiguration<TenantFeatureTrialUsage>
+{
+    public void Configure(EntityTypeBuilder<TenantFeatureTrialUsage> builder)
+    {
+        builder.ToTable("TenantFeatureTrialUsages");
+        builder.HasKey(u => u.Id);
+        builder.Property(u => u.Feature).HasConversion<string>().HasMaxLength(30);
+        // Two uses counted at the same moment must not both write the same number (see FeatureAccessService.RecordTrialUseAsync).
+        builder.Property(u => u.Used).IsConcurrencyToken();
+        builder.HasIndex(u => new { u.TenantId, u.Feature }).IsUnique();
+    }
+}
+
 public class TenantFeatureCapConfiguration : IEntityTypeConfiguration<TenantFeatureCap>
 {
     public void Configure(EntityTypeBuilder<TenantFeatureCap> builder)

@@ -29,6 +29,7 @@ public class CreatePlanRequestValidator : AbstractValidator<CreatePlanRequest>
         RuleFor(x => x.MonthlyCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits);
         RuleForEach(x => x.Features).IsInEnum();
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
+        RuleFor(x => x.FreeTrials).SetValidator(new PlanFeatureTrialListValidator()!);
     }
 }
 
@@ -47,6 +48,28 @@ public class UpdatePlanRequestValidator : AbstractValidator<UpdatePlanRequest>
         RuleFor(x => x.MonthlyCredits).InclusiveBetween(0m, PlanQuotaListValidator.MaxUnits).When(x => x.MonthlyCredits is not null);
         RuleForEach(x => x.Features).IsInEnum();
         RuleFor(x => x.CountryPrices).SetValidator(new CountryPriceListValidator()!);
+        RuleFor(x => x.FreeTrials).SetValidator(new PlanFeatureTrialListValidator()!);
+    }
+}
+
+/// <summary>Free uses of features outside a plan: only features that have a unit to count, a sane number, and no feature twice.</summary>
+public class PlanFeatureTrialListValidator : AbstractValidator<IReadOnlyList<PlanFeatureTrialInput>>
+{
+    public const int MaxFreeUses = 100_000;
+
+    public PlanFeatureTrialListValidator()
+    {
+        RuleForEach(x => x).ChildRules(trial =>
+        {
+            trial.RuleFor(t => t.Feature).IsInEnum()
+                .Must(f => WhatsAppSalesAutomation.Application.Credits.PlatformFeatureCatalog.TrialUnitFor(f) is not null)
+                .WithMessage("This feature cannot be given free uses.");
+            trial.RuleFor(t => t.FreeUses).InclusiveBetween(0, MaxFreeUses).WithMessage("Free uses must be between 0 and 100,000.");
+        });
+
+        RuleFor(x => x)
+            .Must(list => list.Select(t => t.Feature).Distinct().Count() == list.Count)
+            .WithMessage("Each feature can be listed only once.");
     }
 }
 

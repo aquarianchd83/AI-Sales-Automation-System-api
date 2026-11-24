@@ -57,11 +57,17 @@ public class CreditRouter : ICreditRouter
         if (existing is not null)
             return InCallerUnits(await AlreadySpentAsync(existing, request, cancellationToken));
 
+        // Set when the spend is one of the free uses the tenant's plan gives of a feature it does not include: counted once the spend goes through.
+        var trialFeature = (PlatformFeature?)null;
+
         if (feature is { } f)
         {
-            // Not in the plan, or over the tenant's cap for the month: nothing is spent. A spend that can be partial (lead candidates) takes what the cap allows.
+            // Not in the plan (and no free uses left), or over the tenant's cap for the month: nothing is spent. A spend that can be partial (lead candidates) takes what the cap allows.
             if (!await _access.HasAsync(request.TenantId, f, cancellationToken))
                 return await RefusedAsync(original, cancellationToken);
+
+            if (CountsAsTrialUse(f, request) && await _access.GetTrialAsync(request.TenantId, f, cancellationToken) is not null)
+                trialFeature = f;
 
             if (await _wallet.GetCapRemainingAsync(request.TenantId, f, cancellationToken) is { } remaining && remaining < credits)
             {
@@ -79,7 +85,10 @@ public class CreditRouter : ICreditRouter
         {
             var spent = await TrySpendFromPlatformAsync(request, known, description, cancellationToken);
             if (spent is not null)
+            {
+                await CountTrialUseAsync(trialFeature, request.TenantId, spent, cancellationToken);
                 return InCallerUnits(spent);
+            }
 
             // The platform wallet cannot cover it. The customer still gets answered; the tenant pays, and the record says why.
             fellBack = true;
@@ -106,7 +115,28 @@ public class CreditRouter : ICreditRouter
             }, cancellationToken);
         }
 
+        await CountTrialUseAsync(trialFeature, request.TenantId, result, cancellationToken);
         return InCallerUnits(result);
+    }
+
+    /// <summary>Whether this spend is what one free use of the feature means (a charged lead, not the AI research behind it).</summary>
+    private static bool CountsAsTrialUse(PlatformFeature feature, ConsumeRequest request) =>
+        PlatformFeatureCatalog.TrialUnitFor(feature) is { } unit && (unit.ReferenceType is null || string.Equals(unit.ReferenceType, request.ReferenceType, StringComparison.Ordinal));
+
+    /// <summary>Counts one free use once a spend has really gone through. Best effort, like the usage record: the credits have already moved.</summary>
+    private async Task CountTrialUseAsync(PlatformFeature? feature, Guid tenantId, ConsumeResult result, CancellationToken cancellationToken)
+    {
+        if (feature is not { } f || result.Consumed <= 0 || result.AlreadyApplied)
+            return;
+
+        try
+        {
+            await _access.RecordTrialUseAsync(tenantId, f, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not count a free use of {Feature} for tenant {TenantId}", f, tenantId);
+        }
     }
 
     /// <summary>Nothing taken: the feature is not in the plan, or its monthly cap is used up. Reads as "not enough" to every caller, which already knows what to do then.</summary>
