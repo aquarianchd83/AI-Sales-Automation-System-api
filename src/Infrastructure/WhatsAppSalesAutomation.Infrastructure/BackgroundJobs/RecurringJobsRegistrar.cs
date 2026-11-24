@@ -58,6 +58,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<WhatsAppBridgeHealthJob>(
             "whatsapp-bridge-health", job => job.RunAsync(), "*/5 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Twice a day, 10:00 and 17:00 IST (04:30 and 11:30 UTC): tells each QR tenant whose WhatsApp session has dropped, once per disconnect, to scan a new QR.
+        // Sent from the platform's own WhatsApp number and email account; the tenant's wallet pays. A no-op when no session is down.
+        recurringJobs.AddOrUpdate<WhatsAppSessionAlertJob>(
+            "whatsapp-session-alert", job => job.RunAsync(), "30 4,11 * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 15 minutes: low-balance, used-up and credits-expiring alerts. Frequent so a tenant that has just
         // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
         recurringJobs.AddOrUpdate<QuotaAlertJob>(

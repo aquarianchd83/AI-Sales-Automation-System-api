@@ -119,20 +119,20 @@ public class TenantNotifier : ITenantNotifier
                 {
                     sent = await _whatsApp.SendTemplateAsync(
                         whatsAppTo, _options.WhatsAppTemplateName, _options.WhatsAppTemplateLanguage,
-                        new[] { tenant.Name, request.Body }, cancellationToken);
+                        new[] { tenant.Name, request.WhatsAppBody ?? request.Body }, cancellationToken);
                 }
                 else
                 {
                     // The platform admin owns one template per kind of notice. One that is missing, switched off or not yet approved by Meta is skipped
                     // with the reason on the notification - unless the notice allows plain text, when the same words go as a plain message instead.
-                    var resolution = await _templates.ResolveAsync(request.Kind, tenant.Name, request.Title, request.Body, cancellationToken);
+                    var resolution = await _templates.ResolveAsync(request.Kind, tenant.Name, request.Title, request.WhatsAppBody ?? request.Body, cancellationToken);
                     if (resolution.Message is { } message)
                     {
                         sent = await _whatsApp.SendTemplateAsync(whatsAppTo, message.TemplateName, message.Language, message.Parameters, cancellationToken, message.MediaUrl);
                     }
                     else if (request.PlainTextFallback)
                     {
-                        sent = await _whatsApp.SendTextAsync(whatsAppTo, $"{request.Title}\n\n{request.Body}", cancellationToken);
+                        sent = await _whatsApp.SendTextAsync(whatsAppTo, $"{request.Title}\n\n{request.WhatsAppBody ?? request.Body}", cancellationToken);
                         notes.Add(sent.Success
                             ? $"whatsapp: sent as plain text ({resolution.SkipNote})"
                             : $"whatsapp: plain text fallback after: {resolution.SkipNote}");

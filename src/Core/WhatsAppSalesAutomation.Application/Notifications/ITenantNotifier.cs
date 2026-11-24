@@ -15,7 +15,9 @@ public record TenantNotificationRequest(
     // When the notice's own template cannot be used (missing, switched off, not yet approved by Meta) send the same words as plain text instead of skipping.
     // WhatsApp delivers plain text from a business only while the person has messaged that number in the last 24 hours, so this can still fail: the
     // notification then records Failed with Meta's reason rather than pretending it went.
-    bool PlainTextFallback = false);
+    bool PlainTextFallback = false,
+    // WhatsApp carries a shorter text than email: when set, this goes in the WhatsApp message in place of <see cref="Body"/> (email and in-app keep Body).
+    string? WhatsAppBody = null);
 
 /// <summary>Tells a tenant something about its billing: always in-app, by email when there's an address, and on
 /// WhatsApp when asked and the tenant has opted in with a number. Never throws - a delivery problem is recorded
