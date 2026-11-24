@@ -34,8 +34,8 @@ public record PlatformPlanDto(
     // Explicit prices set per country, each in that country's own currency. A country not listed here is quoted
     // the base USD price converted at the catalog rate.
     IReadOnlyList<CountryPriceDto> CountryPrices,
-    // Free uses the plan gives of features it does NOT include: a tenant can try the feature this many times (in the feature's own unit)
-    // and is then asked to upgrade. Lifetime, per tenant.
+    // Uses the plan allows of a feature, in the feature's own unit, lifetime per tenant. For a feature the plan does NOT include these are free
+    // uses to try it; for one it includes, a cap (Basic: 100 AI replies). Either way the tenant is asked to upgrade once they are gone.
     IReadOnlyList<PlanFeatureTrialDto>? FreeTrials = null);
 
 /// <summary>Free uses a plan gives of one feature it does not include. <see cref="Unit"/> says what one use is ("leads", "AI generations").</summary>

@@ -209,4 +209,35 @@ public sealed class FeatureTrialTests : IDisposable
         Assert.False(await access.TryReserveTrialUseAsync(_tenant, PlatformFeature.LeadDiscovery));
         Assert.Equal(3, await UsedAsync());
     }
+    [Fact]
+    public async Task A_feature_the_plan_includes_can_be_capped_and_is_closed_once_the_cap_is_reached()
+    {
+        _db.PlanFeatureTrials.Add(new PlanFeatureTrial { PlanId = _basic.Id, Feature = PlatformFeature.AiConversations, FreeUses = 2 });
+        await _db.SaveChangesAsync();
+
+        Task<ConsumeResult> ReplyAsync(string key) =>
+            Request().Router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, 1m, key, "AiTransaction", key));
+
+        Assert.True((await ReplyAsync("ai:1")).Sufficient);
+        var capped = await Request().Access.GetTrialAsync(_tenant, PlatformFeature.AiConversations);
+        Assert.True(capped!.IncludedInPlan);
+        Assert.Equal(1, capped.Remaining);
+
+        Assert.True((await ReplyAsync("ai:2")).Sufficient);
+        Assert.False((await ReplyAsync("ai:3")).Sufficient);
+        Assert.DoesNotContain(PlatformFeature.AiConversations, await Request().Access.GetFeaturesAsync(_tenant));
+
+        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => Request().Access.RequireAsync(_tenant, PlatformFeature.AiConversations));
+        Assert.Contains("all 2 AI replies of AI conversations included with your Basic plan", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_feature_the_plan_includes_with_no_cap_is_unlimited()
+    {
+        for (var i = 0; i < 5; i++)
+            Assert.True((await Request().Router.ConsumeAsync(new ConsumeRequest(_tenant, QuotaType.Credits, 1m, $"ai:{i}", "AiTransaction", $"ai:{i}"))).Sufficient);
+
+        Assert.Contains(PlatformFeature.AiConversations, await Request().Access.GetFeaturesAsync(_tenant));
+        Assert.Null(await Request().Access.GetTrialAsync(_tenant, PlatformFeature.AiConversations));
+    }
 }

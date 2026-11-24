@@ -59,7 +59,9 @@ public class CreditCostService : ICreditCostService
 /// <see cref="Remaining"/> reaches zero the feature is locked like any other feature outside the plan, until the tenant upgrades.
 /// </summary>
 /// <param name="Unit">What one use is, plural ("leads", "AI generations"), for "3 of 10 free leads left".</param>
-public record FeatureTrialDto(PlatformFeature Feature, string Label, int FreeUses, int Used, string Unit, string UnitSingular)
+/// <param name="IncludedInPlan">True when the plan includes the feature but caps it (Basic: 100 AI replies); false when the plan does not include it
+/// and these are free uses to try it (Basic: 10 free leads). Either way the feature is closed to the tenant once they are used up, until it upgrades.</param>
+public record FeatureTrialDto(PlatformFeature Feature, string Label, int FreeUses, int Used, string Unit, string UnitSingular, bool IncludedInPlan = false)
 {
     public int Remaining => Math.Max(0, FreeUses - Used);
 
@@ -142,7 +144,8 @@ public class FeatureAccessService : IFeatureAccessService
             var planName = await _context.Plans.AsNoTracking().Where(p => p.Id == planId).Select(p => p.Name).FirstOrDefaultAsync(cancellationToken);
             access = new PlanAccess(
                 features,
-                trials.Where(t => !features.Contains(t.Feature) && PlatformFeatureCatalog.TrialUnitFor(t.Feature) is not null).ToDictionary(t => t.Feature, t => t.FreeUses),
+                // A feature the plan includes may have a cap too (Basic: AI conversations up to 100 replies); one it does not include, free uses to try it.
+                trials.Where(t => PlatformFeatureCatalog.TrialUnitFor(t.Feature) is not null).ToDictionary(t => t.Feature, t => t.FreeUses),
                 planName);
         }
 
@@ -162,10 +165,17 @@ public class FeatureAccessService : IFeatureAccessService
 
         // A feature the plan only gives free uses of is open while some are left. The unpublished switches are applied fresh every
         // time, so a platform admin's switch is never held back by the cache.
+        // A capped feature (in the plan or not) is open while some of its uses are left, and closed once they are gone.
         if (access.FreeUses.Count > 0)
         {
             var used = await LoadUsedAsync(tenantId, cancellationToken);
-            features.UnionWith(access.FreeUses.Where(t => used.GetValueOrDefault(t.Key) < t.Value).Select(t => t.Key));
+            foreach (var (feature, cap) in access.FreeUses)
+            {
+                if (used.GetValueOrDefault(feature) < cap)
+                    features.Add(feature);
+                else
+                    features.Remove(feature);
+            }
         }
 
         features.ExceptWith(PlatformFeatureSwitches.Unpublished(_configuration));
@@ -178,8 +188,8 @@ public class FeatureAccessService : IFeatureAccessService
             return false;
 
         var access = await GetPlanAccessAsync(tenantId, cancellationToken);
-        if (access.Features.Contains(feature))
-            return true;
+        if (!access.FreeUses.ContainsKey(feature))
+            return access.Features.Contains(feature);
 
         return await GetTrialAsync(tenantId, feature, cancellationToken) is { Exhausted: false };
     }
@@ -198,9 +208,9 @@ public class FeatureAccessService : IFeatureAccessService
         throw new FeatureDisabledException($"{label} is not part of your plan. Upgrade to Premium to use it.");
     }
 
-    /// <summary>What a tenant is told once the free uses of a feature are gone.</summary>
+    /// <summary>What a tenant is told once the free uses (or the plan's cap) of a feature are gone.</summary>
     public static string TrialUsedUpMessage(FeatureTrialDto trial, string? planName) =>
-        $"You have used all {trial.FreeUses} free {(trial.FreeUses == 1 ? trial.UnitSingular : trial.Unit)} of {trial.Label} included with your " +
+        $"You have used all {trial.FreeUses} {(trial.IncludedInPlan ? "" : "free ")}{(trial.FreeUses == 1 ? trial.UnitSingular : trial.Unit)} of {trial.Label} included with your " +
         $"{(string.IsNullOrWhiteSpace(planName) ? "current" : planName)} plan. Upgrade to Premium to keep using it.";
 
     public async Task<IReadOnlyList<FeatureTrialDto>> GetTrialsAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -214,7 +224,7 @@ public class FeatureAccessService : IFeatureAccessService
         return access.FreeUses
             .Where(t => !unpublished.Contains(t.Key))
             .OrderBy(t => t.Key)
-            .Select(t => ToDto(t.Key, t.Value, used.GetValueOrDefault(t.Key)))
+            .Select(t => ToDto(t.Key, t.Value, used.GetValueOrDefault(t.Key), access.Features.Contains(t.Key)))
             .ToList();
     }
 
@@ -226,13 +236,13 @@ public class FeatureAccessService : IFeatureAccessService
 
         var used = await _context.TenantFeatureTrialUsages.IgnoreQueryFilters().AsNoTracking()
             .Where(u => u.TenantId == tenantId && u.Feature == feature).Select(u => u.Used).FirstOrDefaultAsync(cancellationToken);
-        return ToDto(feature, freeUses, used);
+        return ToDto(feature, freeUses, used, access.Features.Contains(feature));
     }
 
-    private static FeatureTrialDto ToDto(PlatformFeature feature, int freeUses, int used)
+    private static FeatureTrialDto ToDto(PlatformFeature feature, int freeUses, int used, bool includedInPlan)
     {
         var unit = PlatformFeatureCatalog.TrialUnitFor(feature)!;
-        return new FeatureTrialDto(feature, PlatformFeatureCatalog.For(feature).Label, freeUses, used, unit.Plural, unit.Singular);
+        return new FeatureTrialDto(feature, PlatformFeatureCatalog.For(feature).Label, freeUses, used, unit.Plural, unit.Singular, includedInPlan);
     }
 
     public async Task<bool> TryReserveTrialUseAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
