@@ -83,10 +83,14 @@ public class WhatsAppChannelStore : IWhatsAppChannelStore
         if (row is null)
             return;
 
+        // The time moves only when the status itself changes. A repeated "close" for a channel already Disconnected must keep the moment it went down:
+        // the session-disconnect alert uses it to tell one outage from the next, and a refresh here would make every repeat look like a new outage.
+        var changed = !string.Equals(row.Status, status, StringComparison.Ordinal);
         row.Status = status;
         row.ConnectedPhone = connectedPhone;
         row.LastError = lastError is null ? null : lastError.Length > 300 ? lastError[..300] : lastError;
-        row.StatusUpdatedAtUtc = _dateTime.UtcNow;
+        if (changed)
+            row.StatusUpdatedAtUtc = _dateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
     }
 

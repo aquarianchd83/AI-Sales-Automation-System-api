@@ -61,5 +61,8 @@ public enum TenantNotificationKind
     // The mandate was cancelled - by the tenant, in their UPI app, or by their bank. The plan runs to the end of what was paid for.
     AutoPayCancelled = 28,
     // The tenant paused the mandate in their UPI app: nothing is taken until they resume it there.
-    AutoPayPaused = 29
+    AutoPayPaused = 29,
+    // The tenant's WhatsApp QR session dropped (phone unlinked, logged out, or the connection failed), so every send is paused until they scan a new QR.
+    // Raised by the twice-daily session check, once per disconnect, through the platform's own WhatsApp number and email account.
+    WhatsAppSessionDisconnected = 30
 }
