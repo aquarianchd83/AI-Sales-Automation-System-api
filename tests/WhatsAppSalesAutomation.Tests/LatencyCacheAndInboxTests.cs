@@ -110,7 +110,7 @@ public sealed class LatencyCacheAndInboxTests : IDisposable
         var generation = _cache.Generation;
         _cache.InvalidateTenant(Guid.NewGuid()); // a plan change saved while this request was still reading the old plan
 
-        _cache.Set(tenantId, new HashSet<PlatformFeature> { PlatformFeature.Campaigns }, generation);
+        _cache.Set(tenantId, new PlanAccess(new HashSet<PlatformFeature> { PlatformFeature.Campaigns }, new Dictionary<PlatformFeature, int>(), null), generation);
 
         Assert.False(_cache.TryGet(tenantId, out _));
     }

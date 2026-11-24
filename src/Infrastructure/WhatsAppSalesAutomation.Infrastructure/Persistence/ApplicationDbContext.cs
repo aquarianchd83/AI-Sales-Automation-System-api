@@ -152,6 +152,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<Payment> Payments => Set<Payment>();
 
     public DbSet<PlanFeature> PlanFeatures => Set<PlanFeature>();
+    public DbSet<PlanFeatureTrial> PlanFeatureTrials => Set<PlanFeatureTrial>();
+    public DbSet<TenantFeatureTrialUsage> TenantFeatureTrialUsages => Set<TenantFeatureTrialUsage>();
 
     public DbSet<TenantFeatureCap> TenantFeatureCaps => Set<TenantFeatureCap>();
 

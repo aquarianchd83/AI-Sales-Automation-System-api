@@ -45,8 +45,9 @@ public class PlatformBillingService : IPlatformBillingService
 
         var planIds = plans.Select(p => p.Id).ToList();
         var featuresByPlan = await LoadFeaturesAsync(planIds, cancellationToken);
+        var trialsByPlan = await LoadTrialsAsync(planIds, cancellationToken);
         var pricesByPlan = await CatalogPricing.LoadPlanPricesAsync(_context, planIds, cancellationToken);
-        return plans.Select(p => ToDto(p, pricing, featuresByPlan.GetValueOrDefault(p.Id), pricesByPlan.GetValueOrDefault(p.Id))).ToList();
+        return plans.Select(p => ToDto(p, pricing, featuresByPlan.GetValueOrDefault(p.Id), pricesByPlan.GetValueOrDefault(p.Id), trialsByPlan.GetValueOrDefault(p.Id))).ToList();
     }
 
     public async Task<PagedResult<PlatformSubscriptionListItemDto>> GetSubscriptionsAsync(PlatformSubscriptionQuery query, CancellationToken cancellationToken = default)
@@ -104,6 +105,14 @@ public class PlatformBillingService : IPlatformBillingService
         foreach (var feature in features)
             _context.PlanFeatures.Add(new PlanFeature { PlanId = plan.Id, Feature = feature });
 
+        var trials = new List<PlanFeatureTrial>();
+        foreach (var input in request.FreeTrials ?? Array.Empty<PlanFeatureTrialInput>())
+        {
+            var row = new PlanFeatureTrial { PlanId = plan.Id, Feature = input.Feature, FreeUses = input.FreeUses };
+            _context.PlanFeatureTrials.Add(row);
+            trials.Add(row);
+        }
+
         var prices = new CountryPrices();
         foreach (var input in request.CountryPrices ?? Array.Empty<CountryPriceInput>())
         {
@@ -118,7 +127,7 @@ public class PlatformBillingService : IPlatformBillingService
         plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features.Select(f => new PlanFeature { PlanId = plan.Id, Feature = f }), prices);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features.Select(f => new PlanFeature { PlanId = plan.Id, Feature = f }), prices, trials);
     }
 
     public async Task<PlatformPlanDto> UpdatePlanAsync(Guid id, UpdatePlanRequest request, CancellationToken cancellationToken = default)
@@ -163,6 +172,21 @@ public class PlatformBillingService : IPlatformBillingService
             }
         }
 
+        // Null leaves the free uses alone; a list sets each feature it names. A row set to 0 is kept, so the seeder does not put its default back.
+        var trials = await _context.PlanFeatureTrials.Where(t => t.PlanId == id).ToListAsync(cancellationToken);
+        foreach (var input in request.FreeTrials ?? Array.Empty<PlanFeatureTrialInput>())
+        {
+            var row = trials.FirstOrDefault(t => t.Feature == input.Feature);
+            if (row is null)
+            {
+                row = new PlanFeatureTrial { PlanId = id, Feature = input.Feature };
+                _context.PlanFeatureTrials.Add(row);
+                trials.Add(row);
+            }
+
+            row.FreeUses = input.FreeUses;
+        }
+
         var existingPrices = await _context.PlanPrices.Where(p => p.PlanId == id).ToListAsync(cancellationToken);
         if (request.CountryPrices is { } wantedPrices)
         {
@@ -198,7 +222,7 @@ public class PlatformBillingService : IPlatformBillingService
         plan.PriceMonthlyCents = DeriveBaseCents(plan.PriceMonthlyCents, prices);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features, prices);
+        return ToDto(plan, await _pricing.GetAsync(cancellationToken), features, prices, trials);
     }
 
     public async Task DeactivatePlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -323,6 +347,11 @@ public class PlatformBillingService : IPlatformBillingService
             .GroupBy(f => f.PlanId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+    private async Task<Dictionary<Guid, List<PlanFeatureTrial>>> LoadTrialsAsync(IReadOnlyCollection<Guid> planIds, CancellationToken cancellationToken) =>
+        (await _context.PlanFeatureTrials.Where(t => planIds.Contains(t.PlanId)).ToListAsync(cancellationToken))
+            .GroupBy(t => t.PlanId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
     /// <summary>The USD-cents figure older code still reads (list ordering, the legacy Payment column) - taken from India's
     /// price, else the first country price set, else left as it was. Prices themselves live per country; nothing is sold from this.</summary>
     private static int DeriveBaseCents(int current, CountryPrices prices)
@@ -343,7 +372,7 @@ public class PlatformBillingService : IPlatformBillingService
             .Select(x => new CountryPriceDto(x.Pricing!.CountryCode, x.Pricing.CountryName, x.Pricing.CurrencyCode, x.Pricing.CurrencySymbol, x.Value))
             .ToList();
 
-    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing, IEnumerable<PlanFeature>? features, CountryPrices? prices) => new(
+    private static PlatformPlanDto ToDto(Plan p, RegionalPricing pricing, IEnumerable<PlanFeature>? features, CountryPrices? prices, IEnumerable<PlanFeatureTrial>? trials = null) => new(
         p.Id, p.Code, p.Name, p.MaxUsers, p.MaxMessagesPerMonth,
         p.MaxCampaigns, p.MaxKnowledgeBaseArticles, p.MaxLeadDiscoveryBatchSize, p.PriceMonthlyCents, p.IsActive,
         pricing.CurrencyCode,
@@ -354,7 +383,12 @@ public class PlatformBillingService : IPlatformBillingService
         p.StarterCredits,
         p.MonthlyCredits,
         (features ?? Array.Empty<PlanFeature>()).Select(f => f.Feature).OrderBy(f => f).ToList(),
-        ToCountryPriceDtos(prices));
+        ToCountryPriceDtos(prices),
+        (trials ?? Array.Empty<PlanFeatureTrial>())
+            .Where(t => t.FreeUses > 0 && WhatsAppSalesAutomation.Application.Credits.PlatformFeatureCatalog.TrialUnitFor(t.Feature) is not null)
+            .OrderBy(t => t.Feature)
+            .Select(t => new PlanFeatureTrialDto(t.Feature, t.FreeUses, WhatsAppSalesAutomation.Application.Credits.PlatformFeatureCatalog.TrialUnitFor(t.Feature)!.Plural))
+            .ToList());
 
     private static PlatformCreditPackDto ToDto(CreditPack p, RegionalPricing pricing, CountryPrices? prices) => new(
         p.Id, p.QuotaType, p.Name, p.Units, p.PriceCents, p.IsActive,
