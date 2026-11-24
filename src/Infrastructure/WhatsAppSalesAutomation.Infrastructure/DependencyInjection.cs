@@ -261,6 +261,7 @@ public static class DependencyInjection
         services.AddHttpClient<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppBridgeClient, EvolutionApiClient>().RemoveAllLoggers();
         services.AddScoped<WhatsAppSalesAutomation.Application.WhatsAppBridge.IWhatsAppChannelStore, WhatsAppChannelStore>();
         services.AddScoped<IWhatsAppService, WhatsAppServiceFactory>();
+        services.AddScoped<ITemplateSendPolicy, TemplateSendPolicy>();
 
         // Facebook / Instagram ad spend for the Revenue report. RemoveAllLoggers is a security requirement, as above: the code
         // exchange carries the App Secret and tokens in the query string.
