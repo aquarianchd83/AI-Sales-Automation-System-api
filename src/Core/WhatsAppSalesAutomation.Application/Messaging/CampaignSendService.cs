@@ -591,6 +591,17 @@ public class CampaignSendService : ICampaignSendService
             return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
         }
 
+        // The provider may have changed since the first attempt (e.g. QR bridge -> Meta), so the template must still be sendable now.
+        if (!_templatePolicy.CanSend(template))
+        {
+            message.Status = MessageStatus.Failed;
+            message.FailureReason = "Template is not sendable (inactive, or not Approved for the current provider) - retry abandoned.";
+            message.NextAttemptAt = null;
+            message.AttemptCount = Math.Max(message.AttemptCount, options.MaxRetryAttempts);
+            await _context.SaveChangesAsync(cancellationToken);
+            return SendRunResult.Empty with { Considered = 1, Skipped = 1 };
+        }
+
         var retryGate = TemplateSendGate.Evaluate(customer, template.Category);
         if (!retryGate.Allowed)
         {
