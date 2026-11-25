@@ -3162,12 +3162,18 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
 
+                    b.Property<DateTime?>("LastReminderAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("NextAttemptAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("ProviderMessageId")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ReminderCount")
+                        .HasColumnType("int");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -4928,6 +4934,15 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasColumnType("time");
 
                     b.Property<int>("BatchSize")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ConsentReminderEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ConsentReminderFirstDays")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ConsentReminderSecondDays")
                         .HasColumnType("int");
 
                     b.Property<bool>("ConsentSmsEnabled")

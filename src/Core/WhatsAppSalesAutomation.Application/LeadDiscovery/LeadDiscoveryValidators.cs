@@ -47,6 +47,17 @@ public class SaveLeadDiscoveryProfileRequestValidator : AbstractValidator<SaveLe
             .Must(m => Enum.TryParse<LeadDiscoveryCampaignStartMode>(m, ignoreCase: true, out _))
             .WithMessage("Auto campaign start must be Immediate or NextDayWithTime.");
 
+        // Reminders: the first at day 1 to 13, the second (optional) after it. How far they may go also depends on the Auto-Campaign's length -
+        // checked in LeadDiscoveryService.SaveProfileAsync, which can read the campaign.
+        RuleFor(x => x.ConsentReminderFirstDays)
+            .InclusiveBetween(1, Consent.ConsentReminderPolicy.MaxReminderDay)
+            .When(x => x.ConsentReminderEnabled)
+            .WithMessage($"Send the first reminder between day 1 and day {Consent.ConsentReminderPolicy.MaxReminderDay}.");
+        RuleFor(x => x.ConsentReminderSecondDays)
+            .Must((x, second) => second is null || (second > x.ConsentReminderFirstDays && second <= Consent.ConsentReminderPolicy.MaxReminderDay))
+            .When(x => x.ConsentReminderEnabled)
+            .WithMessage($"Send the second reminder after the first, and by day {Consent.ConsentReminderPolicy.MaxReminderDay}.");
+
         RuleFor(x => x.AutoCampaignStartTime)
             .NotNull()
             .When(x => string.Equals(x.AutoCampaignStartMode, nameof(LeadDiscoveryCampaignStartMode.NextDayWithTime), StringComparison.OrdinalIgnoreCase))

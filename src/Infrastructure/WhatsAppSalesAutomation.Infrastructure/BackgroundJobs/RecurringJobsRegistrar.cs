@@ -68,6 +68,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<LeadDiscoverySlotJob>(
             "lead-discovery-slots", job => job.RunAsync(), "* * * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Hourly, at :20: consent SMS that nobody answered - the reminders that have fallen due, and "No response" once the link has run out.
+        // Cheap when nothing is waiting: one indexed read.
+        recurringJobs.AddOrUpdate<ConsentReminderJob>(
+            "consent-reminders", job => job.RunAsync(CancellationToken.None), "20 * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 15 minutes: low-balance, used-up and credits-expiring alerts. Frequent so a tenant that has just
         // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
         recurringJobs.AddOrUpdate<QuotaAlertJob>(

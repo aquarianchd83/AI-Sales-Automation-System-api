@@ -102,6 +102,8 @@ public sealed class SmsReceiptsControllerTests
             => throw new NotImplementedException();
 
         public Task<int> RetryDueAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetTenantsWithOpenInvitationsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WhatsAppSalesAutomation.Application.Consent.ConsentReminderRunResult> ProcessRemindersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
         public Task<ConsentReplyOutcome> HandleInboundMessageAsync(Customer customer, InboundConsentMessage message, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();

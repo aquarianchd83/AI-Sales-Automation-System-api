@@ -1604,6 +1604,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             return Task.FromResult(new ConsentInvitationBatchResult(customerIds.Count, 0, 0, Array.Empty<string>()));
         }
 
+        public Task<IReadOnlyList<Guid>> GetTenantsWithOpenInvitationsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WhatsAppSalesAutomation.Application.Consent.ConsentReminderRunResult> ProcessRemindersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> RetryDueAsync(CancellationToken cancellationToken = default)
         {
             RetryCalls++;

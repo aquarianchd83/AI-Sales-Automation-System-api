@@ -30,6 +30,7 @@ public class ConsentInvitationService : IConsentInvitationService
     private readonly ICampaignSendService _campaignSend;
     private readonly IConsentPageGate _gate;
     private readonly IConsentWhatsAppStarter _starter;
+    private readonly ITenantTimeZoneProvider _tenantTimeZone;
     private readonly ConsentPageOptions _options;
     private readonly ILogger<ConsentInvitationService> _logger;
 
@@ -42,6 +43,7 @@ public class ConsentInvitationService : IConsentInvitationService
         ICampaignSendService campaignSend,
         IConsentPageGate gate,
         IConsentWhatsAppStarter starter,
+        ITenantTimeZoneProvider tenantTimeZone,
         IOptions<ConsentPageOptions> options,
         ILogger<ConsentInvitationService> logger)
     {
@@ -53,6 +55,7 @@ public class ConsentInvitationService : IConsentInvitationService
         _campaignSend = campaignSend;
         _gate = gate;
         _starter = starter;
+        _tenantTimeZone = tenantTimeZone;
         _options = options.Value;
         _logger = logger;
     }
@@ -299,7 +302,7 @@ public class ConsentInvitationService : IConsentInvitationService
 
         invitation.HeldForConsentPage = false;
         invitation.TokenHash = ConsentLinkToken.Hash(token);
-        invitation.TokenExpiresAtUtc = now.AddDays(_options.TokenLifetimeDays);
+        invitation.TokenExpiresAtUtc = now.AddDays(await WindowDaysAsync(invitation.CampaignId, cancellationToken));
         invitation.Body = ConsentSmsMessage.Redact(body, token);
         invitation.WhatsAppLink = ConsentSmsMessage.Redact(link, token);
 
@@ -351,6 +354,186 @@ public class ConsentInvitationService : IConsentInvitationService
         var retryNote = invitation.NextAttemptAt is { } next ? $" It will be tried again after {next:yyyy-MM-dd HH:mm} UTC." : " It will not be tried again.";
         AddHistory(customer, CustomerHistoryEventTypes.SmsFailed, previous, ConsentInvitationStatus.Failed.ToString(),
             $"{reason}{retryNote}", now, invitation.CampaignId, invitation.ExecutionId, invitation.ProviderMessageId, invitation.CorrelationId);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Reminders and "No response"
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>How many days the customer has to answer: the default, cut to the campaign's own length when it is shorter (see <see cref="ConsentWindow"/>).</summary>
+    private async Task<int> WindowDaysAsync(Guid? campaignId, CancellationToken cancellationToken)
+    {
+        if (campaignId is not { } id)
+            return _options.TokenLifetimeDays;
+
+        var delays = await _context.CampaignSteps.AsNoTracking()
+            .Where(s => s.CampaignId == id && s.IsActive)
+            .Select(s => s.DelayDaysAfterPrevious)
+            .ToListAsync(cancellationToken);
+        return ConsentWindow.Days(_options.TokenLifetimeDays, delays);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetTenantsWithOpenInvitationsAsync(CancellationToken cancellationToken = default) =>
+        await _context.ConsentInvitations.IgnoreQueryFilters().AsNoTracking()
+            .Where(i => i.DecisionStatus == ConsentDecisionStatus.LinkSent && i.ConsentRecordedAtUtc == null && i.TokenHash != null)
+            .Select(i => i.TenantId)
+            .Distinct()
+            .Take(500)
+            .ToListAsync(cancellationToken);
+
+    public async Task<ConsentReminderRunResult> ProcessRemindersAsync(CancellationToken cancellationToken = default)
+    {
+        var now = _dateTime.UtcNow;
+        var expired = await MarkNoResponseAsync(now, cancellationToken);
+
+        var tenantId = _tenantContext.TenantId;
+        if (tenantId is null)
+            return new ConsentReminderRunResult(0, 0, 0, expired);
+
+        // Always the profile's own choice; a tenant that never turned reminders on has none sent.
+        var profile = await _context.LeadDiscoveryProfiles.AsNoTracking()
+            .Where(p => p.TenantId == tenantId && p.ConsentSmsEnabled && p.ConsentReminderEnabled)
+            .Select(p => new { p.ConsentReminderFirstDays, p.ConsentReminderSecondDays })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (profile is null)
+            return new ConsentReminderRunResult(0, 0, 0, expired);
+
+        // Nothing goes to a phone at night: outside the tenant's daytime hours the reminders simply wait for the next hour inside them.
+        var localHour = (await _tenantTimeZone.GetLocalNowAsync(cancellationToken)).Hour;
+        if (localHour < ConsentReminderPolicy.SendWindowStartHour || localHour >= ConsentReminderPolicy.SendWindowEndHour)
+            return new ConsentReminderRunResult(0, 0, 0, expired);
+
+        var readiness = await _gate.EvaluateAsync(tenantId.Value, cancellationToken);
+        if (!readiness.IsReady)
+            return new ConsentReminderRunResult(0, 0, 0, expired);
+
+        var open = await _context.ConsentInvitations
+            .Where(i => i.DecisionStatus == ConsentDecisionStatus.LinkSent && i.ConsentRecordedAtUtc == null && i.TokenHash != null
+                        && i.SubmittedAtUtc != null && i.ReminderCount < ConsentSmsMessage.MaxReminders
+                        && i.TokenExpiresAtUtc != null && i.TokenExpiresAtUtc > now)
+            .OrderBy(i => i.SubmittedAtUtc)
+            .Take(100)
+            .ToListAsync(cancellationToken);
+
+        int sent = 0, failed = 0, skipped = 0;
+        foreach (var invitation in open)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // The day this reminder is due, counted from the invitation. A second reminder that is not set, or one that would fall after the
+            // link has closed, is never sent.
+            var dueAfterDays = invitation.ReminderCount == 0 ? profile.ConsentReminderFirstDays : profile.ConsentReminderSecondDays;
+            if (dueAfterDays is not { } days)
+                continue;
+            var dueAt = invitation.SubmittedAtUtc!.Value.AddDays(days);
+            if (dueAt > now)
+                continue;
+            if (dueAt >= invitation.TokenExpiresAtUtc!.Value)
+            {
+                skipped++;
+                continue;
+            }
+
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == invitation.CustomerId, cancellationToken);
+            if (customer is null || customer.OptInStatus is OptInStatus.OptedOut or OptInStatus.OptedIn)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (await SendReminderAsync(invitation, customer, readiness, now, cancellationToken))
+                sent++;
+            else
+                failed++;
+        }
+
+        return new ConsentReminderRunResult(sent, failed, skipped, expired);
+    }
+
+    /// <summary>
+    /// One reminder SMS, with a fresh link (the earlier one stops working: only the newest secret is kept). The invitation's own expiry is never
+    /// moved, so a reminder can never stretch the window. Counted whether or not the provider takes it, so a provider that is down cannot make
+    /// this repeat every hour.
+    /// </summary>
+    private async Task<bool> SendReminderAsync(
+        ConsentInvitation invitation, Customer customer, ConsentPageReadiness readiness, DateTime now, CancellationToken cancellationToken)
+    {
+        var number = invitation.ReminderCount + 1;
+        var token = ConsentLinkToken.Generate();
+        var link = ConsentSmsMessage.BuildLink(_options.PublicBaseUrl!, token);
+        var body = ConsentSmsMessage.BuildReminderBody(customer.FirstName, readiness.Live!.BusinessName, readiness.Live.ProductLabel, link);
+
+        var problem = ConsentSmsMessage.Preflight(invitation.ToPhoneE164, body, link);
+        invitation.ReminderCount = number;
+        invitation.LastReminderAtUtc = now;
+        if (problem is not null)
+        {
+            invitation.FailureReason = problem;
+            AddHistory(customer, CustomerHistoryEventTypes.SmsFailed, null, null, $"Reminder {number} was not sent: {problem}", now,
+                invitation.CampaignId, invitation.ExecutionId, correlationId: invitation.CorrelationId);
+            await _context.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+
+        ConsentSmsSendResult result;
+        try
+        {
+            // The key carries the reminder number, so the provider never sees it as a repeat of the invitation.
+            result = await _sms.SendAsync(new ConsentSmsRequest(invitation.ToPhoneE164, body, $"{invitation.IdempotencyKey}:reminder:{number}"), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "SMS provider call failed for consent reminder {InvitationId}", invitation.Id);
+            result = new ConsentSmsSendResult(false, null, $"The SMS provider could not be reached: {ex.Message}", Transient: true);
+        }
+
+        if (!result.Accepted)
+        {
+            var reason = result.FailureReason ?? "The SMS provider rejected the message.";
+            invitation.FailureReason = reason;
+            AddHistory(customer, CustomerHistoryEventTypes.SmsFailed, null, null, $"Reminder {number} was not sent: {reason}", now,
+                invitation.CampaignId, invitation.ExecutionId, correlationId: invitation.CorrelationId);
+            await _context.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+
+        // Only the newest link is valid from here on; the stored text has the secret taken out, as for the invitation.
+        invitation.TokenHash = ConsentLinkToken.Hash(token);
+        invitation.Body = ConsentSmsMessage.Redact(body, token);
+        invitation.WhatsAppLink = ConsentSmsMessage.Redact(link, token);
+        invitation.FailureReason = null;
+        AddHistory(customer, CustomerHistoryEventTypes.SmsSubmitted, null, null,
+            $"Reminder {number} of {ConsentSmsMessage.MaxReminders} handed to the SMS provider, with a fresh consent link.", now,
+            invitation.CampaignId, invitation.ExecutionId, result.ProviderMessageId, invitation.CorrelationId);
+        await _context.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>Invitations whose link ran out with no answer: marked Expired, so the customer shows as "No response". Nothing more is sent.</summary>
+    private async Task<int> MarkNoResponseAsync(DateTime now, CancellationToken cancellationToken)
+    {
+        var lapsed = await _context.ConsentInvitations
+            .Where(i => i.DecisionStatus == ConsentDecisionStatus.LinkSent && i.ConsentRecordedAtUtc == null
+                        && i.TokenExpiresAtUtc != null && i.TokenExpiresAtUtc <= now)
+            .OrderBy(i => i.TokenExpiresAtUtc)
+            .Take(200)
+            .ToListAsync(cancellationToken);
+        if (lapsed.Count == 0)
+            return 0;
+
+        var customerIds = lapsed.Select(i => i.CustomerId).ToList();
+        var customers = await _context.Customers.Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, cancellationToken);
+        foreach (var invitation in lapsed)
+        {
+            invitation.DecisionStatus = ConsentDecisionStatus.Expired;
+            if (customers.TryGetValue(invitation.CustomerId, out var customer))
+                AddHistory(customer, CustomerHistoryEventTypes.ConsentExpired, ConsentDecisionStatus.LinkSent.ToString(), ConsentDecisionStatus.Expired.ToString(),
+                    "No response: the consent link expired before the customer answered.", now, invitation.CampaignId, invitation.ExecutionId,
+                    correlationId: invitation.CorrelationId);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return lapsed.Count;
     }
 
     // ---------------------------------------------------------------------------------------------

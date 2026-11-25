@@ -84,7 +84,7 @@ public sealed partial class ConsentFlowTests : IDisposable
         _gate = new ConsentPageGate(_db, _notifier, Options.Create(_pageOptions), NullLogger<ConsentPageGate>.Instance);
         var starter = new ConsentWhatsAppStarter(_db, _campaignSend, _clock, Options.Create(_pageOptions), NullLogger<ConsentWhatsAppStarter>.Instance);
         _consent = new ConsentInvitationService(
-            _db, _sms, _clock, _ambient, config, _campaignSend, _gate, starter, Options.Create(_pageOptions),
+            _db, _sms, _clock, _ambient, config, _campaignSend, _gate, starter, new LocalClock(_clock), Options.Create(_pageOptions),
             NullLogger<ConsentInvitationService>.Instance);
         _page = new ConsentPageService(_db, _ambient, _clock, starter, NullLogger<ConsentPageService>.Instance);
 
