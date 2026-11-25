@@ -132,6 +132,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<LeadDiscoveryExecution> LeadDiscoveryExecutions => Set<LeadDiscoveryExecution>();
 
+    public DbSet<LeadDiscoveryScheduleSlot> LeadDiscoveryScheduleSlots => Set<LeadDiscoveryScheduleSlot>();
+
     public DbSet<LeadDiscoveryExecutionCustomer> LeadDiscoveryExecutionCustomers => Set<LeadDiscoveryExecutionCustomer>();
     public DbSet<LeadDiscoveryCachedLead> LeadDiscoveryCachedLeads => Set<LeadDiscoveryCachedLead>();
 

@@ -89,7 +89,9 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
                 _recurringJobs.AddOrUpdate<WhatsAppTokenRefreshJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
                 break;
             case TenantJobTypes.LeadDiscovery:
-                _recurringJobs.AddOrUpdate<LeadDiscoveryJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);
+                // No cron of its own any more: the tenant's own dates and times (LeadDiscoveryScheduleSlot, up to five) start it, through the minute-by-minute
+                // LeadDiscoverySlotJob. An old registration is removed so the midnight run does not fire beside them.
+                _recurringJobs.RemoveIfExists(recurringJobId);
                 break;
             case TenantJobTypes.LeadFollowUps:
                 _recurringJobs.AddOrUpdate<LeadFollowUpJob>(recurringJobId, job => job.RunAsync(tenantId), cronExpression, RecurringJobPolicy.SkipMissedOccurrences);

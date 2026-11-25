@@ -63,6 +63,11 @@ public static class RecurringJobsRegistrar
         recurringJobs.AddOrUpdate<WhatsAppSessionAlertJob>(
             "whatsapp-session-alert", job => job.RunAsync(), "30 4,11 * * *", RecurringJobPolicy.SkipMissedOccurrences);
 
+        // Every minute: starts the lead-discovery run for each tenant with a scheduled date and time that has come (up to five per tenant). Cheap when
+        // nothing is due: one indexed read.
+        recurringJobs.AddOrUpdate<LeadDiscoverySlotJob>(
+            "lead-discovery-slots", job => job.RunAsync(), "* * * * *", RecurringJobPolicy.SkipMissedOccurrences);
+
         // Every 15 minutes: low-balance, used-up and credits-expiring alerts. Frequent so a tenant that has just
         // run out hears about it quickly; the notifier never raises the same alert twice, so it costs nothing.
         recurringJobs.AddOrUpdate<QuotaAlertJob>(

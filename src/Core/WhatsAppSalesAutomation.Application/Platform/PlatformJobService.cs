@@ -153,7 +153,8 @@ public class PlatformJobService : IPlatformJobService
         if (!TenantStatusRules.AllowsBackgroundJobs(tenant.Status))
             throw new ConflictException($"Tenant {tenant.Name} is {tenant.Status} - its background jobs cannot be run.");
 
-        if (!schedule.IsEnabled)
+        // Lead discovery's Run now does not depend on a schedule: its times are the tenant's own slots, and a person's run is separate from them.
+        if (!schedule.IsEnabled && jobType != TenantJobTypes.LeadDiscovery)
             throw new ConflictException($"Job {jobType} is disabled for tenant {tenant.Name} - enable it before running it.");
 
         var backgroundJobId = _scheduler.TriggerTenantJob(tenantId, jobType, string.IsNullOrWhiteSpace(actorEmail) ? null : actorEmail);

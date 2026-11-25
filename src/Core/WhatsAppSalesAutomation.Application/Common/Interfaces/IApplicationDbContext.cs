@@ -139,6 +139,8 @@ public interface IApplicationDbContext
 
     DbSet<LeadDiscoveryExecution> LeadDiscoveryExecutions { get; }
 
+    DbSet<LeadDiscoveryScheduleSlot> LeadDiscoveryScheduleSlots { get; }
+
     DbSet<LeadDiscoveryExecutionCustomer> LeadDiscoveryExecutionCustomers { get; }
 
     DbSet<LeadDiscoveryCachedLead> LeadDiscoveryCachedLeads { get; }

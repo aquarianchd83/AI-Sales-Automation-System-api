@@ -2,6 +2,7 @@ using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -44,6 +45,20 @@ public class LeadDiscoveryController : ControllerBase
     public async Task<ActionResult<Application.Tenancy.KeywordSuggestionsDto>> SuggestKeywords(
         [FromBody] SuggestLeadKeywordsRequest request, [FromServices] ILeadDiscoveryKeywordSuggestionService suggestions, CancellationToken cancellationToken)
         => Ok(await suggestions.SuggestAsync(request, cancellationToken));
+
+    /// <summary>The up-to-five times the tenant has set for lead discovery to run by itself, and the next runs they make.</summary>
+    [HttpGet("schedule")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<LeadDiscoveryScheduleDto>> GetSchedule(
+        [FromServices] ILeadDiscoveryScheduleService schedule, [FromServices] ITenantContext tenant, CancellationToken cancellationToken)
+        => Ok(await schedule.GetAsync(tenant.TenantId ?? throw new InvalidOperationException("A tenant is required."), cancellationToken));
+
+    /// <summary>Replaces the schedule: each slot is a date and a time in the tenant's time zone, once or every day.</summary>
+    [HttpPut("schedule")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<LeadDiscoveryScheduleDto>> SaveSchedule(
+        [FromBody] SaveLeadDiscoveryScheduleRequest request, [FromServices] ILeadDiscoveryScheduleService schedule, [FromServices] ITenantContext tenant, CancellationToken cancellationToken)
+        => Ok(await schedule.SaveAsync(tenant.TenantId ?? throw new InvalidOperationException("A tenant is required."), request, cancellationToken));
 
     [HttpGet("leads")]
     public async Task<ActionResult<PagedResult<DiscoveredLeadDto>>> GetLeads(

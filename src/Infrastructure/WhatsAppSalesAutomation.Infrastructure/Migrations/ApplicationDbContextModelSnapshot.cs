@@ -5072,6 +5072,42 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.ToTable("LeadDiscoveryRuns", (string)null);
                 });
 
+            modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.LeadDiscovery.LeadDiscoveryScheduleSlot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDone")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastRunAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("NextRunAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("RepeatDaily")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("IsDone", "NextRunAtUtc");
+
+                    b.ToTable("LeadDiscoveryScheduleSlots", (string)null);
+                });
+
             modelBuilder.Entity("WhatsAppSalesAutomation.Domain.Entities.Leads.Lead", b =>
                 {
                     b.Property<Guid>("Id")

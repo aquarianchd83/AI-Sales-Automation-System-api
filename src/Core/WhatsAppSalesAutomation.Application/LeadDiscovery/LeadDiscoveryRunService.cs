@@ -156,7 +156,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
         // Unfinished work first, oldest first - each resumed by its own new execution.
         var retried = false;
-        foreach (var retryId in await FindAutomaticRetryTargetsAsync(profile, cancellationToken))
+        // A person's Run now is its own run: it never takes over a waiting retry, which stays for the next scheduled time.
+        foreach (var retryId in startedBy is null ? await FindAutomaticRetryTargetsAsync(profile, cancellationToken) : new List<Guid>())
         {
             var previous = await _context.LeadDiscoveryExecutions
                 .FirstOrDefaultAsync(e => e.Id == retryId && e.TenantId == tenantId, cancellationToken);

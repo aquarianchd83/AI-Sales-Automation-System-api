@@ -199,6 +199,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantChargesService, TenantChargesService>();
         services.AddScoped<ILeadDiscoveryService, LeadDiscoveryService>();
         services.AddScoped<ILeadDiscoveryRunService, LeadDiscoveryRunService>();
+        services.AddScoped<ILeadDiscoveryScheduleService, LeadDiscoveryScheduleService>();
         services.AddScoped<ILeadDiscoveryHistoryService, LeadDiscoveryHistoryService>();
         services.AddSingleton<IApplicationInstance, ApplicationInstance>();
 

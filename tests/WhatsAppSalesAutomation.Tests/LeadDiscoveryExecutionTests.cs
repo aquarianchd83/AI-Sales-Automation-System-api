@@ -228,6 +228,23 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_now_does_not_take_over_a_waiting_retry()
+    {
+        _agent.Rounds.Add(Candidates("A", "C"));
+        FailCustomerSave("C Contact");
+        await Service().RunForTenantAsync(_tenant); // first run: C fails -> RetryPending
+        _agent.Rounds.Add(Candidates("X"));
+
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+
+        var executions = await Executions();
+        Assert.Empty(executions.Where(e => e.Trigger == LeadDiscoveryTriggers.AutomaticRetry));
+        Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.ManualRun);
+        // The waiting run is still waiting for the next scheduled time.
+        Assert.Single(executions, e => e.Status == LeadDiscoveryExecutionStatus.RetryPending);
+    }
+
+    [Fact]
     public async Task The_same_skipped_run_repeating_updates_one_row_instead_of_adding_more()
     {
         _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
