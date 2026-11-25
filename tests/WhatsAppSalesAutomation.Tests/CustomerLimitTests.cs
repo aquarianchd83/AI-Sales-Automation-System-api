@@ -88,6 +88,19 @@ public sealed class CustomerLimitTests : IDisposable
         Assert.Null(await CustomerQuota.GetAsync(_db, _tenant));
     }
 
+    [Fact]
+    public async Task The_team_limit_counts_the_tenants_users()
+    {
+        _basic.MaxUsers = 3;
+        await _db.SaveChangesAsync();
+        _db.Users.Add(new WhatsAppSalesAutomation.Domain.Entities.Identity.ApplicationUser { Id = Guid.NewGuid(), TenantId = _tenant, UserName = "a@x.test", Email = "a@x.test" });
+        _db.Users.Add(new WhatsAppSalesAutomation.Domain.Entities.Identity.ApplicationUser { Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), UserName = "b@x.test", Email = "b@x.test" });
+        await _db.SaveChangesAsync();
+
+        var users = await UserQuota.GetAsync(_db, _tenant);
+        Assert.Equal((3, 1, 2), (users!.Limit, users.Used, users.Remaining));
+    }
+
     private sealed class FakeImport : ICustomerImportService
     {
         public IReadOnlyList<CustomerImportRow> Rows { get; set; } = Array.Empty<CustomerImportRow>();

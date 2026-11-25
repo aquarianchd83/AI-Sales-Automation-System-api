@@ -358,7 +358,7 @@ public record CreditCostItemDto(PlatformFeature Feature, CreditScenario Scenario
 /// <summary>What the signed-in tenant is allowed to see and use: the features of its plan, its balance and what each action costs. Light enough to load for every user.</summary>
 /// <param name="Trials">Features the plan does not include but gives free uses of. A feature listed here is in <paramref name="Features"/> only while it has uses left;
 /// once they are gone the app shows it locked, with an upgrade prompt.</param>
-/// <param name="Quotas">Plan limits that are not a feature of their own (the customer limit), so the app can show "N left" beside them too.</param>
+/// <param name="Quotas">Plan limits that are not a feature of their own (the customer and user limits), so the app can show "N left" beside them too.</param>
 public record EntitlementsDto(string? PlanCode, string? PlanName, IReadOnlyList<PlatformFeature> Features, decimal Balance, IReadOnlyList<CreditCostItemDto> Costs,
     IReadOnlyList<FeatureTrialDto>? Trials = null, IReadOnlyList<WhatsAppSalesAutomation.Application.Billing.PlanQuotaDto>? Quotas = null);
 
@@ -414,9 +414,11 @@ public class CreditWalletService : ICreditWalletService
         var features = (await _access.GetFeaturesAsync(tenantId, ct)).OrderBy(f => f).ToList();
         if (features.Contains(PlatformFeature.Campaigns) && await CampaignQuotaAsync(tenantId, summary.PlanCode, ct) is { } campaigns)
             trials = trials.Append(campaigns).ToList();
-        var quotas = await WhatsAppSalesAutomation.Application.Billing.CustomerQuota.GetAsync(_context, tenantId, ct) is { } customers
-            ? new[] { customers }
-            : Array.Empty<WhatsAppSalesAutomation.Application.Billing.PlanQuotaDto>();
+        var quotas = new List<WhatsAppSalesAutomation.Application.Billing.PlanQuotaDto>();
+        if (await WhatsAppSalesAutomation.Application.Billing.CustomerQuota.GetAsync(_context, tenantId, ct) is { } customers)
+            quotas.Add(customers);
+        if (await WhatsAppSalesAutomation.Application.Billing.UserQuota.GetAsync(_context, tenantId, ct) is { } users)
+            quotas.Add(users);
         return new EntitlementsDto(summary.PlanCode, summary.PlanName, features, summary.Balance, costs, trials, quotas);
     }
 

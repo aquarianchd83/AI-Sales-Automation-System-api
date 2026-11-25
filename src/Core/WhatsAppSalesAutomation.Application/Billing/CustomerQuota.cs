@@ -49,3 +49,26 @@ public static class CustomerQuota
             throw new PlanLimitExceededException(LimitReachedMessage(quota));
     }
 }
+
+/// <summary>
+/// The plan's team limit (<c>Plan.MaxUsers</c>, "Team members" on the plan editor) as a quota, so the app shows "N left" beside Users &amp; Roles.
+/// Counted the way <c>PlanLimitsService.EnsureCanAddUserAsync</c> counts when it refuses a new user, and only for a tenant with a plan, as there.
+/// </summary>
+public static class UserQuota
+{
+    public const string Key = "Users";
+
+    public static async Task<PlanQuotaDto?> GetAsync(IApplicationDbContext context, Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var planId = await context.Subscriptions.IgnoreQueryFilters().AsNoTracking()
+            .Where(s => s.TenantId == tenantId).Select(s => s.PlanId).FirstOrDefaultAsync(cancellationToken);
+        if (planId is not { } id)
+            return null;
+        var max = await context.Plans.AsNoTracking().Where(p => p.Id == id).Select(p => (int?)p.MaxUsers).FirstOrDefaultAsync(cancellationToken);
+        if (max is null)
+            return null;
+
+        var used = await context.Users.IgnoreQueryFilters().AsNoTracking().CountAsync(u => u.TenantId == tenantId, cancellationToken);
+        return new PlanQuotaDto(Key, "Users", max.Value, used, "users", "user");
+    }
+}
