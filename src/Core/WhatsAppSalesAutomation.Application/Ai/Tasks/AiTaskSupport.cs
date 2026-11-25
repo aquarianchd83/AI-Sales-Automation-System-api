@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using WhatsAppSalesAutomation.Application.Simulator;
 
 namespace WhatsAppSalesAutomation.Application.Ai.Tasks;
 
@@ -57,26 +58,30 @@ public static class AiLogScrubber
 }
 
 /// <summary>
-/// The simulator's replies for product-knowledge tasks. They are fixed, labelled <c>simulated</c>, carry no evidence, and so can never be
+/// The simulator's replies for product-knowledge tasks. Their texts come from the Simulator dummy data page; they are labelled <c>simulated</c>, carry no evidence, and so can never be
 /// mistaken for - or promoted to - a verified answer: the simulator does not read sources and says so in every reply.
 /// </summary>
 public static class SimulatedTaskEngine
 {
     public const string Marker = "[SIMULATED]";
 
-    /// <summary>The reply for a task under a scenario, or null for <see cref="AiSimulatorScenarios.ProviderError"/> (which is a failure, not a reply).</summary>
-    public static string? Respond(string task, string scenario, bool expectJson)
+    /// <summary>The reply for a task under a scenario, or null for <see cref="AiSimulatorScenarios.ProviderError"/> (which is a failure, not a reply).
+    /// The texts are the platform admin's Simulator dummy data (<paramref name="data"/>); the marker is always added so test data never passes for AI output.</summary>
+    public static string? Respond(string task, string scenario, bool expectJson, SimulatorDataSnapshot? data = null)
     {
+        data ??= SimulatorDataSnapshot.Defaults;
+        string A(string key) => data.Answer(key);
+
         if (string.Equals(scenario, AiSimulatorScenarios.ProviderError, StringComparison.OrdinalIgnoreCase))
             return null;
 
         if (!expectJson)
-            return $"{Marker} This is a predefined test reply for {task}. It was not produced by an AI provider and is not based on your documents.";
+            return $"{Marker} {A(SimulatorDataCatalog.Answers.TextReply).Replace("{task}", task, StringComparison.OrdinalIgnoreCase)}";
 
         if (string.Equals(scenario, AiSimulatorScenarios.Malformed, StringComparison.OrdinalIgnoreCase))
-            return $"{Marker} sorry, here is the answer: {{ \"answer\": ";
+            return $"{Marker} {A(SimulatorDataCatalog.Answers.MalformedReply)}";
 
-        var note = $"{Marker} Predefined test data. No source was read and no AI provider was contacted.";
+        var note = $"{Marker} {A(SimulatorDataCatalog.Answers.MissingEvidenceNote)}";
 
         if (string.Equals(scenario, AiSimulatorScenarios.MissingEvidence, StringComparison.OrdinalIgnoreCase))
             return JsonSerializer.Serialize(new
@@ -87,13 +92,17 @@ public static class SimulatedTaskEngine
         if (string.Equals(scenario, AiSimulatorScenarios.Conflict, StringComparison.OrdinalIgnoreCase))
             return JsonSerializer.Serialize(new
             {
-                simulated = true, task, answer = $"{Marker} The price differs between two sources.", evidence = Array.Empty<object>(), insufficientEvidence = false,
+                simulated = true, task, answer = $"{Marker} {A(SimulatorDataCatalog.Answers.ConflictAnswer)}", evidence = Array.Empty<object>(), insufficientEvidence = false,
                 conflicts = new[]
                 {
                     new
                     {
                         fact = "price",
-                        values = new[] { new { value = "999", source = "simulated brochure" }, new { value = "1499", source = "simulated website" } }
+                        values = new[]
+                        {
+                            new { value = A(SimulatorDataCatalog.Answers.ConflictBrochurePrice), source = "simulated brochure" },
+                            new { value = A(SimulatorDataCatalog.Answers.ConflictWebsitePrice), source = "simulated website" }
+                        }
                     }
                 },
                 note
@@ -101,7 +110,7 @@ public static class SimulatedTaskEngine
 
         return JsonSerializer.Serialize(new
         {
-            simulated = true, task, answer = $"{Marker} A predefined answer used for testing.", evidence = Array.Empty<object>(), insufficientEvidence = false,
+            simulated = true, task, answer = $"{Marker} {A(SimulatorDataCatalog.Answers.Answer)}", evidence = Array.Empty<object>(), insufficientEvidence = false,
             conflicts = Array.Empty<object>(), note
         });
     }

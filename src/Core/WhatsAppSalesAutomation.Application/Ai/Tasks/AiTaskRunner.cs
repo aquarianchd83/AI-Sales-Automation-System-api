@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Platform;
+using WhatsAppSalesAutomation.Application.Simulator;
 using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -24,12 +25,14 @@ public sealed class AiTaskRunner : IAiTaskRunner
     private readonly IAiExecutionLog _log;
     private readonly IAiTaskPolicyProvider _policy;
     private readonly ILogger<AiTaskRunner> _logger;
+    private readonly ISimulatorDataProvider? _simulatorData;
     private readonly ICreditRouter? _credits;
 
     public AiTaskRunner(
         IAiFeatureRouting routing, IPlatformAiConfigProvider credentials, IAiCompletionClient client, IAiExecutionLog log,
-        IAiTaskPolicyProvider policy, ILogger<AiTaskRunner> logger, ICreditRouter? credits = null)
+        IAiTaskPolicyProvider policy, ILogger<AiTaskRunner> logger, ICreditRouter? credits = null, ISimulatorDataProvider? simulatorData = null)
     {
+        _simulatorData = simulatorData;
         _credits = credits;
         _routing = routing;
         _credentials = credentials;
@@ -70,7 +73,8 @@ public sealed class AiTaskRunner : IAiTaskRunner
         AiTaskRequest request, AiTaskPolicy policy, Guid correlation, AiFeatureChoice route, List<AiAttempt> attempts, CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
-        var reply = SimulatedTaskEngine.Respond(request.Task, policy.SimulatorScenario, request.ExpectJson);
+        var data = _simulatorData is null ? null : await _simulatorData.GetAsync(ct);
+        var reply = SimulatedTaskEngine.Respond(request.Task, policy.SimulatorScenario, request.ExpectJson, data);
 
         string? code = null;
         string? message = null;

@@ -80,6 +80,11 @@ public static class PlatformAuditActions
     public const string FaqEntryCreated = "FaqEntryCreated";
     public const string FaqEntryUpdated = "FaqEntryUpdated";
     public const string FaqEntryDeleted = "FaqEntryDeleted";
+
+    public const string SimulatorDataCreated = "SimulatorDataCreated";
+    public const string SimulatorDataUpdated = "SimulatorDataUpdated";
+    public const string SimulatorDataDeleted = "SimulatorDataDeleted";
+    public const string SimulatorDataRestored = "SimulatorDataRestored";
     public const string KnowledgeRetrievalSimulated = "KnowledgeRetrievalSimulated";
     public const string KnowledgeArticleCreated = "KnowledgeArticleCreated";
     public const string KnowledgeArticleUpdated = "KnowledgeArticleUpdated";

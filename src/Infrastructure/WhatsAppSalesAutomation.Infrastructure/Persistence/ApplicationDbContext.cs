@@ -293,6 +293,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<FaqEntry> FaqEntries => Set<FaqEntry>();
 
+    public DbSet<SimulatorDummyRecord> SimulatorDummyRecords => Set<SimulatorDummyRecord>();
+
     // Deliberately not on IApplicationDbContext - see WhatsAppAccessTokenState's own doc comment for
     // why this is Infrastructure-internal state, not something Application services should reach.
     public DbSet<WhatsAppAccessTokenState> WhatsAppAccessTokenStates => Set<WhatsAppAccessTokenState>();
