@@ -15,8 +15,7 @@ public record PlanQuotaDto(string Key, string Label, int Limit, int Used, string
 
 /// <summary>
 /// The most customers a tenant's plan lets it keep (<c>Plan.MaxCustomers</c>, set on the platform admin's plan editor; 0 = no limit). Only adding by
-/// hand and importing are held to it: a customer who writes in on WhatsApp is always taken in, so a conversation is never lost, and lead discovery
-/// has its own limit.
+/// hand, importing and lead discovery are held to it: a customer who writes in on WhatsApp is always taken in, so a conversation is never lost.
 /// </summary>
 public static class CustomerQuota
 {

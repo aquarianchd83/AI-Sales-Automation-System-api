@@ -6,10 +6,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Consent;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -192,6 +194,53 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             Assert.Null(c.OptInTimestamp);
             Assert.Null(c.OptInSource);
         });
+    }
+
+    [Fact]
+    public async Task A_batch_is_cut_to_the_room_left_in_the_plans_customer_limit()
+    {
+        var plan = new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 2 };
+        _db.Plans.Add(plan);
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2, (await SingleExecutionAsync()).CustomersCreated);
+    }
+
+    [Fact]
+    public async Task A_run_is_not_started_when_the_customer_limit_is_already_reached()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Customers.CountAsync());
+        Assert.Equal(0, _agent.Calls);
+        var execution = await SingleExecutionAsync();
+        Assert.Contains("up to 1 customer", execution.Summary);
+        Assert.Contains("no discovery credits were deducted", execution.Summary);
+    }
+
+    [Fact]
+    public async Task A_run_is_not_started_when_its_auto_campaign_would_pass_the_campaign_limit()
+    {
+        EnableAutoCampaign();
+        _beforeCampaignCreate = () => throw new PlanLimitExceededException("Your plan allows up to 6 campaigns. Upgrade to create more.");
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(0, await _db.Customers.CountAsync());
+        Assert.Equal(0, _agent.Calls);
+        var execution = await SingleExecutionAsync();
+        Assert.Contains("up to 6 campaigns", execution.Summary);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
     }
 
     [Fact]
@@ -972,7 +1021,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
         var failCustomer = FailCustomerSave("C Contact");
         var campaignAttempts = 0;
-        _beforeCampaignCreate = () => ++campaignAttempts == 1 ? throw new InvalidOperationException("Campaign store down") : Task.CompletedTask;
+        // The first look at the campaign limit is the run's own pre-check (before anything is searched); the store goes down at the second, in the campaign step.
+        _beforeCampaignCreate = () => ++campaignAttempts == 2 ? throw new InvalidOperationException("Campaign store down") : Task.CompletedTask;
 
         await Service().RunForTenantAsync(_tenant);
 

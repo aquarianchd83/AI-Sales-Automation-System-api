@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Campaigns;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Options;
@@ -222,6 +223,32 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (batchSize <= 0)
             return await RecordSkipAsync(profile, "Skipped: the tenant's plan allows no discovered leads per run.",
                 quotaExhausted: false, cancellationToken);
+
+        // The plan's other limits are checked before anything is searched or paid for, never after: a run whose customers or campaign would pass
+        // the plan's limit is not started, and a batch is cut to the room left for customers.
+        if (await CustomerQuota.GetAsync(_context, profile.TenantId, cancellationToken) is { } customerQuota)
+        {
+            if (customerQuota.Exhausted)
+                return await RecordSkipAsync(profile,
+                    "Skipped: " + CustomerQuota.LimitReachedMessage(customerQuota) + " Nothing was searched and no discovery credits were deducted.",
+                    quotaExhausted: false, cancellationToken, stopReason: CustomerQuota.LimitReachedMessage(customerQuota));
+
+            batchSize = Math.Min(batchSize, customerQuota.Remaining);
+        }
+
+        if (profile.AutoCampaignEnabled && profile.SourceCampaignId is not null)
+        {
+            try
+            {
+                await _planLimits.EnsureCanCreateCampaignAsync(profile.TenantId, cancellationToken);
+            }
+            catch (PlanLimitExceededException limit)
+            {
+                return await RecordSkipAsync(profile,
+                    "Skipped: " + limit.Message + " Nothing was searched and no discovery credits were deducted.",
+                    quotaExhausted: false, cancellationToken, stopReason: limit.Message);
+            }
+        }
 
         // Prepaid, but only for results: a tenant is charged for each customer a run creates - never for rejected or duplicate
         // candidates, whatever the research cost. A tenant who cannot afford even one lead gets no run and no agent call, but it is
@@ -513,7 +540,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             // Leads an earlier run found and paid for but had no room for come first: no new research is bought for places they can fill.
             await UseCachedLeadsAsync(run, knownBusinesses, cancellationToken);
 
-            while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished)
+            while (stats.Created < run.BatchSize && stats.Rounds < _options.MaxRounds && !run.VerificationUnfinished && !stats.StoppedEarlyForAllowance)
             {
                 run.Step = LeadDiscoverySteps.Discovery;
                 await run.Lease.EnsureCanProcessAsync(cancellationToken);
@@ -922,6 +949,15 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             if (dndCheck && lead.PhoneE164 is not null
                 && row.VerificationStatus is not (LeadDiscoveryVerificationStatus.Pass or LeadDiscoveryVerificationStatus.Fail))
                 continue;
+
+            // Hard stop at the plan's customer limit, for every path that makes customers (a retry resumes candidates found earlier): what is
+            // left stays Pending, with its candidate, for a run after the tenant has room.
+            if (lead.PhoneE164 is not null && await CustomerQuota.GetAsync(_context, run.Profile.TenantId, cancellationToken) is { Exhausted: true } full)
+            {
+                run.Stats.QuotaStopReason ??= CustomerQuota.LimitReachedMessage(full);
+                run.Stats.StoppedEarlyForAllowance = true;
+                break;
+            }
 
             var outcome = await ProcessCustomerAsync(run, row, lead, cancellationToken);
             outcomes.Add((lead, outcome));
