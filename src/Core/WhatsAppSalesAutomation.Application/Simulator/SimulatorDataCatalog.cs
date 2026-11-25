@@ -46,13 +46,11 @@ public static class SimulatorDataCatalog
 
     public static class Settings
     {
-        /// <summary>true: each lead run adds a run tag to names and websites and new last digits to phones, so a rerun is not all duplicates.</summary>
-        public const string UniquePerRun = "UniquePerRun";
-
         /// <summary>How many of the businesses a lead run hands back are the flawed ones (0-90).</summary>
         public const string FlawedSharePercent = "FlawedSharePercent";
 
-        /// <summary>true: besides the listed DND numbers, any number whose digits add up to a multiple of four is DND (about one in four).</summary>
+        /// <summary>true: besides the listed DND numbers, any number whose digits add up to a multiple of four is DND (about one in four).
+        /// Off by default, so only the stored DND numbers decide.</summary>
         public const string DndDigitSumRule = "DndDigitSumRule";
     }
 
@@ -81,9 +79,8 @@ public static class SimulatorDataCatalog
         new(SimulatorDataCategory.TaskAnswer, Answers.ConflictWebsitePrice, "1499", "Conflict scenario: the price on the website."),
         new(SimulatorDataCategory.TaskAnswer, Answers.MalformedReply, "sorry, here is the answer: { \"answer\": ", "The broken reply under the Malformed scenario."),
 
-        new(SimulatorDataCategory.Setting, Settings.UniquePerRun, "true", "true = each lead run tags names/websites and changes the last 4 phone digits, so a rerun is not all duplicates. false = data is used exactly as written."),
         new(SimulatorDataCategory.Setting, Settings.FlawedSharePercent, "30", "Share (0-90%) of a lead run that comes from the flawed businesses (phone not on page / closed)."),
-        new(SimulatorDataCategory.Setting, Settings.DndDigitSumRule, "true", "true = besides the DND numbers list, about 1 in 4 numbers (digits add up to a multiple of 4) also fail the DND check."),
+        new(SimulatorDataCategory.Setting, Settings.DndDigitSumRule, "false", "false = only the DND numbers list decides. true = besides the list, about 1 in 4 numbers (digits add up to a multiple of 4) also fail the DND check."),
     };
 
     public static SimulatorKeyDefinition? Find(SimulatorDataCategory category, string key) =>

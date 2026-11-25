@@ -24,6 +24,8 @@ using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Infrastructure.Ai;
 using WhatsAppSalesAutomation.Infrastructure.LeadDiscovery;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
+using WhatsAppSalesAutomation.Domain.Entities.Platform;
+using WhatsAppSalesAutomation.Application.Simulator;
 
 namespace WhatsAppSalesAutomation.Tests;
 
@@ -2594,7 +2596,13 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         RecordRealRun(considered: 2, rejected: 0, duplicates: 0, at: DateTime.UtcNow.AddDays(-2).AddHours(3));
         await _db.SaveChangesAsync();
         ProfileLastChangedAt(DateTime.UtcNow.AddHours(-6));
-        var simulated = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance);
+        // The stored dummy data, with enough flawed rows for a 30% share of 15 (the starter set has four).
+        var stored = SimulatorDataCatalog.DefaultRecords().Concat(new[]
+        {
+            new SimulatorDummyRecord { Category = SimulatorDataCategory.LeadBusiness, Name = "Extra Closed Clinic", BusinessType = "Dental clinic",
+                Phone = "+91 98765 99999", Website = "https://extra-closed.example", LeadScore = 80, Variant = SimulatorLeadVariant.PermanentlyClosed, DisplayOrder = 5000 }
+        });
+        var simulated = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, new FixedSimulatorData(new SimulatorDataSnapshot(stored)));
 
         await ServiceWithChargeLog(new List<(string Key, string Note)>(), simulated).RunForTenantAsync(_tenant);
 
@@ -2893,4 +2901,13 @@ public class Stub<T> : DispatchProxy where T : class
 
         return returnType.IsValueType && returnType != typeof(void) ? Activator.CreateInstance(returnType) : null;
     }
+}
+
+/// <summary>Hands the simulator a fixed set of stored dummy data.</summary>
+internal sealed class FixedSimulatorData : ISimulatorDataProvider
+{
+    private readonly SimulatorDataSnapshot _snapshot;
+    public FixedSimulatorData(SimulatorDataSnapshot snapshot) => _snapshot = snapshot;
+    public Task<SimulatorDataSnapshot> GetAsync(CancellationToken cancellationToken = default) => Task.FromResult(_snapshot);
+    public void Invalidate() { }
 }
