@@ -114,7 +114,13 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         _pricing = pricing.Value;
     }
 
-    public async Task<string> RunForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    public Task<string> RunForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+        RunCoreAsync(tenantId, startedBy: null, cancellationToken);
+
+    public Task<string> RunManuallyAsync(Guid tenantId, string? startedBy, CancellationToken cancellationToken = default) =>
+        RunCoreAsync(tenantId, string.IsNullOrWhiteSpace(startedBy) ? "a team member" : startedBy.Trim(), cancellationToken);
+
+    private async Task<string> RunCoreAsync(Guid tenantId, string? startedBy, CancellationToken cancellationToken)
     {
         var profile = await LoadProfileAsync(tenantId, null, cancellationToken);
 
@@ -131,9 +137,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         {
             try
             {
-                var retried = await _consent.RetryDueAsync(cancellationToken);
-                if (retried > 0)
-                    summaries.Add($"consent SMS retried: {retried}");
+                var retriedInvitations = await _consent.RetryDueAsync(cancellationToken);
+                if (retriedInvitations > 0)
+                    summaries.Add($"consent SMS retried: {retriedInvitations}");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -149,15 +155,23 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         }
 
         // Unfinished work first, oldest first - each resumed by its own new execution.
+        var retried = false;
         foreach (var retryId in await FindAutomaticRetryTargetsAsync(profile, cancellationToken))
         {
             var previous = await _context.LeadDiscoveryExecutions
                 .FirstOrDefaultAsync(e => e.Id == retryId && e.TenantId == tenantId, cancellationToken);
             if (previous is not null && LeadDiscoveryRetryRules.CanRetry(previous))
-                summaries.Add("retry: " + await ExecuteAsync(profile, previous, LeadDiscoveryTriggers.AutomaticRetry, 0, cancellationToken));
+            {
+                // Started by the schedule, or by a person's Run now: the retry is that firing's run, so it carries the same label.
+                summaries.Add("retry: " + await ExecuteAsync(profile, previous, LeadDiscoveryTriggers.AutomaticRetry, 0, cancellationToken, startedBy));
+                retried = true;
+            }
         }
 
-        summaries.Add(await RunFreshAsync(profile, cancellationToken));
+        // One run per firing: a run that was waiting to finish takes this firing's place, so the tenant never sees a second, new run a second later.
+        // The next firing starts new work once nothing is waiting.
+        if (!retried)
+            summaries.Add(await RunFreshAsync(profile, startedBy, cancellationToken));
         return string.Join(" | ", summaries);
     }
 
@@ -209,20 +223,20 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             .Where(p => p.TenantId == tenantId && (profileId == null || p.Id == profileId))
             .FirstOrDefaultAsync(cancellationToken);
 
-    private async Task<string> RunFreshAsync(LeadDiscoveryProfile profile, CancellationToken cancellationToken)
+    private async Task<string> RunFreshAsync(LeadDiscoveryProfile profile, string? startedBy, CancellationToken cancellationToken)
     {
         // From here on every firing is recorded in Lead Discovery History, even one that does nothing: the
         // profile is enabled, so the tenant expects a run and needs to see why there was none. (No profile, or
         // a disabled one, is the tenant not using discovery - recording those would fill history with noise.)
         if (profile.Keywords.Count == 0 || profile.Locations.Count == 0)
             return await RecordSkipAsync(profile, "Skipped: the profile needs at least one keyword and one location.",
-                quotaExhausted: false, cancellationToken);
+                quotaExhausted: false, cancellationToken, startedBy: startedBy);
 
         var planLimit = await _planLimits.GetLeadDiscoveryBatchLimitAsync(profile.TenantId, cancellationToken);
         var batchSize = Math.Min(profile.BatchSize, planLimit ?? int.MaxValue);
         if (batchSize <= 0)
             return await RecordSkipAsync(profile, "Skipped: the tenant's plan allows no discovered leads per run.",
-                quotaExhausted: false, cancellationToken);
+                quotaExhausted: false, cancellationToken, startedBy: startedBy);
 
         // The plan's other limits are checked before anything is searched or paid for, never after: a run whose customers or campaign would pass
         // the plan's limit is not started, and a batch is cut to the room left for customers.
@@ -231,7 +245,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             if (customerQuota.Exhausted)
                 return await RecordSkipAsync(profile,
                     "Skipped: " + CustomerQuota.LimitReachedMessage(customerQuota) + " Nothing was searched and no discovery credits were deducted.",
-                    quotaExhausted: false, cancellationToken, stopReason: CustomerQuota.LimitReachedMessage(customerQuota));
+                    quotaExhausted: false, cancellationToken, stopReason: CustomerQuota.LimitReachedMessage(customerQuota), startedBy: startedBy);
 
             batchSize = Math.Min(batchSize, customerQuota.Remaining);
         }
@@ -246,7 +260,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             {
                 return await RecordSkipAsync(profile,
                     "Skipped: " + limit.Message + " Nothing was searched and no discovery credits were deducted.",
-                    quotaExhausted: false, cancellationToken, stopReason: limit.Message);
+                    quotaExhausted: false, cancellationToken, stopReason: limit.Message, startedBy: startedBy);
             }
         }
 
@@ -264,10 +278,10 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 
             return await RecordSkipAsync(profile,
                 "Skipped: " + (shortfall?.Message ?? "no lead-candidate quota left - buy credits or wait for the plan to renew."),
-                quotaExhausted: outOfCredits, cancellationToken, stopReason: shortfall?.Message);
+                quotaExhausted: outOfCredits, cancellationToken, stopReason: shortfall?.Message, startedBy: startedBy);
         }
 
-        return await ExecuteAsync(profile, null, LeadDiscoveryTriggers.Scheduled, batchSize, cancellationToken);
+        return await ExecuteAsync(profile, null, startedBy is null ? LeadDiscoveryTriggers.Scheduled : LeadDiscoveryTriggers.ManualRun, batchSize, cancellationToken, startedBy);
     }
 
     /// <summary>A scheduled firing that cannot start at all, so there is nothing to lock and nothing to process -
@@ -275,9 +289,24 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     /// a mid-run quota exhaustion (DiscoverCustomersAsync, via FinalizeAsync), rather than Failed: there is
     /// nothing a retry could resume, and a Failed row would offer one.</summary>
     private async Task<string> RecordSkipAsync(
-        LeadDiscoveryProfile profile, string summary, bool quotaExhausted, CancellationToken cancellationToken, string? stopReason = null)
+        LeadDiscoveryProfile profile, string summary, bool quotaExhausted, CancellationToken cancellationToken, string? stopReason = null, string? startedBy = null)
     {
         var now = _dateTime.UtcNow;
+        var trigger = startedBy is null ? LeadDiscoveryTriggers.Scheduled : LeadDiscoveryTriggers.ManualRun;
+
+        // The same "not run" for the same reason as the row before it is that row again, not another row: it says "Skipped 3 times, last ..." so a limit
+        // that stays full does not fill the history with identical lines.
+        var latest = await _context.LeadDiscoveryExecutions
+            .Where(e => e.TenantId == profile.TenantId && e.LeadDiscoveryProfileId == profile.Id)
+            .OrderByDescending(e => e.StartedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (latest is { SkipCount: > 0 } && latest.Summary == summary)
+        {
+            latest.SkipCount++;
+            latest.LastSkippedAtUtc = now;
+            await _context.SaveChangesAsync(cancellationToken);
+            return summary;
+        }
 
         var execution = new LeadDiscoveryExecution
         {
@@ -285,7 +314,9 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             LeadDiscoveryProfileId = profile.Id,
             ProfileName = Truncate(profile.TargetBusinessType, 200) ?? string.Empty,
             ProcessingDate = (await _tenantTimeZone.GetLocalNowAsync(cancellationToken)).Date,
-            Trigger = LeadDiscoveryTriggers.Scheduled,
+            Trigger = trigger,
+            StartedBy = Truncate(startedBy, 200),
+            SkipCount = 1,
             StartedAtUtc = now,
             EndedAtUtc = now,
             Status = LeadDiscoveryExecutionStatus.Completed,
@@ -343,7 +374,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
     /// <param name="previous">The execution being resumed, or null for a fresh discovery.</param>
     /// <param name="batchSize">Fresh discovery only: the most new leads this execution may add.</param>
     private async Task<string> ExecuteAsync(
-        LeadDiscoveryProfile profile, LeadDiscoveryExecution? previous, string trigger, int batchSize, CancellationToken cancellationToken)
+        LeadDiscoveryProfile profile, LeadDiscoveryExecution? previous, string trigger, int batchSize, CancellationToken cancellationToken, string? startedBy = null)
     {
         var now = _dateTime.UtcNow;
         var processingDate = previous?.ProcessingDate ?? (await _tenantTimeZone.GetLocalNowAsync(cancellationToken)).Date;
@@ -355,6 +386,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             ProfileName = Truncate(profile.TargetBusinessType, 200) ?? string.Empty,
             ProcessingDate = processingDate,
             Trigger = trigger,
+            StartedBy = Truncate(startedBy, 200),
             StartedAtUtc = now,
             Status = LeadDiscoveryExecutionStatus.Started,
             RetryOfExecutionId = previous?.Id,
@@ -2386,6 +2418,7 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
 public static class LeadDiscoveryTriggers
 {
     public const string Scheduled = "Scheduled";
+    public const string ManualRun = "Manual run";
     public const string AutomaticRetry = "Automatic retry";
     public const string ManualRetry = "Manual retry";
 }

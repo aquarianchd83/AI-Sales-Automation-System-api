@@ -63,7 +63,10 @@ public record LeadDiscoveryExecutionSummaryDto(
     string CurrencyCode,
     string CurrencySymbol,
     string? AiProvider = null,
-    string? AiModel = null);
+    string? AiModel = null,
+    string? StartedBy = null,
+    int SkipCount = 0,
+    DateTime? LastSkippedAtUtc = null);
 
 /// <summary>One processing date and every execution that belongs to it, newest first.</summary>
 public record LeadDiscoveryHistoryDayDto([property: JsonConverter(typeof(WallClockDateTimeJsonConverter))] DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);

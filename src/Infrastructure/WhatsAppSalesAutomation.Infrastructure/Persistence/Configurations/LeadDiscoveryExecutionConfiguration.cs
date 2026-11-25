@@ -13,6 +13,7 @@ public class LeadDiscoveryExecutionConfiguration : IEntityTypeConfiguration<Lead
 
         builder.Property(e => e.ProfileName).IsRequired().HasMaxLength(200);
         builder.Property(e => e.Trigger).IsRequired().HasMaxLength(30);
+        builder.Property(e => e.StartedBy).HasMaxLength(200);
         builder.Property(e => e.Status).HasConversion<string>().HasMaxLength(30);
         builder.Property(e => e.FailedStep).HasMaxLength(50);
         builder.Property(e => e.ErrorMessage).HasMaxLength(2000);

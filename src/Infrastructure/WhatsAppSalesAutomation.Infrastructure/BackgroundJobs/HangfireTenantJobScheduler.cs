@@ -105,7 +105,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
     public void RemoveTenantJob(Guid tenantId, string jobType)
         => _recurringJobs.RemoveIfExists(TenantJobCatalog.RecurringJobId(jobType, tenantId));
 
-    public string TriggerTenantJob(Guid tenantId, string jobType)
+    public string TriggerTenantJob(Guid tenantId, string jobType, string? startedBy = null)
     {
         // Enqueued directly rather than via IRecurringJobManager.Trigger: Trigger returns nothing, and
         // the operator needs the resulting background job id to find their own run in the dashboard.
@@ -119,7 +119,7 @@ public class HangfireTenantJobScheduler : ITenantJobScheduler
             TenantJobTypes.CampaignCompletion => _backgroundJobs.Enqueue<CampaignCompletionJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTemplateSync => _backgroundJobs.Enqueue<MessageTemplateSyncJob>(job => job.RunAsync(tenantId)),
             TenantJobTypes.WhatsAppTokenRefresh => _backgroundJobs.Enqueue<WhatsAppTokenRefreshJob>(job => job.RunAsync(tenantId)),
-            TenantJobTypes.LeadDiscovery => _backgroundJobs.Enqueue<LeadDiscoveryJob>(job => job.RunAsync(tenantId)),
+            TenantJobTypes.LeadDiscovery => _backgroundJobs.Enqueue<LeadDiscoveryJob>(job => job.RunManuallyAsync(tenantId, startedBy)),
             TenantJobTypes.LeadFollowUps => _backgroundJobs.Enqueue<LeadFollowUpJob>(job => job.RunAsync(tenantId)),
             _ => throw new ArgumentOutOfRangeException(nameof(jobType), jobType, "Not a per-tenant background job.")
         };

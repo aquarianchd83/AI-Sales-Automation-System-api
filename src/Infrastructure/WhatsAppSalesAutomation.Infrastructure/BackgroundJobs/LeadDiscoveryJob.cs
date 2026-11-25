@@ -36,6 +36,15 @@ public class LeadDiscoveryJob
             return await discovery.RunForTenantAsync(tenantId, cancellationToken);
         });
 
+    /// <summary>A person's Run now: the same run, recorded as started by them.</summary>
+    [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 60)]
+    public Task RunManuallyAsync(Guid tenantId, string? startedBy) =>
+        _runner.RunAsync(tenantId, TenantJobTypes.LeadDiscovery, async (services, cancellationToken) =>
+        {
+            var discovery = services.GetRequiredService<ILeadDiscoveryRunService>();
+            return await discovery.RunManuallyAsync(tenantId, startedBy, cancellationToken);
+        });
+
     /// <summary>A manual retry from Lead Discovery History. Recorded on the same schedule row as the scheduled
     /// run, so the console's last-run summary shows it too.</summary>
     [DisableConcurrentExecutionPerTenant(timeoutInSeconds: 60)]

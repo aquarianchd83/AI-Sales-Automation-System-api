@@ -41,7 +41,7 @@ public sealed class OnDemandTenantJobTests : IDisposable
 
         public void RemoveTenantJob(Guid tenantId, string jobType) => Registered.Remove(TenantJobCatalog.RecurringJobId(jobType, tenantId));
 
-        public string TriggerTenantJob(Guid tenantId, string jobType) => "job";
+        public string TriggerTenantJob(Guid tenantId, string jobType, string? startedBy = null) => "job";
 
         public IReadOnlyDictionary<string, RecurringJobRegistrationState> GetRegistrations(IEnumerable<string> recurringJobIds) =>
             new Dictionary<string, RecurringJobRegistrationState>();

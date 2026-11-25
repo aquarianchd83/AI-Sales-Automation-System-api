@@ -377,7 +377,10 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         pricing.CurrencyCode,
         pricing.CurrencySymbol,
         ProviderOf(run?.Model),
-        string.IsNullOrWhiteSpace(run?.Model) ? null : run!.Model);
+        string.IsNullOrWhiteSpace(run?.Model) ? null : run!.Model,
+        e.StartedBy,
+        e.SkipCount,
+        AsUtc(e.LastSkippedAtUtc));
 
     /// <summary>The AI provider that did the research, read from the model name the run recorded (a run stores the model, not the
     /// provider). Null when the execution did no research - a retry, or a run skipped before it started.</summary>

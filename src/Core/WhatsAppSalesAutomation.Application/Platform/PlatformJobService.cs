@@ -156,7 +156,7 @@ public class PlatformJobService : IPlatformJobService
         if (!schedule.IsEnabled)
             throw new ConflictException($"Job {jobType} is disabled for tenant {tenant.Name} - enable it before running it.");
 
-        var backgroundJobId = _scheduler.TriggerTenantJob(tenantId, jobType);
+        var backgroundJobId = _scheduler.TriggerTenantJob(tenantId, jobType, string.IsNullOrWhiteSpace(actorEmail) ? null : actorEmail);
 
         await _auditService.LogAsync(
             actorUserId, actorEmail, PlatformAuditActions.TenantJobTriggered, tenantId,

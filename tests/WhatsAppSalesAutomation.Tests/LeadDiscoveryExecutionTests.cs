@@ -197,6 +197,54 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_waiting_retry_takes_the_firings_place_so_there_is_no_second_run()
+    {
+        _agent.Rounds.Add(Candidates("A", "C"));
+        FailCustomerSave("C Contact");
+        await Service().RunForTenantAsync(_tenant); // first run: C fails -> RetryPending
+        var callsBefore = _agent.Calls;
+
+        await Service().RunForTenantAsync(_tenant); // the retry finishes it; no new search starts
+
+        var executions = await Executions();
+        Assert.Equal(2, executions.Count);
+        Assert.Equal(callsBefore, _agent.Calls);
+        Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.AutomaticRetry);
+    }
+
+    [Fact]
+    public async Task Run_now_is_recorded_as_a_manual_run_by_the_person_and_the_schedule_as_automatic()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        _agent.Rounds.Add(Candidates("B"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var executions = (await Executions()).OrderBy(e => e.StartedAtUtc).ToList();
+        var manual = Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.ManualRun);
+        Assert.Equal("harish@example.com", manual.StartedBy);
+        var scheduled = Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.Scheduled);
+        Assert.Null(scheduled.StartedBy);
+    }
+
+    [Fact]
+    public async Task The_same_skipped_run_repeating_updates_one_row_instead_of_adding_more()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(3, execution.SkipCount);
+        Assert.NotNull(execution.LastSkippedAtUtc);
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
     public async Task A_batch_is_cut_to_the_room_left_in_the_plans_customer_limit()
     {
         var plan = new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 2 };

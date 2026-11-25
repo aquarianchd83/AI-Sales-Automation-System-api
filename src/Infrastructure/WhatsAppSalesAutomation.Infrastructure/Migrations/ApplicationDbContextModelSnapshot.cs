@@ -4483,6 +4483,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<DateTime?>("LastRetryAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("LastSkippedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid>("LeadDiscoveryProfileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -4565,8 +4568,15 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<Guid>("RootExecutionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("SkipCount")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("StartedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Status")
                         .IsRequired()
