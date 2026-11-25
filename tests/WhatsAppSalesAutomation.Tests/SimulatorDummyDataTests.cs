@@ -56,19 +56,20 @@ public sealed class SimulatorDummyDataTests : IDisposable
         await _service.CreateAsync(Keyed(SimulatorDataCategory.Setting, key, value), _actor, "a@b.c");
 
     [Fact]
-    public async Task Lead_discovery_hands_back_the_admins_businesses_exactly_when_unique_per_run_is_off()
+    public async Task Lead_discovery_hands_back_the_admins_businesses_exactly_as_stored()
     {
         await _service.CreateAsync(Business("Test Dental One", "+91 98140 55501"), _actor, "a@b.c");
         await _service.CreateAsync(Business("Test Dental Two", "+91 98140 55502"), _actor, "a@b.c");
-        await Set(SimulatorDataCatalog.Settings.UniquePerRun, "false");
 
         var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, _provider);
         var result = await agent.DiscoverAsync(Ask(10));
 
         // Only the two rows there are - nothing invented, nothing repeated.
-        Assert.Equal(new[] { "[Simulated] Test Dental One", "[Simulated] Test Dental Two" }, result.Candidates.Select(c => c.BusinessName));
+        Assert.Equal(new[] { "Test Dental One", "Test Dental Two" }, result.Candidates.Select(c => c.BusinessName));
         Assert.Equal("+91 98140 55501", result.Candidates[0].Phone);
         Assert.Equal("Mohali", result.Candidates[0].City);
+        Assert.Equal("SCO 1, Sector 9", result.Candidates[0].Address);
+        Assert.Equal("https://test-clinic.example", result.Candidates[0].Website);
         Assert.Equal(81, result.Candidates[0].LeadScore);
 
         var assessed = LeadQualification.AssessAll(result.Candidates, result.Evidence,
@@ -77,30 +78,16 @@ public sealed class SimulatorDummyDataTests : IDisposable
     }
 
     [Fact]
-    public async Task With_unique_per_run_on_the_rows_are_reused_with_a_run_tag_so_a_rerun_is_not_all_duplicates()
-    {
-        await _service.CreateAsync(Business("Only Clinic", "+91 98140 55501"), _actor, "a@b.c");
-
-        var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, _provider);
-        var result = await agent.DiscoverAsync(Ask(3));
-
-        Assert.Equal(3, result.Candidates.Count);
-        Assert.All(result.Candidates, c => Assert.StartsWith("[Simulated] Only Clinic ", c.BusinessName));
-        Assert.Equal(3, result.Candidates.Select(c => c.BusinessName).Distinct().Count());
-        Assert.All(result.Candidates, c => Assert.StartsWith("+91 98140 5", c.Phone));
-    }
-
-    [Fact]
-    public async Task A_business_whose_phone_is_on_the_dnd_list_keeps_that_number_even_with_unique_per_run_on()
+    public async Task A_business_whose_phone_is_on_the_dnd_list_is_rejected_by_the_dnd_check_every_time()
     {
         await _service.CreateAsync(Business("Dnd Clinic", "+91 98140 55501"), _actor, "a@b.c");
         await _service.CreateAsync(new SaveSimulatorDummyRecordRequest(SimulatorDataCategory.DndNumber, "+919814055501", null,
             null, null, null, null, null, null, null, null, null, true, 0), _actor, "a@b.c");
 
         var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, _provider);
-        var result = await agent.DiscoverAsync(Ask(2));
+        var candidate = (await agent.DiscoverAsync(Ask(2))).Candidates.Single();
 
-        Assert.All(result.Candidates, c => Assert.Equal("+91 98140 55501", c.Phone));
+        Assert.Equal("+91 98140 55501", candidate.Phone);
         var dnd = await new SimulatedPhoneVerificationProvider(_provider).VerifyAsync(Guid.NewGuid(),
             new[] { new PhoneVerificationItem(Guid.NewGuid(), "+919814055501") });
         Assert.Equal(LeadDiscoveryVerificationStatus.Fail, dnd.Results.Single().Status);
@@ -124,13 +111,12 @@ public sealed class SimulatorDummyDataTests : IDisposable
     public async Task An_edit_is_used_on_the_very_next_call()
     {
         var row = await _service.CreateAsync(Business("Before Edit", "+91 98140 55501"), _actor, "a@b.c");
-        await Set(SimulatorDataCatalog.Settings.UniquePerRun, "false");
         var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, _provider);
-        Assert.Equal("[Simulated] Before Edit", (await agent.DiscoverAsync(Ask(1))).Candidates.Single().BusinessName);
+        Assert.Equal("Before Edit", (await agent.DiscoverAsync(Ask(1))).Candidates.Single().BusinessName);
 
         await _service.UpdateAsync(row.Id, Business("After Edit", "+91 98140 55501"), _actor, "a@b.c");
 
-        Assert.Equal("[Simulated] After Edit", (await agent.DiscoverAsync(Ask(1))).Candidates.Single().BusinessName);
+        Assert.Equal("After Edit", (await agent.DiscoverAsync(Ask(1))).Candidates.Single().BusinessName);
     }
 
     [Fact]
@@ -155,12 +141,10 @@ public sealed class SimulatorDummyDataTests : IDisposable
     }
 
     [Fact]
-    public async Task A_listed_dnd_number_is_rejected_and_the_digit_rule_can_be_switched_off()
+    public async Task A_listed_dnd_number_is_rejected_and_the_digit_rule_is_off_by_default()
     {
         await _service.CreateAsync(new SaveSimulatorDummyRecordRequest(SimulatorDataCategory.DndNumber, "+91 98140 55501", null,
             null, null, null, null, null, null, null, null, null, true, 0), _actor, "a@b.c");
-        await Set(SimulatorDataCatalog.Settings.DndDigitSumRule, "false");
-
         var dnd = new SimulatedPhoneVerificationProvider(_provider);
         var listed = new PhoneVerificationItem(Guid.NewGuid(), "+919814055501");
         var digitSumMultipleOfFour = new PhoneVerificationItem(Guid.NewGuid(), "+919800000001");   // 9+1+9+8+1 = 28, DND under the digit rule
@@ -189,7 +173,8 @@ public sealed class SimulatorDummyDataTests : IDisposable
     public async Task Settings_are_checked()
     {
         await Assert.ThrowsAsync<ValidationException>(() => Set(SimulatorDataCatalog.Settings.FlawedSharePercent, "95"));
-        await Assert.ThrowsAsync<ValidationException>(() => Set(SimulatorDataCatalog.Settings.UniquePerRun, "maybe"));
+        await Assert.ThrowsAsync<ValidationException>(() => Set(SimulatorDataCatalog.Settings.DndDigitSumRule, "maybe"));
+        await Assert.ThrowsAsync<ValidationException>(() => Set("UniquePerRun", "true"));   // no longer a setting
         await Set(SimulatorDataCatalog.Settings.FlawedSharePercent, "50");
     }
 

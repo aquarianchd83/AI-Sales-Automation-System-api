@@ -18,7 +18,7 @@ public enum SimulatorDataCategory
     /// <summary>A phone number the simulated DND check always rejects.</summary>
     DndNumber = 4,
 
-    /// <summary>A simulator switch (keyed: UniquePerRun, FlawedSharePercent, DndDigitSumRule).</summary>
+    /// <summary>A simulator switch (keyed: FlawedSharePercent, DndDigitSumRule).</summary>
     Setting = 5
 }
 

@@ -6,8 +6,8 @@ namespace WhatsAppSalesAutomation.Infrastructure.Verification;
 
 /// <summary>
 /// The no-cost <see cref="IPhoneVerificationProvider"/> until a real provider is wired in. Nothing is sent anywhere. A number is rejected as
-/// being on a DND register when it is in the DND numbers list on the Simulator dummy data page, or - while the DndDigitSumRule setting is on
-/// (the default) - when its digits add up to a multiple of four (about one in four). Deterministic, so a number gets the same answer every time.
+/// being on a DND register when it is in the DND numbers list on the Simulator dummy data page, or - only while the DndDigitSumRule setting is switched on
+/// (off by default) - when its digits add up to a multiple of four (about one in four). Deterministic, so a number gets the same answer every time.
 /// </summary>
 public class SimulatedPhoneVerificationProvider : IPhoneVerificationProvider
 {
