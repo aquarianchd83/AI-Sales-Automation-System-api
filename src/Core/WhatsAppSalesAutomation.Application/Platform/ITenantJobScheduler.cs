@@ -41,7 +41,8 @@ public interface ITenantJobScheduler
     /// <summary>Fires one tenant's copy of a job immediately, without disturbing its schedule - the
     /// console's "Run now". Returns the enqueued background job id so the caller can put it in the audit
     /// trail and the operator can find that exact run in the Hangfire dashboard.</summary>
-    string TriggerTenantJob(Guid tenantId, string jobType);
+    /// <param name="startedBy">Who pressed Run now (their name or email), for a job that records it - lead discovery's history says "Manual run by ...".</param>
+    string TriggerTenantJob(Guid tenantId, string jobType, string? startedBy = null);
 
     /// <summary>Registry state for the given recurring job ids, keyed by id; ids that are not registered
     /// are simply absent from the result rather than mapping to null.</summary>

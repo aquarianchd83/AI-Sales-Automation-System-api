@@ -30,6 +30,13 @@ public interface IConsentInvitationService
     Task<bool> ApplyReceiptAsync(
         string providerMessageId, ConsentInvitationStatus status, DateTime atUtc, string? reason, CancellationToken cancellationToken = default);
 
+    /// <summary>Every tenant that has an invitation waiting for an answer - what the hourly reminder job walks, one tenant at a time.</summary>
+    Task<IReadOnlyList<Guid>> GetTenantsWithOpenInvitationsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The ambient tenant's pass: marks lapsed invitations "No response", and - when the tenant turned reminders on - sends the ones
+    /// that have fallen due, inside daytime hours and the consent link's window.</summary>
+    Task<ConsentReminderRunResult> ProcessRemindersAsync(CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Called for an inbound WhatsApp message from <paramref name="customer"/>. When the customer has an invitation that is still waiting for
     /// an answer, records their opt-in with the message as evidence and starts the campaign's first message. A message from a customer with
@@ -57,4 +64,10 @@ public record ConsentInvitationBatchResult(int Sent, int Failed, int Skipped, IR
 public record ConsentReplyOutcome(bool InvitationAnswered, bool ConsentRecorded, FirstMessageOutcome? FirstMessage)
 {
     public static ConsentReplyOutcome None { get; } = new(false, false, null);
+}
+
+/// <summary>What one reminder pass did for one tenant.</summary>
+public record ConsentReminderRunResult(int Sent, int Failed, int Skipped, int NoResponse)
+{
+    public string Describe() => $"reminders sent={Sent} failed={Failed} skipped={Skipped} noResponse={NoResponse}";
 }

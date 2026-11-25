@@ -32,8 +32,18 @@ public class LeadDiscoveryExecution : BaseEntity, ITenantOwned
     /// retry on a later day still completes the original day's campaign.</summary>
     public DateTime ProcessingDate { get; set; }
 
-    /// <summary>"Scheduled", "Automatic retry" or "Manual retry".</summary>
+    /// <summary>"Scheduled", "Manual run" (Run now), "Automatic retry" or "Manual retry".</summary>
     public string Trigger { get; set; } = string.Empty;
+
+    /// <summary>Who started it when a person did (Run now, a manual retry): their name or email. Null for what the schedule started.</summary>
+    public string? StartedBy { get; set; }
+
+    /// <summary>How many times this same "not run" outcome has been recorded in a row (a run that could not start because of a plan limit); 0 for a run that
+    /// did start. A repeat updates the row instead of adding another.</summary>
+    public int SkipCount { get; set; }
+
+    /// <summary>When the latest repeat of a skipped run happened; null when it was not repeated.</summary>
+    public DateTime? LastSkippedAtUtc { get; set; }
 
     public DateTime StartedAtUtc { get; set; }
 

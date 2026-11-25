@@ -39,6 +39,9 @@ public interface ILeadDiscoveryRunService
     /// profile, or no Anthropic API key, is skipped with a summary saying so rather than failing.</summary>
     Task<string> RunForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
+    /// <summary>The same run, started by a person's Run now: recorded as a manual run by <paramref name="startedBy"/> (their name or email).</summary>
+    Task<string> RunManuallyAsync(Guid tenantId, string? startedBy, CancellationToken cancellationToken = default);
+
     /// <summary>Resumes one retryable execution as a new execution (manual retry). Returns its summary, or a
     /// "Skipped:" line when the execution is not retryable.</summary>
     Task<string> RetryExecutionAsync(Guid tenantId, Guid executionId, CancellationToken cancellationToken = default);

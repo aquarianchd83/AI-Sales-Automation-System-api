@@ -22,6 +22,7 @@ public class CreatePlanRequestValidator : AbstractValidator<CreatePlanRequest>
         RuleFor(x => x.MaxUsers).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxMessagesPerMonth).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxCampaigns).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.MaxCustomers).GreaterThanOrEqualTo(0).When(x => x.MaxCustomers is not null);
         RuleFor(x => x.MaxKnowledgeBaseArticles).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxLeadDiscoveryBatchSize).GreaterThanOrEqualTo(0);
         RuleFor(x => x.PriceMonthlyCents).GreaterThanOrEqualTo(0);
@@ -41,6 +42,7 @@ public class UpdatePlanRequestValidator : AbstractValidator<UpdatePlanRequest>
         RuleFor(x => x.MaxUsers).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxMessagesPerMonth).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxCampaigns).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.MaxCustomers).GreaterThanOrEqualTo(0).When(x => x.MaxCustomers is not null);
         RuleFor(x => x.MaxKnowledgeBaseArticles).GreaterThanOrEqualTo(0);
         RuleFor(x => x.MaxLeadDiscoveryBatchSize).GreaterThanOrEqualTo(0);
         RuleFor(x => x.PriceMonthlyCents).GreaterThanOrEqualTo(0);

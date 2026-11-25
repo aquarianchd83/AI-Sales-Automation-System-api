@@ -63,7 +63,10 @@ public record LeadDiscoveryExecutionSummaryDto(
     string CurrencyCode,
     string CurrencySymbol,
     string? AiProvider = null,
-    string? AiModel = null);
+    string? AiModel = null,
+    string? StartedBy = null,
+    int SkipCount = 0,
+    DateTime? LastSkippedAtUtc = null);
 
 /// <summary>One processing date and every execution that belongs to it, newest first.</summary>
 public record LeadDiscoveryHistoryDayDto([property: JsonConverter(typeof(WallClockDateTimeJsonConverter))] DateTime ProcessingDate, IReadOnlyList<LeadDiscoveryExecutionSummaryDto> Executions);
@@ -103,7 +106,15 @@ public record LeadDiscoveryExecutionCustomerDto(
     /// <summary>What the agent reported about this candidate (business type, contact person, address, website, the page it was found on, score and why). Null for a row from before candidates were kept.</summary>
     LeadDiscoveryCandidateSnapshot? Candidate = null,
     /// <summary>The first sentence of <see cref="ConsentSmsNote"/> when it names a missing setting - shown in bold ahead of the rest. Null when the note has no such lead-in.</summary>
-    string? ConsentSmsHeadline = null);
+    string? ConsentSmsHeadline = null,
+    /// <summary>Where the customer stands on the consent SMS: Waiting (link open, no answer yet), Consented, Declined, or NoResponse (the link expired). Null when no SMS was sent.</summary>
+    string? ConsentState = null,
+    /// <summary>How many reminder SMS followed the invitation (0 to 2).</summary>
+    int ConsentReminderCount = 0,
+    /// <summary>When the latest reminder went, if any.</summary>
+    DateTime? ConsentLastReminderAtUtc = null,
+    /// <summary>When the consent link stops working - after this the customer is "No response".</summary>
+    DateTime? ConsentLinkExpiresAtUtc = null);
 
 public record LeadDiscoveryExecutionTemplateDto(
     Guid Id,

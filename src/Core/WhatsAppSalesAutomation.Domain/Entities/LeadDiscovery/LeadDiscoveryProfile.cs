@@ -86,4 +86,14 @@ public class LeadDiscoveryProfile : BaseEntity, ITenantOwned
     /// <summary>Whether each customer who joins the auto-campaign is sent an SMS inviting them to start a WhatsApp conversation, which
     /// is how their consent is obtained. Off by default: nothing is sent unless the tenant turns it on.</summary>
     public bool ConsentSmsEnabled { get; set; }
+
+    /// <summary>Whether a customer who has not answered the consent SMS is sent up to two reminders. Off by default: nothing extra is sent
+    /// unless the tenant turns it on. Reminders only ever go while the consent link is still valid.</summary>
+    public bool ConsentReminderEnabled { get; set; }
+
+    /// <summary>Days after the invitation the first reminder goes (1 to 13).</summary>
+    public int ConsentReminderFirstDays { get; set; } = 3;
+
+    /// <summary>Days after the invitation the second reminder goes; null for no second reminder. Always later than the first.</summary>
+    public int? ConsentReminderSecondDays { get; set; } = 7;
 }

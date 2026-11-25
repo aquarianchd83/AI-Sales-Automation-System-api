@@ -81,6 +81,15 @@ public interface IFeatureAccessService
     /// <summary>Throws <see cref="FeatureDisabledException"/> (HTTP 403) when the tenant can't use the feature: not in its plan, and no free uses left.</summary>
     Task RequireAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether the tenant may still SEE what it already has of the feature: true when it can use it, and also once the free uses (or the plan's cap) of it
+    /// are used up - the leads it discovered, the stories it made stay readable; only adding new ones asks for an upgrade.
+    /// </summary>
+    Task<bool> CanViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
+    /// <summary>Throws <see cref="FeatureDisabledException"/> (HTTP 403) when the tenant can't even look at the feature (see <see cref="CanViewAsync"/>).</summary>
+    Task RequireViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default);
+
     /// <summary>The free uses the tenant's plan gives of each published feature it does not include (used up or not). Empty for a plan that gives none.</summary>
     Task<IReadOnlyList<FeatureTrialDto>> GetTrialsAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
@@ -208,6 +217,24 @@ public class FeatureAccessService : IFeatureAccessService
         throw new FeatureDisabledException($"{label} is not part of your plan. Upgrade to Premium to use it.");
     }
 
+    public async Task<bool> CanViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    {
+        if (await HasAsync(tenantId, feature, cancellationToken))
+            return true;
+        if (PlatformFeatureSwitches.Unpublished(_configuration).Contains(feature))
+            return false;
+
+        // Used up, not taken away: a feature the plan gave free uses of (or caps) keeps what was made with it on screen.
+        return await GetTrialAsync(tenantId, feature, cancellationToken) is not null;
+    }
+
+    public async Task RequireViewAsync(Guid tenantId, PlatformFeature feature, CancellationToken cancellationToken = default)
+    {
+        if (await CanViewAsync(tenantId, feature, cancellationToken))
+            return;
+        await RequireAsync(tenantId, feature, cancellationToken);
+    }
+
     /// <summary>What a tenant is told once the free uses (or the plan's cap) of a feature are gone.</summary>
     public static string TrialUsedUpMessage(FeatureTrialDto trial, string? planName) =>
         $"You have used all {trial.FreeUses} {(trial.IncludedInPlan ? "" : "free ")}{(trial.FreeUses == 1 ? trial.UnitSingular : trial.Unit)} of {trial.Label} included with your " +
@@ -331,8 +358,9 @@ public record CreditCostItemDto(PlatformFeature Feature, CreditScenario Scenario
 /// <summary>What the signed-in tenant is allowed to see and use: the features of its plan, its balance and what each action costs. Light enough to load for every user.</summary>
 /// <param name="Trials">Features the plan does not include but gives free uses of. A feature listed here is in <paramref name="Features"/> only while it has uses left;
 /// once they are gone the app shows it locked, with an upgrade prompt.</param>
+/// <param name="Quotas">Plan limits that are not a feature of their own (the customer and user limits), so the app can show "N left" beside them too.</param>
 public record EntitlementsDto(string? PlanCode, string? PlanName, IReadOnlyList<PlatformFeature> Features, decimal Balance, IReadOnlyList<CreditCostItemDto> Costs,
-    IReadOnlyList<FeatureTrialDto>? Trials = null);
+    IReadOnlyList<FeatureTrialDto>? Trials = null, IReadOnlyList<WhatsAppSalesAutomation.Application.Billing.PlanQuotaDto>? Quotas = null);
 
 public interface ICreditWalletService
 {
@@ -381,7 +409,33 @@ public class CreditWalletService : ICreditWalletService
         var costs = included.SelectMany(f => f.Costs.Select(c => new CreditCostItemDto(f.Feature, c.Scenario, c.Title, c.UnitLabel, c.Credits, c.PerAction))).ToList();
         // A feature open on free uses is already in `included` (the access service counts it in while uses are left).
         var trials = await _access.GetTrialsAsync(tenantId, ct);
-        return new EntitlementsDto(summary.PlanCode, summary.PlanName, included.Select(f => f.Feature).ToList(), summary.Balance, costs, trials);
+        // The features come from the access service, not the wallet summary: Campaigns has no wallet (it spends nothing of its own), so the summary
+        // leaves it out, and the app would show a plan that includes it as locked.
+        var features = (await _access.GetFeaturesAsync(tenantId, ct)).OrderBy(f => f).ToList();
+        if (features.Contains(PlatformFeature.Campaigns) && await CampaignQuotaAsync(tenantId, summary.PlanCode, ct) is { } campaigns)
+            trials = trials.Append(campaigns).ToList();
+        var quotas = new List<WhatsAppSalesAutomation.Application.Billing.PlanQuotaDto>();
+        if (await WhatsAppSalesAutomation.Application.Billing.CustomerQuota.GetAsync(_context, tenantId, ct) is { } customers)
+            quotas.Add(customers);
+        if (await WhatsAppSalesAutomation.Application.Billing.UserQuota.GetAsync(_context, tenantId, ct) is { } users)
+            quotas.Add(users);
+        return new EntitlementsDto(summary.PlanCode, summary.PlanName, features, summary.Balance, costs, trials, quotas);
+    }
+
+    /// <summary>
+    /// The Basic plan's campaign limit (Plan.MaxCampaigns) as a quota, so the app shows "N left" beside Campaigns like the other capped features and
+    /// turns it read-only once it is reached (creating one is refused by PlanLimitsService). Counted the same way that refusal counts. Null on any
+    /// other plan: Premium's limit is not shown.
+    /// </summary>
+    private async Task<FeatureTrialDto?> CampaignQuotaAsync(Guid tenantId, string? planCode, CancellationToken ct)
+    {
+        if (planCode != PlatformFeatureCatalog.TrialPlanCode)
+            return null;
+        var max = await _context.Plans.AsNoTracking().Where(p => p.Code == planCode).Select(p => (int?)p.MaxCampaigns).FirstOrDefaultAsync(ct);
+        if (max is null)
+            return null;
+        var used = await _context.Campaigns.IgnoreQueryFilters().AsNoTracking().CountAsync(c => c.TenantId == tenantId, ct);
+        return new FeatureTrialDto(PlatformFeature.Campaigns, PlatformFeatureCatalog.For(PlatformFeature.Campaigns).Label, max.Value, used, "campaigns", "campaign", IncludedInPlan: true);
     }
 
     public async Task<WalletSummaryDto> GetSummaryAsync(Guid tenantId, CancellationToken ct = default)

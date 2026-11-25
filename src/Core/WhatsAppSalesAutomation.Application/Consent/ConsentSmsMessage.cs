@@ -18,6 +18,9 @@ public static class ConsentSmsMessage
     /// <summary>Three SMS segments of GSM-7 text.</summary>
     public const int MaxBodyLength = 459;
 
+    /// <summary>At most this many reminders follow one invitation.</summary>
+    public const int MaxReminders = 2;
+
     /// <summary>How many times one invitation is tried (the first send included) before it stays Failed.</summary>
     public const int MaxAttempts = 3;
 
@@ -43,6 +46,10 @@ public static class ConsentSmsMessage
 
         return $"{greeting} {question} View the details and choose whether to receive WhatsApp follow-ups: {link}";
     }
+
+    /// <summary>The reminder: the same ask, marked as a reminder, with a fresh link.</summary>
+    public static string BuildReminderBody(string? customerFirstName, string businessName, string? productLabel, string link) =>
+        "Reminder: " + BuildBody(customerFirstName, businessName, productLabel, link);
 
     /// <summary>The same note with the secret taken out, for the record: the raw token is never stored.</summary>
     public static string Redact(string body, string token) => body.Replace(token, "[token]", StringComparison.Ordinal);

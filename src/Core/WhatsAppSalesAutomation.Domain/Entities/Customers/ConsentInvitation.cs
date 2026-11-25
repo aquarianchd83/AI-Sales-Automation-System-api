@@ -67,6 +67,12 @@ public class ConsentInvitation : BaseEntity, ITenantOwned
 
     public DateTime? TokenExpiresAtUtc { get; set; }
 
+    /// <summary>How many reminder SMS have been sent for this invitation (0, 1 or 2). The invitation itself is not counted.</summary>
+    public int ReminderCount { get; set; }
+
+    /// <summary>When the latest reminder SMS was sent.</summary>
+    public DateTime? LastReminderAtUtc { get; set; }
+
     /// <summary>The customer's decision - separate from <see cref="Status"/>, which is only about the SMS.</summary>
     public ConsentDecisionStatus DecisionStatus { get; set; } = ConsentDecisionStatus.Pending;
 

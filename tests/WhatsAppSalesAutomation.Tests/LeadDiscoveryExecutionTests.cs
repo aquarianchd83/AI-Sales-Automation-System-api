@@ -6,10 +6,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Campaigns;
+using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Common.Options;
 using WhatsAppSalesAutomation.Application.Consent;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.LeadDiscovery;
 using WhatsAppSalesAutomation.Application.LeadDiscovery.Execution;
 using WhatsAppSalesAutomation.Application.Quota;
@@ -192,6 +194,150 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             Assert.Null(c.OptInTimestamp);
             Assert.Null(c.OptInSource);
         });
+    }
+
+    [Fact]
+    public async Task A_waiting_retry_takes_the_firings_place_so_there_is_no_second_run()
+    {
+        _agent.Rounds.Add(Candidates("A", "C"));
+        FailCustomerSave("C Contact");
+        await Service().RunForTenantAsync(_tenant); // first run: C fails -> RetryPending
+        var callsBefore = _agent.Calls;
+
+        await Service().RunForTenantAsync(_tenant); // the retry finishes it; no new search starts
+
+        var executions = await Executions();
+        Assert.Equal(2, executions.Count);
+        Assert.Equal(callsBefore, _agent.Calls);
+        Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.AutomaticRetry);
+    }
+
+    [Fact]
+    public async Task Run_now_is_recorded_as_a_manual_run_by_the_person_and_the_schedule_as_automatic()
+    {
+        _agent.Rounds.Add(Candidates("A"));
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        _agent.Rounds.Add(Candidates("B"));
+        await Service().RunForTenantAsync(_tenant);
+
+        var executions = (await Executions()).OrderBy(e => e.StartedAtUtc).ToList();
+        var manual = Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.ManualRun);
+        Assert.Equal("harish@example.com", manual.StartedBy);
+        var scheduled = Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.Scheduled);
+        Assert.Null(scheduled.StartedBy);
+    }
+
+    [Fact]
+    public async Task Run_now_does_not_take_over_a_waiting_retry()
+    {
+        _agent.Rounds.Add(Candidates("A", "C"));
+        FailCustomerSave("C Contact");
+        await Service().RunForTenantAsync(_tenant); // first run: C fails -> RetryPending
+        _agent.Rounds.Add(Candidates("X"));
+
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+
+        var executions = await Executions();
+        Assert.Empty(executions.Where(e => e.Trigger == LeadDiscoveryTriggers.AutomaticRetry));
+        Assert.Single(executions, e => e.Trigger == LeadDiscoveryTriggers.ManualRun);
+        // The waiting run is still waiting for the next scheduled time.
+        Assert.Single(executions, e => e.Status == LeadDiscoveryExecutionStatus.RetryPending);
+    }
+
+    [Fact]
+    public async Task The_same_skipped_run_repeating_updates_one_row_instead_of_adding_more()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync();
+        Assert.Equal(3, execution.SkipCount);
+        Assert.NotNull(execution.LastSkippedAtUtc);
+        Assert.Equal(0, _agent.Calls);
+    }
+
+    [Fact]
+    public async Task Run_now_always_gets_its_own_row_even_when_the_same_skip_just_happened()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+
+        var executions = await Executions();
+        Assert.Equal(3, executions.Count);
+        Assert.Equal(2, executions.Count(e => e.Trigger == LeadDiscoveryTriggers.ManualRun && e.StartedBy == "harish@example.com"));
+        Assert.All(executions, e => Assert.Equal(1, e.SkipCount));
+    }
+
+    [Fact]
+    public async Task Run_now_with_the_profile_turned_off_leaves_a_row_saying_why()
+    {
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.IsEnabled = false;
+        await _db.SaveChangesAsync();
+
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync(); // the schedule's own firing records nothing
+        Assert.Equal(LeadDiscoveryTriggers.ManualRun, execution.Trigger);
+        Assert.Contains("turned off", execution.Summary);
+    }
+
+    [Fact]
+    public async Task A_batch_is_cut_to_the_room_left_in_the_plans_customer_limit()
+    {
+        var plan = new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 2 };
+        _db.Plans.Add(plan);
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(2, await _db.Customers.CountAsync());
+        Assert.Equal(2, (await SingleExecutionAsync()).CustomersCreated);
+    }
+
+    [Fact]
+    public async Task A_run_is_not_started_when_the_customer_limit_is_already_reached()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(1, await _db.Customers.CountAsync());
+        Assert.Equal(0, _agent.Calls);
+        var execution = await SingleExecutionAsync();
+        Assert.Contains("up to 1 customer", execution.Summary);
+        Assert.Contains("no discovery credits were deducted", execution.Summary);
+    }
+
+    [Fact]
+    public async Task A_run_is_not_started_when_its_auto_campaign_would_pass_the_campaign_limit()
+    {
+        EnableAutoCampaign();
+        _beforeCampaignCreate = () => throw new PlanLimitExceededException("Your plan allows up to 6 campaigns. Upgrade to create more.");
+        _agent.Rounds.Add(Candidates("A", "B"));
+
+        await Service().RunForTenantAsync(_tenant);
+
+        Assert.Equal(0, await _db.Customers.CountAsync());
+        Assert.Equal(0, _agent.Calls);
+        var execution = await SingleExecutionAsync();
+        Assert.Contains("up to 6 campaigns", execution.Summary);
+        Assert.False(LeadDiscoveryRetryRules.CanRetry(execution));
     }
 
     [Fact]
@@ -972,7 +1118,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
         _agent.Rounds.Add(Candidates("A", "B", "C", "D"));
         var failCustomer = FailCustomerSave("C Contact");
         var campaignAttempts = 0;
-        _beforeCampaignCreate = () => ++campaignAttempts == 1 ? throw new InvalidOperationException("Campaign store down") : Task.CompletedTask;
+        // The first look at the campaign limit is the run's own pre-check (before anything is searched); the store goes down at the second, in the campaign step.
+        _beforeCampaignCreate = () => ++campaignAttempts == 2 ? throw new InvalidOperationException("Campaign store down") : Task.CompletedTask;
 
         await Service().RunForTenantAsync(_tenant);
 
@@ -1457,6 +1604,8 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
             return Task.FromResult(new ConsentInvitationBatchResult(customerIds.Count, 0, 0, Array.Empty<string>()));
         }
 
+        public Task<IReadOnlyList<Guid>> GetTenantsWithOpenInvitationsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WhatsAppSalesAutomation.Application.Consent.ConsentReminderRunResult> ProcessRemindersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> RetryDueAsync(CancellationToken cancellationToken = default)
         {
             RetryCalls++;

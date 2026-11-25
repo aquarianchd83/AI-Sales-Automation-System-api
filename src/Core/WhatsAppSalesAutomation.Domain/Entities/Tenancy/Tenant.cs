@@ -46,6 +46,10 @@ public class Tenant : BaseEntity
     /// False by default, which is how customers behaved before the setting existed.</summary>
     public bool ConsentRequired { get; set; }
 
+    /// <summary>How many months after the customer says "not now" a follow-up reminder is scheduled, when the customer named no
+    /// wait of their own. Set by the tenant's Admin on the Follow-ups page. Null means <c>LeadFollowUpPolicy.DefaultSuggestedMonths</c>.</summary>
+    public int? FollowUpMonths { get; set; }
+
     /// <summary>IANA timezone id (e.g. "America/New_York", "Asia/Kolkata") - one of
     /// TimeZoneCatalog.All, set at signup or changed later by the tenant's own Admin or a
     /// PlatformSuperAdmin. Null defaults to TimeZoneCatalog.DefaultId (India Standard Time) via

@@ -1,5 +1,6 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
@@ -136,6 +137,8 @@ public class CustomerService : ICustomerService
         PhoneNumberNormalizer.TryNormalize(request.PhoneNumberE164, out var phoneNumber);
 
         await EnsurePhoneNumberIsFreeAsync(phoneNumber, excludingCustomerId: null, cancellationToken);
+        if (_tenantContext.TenantId is { } tenantId)
+            await CustomerQuota.EnsureCanAddAsync(_context, tenantId, 1, cancellationToken);
 
         var customer = new Customer
         {
@@ -393,6 +396,9 @@ public class CustomerService : ICustomerService
         var importTags = await LoadTagsAsync(
             rows.SelectMany(r => r.Tags).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()), cancellationToken);
 
+        // The plan's customer limit: rows past it are reported, not imported, so the rest of the file still goes in.
+        var quota = _tenantContext.TenantId is { } tenantId ? await CustomerQuota.GetAsync(_context, tenantId, cancellationToken) : null;
+
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -425,6 +431,12 @@ public class CustomerService : ICustomerService
             if (existingNumbers.Contains(phoneNumber))
             {
                 skipped++;
+                continue;
+            }
+
+            if (quota is not null && imported >= quota.Remaining)
+            {
+                errors.Add(new CustomerImportRowError(row.RowNumber, CustomerQuota.LimitReachedMessage(quota)));
                 continue;
             }
 

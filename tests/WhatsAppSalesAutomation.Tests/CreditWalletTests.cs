@@ -8,6 +8,7 @@ using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.Quota;
 using WhatsAppSalesAutomation.Domain.Entities.Billing;
+using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
 using WhatsAppSalesAutomation.Domain.Enums;
 using WhatsAppSalesAutomation.Infrastructure.Persistence;
@@ -315,10 +316,32 @@ public sealed class CreditWalletTests : IDisposable
 
         var entitlements = await _wallet.GetEntitlementsAsync(_tenant);
 
-        Assert.Equal(new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations }, entitlements.Features.ToArray());
+        // Campaigns too: it has no wallet of its own, but the plan includes it, so the app must not lock it.
+        Assert.Equal(new[] { PlatformFeature.WhatsAppMessaging, PlatformFeature.AiConversations, PlatformFeature.Campaigns }, entitlements.Features.ToArray());
         Assert.Equal(2m, entitlements.Costs.Single(c => c.Scenario == CreditScenario.CustomerChatReply).Credits);
         Assert.DoesNotContain(entitlements.Costs, c => c.Feature == PlatformFeature.ContentStudio);
         Assert.Equal(100m, entitlements.Balance);
+    }
+
+    [Fact]
+    public async Task Basic_shows_its_campaign_limit_as_a_quota_and_premium_does_not()
+    {
+        _trial.MaxCampaigns = 2;
+        await OnPlanAsync(_trial);
+        _db.Campaigns.Add(new Campaign { TenantId = _tenant, Name = "First", Status = CampaignStatus.Draft, CreatedBy = Guid.NewGuid() });
+        await _db.SaveChangesAsync();
+
+        var campaigns = Assert.Single((await _wallet.GetEntitlementsAsync(_tenant)).Trials!, t => t.Feature == PlatformFeature.Campaigns);
+        Assert.Equal((2, 1, 1, true), (campaigns.FreeUses, campaigns.Used, campaigns.Remaining, campaigns.IncludedInPlan));
+        Assert.Equal("campaigns", campaigns.Unit);
+
+        _db.Campaigns.Add(new Campaign { TenantId = _tenant, Name = "Second", Status = CampaignStatus.Draft, CreatedBy = Guid.NewGuid() });
+        await _db.SaveChangesAsync();
+        Assert.True(Assert.Single((await _wallet.GetEntitlementsAsync(_tenant)).Trials!, t => t.Feature == PlatformFeature.Campaigns).Exhausted);
+
+        (await _db.Subscriptions.IgnoreQueryFilters().SingleAsync(x => x.TenantId == _tenant)).PlanId = _premium.Id;
+        await _db.SaveChangesAsync();
+        Assert.DoesNotContain((await _wallet.GetEntitlementsAsync(_tenant)).Trials!, t => t.Feature == PlatformFeature.Campaigns);
     }
 
     private sealed class Clock : IDateTimeProvider

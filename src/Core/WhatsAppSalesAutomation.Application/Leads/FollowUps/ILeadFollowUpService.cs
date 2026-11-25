@@ -35,6 +35,11 @@ public interface ILeadFollowUpService
     /// quiet period and the "customer wrote in since" check, but never opt-in, template approval or quota.</summary>
     Task<LeadFollowUpDto> SendNowAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<LeadFollowUpSettingDto> GetSettingAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Sets how many months after "not now" a follow-up is scheduled. Applies to follow-ups suggested from now on.</summary>
+    Task<LeadFollowUpSettingDto> SetSettingAsync(SetLeadFollowUpSettingRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>The scheduled job's pass: sends what has fallen due, inside the tenant's daytime hours.</summary>
     Task<LeadFollowUpRunResult> ProcessDueAsync(CancellationToken cancellationToken = default);
 }

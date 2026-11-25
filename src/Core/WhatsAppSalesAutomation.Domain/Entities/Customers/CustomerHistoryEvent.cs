@@ -64,6 +64,9 @@ public static class CustomerHistoryEventTypes
     /// <summary>The customer chose "No, Not Interested" on the consent page. Not a failure; no WhatsApp conversation follows.</summary>
     public const string ConsentDeclined = "ConsentDeclined";
 
+    /// <summary>The consent link lapsed with no answer: the customer is shown as "No response".</summary>
+    public const string ConsentExpired = "ConsentExpired";
+
     // The campaign's first message after consent.
     public const string FirstMessageSent = "FirstMessageSent";
     public const string FirstMessageFailed = "FirstMessageFailed";

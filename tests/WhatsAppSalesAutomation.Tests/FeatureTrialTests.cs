@@ -131,7 +131,8 @@ public sealed class FeatureTrialTests : IDisposable
         var entitlements = await Request().Wallet.GetEntitlementsAsync(_tenant);
 
         Assert.Contains(PlatformFeature.LeadDiscovery, entitlements.Features);
-        var trial = Assert.Single(entitlements.Trials!);
+        Assert.Contains(PlatformFeature.Campaigns, entitlements.Features); // no wallet of its own, but in the plan: the app must not lock it
+        var trial = Assert.Single(entitlements.Trials!, t => t.Feature == PlatformFeature.LeadDiscovery); // Campaigns' limit is listed too
         Assert.Equal(PlatformFeature.LeadDiscovery, trial.Feature);
         Assert.Equal(3, trial.FreeUses);
         Assert.Equal(1, trial.Used);
@@ -157,6 +158,25 @@ public sealed class FeatureTrialTests : IDisposable
         subscription.PlanId = _basic.Id;
         await _db.SaveChangesAsync();
         Assert.Equal(2, (await Request().Access.GetTrialAsync(_tenant, PlatformFeature.LeadDiscovery))!.Remaining);
+    }
+
+    [Fact]
+    public async Task Used_up_free_uses_keep_the_feature_readable_but_not_usable()
+    {
+        Assert.True(await Request().Access.CanViewAsync(_tenant, PlatformFeature.LeadDiscovery));
+        for (var i = 0; i < 3; i++)
+            await ChargeLeadAsync($"lead:{i}");
+
+        var access = Request().Access;
+        Assert.False(await access.HasAsync(_tenant, PlatformFeature.LeadDiscovery));
+        Assert.True(await access.CanViewAsync(_tenant, PlatformFeature.LeadDiscovery));
+        await access.RequireViewAsync(_tenant, PlatformFeature.LeadDiscovery); // reads still pass
+        await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireAsync(_tenant, PlatformFeature.LeadDiscovery));
+
+        // A feature with no free uses at all stays closed to reads too.
+        Assert.False(await access.CanViewAsync(_tenant, PlatformFeature.ContentStudio));
+        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(() => access.RequireViewAsync(_tenant, PlatformFeature.ContentStudio));
+        Assert.Contains("not part of your plan", ex.Message);
     }
 
     [Fact]

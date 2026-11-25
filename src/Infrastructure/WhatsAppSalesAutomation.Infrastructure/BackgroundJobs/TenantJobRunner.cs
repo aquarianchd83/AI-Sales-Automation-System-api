@@ -143,6 +143,11 @@ public class TenantJobRunner
         if (!TenantStatusRules.AllowsBackgroundJobs(status.Value))
             return "tenant is " + status.Value;
 
+        // Lead discovery has no on/off switch of its own any more: its times are the tenant's slots (an empty schedule runs nothing), and a person's Run now
+        // is separate from it. The old schedule row's flag - the midnight cron, switched off for most tenants - must not silence either.
+        if (jobType == TenantJobTypes.LeadDiscovery)
+            return null;
+
         var isEnabled = await context.TenantJobSchedules
             .Where(s => s.TenantId == tenantId && s.JobType == jobType)
             .Select(s => (bool?)s.IsEnabled)

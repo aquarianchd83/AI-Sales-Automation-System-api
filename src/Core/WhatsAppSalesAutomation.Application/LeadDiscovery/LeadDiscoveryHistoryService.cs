@@ -138,6 +138,16 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
     }
 
     /// <summary>The bold lead-in of a consent SMS note, when it has one: the sentence that says which setting is missing. Null for any other note.</summary>
+    /// <summary>Waiting, Consented, Declined or NoResponse - what the Consent column shows.</summary>
+    internal static string ConsentStateOf(ConsentDecisionStatus decision, DateTime? consentRecordedAtUtc) => decision switch
+    {
+        ConsentDecisionStatus.Granted => "Consented",
+        ConsentDecisionStatus.NotInterested => "Declined",
+        ConsentDecisionStatus.Expired => "NoResponse",
+        // A legacy invitation answered by a WhatsApp message records the consent time without a decision.
+        _ => consentRecordedAtUtc is not null ? "Consented" : "Waiting"
+    };
+
     internal static string? ConsentSmsHeadlineOf(string? note) =>
         note is null ? null
         : note.StartsWith(LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline, StringComparison.Ordinal) ? LeadDiscoveryRunService.AutoCampaignNotConfiguredHeadline
@@ -157,7 +167,7 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
             .Select(c => new LeadDiscoveryExecutionCustomerDto(
                 c.Id, c.CustomerId, c.DiscoveredLeadId, c.CustomerName, c.Phone, c.Status.ToString(), c.IsInvalid,
                 c.ErrorMessage, c.ErrorDetails, c.RetriedFromId, c.ProcessedAtUtc,
-                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false, "", null, null))
+                c.VerificationStatus.ToString(), c.VerificationReasonCode, c.VerificationReason, c.VerifiedAtUtc, null, null, null, null, null, null, false, "", null, null, null, 0, null, null))
             .ToListAsync(cancellationToken);
 
         // What the agent reported about each candidate. Read separately, and only where one was kept, so the large text is not pulled
@@ -211,14 +221,21 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         {
             var invitations = (await _context.ConsentInvitations.AsNoTracking()
                     .Where(i => i.ExecutionId == executionId && customerIds.Contains(i.CustomerId))
-                    .Select(i => new { i.CustomerId, i.Status, i.FailureReason, i.ConsentRecordedAtUtc })
+                    .Select(i => new { i.CustomerId, i.Status, i.FailureReason, i.ConsentRecordedAtUtc, i.DecisionStatus, i.ReminderCount, i.LastReminderAtUtc, i.TokenExpiresAtUtc })
                     .ToListAsync(cancellationToken))
                 .GroupBy(i => i.CustomerId)
                 .ToDictionary(g => g.Key, g => g.First());
 
             customers = customers
                 .Select(c => c.CustomerId is { } id && invitations.TryGetValue(id, out var inv)
-                    ? c with { ConsentSmsStatus = inv.Status.ToString(), ConsentSmsFailureReason = inv.FailureReason, ConsentRecordedAtUtc = inv.ConsentRecordedAtUtc }
+                    ? c with
+                    {
+                        ConsentSmsStatus = inv.Status.ToString(), ConsentSmsFailureReason = inv.FailureReason, ConsentRecordedAtUtc = inv.ConsentRecordedAtUtc,
+                        ConsentState = ConsentStateOf(inv.DecisionStatus, inv.ConsentRecordedAtUtc),
+                        ConsentReminderCount = inv.ReminderCount,
+                        ConsentLastReminderAtUtc = inv.LastReminderAtUtc is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
+                        ConsentLinkExpiresAtUtc = inv.TokenExpiresAtUtc is { } expires ? DateTime.SpecifyKind(expires, DateTimeKind.Utc) : null
+                    }
                     : c)
                 .ToList();
         }
@@ -377,7 +394,10 @@ public class LeadDiscoveryHistoryService : ILeadDiscoveryHistoryService
         pricing.CurrencyCode,
         pricing.CurrencySymbol,
         ProviderOf(run?.Model),
-        string.IsNullOrWhiteSpace(run?.Model) ? null : run!.Model);
+        string.IsNullOrWhiteSpace(run?.Model) ? null : run!.Model,
+        e.StartedBy,
+        e.SkipCount,
+        AsUtc(e.LastSkippedAtUtc));
 
     /// <summary>The AI provider that did the research, read from the model name the run recorded (a run stores the model, not the
     /// provider). Null when the execution did no research - a retry, or a run skipped before it started.</summary>

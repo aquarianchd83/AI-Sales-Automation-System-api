@@ -72,7 +72,12 @@ public record LeadDiscoveryProfileDto(
     DateTime? UpdatedAt,
     string? Description = null,
     bool DndCheckEnabled = false,
-    bool ConsentSmsEnabled = false);
+    bool ConsentSmsEnabled = false,
+    bool ConsentReminderEnabled = false,
+    int ConsentReminderFirstDays = 3,
+    int? ConsentReminderSecondDays = 7,
+    /// <summary>How many days a customer has to answer the consent SMS: 14, or the length of the Auto-Campaign when that is shorter. A reminder can be set to any day before this one.</summary>
+    int ConsentWindowDays = 14);
 
 /// <summary>Body of PUT lead-discovery/profile. Replaces the whole profile. RequiredFields are
 /// LeadDiscoveryFields names, in any case. <paramref name="SourceCampaignId"/> must reference an
@@ -98,7 +103,10 @@ public record SaveLeadDiscoveryProfileRequest(
     TimeSpan? AutoCampaignStartTime = null,
     string? Description = null,
     bool DndCheckEnabled = false,
-    bool ConsentSmsEnabled = false);
+    bool ConsentSmsEnabled = false,
+    bool ConsentReminderEnabled = false,
+    int ConsentReminderFirstDays = 3,
+    int? ConsentReminderSecondDays = 7);
 
 /// <summary>What one lead discovery run cost and produced. <paramref name="EstimatedCostUsd"/> is the figure
 /// the run was priced at when it ran; <paramref name="EstimatedCostLocal"/> is that converted to the tenant's

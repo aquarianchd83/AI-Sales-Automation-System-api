@@ -34,3 +34,8 @@ public record LeadFollowUpRunResult(int Considered, int Sent, int Failed, int Sk
     public string Describe() =>
         $"considered={Considered} sent={Sent} failed={Failed} skipped={Skipped} deferred={Deferred} cancelled={Cancelled}";
 }
+
+/// <summary>The tenant's "send the follow-up after how many months" choice (1 up to <see cref="LeadFollowUpPolicy.MaxMonths"/>).</summary>
+public record LeadFollowUpSettingDto(int Months, int MaxMonths);
+
+public record SetLeadFollowUpSettingRequest(int Months);

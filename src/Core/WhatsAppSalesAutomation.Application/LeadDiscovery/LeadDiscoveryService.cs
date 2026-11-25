@@ -51,7 +51,8 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         var planLimit = await _planLimits.GetLeadDiscoveryBatchLimitAsync(tenantId, cancellationToken);
         var (sourceCampaignName, sourceCampaignStatus) = await ResolveSourceCampaignAsync(tenantId, profile?.SourceCampaignId, cancellationToken);
 
-        return ToDto(profile ?? new LeadDiscoveryProfile(), planLimit, sourceCampaignName, sourceCampaignStatus);
+        var windowDays = await ResolveConsentWindowDaysAsync(profile?.SourceCampaignId, cancellationToken);
+        return ToDto(profile ?? new LeadDiscoveryProfile(), planLimit, sourceCampaignName, sourceCampaignStatus, windowDays);
     }
 
     public async Task<LeadDiscoveryProfileDto> SaveProfileAsync(SaveLeadDiscoveryProfileRequest request, CancellationToken cancellationToken = default)
@@ -86,6 +87,22 @@ public class LeadDiscoveryService : ILeadDiscoveryService
             sourceCampaignStatus = sourceCampaign.Status.ToString();
         }
 
+        // A reminder can only go while the consent link is open, and that is never longer than the Auto-Campaign: a date past its close is refused here
+        // rather than saved and never sent.
+        if (request.ConsentSmsEnabled && request.ConsentReminderEnabled)
+        {
+            var reminderWindowDays = await ResolveConsentWindowDaysAsync(request.AutoCampaignEnabled ? request.SourceCampaignId : null, cancellationToken);
+            if (!Consent.ConsentWindow.Fits(request.ConsentReminderFirstDays, reminderWindowDays)
+                || (request.ConsentReminderSecondDays is { } second && !Consent.ConsentWindow.Fits(second, reminderWindowDays)))
+            {
+                throw new FluentValidation.ValidationException(new[]
+                {
+                    new FluentValidation.Results.ValidationFailure(nameof(request.ConsentReminderFirstDays),
+                        $"Customers have {reminderWindowDays} days to answer, so a reminder must go by day {Consent.ConsentWindow.LastReminderDay(reminderWindowDays)}.")
+                });
+            }
+        }
+
         var profile = await _context.LeadDiscoveryProfiles.FirstOrDefaultAsync(cancellationToken);
         if (profile is null)
         {
@@ -116,6 +133,9 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         profile.AutoCampaignStartTime = request.AutoCampaignStartTime;
         profile.DndCheckEnabled = request.DndCheckEnabled;
         profile.ConsentSmsEnabled = request.ConsentSmsEnabled;
+        profile.ConsentReminderEnabled = request.ConsentReminderEnabled;
+        profile.ConsentReminderFirstDays = request.ConsentReminderFirstDays;
+        profile.ConsentReminderSecondDays = request.ConsentReminderSecondDays;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -130,7 +150,8 @@ public class LeadDiscoveryService : ILeadDiscoveryService
             _logger.LogWarning(ex, "Could not create the lead discovery job of tenant {TenantId} after its profile was saved; the next reconcile will", tenantId);
         }
 
-        return ToDto(profile, planLimit, sourceCampaignName, sourceCampaignStatus);
+        var windowDays = await ResolveConsentWindowDaysAsync(profile.SourceCampaignId, cancellationToken);
+        return ToDto(profile, planLimit, sourceCampaignName, sourceCampaignStatus, windowDays);
     }
 
     public async Task<PagedResult<DiscoveredLeadDto>> GetDiscoveredLeadsAsync(
@@ -357,12 +378,27 @@ public class LeadDiscoveryService : ILeadDiscoveryService
         return campaign is null ? (null, null) : (campaign.Name, campaign.Status.ToString());
     }
 
-    private static LeadDiscoveryProfileDto ToDto(LeadDiscoveryProfile p, int? planLimit, string? sourceCampaignName, string? sourceCampaignStatus) => new(
+    /// <summary>The days a customer has to answer the consent SMS for the Auto-Campaign chosen: the default, cut to the campaign's own length when
+    /// that is shorter (see <see cref="Consent.ConsentWindow"/>). The reminder days the profile offers never reach past it.</summary>
+    private async Task<int> ResolveConsentWindowDaysAsync(Guid? sourceCampaignId, CancellationToken cancellationToken)
+    {
+        var defaultDays = new Consent.ConsentPageOptions().TokenLifetimeDays;
+        if (sourceCampaignId is not { } id)
+            return defaultDays;
+        var delays = await _context.CampaignSteps.AsNoTracking()
+            .Where(s => s.CampaignId == id && s.IsActive)
+            .Select(s => s.DelayDaysAfterPrevious)
+            .ToListAsync(cancellationToken);
+        return Consent.ConsentWindow.Days(defaultDays, delays);
+    }
+
+    private static LeadDiscoveryProfileDto ToDto(LeadDiscoveryProfile p, int? planLimit, string? sourceCampaignName, string? sourceCampaignStatus, int consentWindowDays) => new(
         p.IsEnabled, p.TargetBusinessType, p.Keywords, p.Locations, p.BatchSize, planLimit, p.RequiredFields,
         p.PhoneRequired, p.EmailRequired, p.IndependentBusiness, p.MinimumLeadScore, p.AdditionalCriteria,
         p.AutoCampaignEnabled, p.SourceCampaignId, sourceCampaignName, sourceCampaignStatus,
         p.AutoCampaignStartMode.ToString(), p.AutoCampaignStartTime,
-        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled, p.ConsentSmsEnabled);
+        p.UpdatedAt ?? (p.CreatedAt == default ? null : p.CreatedAt), p.Description, p.DndCheckEnabled, p.ConsentSmsEnabled,
+        p.ConsentReminderEnabled, p.ConsentReminderFirstDays, p.ConsentReminderSecondDays, consentWindowDays);
 
     private static DiscoveredLeadDto ToDto(DiscoveredLead l) => new(
         l.Id, l.BusinessName, l.BusinessType, l.ContactPerson, l.Address, l.City, l.State, l.Phone, l.Email,
