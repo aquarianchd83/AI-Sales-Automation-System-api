@@ -127,7 +127,11 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
         if (profile is null)
             return "Skipped: no lead discovery profile has been set up.";
         if (!profile.IsEnabled)
-            return "Skipped: lead discovery is turned off in the profile.";
+        {
+            // A person who pressed Run now must see why nothing started: a history row says it. The schedule's own firing stays quiet, as before.
+            const string off = "Skipped: lead discovery is turned off in the profile.";
+            return startedBy is null ? off : await RecordSkipAsync(profile, off, quotaExhausted: false, cancellationToken, startedBy: startedBy);
+        }
 
         var summaries = new List<string>();
 
@@ -301,7 +305,8 @@ public class LeadDiscoveryRunService : ILeadDiscoveryRunService
             .Where(e => e.TenantId == profile.TenantId && e.LeadDiscoveryProfileId == profile.Id)
             .OrderByDescending(e => e.StartedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
-        if (latest is { SkipCount: > 0 } && latest.Summary == summary)
+        // Only the schedule's own repeats join a row. A person's Run now always gets a row of its own, so pressing it is always seen.
+        if (startedBy is null && latest is { SkipCount: > 0, StartedBy: null } && latest.Summary == summary)
         {
             latest.SkipCount++;
             latest.LastSkippedAtUtc = now;

@@ -262,6 +262,38 @@ public sealed class LeadDiscoveryExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_now_always_gets_its_own_row_even_when_the_same_skip_just_happened()
+    {
+        _db.Plans.Add(new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 1 });
+        _db.Customers.Add(new Customer { TenantId = _tenant, PhoneNumberE164 = "+919800000001", FirstName = "Existing" });
+        await _db.SaveChangesAsync();
+
+        await Service().RunForTenantAsync(_tenant);
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+
+        var executions = await Executions();
+        Assert.Equal(3, executions.Count);
+        Assert.Equal(2, executions.Count(e => e.Trigger == LeadDiscoveryTriggers.ManualRun && e.StartedBy == "harish@example.com"));
+        Assert.All(executions, e => Assert.Equal(1, e.SkipCount));
+    }
+
+    [Fact]
+    public async Task Run_now_with_the_profile_turned_off_leaves_a_row_saying_why()
+    {
+        var profile = await _db.LeadDiscoveryProfiles.SingleAsync();
+        profile.IsEnabled = false;
+        await _db.SaveChangesAsync();
+
+        await Service().RunManuallyAsync(_tenant, "harish@example.com");
+        await Service().RunForTenantAsync(_tenant);
+
+        var execution = await SingleExecutionAsync(); // the schedule's own firing records nothing
+        Assert.Equal(LeadDiscoveryTriggers.ManualRun, execution.Trigger);
+        Assert.Contains("turned off", execution.Summary);
+    }
+
+    [Fact]
     public async Task A_batch_is_cut_to_the_room_left_in_the_plans_customer_limit()
     {
         var plan = new Plan { Code = PlatformFeatureCatalog.TrialPlanCode, Name = "Basic", IsActive = true, MaxCustomers = 2 };
