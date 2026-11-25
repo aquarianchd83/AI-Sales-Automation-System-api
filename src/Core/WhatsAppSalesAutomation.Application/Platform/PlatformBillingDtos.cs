@@ -36,7 +36,9 @@ public record PlatformPlanDto(
     IReadOnlyList<CountryPriceDto> CountryPrices,
     // Uses the plan allows of a feature, in the feature's own unit, lifetime per tenant. For a feature the plan does NOT include these are free
     // uses to try it; for one it includes, a cap (Basic: 100 AI replies). Either way the tenant is asked to upgrade once they are gone.
-    IReadOnlyList<PlanFeatureTrialDto>? FreeTrials = null);
+    IReadOnlyList<PlanFeatureTrialDto>? FreeTrials = null,
+    // The most customers a tenant on the plan may keep; 0 for no limit.
+    int MaxCustomers = 0);
 
 /// <summary>Free uses a plan gives of one feature it does not include. <see cref="Unit"/> says what one use is ("leads", "AI generations").</summary>
 public record PlanFeatureTrialDto(PlatformFeature Feature, int FreeUses, string Unit);
@@ -86,7 +88,9 @@ public record CreatePlanRequest(
     decimal MonthlyCredits = 0m,
     IReadOnlyList<PlatformFeature>? Features = null,
     IReadOnlyList<CountryPriceInput>? CountryPrices = null,
-    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null);
+    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null,
+    // The most customers a tenant on the plan may keep; 0 or null for no limit.
+    int? MaxCustomers = null);
 
 /// <summary>Body of PUT one plan. <see cref="IsActive"/> is how a plan is both retired ("Delete" in
 /// the admin UI sets it false) and un-retired - there is no separate reactivate endpoint.</summary>
@@ -106,7 +110,9 @@ public record UpdatePlanRequest(
     // Null leaves the plan's country prices as they are; a list is the complete new set.
     IReadOnlyList<CountryPriceInput>? CountryPrices = null,
     // Null leaves the plan's free uses as they are; a list sets each feature it names (0 for none) and leaves the rest.
-    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null);
+    IReadOnlyList<PlanFeatureTrialInput>? FreeTrials = null,
+    // The most customers a tenant on the plan may keep; 0 for no limit, null leaves it as it is.
+    int? MaxCustomers = null);
 
 /// <summary>One credit pack in the catalog, as the operator manages it. PriceCents is the authored base USD price;
 /// the local price is a display conversion into the signed-in operator's currency, like <see cref="PlatformPlanDto"/>.</summary>

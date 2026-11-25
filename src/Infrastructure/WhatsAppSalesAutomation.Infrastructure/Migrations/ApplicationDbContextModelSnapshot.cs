@@ -797,6 +797,9 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                     b.Property<int>("MaxCampaigns")
                         .HasColumnType("int");
 
+                    b.Property<int>("MaxCustomers")
+                        .HasColumnType("int");
+
                     b.Property<int>("MaxKnowledgeBaseArticles")
                         .HasColumnType("int");
 

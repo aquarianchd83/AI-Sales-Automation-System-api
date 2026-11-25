@@ -91,6 +91,7 @@ public class PlatformBillingService : IPlatformBillingService
             MaxUsers = request.MaxUsers,
             MaxMessagesPerMonth = request.MaxMessagesPerMonth,
             MaxCampaigns = request.MaxCampaigns,
+            MaxCustomers = request.MaxCustomers ?? 0,
             MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles,
             MaxLeadDiscoveryBatchSize = request.MaxLeadDiscoveryBatchSize ?? Plan.DefaultLeadDiscoveryBatchSize,
             PriceMonthlyCents = request.PriceMonthlyCents,
@@ -141,6 +142,9 @@ public class PlatformBillingService : IPlatformBillingService
         plan.MaxUsers = request.MaxUsers;
         plan.MaxMessagesPerMonth = request.MaxMessagesPerMonth;
         plan.MaxCampaigns = request.MaxCampaigns;
+        // Optional, so a client that predates the field leaves it alone.
+        if (request.MaxCustomers is { } maxCustomers)
+            plan.MaxCustomers = maxCustomers;
         plan.MaxKnowledgeBaseArticles = request.MaxKnowledgeBaseArticles;
         // Optional, so a client that predates the field leaves it alone rather than zeroing it.
         if (request.MaxLeadDiscoveryBatchSize is { } maxLeadDiscoveryBatchSize)
@@ -388,7 +392,8 @@ public class PlatformBillingService : IPlatformBillingService
             .Where(t => t.FreeUses > 0 && WhatsAppSalesAutomation.Application.Credits.PlatformFeatureCatalog.TrialUnitFor(t.Feature) is not null)
             .OrderBy(t => t.Feature)
             .Select(t => new PlanFeatureTrialDto(t.Feature, t.FreeUses, WhatsAppSalesAutomation.Application.Credits.PlatformFeatureCatalog.TrialUnitFor(t.Feature)!.Plural))
-            .ToList());
+            .ToList(),
+        p.MaxCustomers);
 
     private static PlatformCreditPackDto ToDto(CreditPack p, RegionalPricing pricing, CountryPrices? prices) => new(
         p.Id, p.QuotaType, p.Name, p.Units, p.PriceCents, p.IsActive,

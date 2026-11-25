@@ -23,6 +23,10 @@ public class Plan : BaseEntity
 
     public int MaxCampaigns { get; set; }
 
+    /// <summary>The most customers a tenant on this plan may keep; 0 for no limit. Only adding by hand and importing are held to it - see
+    /// <c>CustomerQuota</c>.</summary>
+    public int MaxCustomers { get; set; }
+
     public int MaxKnowledgeBaseArticles { get; set; }
 
     public const int DefaultLeadDiscoveryBatchSize = 25;
