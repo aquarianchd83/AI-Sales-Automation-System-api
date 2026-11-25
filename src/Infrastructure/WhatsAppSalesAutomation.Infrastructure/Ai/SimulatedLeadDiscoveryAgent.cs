@@ -70,9 +70,9 @@ public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
         var badCount = unique ? flawed : Math.Min(flawed, bad.Count);
 
         for (var i = 0; i < goodCount; i++)
-            candidates.Add(Build(good[i % good.Count], request, unique ? $"{tag}-{i + 1}" : null, city, pages, seenUrls));
+            candidates.Add(Build(good[i % good.Count], request, unique ? $"{tag}-{i + 1}" : null, city, pages, seenUrls, data));
         for (var i = 0; i < badCount; i++)
-            candidates.Add(Build(bad[i % bad.Count], request, unique ? $"{tag}-x{i + 1}" : null, city, pages, seenUrls));
+            candidates.Add(Build(bad[i % bad.Count], request, unique ? $"{tag}-x{i + 1}" : null, city, pages, seenUrls, data));
 
         _logger.LogInformation(
             "Simulated lead discovery handed back {Count} dummy businesses for {BusinessType} in {Location} ({Available} on the Simulator dummy data page) - no API call was made",
@@ -93,13 +93,14 @@ public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
             || target.Contains(business.BusinessType.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private static DiscoveredBusinessCandidate Build(
-        SimulatorLeadBusiness b, LeadDiscoveryAgentRequest request, string? runTag, string requestCity, List<FetchedPage> pages, List<string> seenUrls)
+        SimulatorLeadBusiness b, LeadDiscoveryAgentRequest request, string? runTag, string requestCity, List<FetchedPage> pages, List<string> seenUrls, SimulatorDataSnapshot data)
     {
         var name = $"{Marker} {b.Name}{(runTag is null ? "" : " " + runTag)}";
         var businessType = string.IsNullOrWhiteSpace(b.BusinessType) ? Capitalise(request.TargetBusinessType) : b.BusinessType!;
         var city = string.IsNullOrWhiteSpace(b.City) ? requestCity : b.City!;
         var address = string.IsNullOrWhiteSpace(b.Address) ? null : $"{b.Address}, {city}";
-        var phone = runTag is null ? b.Phone : FreshTail(b.Phone);
+        // A phone on the DND numbers list keeps its digits, so the simulated DND check still rejects it on every run.
+        var phone = runTag is null || (b.Phone is not null && data.IsDndNumber(b.Phone)) ? b.Phone : FreshTail(b.Phone);
         var website = Tagged(b.Website, runTag);
         var email = TaggedEmail(b.Email, runTag);
         var slug = Slug(b.Name) + (runTag is null ? "" : "-" + runTag);

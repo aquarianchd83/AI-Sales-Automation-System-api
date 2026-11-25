@@ -91,6 +91,22 @@ public sealed class SimulatorDummyDataTests : IDisposable
     }
 
     [Fact]
+    public async Task A_business_whose_phone_is_on_the_dnd_list_keeps_that_number_even_with_unique_per_run_on()
+    {
+        await _service.CreateAsync(Business("Dnd Clinic", "+91 98140 55501"), _actor, "a@b.c");
+        await _service.CreateAsync(new SaveSimulatorDummyRecordRequest(SimulatorDataCategory.DndNumber, "+919814055501", null,
+            null, null, null, null, null, null, null, null, null, true, 0), _actor, "a@b.c");
+
+        var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance, _provider);
+        var result = await agent.DiscoverAsync(Ask(2));
+
+        Assert.All(result.Candidates, c => Assert.Equal("+91 98140 55501", c.Phone));
+        var dnd = await new SimulatedPhoneVerificationProvider(_provider).VerifyAsync(Guid.NewGuid(),
+            new[] { new PhoneVerificationItem(Guid.NewGuid(), "+919814055501") });
+        Assert.Equal(LeadDiscoveryVerificationStatus.Fail, dnd.Results.Single().Status);
+    }
+
+    [Fact]
     public async Task An_inactive_or_deleted_business_is_not_used()
     {
         var off = Business("Switched Off Clinic", "+91 98140 55509") with { IsActive = false };
