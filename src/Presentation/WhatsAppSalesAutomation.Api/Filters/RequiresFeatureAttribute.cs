@@ -23,7 +23,8 @@ public sealed class RequiresFeatureAttribute : Attribute, IAsyncActionFilter
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         var tenant = context.HttpContext.RequestServices.GetRequiredService<ITenantContext>();
-        if (tenant.TenantId is { } tenantId)
+        var probe = context.ActionDescriptor.EndpointMetadata.OfType<SkipFeatureCheckAttribute>().Any();
+        if (!probe && tenant.TenantId is { } tenantId)
         {
             var access = context.HttpContext.RequestServices.GetRequiredService<IFeatureAccessService>();
             var method = context.HttpContext.Request.Method;
@@ -35,4 +36,13 @@ public sealed class RequiresFeatureAttribute : Attribute, IAsyncActionFilter
 
         await next();
     }
+}
+
+/// <summary>
+/// Marks an action that answers "is this feature on for me?" itself, so the controller's feature check must not turn the answer into a 403 (which the app
+/// would show the tenant as an error). The action must answer false instead.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+public sealed class SkipFeatureCheckAttribute : Attribute
+{
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Credits;
 using WhatsAppSalesAutomation.Application.ContentStudio.Knowledge;
 using WhatsAppSalesAutomation.Application.ContentStudio.Questionnaire;
 using WhatsAppSalesAutomation.Domain.Constants;
@@ -40,8 +41,15 @@ public class ContentStudioQuestionnaireController : ControllerBase
 
     /// <summary>Whether the studio is on for this tenant. Open to everyone who can use the studio, unlike the Admin-only overview.</summary>
     [HttpGet("status")]
-    public async Task<ActionResult<StudioStatusDto>> GetStatus(CancellationToken cancellationToken)
-        => Ok(new StudioStatusDto(await _questionnaire.IsEnabledAsync(RequireTenantId(), cancellationToken)));
+    [SkipFeatureCheck]
+    public async Task<ActionResult<StudioStatusDto>> GetStatus([FromServices] IFeatureAccessService access, CancellationToken cancellationToken)
+    {
+        // Off (not a 403) when the platform has switched the studio off or the plan lacks it: the app just hides the studio, without an error for the tenant.
+        var tenantId = RequireTenantId();
+        var enabled = await _questionnaire.IsEnabledAsync(tenantId, cancellationToken)
+            && await access.CanViewAsync(tenantId, PlatformFeature.ContentStudio, cancellationToken);
+        return Ok(new StudioStatusDto(enabled));
+    }
 
     [HttpGet("questionnaire")]
     public async Task<ActionResult<QuestionnaireStateDto>> GetQuestionnaire(CancellationToken cancellationToken)
