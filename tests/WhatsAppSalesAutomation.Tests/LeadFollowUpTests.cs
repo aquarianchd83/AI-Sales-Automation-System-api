@@ -418,6 +418,36 @@ public sealed class LeadFollowUpTests : IDisposable
     }
 
     [Fact]
+    public async Task The_tenants_follow_up_months_decide_the_date_when_the_customer_named_no_wait()
+    {
+        Assert.Equal(LeadFollowUpPolicy.DefaultSuggestedMonths, (await _service.GetSettingAsync()).Months);
+
+        var saved = await _service.SetSettingAsync(new SetLeadFollowUpSettingRequest(3));
+        Assert.Equal(3, saved.Months);
+
+        Assert.True(await SuggestAsync(months: null));
+        Assert.Equal(_clock.UtcNow.AddMonths(3), (await _db.LeadFollowUps.SingleAsync()).DueAt);
+    }
+
+    [Fact]
+    public async Task A_wait_the_customer_named_wins_over_the_tenants_setting()
+    {
+        await _service.SetSettingAsync(new SetLeadFollowUpSettingRequest(3));
+
+        Assert.True(await SuggestAsync(months: 2));
+        Assert.Equal(_clock.UtcNow.AddMonths(2), (await _db.LeadFollowUps.SingleAsync()).DueAt);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(13)]
+    public async Task The_follow_up_months_setting_must_be_between_one_and_the_maximum(int months)
+    {
+        await Assert.ThrowsAsync<FluentValidation.ValidationException>(
+            () => _service.SetSettingAsync(new SetLeadFollowUpSettingRequest(months)));
+    }
+
+    [Fact]
     public async Task The_AI_can_suggest_a_follow_up_that_nothing_will_ever_send_until_a_person_confirms_it()
     {
         await Fund(5);

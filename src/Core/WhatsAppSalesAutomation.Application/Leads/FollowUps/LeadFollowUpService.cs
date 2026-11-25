@@ -206,6 +206,33 @@ public class LeadFollowUpService : ILeadFollowUpService
         return ToDto(followUp, customer, lead, template.Name);
     }
 
+    private async Task<int> GetConfiguredMonthsAsync(CancellationToken cancellationToken)
+    {
+        var tenantId = _tenantContext.TenantId;
+        if (tenantId is null)
+            return LeadFollowUpPolicy.DefaultSuggestedMonths;
+        var months = await _context.Tenants.AsNoTracking()
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.FollowUpMonths)
+            .FirstOrDefaultAsync(cancellationToken);
+        return Math.Clamp(months ?? LeadFollowUpPolicy.DefaultSuggestedMonths, 1, LeadFollowUpPolicy.MaxMonths);
+    }
+
+    public async Task<LeadFollowUpSettingDto> GetSettingAsync(CancellationToken cancellationToken = default)
+        => new(await GetConfiguredMonthsAsync(cancellationToken), LeadFollowUpPolicy.MaxMonths);
+
+    public async Task<LeadFollowUpSettingDto> SetSettingAsync(SetLeadFollowUpSettingRequest request, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _tenantContext.TenantId ?? throw new ConflictException("There is no tenant to change this setting for.");
+        if (request.Months < 1 || request.Months > LeadFollowUpPolicy.MaxMonths)
+            throw Invalid(nameof(request.Months), $"Pick between 1 and {LeadFollowUpPolicy.MaxMonths} months.");
+        var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+                     ?? throw new NotFoundException("Tenant", tenantId);
+        tenant.FollowUpMonths = request.Months;
+        await _context.SaveChangesAsync(cancellationToken);
+        return new LeadFollowUpSettingDto(request.Months, LeadFollowUpPolicy.MaxMonths);
+    }
+
     public async Task<bool> SuggestAsync(Guid leadId, string? reason, int? months, CancellationToken cancellationToken = default)
     {
         var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
@@ -241,7 +268,7 @@ public class LeadFollowUpService : ILeadFollowUpService
         if (recentlyDismissed)
             return false;
 
-        var wait = Math.Clamp(months ?? LeadFollowUpPolicy.DefaultSuggestedMonths, 1, LeadFollowUpPolicy.MaxMonths);
+        var wait = Math.Clamp(months ?? await GetConfiguredMonthsAsync(cancellationToken), 1, LeadFollowUpPolicy.MaxMonths);
         var dueAt = now.AddMonths(wait);
 
         // Staged, not saved: the caller (an AI turn) saves everything it did in one go.

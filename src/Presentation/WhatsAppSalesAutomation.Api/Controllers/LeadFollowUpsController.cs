@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
 using WhatsAppSalesAutomation.Application.Leads.FollowUps;
+using WhatsAppSalesAutomation.Domain.Constants;
 
 namespace WhatsAppSalesAutomation.Api.Controllers;
 
@@ -32,6 +33,15 @@ public class LeadFollowUpsController : ControllerBase
     [HttpGet("api/v1/lead-follow-ups/summary")]
     public async Task<ActionResult<LeadFollowUpSummaryDto>> GetSummary(CancellationToken cancellationToken)
         => Ok(await _followUps.GetSummaryAsync(cancellationToken));
+
+    [HttpGet("api/v1/lead-follow-ups/settings")]
+    public async Task<ActionResult<LeadFollowUpSettingDto>> GetSetting(CancellationToken cancellationToken)
+        => Ok(await _followUps.GetSettingAsync(cancellationToken));
+
+    [HttpPut("api/v1/lead-follow-ups/settings")]
+    [Authorize(Roles = AppRoles.Admin)]
+    public async Task<ActionResult<LeadFollowUpSettingDto>> SetSetting([FromBody] SetLeadFollowUpSettingRequest request, CancellationToken cancellationToken)
+        => Ok(await _followUps.SetSettingAsync(request, cancellationToken));
 
     [HttpGet("api/v1/leads/{leadId:guid}/follow-ups")]
     public async Task<ActionResult<IReadOnlyList<LeadFollowUpDto>>> GetForLead(Guid leadId, CancellationToken cancellationToken)
