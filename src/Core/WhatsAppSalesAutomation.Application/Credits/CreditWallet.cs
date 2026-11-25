@@ -411,7 +411,25 @@ public class CreditWalletService : ICreditWalletService
         // The features come from the access service, not the wallet summary: Campaigns has no wallet (it spends nothing of its own), so the summary
         // leaves it out, and the app would show a plan that includes it as locked.
         var features = (await _access.GetFeaturesAsync(tenantId, ct)).OrderBy(f => f).ToList();
+        if (features.Contains(PlatformFeature.Campaigns) && await CampaignQuotaAsync(tenantId, summary.PlanCode, ct) is { } campaigns)
+            trials = trials.Append(campaigns).ToList();
         return new EntitlementsDto(summary.PlanCode, summary.PlanName, features, summary.Balance, costs, trials);
+    }
+
+    /// <summary>
+    /// The Basic plan's campaign limit (Plan.MaxCampaigns) as a quota, so the app shows "N left" beside Campaigns like the other capped features and
+    /// turns it read-only once it is reached (creating one is refused by PlanLimitsService). Counted the same way that refusal counts. Null on any
+    /// other plan: Premium's limit is not shown.
+    /// </summary>
+    private async Task<FeatureTrialDto?> CampaignQuotaAsync(Guid tenantId, string? planCode, CancellationToken ct)
+    {
+        if (planCode != PlatformFeatureCatalog.TrialPlanCode)
+            return null;
+        var max = await _context.Plans.AsNoTracking().Where(p => p.Code == planCode).Select(p => (int?)p.MaxCampaigns).FirstOrDefaultAsync(ct);
+        if (max is null)
+            return null;
+        var used = await _context.Campaigns.IgnoreQueryFilters().AsNoTracking().CountAsync(c => c.TenantId == tenantId, ct);
+        return new FeatureTrialDto(PlatformFeature.Campaigns, PlatformFeatureCatalog.For(PlatformFeature.Campaigns).Label, max.Value, used, "campaigns", "campaign", IncludedInPlan: true);
     }
 
     public async Task<WalletSummaryDto> GetSummaryAsync(Guid tenantId, CancellationToken ct = default)
