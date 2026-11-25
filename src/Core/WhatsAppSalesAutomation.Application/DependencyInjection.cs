@@ -264,6 +264,8 @@ public static class DependencyInjection
         services.AddScoped<IAiProviderModelService, AiProviderModelService>();
         services.AddScoped<IFlowchartService, FlowchartService>();
         services.AddScoped<IFaqService, FaqService>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Simulator.ISimulatorDataProvider, WhatsAppSalesAutomation.Application.Simulator.SimulatorDataProvider>();
+        services.AddScoped<WhatsAppSalesAutomation.Application.Simulator.ISimulatorDummyDataService, WhatsAppSalesAutomation.Application.Simulator.SimulatorDummyDataService>();
         services.AddScoped<IPlatformDashboardService, PlatformDashboardService>();
         services.AddScoped<IPlatformJobService, PlatformJobService>();
         services.AddScoped<IPlatformNotifier, PlatformNotifier>();

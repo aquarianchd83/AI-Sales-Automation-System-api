@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Simulator;
 using WhatsAppSalesAutomation.Domain.Constants;
 using WhatsAppSalesAutomation.Domain.Enums;
 
@@ -16,20 +17,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Ai;
 /// </summary>
 public class SimulatedAiClient : IAiService
 {
-    private static readonly string[] ComplaintKeywords = { "complain", "complaint", "angry", "terrible", "worst", "refund", "broken", "disappointed" };
-    private static readonly string[] HumanRequestKeywords = { "human", "real person", "speak to someone", "agent please", "talk to a person" };
-    private static readonly string[] NegotiationKeywords = { "discount", "lower price", "best price", "negotiate", "cheaper" };
-    private static readonly string[] TechnicalKeywords = { "error code", "not working", "technical issue", "bug", "crash", "doesn't work" };
-    private static readonly string[] PriceKeywords = { "price", "cost", "how much", "rate", "charges" };
-    private static readonly string[] BuyingKeywords = { "want to buy", "how do i pay", "payment", "purchase", "book it", "ready to buy" };
-    private static readonly string[] DemoKeywords = { "demo", "site visit", "appointment", "trial", "show me" };
-    private static readonly string[] CannotProceedKeywords =
-    {
-        "not right now", "not now", "maybe later", "maybe next", "next quarter", "can't afford", "cannot afford",
-        "budget is tight", "budget is low", "call me after", "come back in", "ask me in", "after a few months"
-    };
     private static readonly Regex MonthsPattern = new(@"\b(\d{1,2})\s*months?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly string[] FaqKeywords = { "hours", "location", "hello", "hi", "info", "information" };
 
     private static readonly Regex BudgetPattern = new(@"(?:₹|rs\.?|inr|\$)\s?[\d,]+(?:k)?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex InterestPattern = new(@"interested in ([a-zA-Z0-9 ]{2,40})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -37,27 +25,32 @@ public class SimulatedAiClient : IAiService
 
     private readonly AiProviderSettings _settings;
     private readonly ILogger<SimulatedAiClient> _logger;
+    private readonly ISimulatorDataProvider? _data;
     private readonly Random _random = new();
 
-    public SimulatedAiClient(IOptionsSnapshot<AiProviderSettings> settings, ILogger<SimulatedAiClient> logger)
+    public SimulatedAiClient(IOptionsSnapshot<AiProviderSettings> settings, ILogger<SimulatedAiClient> logger, ISimulatorDataProvider? data = null)
     {
         _settings = settings.Value;
         _logger = logger;
+        _data = data;
     }
 
-    public Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
+    public async Task<AiReplyResult> GetResponseAsync(AiConversationContext context, CancellationToken cancellationToken = default)
     {
+        // Keywords and canned replies are the platform admin's Simulator dummy data, not hardcoded.
+        var data = _data is null ? SimulatorDataSnapshot.Defaults : await _data.GetAsync(cancellationToken);
+
         var stopwatch = Stopwatch.StartNew();
         var text = context.InboundMessageText;
 
         if (_settings.SimulatedFailureRatePercent > 0 && _random.Next(100) < _settings.SimulatedFailureRatePercent)
         {
             _logger.LogWarning("[Simulated AI] Injected provider failure for conversation {ConversationId}", context.ConversationId);
-            return Task.FromResult(AiClientFailure.Result("Simulated:rule-based", stopwatch.Elapsed, context.ExistingSummary));
+            return AiClientFailure.Result("Simulated:rule-based", stopwatch.Elapsed, context.ExistingSummary);
         }
 
-        var (intent, confidence) = DetectIntent(text);
-        var cannotProceed = intent == nameof(CustomerIntent.Interested) && ContainsAny(text, CannotProceedKeywords);
+        var (intent, confidence) = DetectIntent(text, data);
+        var cannotProceed = intent == nameof(CustomerIntent.Interested) && ContainsAny(text, data.Keywords(SimulatorDataCatalog.Intents.CannotProceed));
         var extractedFields = ExtractFields(text, context.SchemaFields);
         var entities = ToLegacyEntities(extractedFields);
         var citedChunkIds = new List<Guid>();
@@ -67,16 +60,16 @@ public class SimulatedAiClient : IAiService
         {
             var top = context.GroundingChunks[0];
             citedChunkIds.Add(top.ChunkId);
-            responseText = $"Here's what I found: {Truncate(top.Text, 300)}";
+            responseText = data.Reply(SimulatorDataCatalog.Replies.Grounded).Replace("{answer}", Truncate(top.Text, 300), StringComparison.OrdinalIgnoreCase);
         }
         else if (intent is nameof(CustomerIntent.Complaint) or nameof(CustomerIntent.HumanRequest)
                  or nameof(CustomerIntent.Negotiation) or nameof(CustomerIntent.Support))
         {
-            responseText = "I understand, and I want to make sure this gets handled properly - connecting you with a team member who can help.";
+            responseText = data.Reply(SimulatorDataCatalog.Replies.Escalation);
         }
         else
         {
-            responseText = "Thanks for reaching out! Someone from our team will follow up with more details shortly.";
+            responseText = data.Reply(SimulatorDataCatalog.Replies.Default);
         }
 
         var summary = BuildSummary(context.ExistingSummary, text);
@@ -87,7 +80,7 @@ public class SimulatedAiClient : IAiService
             "[Simulated AI] conversation={ConversationId} intent={Intent} confidence={Confidence}",
             context.ConversationId, intent, confidence);
 
-        return Task.FromResult(new AiReplyResult(
+        return new AiReplyResult(
             responseText,
             intent,
             confidence,
@@ -107,24 +100,26 @@ public class SimulatedAiClient : IAiService
             FollowUpInMonths: cannotProceed ? SuggestedMonths(text) : null,
             AskedFieldKey: context.FieldsToAsk.Count > 0 ? context.FieldsToAsk[0].FieldKey : null,
             DetectedLanguage: "en",
-            AgentNote: $"Simulated turn; detected {intent}."));
+            AgentNote: $"Simulated turn; detected {intent}.");
     }
 
     /// <summary>Returns CustomerIntent names, the same closed set a real provider is now constrained
     /// to - a simulator emitting labels the enum does not contain would let configuration keyed on
     /// those intents pass in dev and silently do nothing in production.</summary>
-    private static (string Intent, double Confidence) DetectIntent(string text)
+    private static (string Intent, double Confidence) DetectIntent(string text, SimulatorDataSnapshot data)
     {
-        if (ContainsAny(text, ComplaintKeywords)) return (nameof(CustomerIntent.Complaint), 0.9);
-        if (ContainsAny(text, HumanRequestKeywords)) return (nameof(CustomerIntent.HumanRequest), 0.9);
+        bool Has(string intent) => ContainsAny(text, data.Keywords(intent));
+
+        if (Has(SimulatorDataCatalog.Intents.Complaint)) return (nameof(CustomerIntent.Complaint), 0.9);
+        if (Has(SimulatorDataCatalog.Intents.HumanRequest)) return (nameof(CustomerIntent.HumanRequest), 0.9);
         // Before buying: "not ready to buy right now" contains "ready to buy" and is the opposite of it.
-        if (ContainsAny(text, CannotProceedKeywords)) return (nameof(CustomerIntent.Interested), 0.85);
-        if (ContainsAny(text, BuyingKeywords)) return (nameof(CustomerIntent.PurchaseIntent), 0.9);
-        if (ContainsAny(text, DemoKeywords)) return (nameof(CustomerIntent.DemoRequest), 0.9);
-        if (ContainsAny(text, NegotiationKeywords)) return (nameof(CustomerIntent.Negotiation), 0.85);
-        if (ContainsAny(text, TechnicalKeywords)) return (nameof(CustomerIntent.Support), 0.7);
-        if (ContainsAny(text, PriceKeywords)) return (nameof(CustomerIntent.PriceEnquiry), 0.85);
-        if (ContainsAny(text, FaqKeywords)) return (nameof(CustomerIntent.Information), 0.85);
+        if (Has(SimulatorDataCatalog.Intents.CannotProceed)) return (nameof(CustomerIntent.Interested), 0.85);
+        if (Has(SimulatorDataCatalog.Intents.PurchaseIntent)) return (nameof(CustomerIntent.PurchaseIntent), 0.9);
+        if (Has(SimulatorDataCatalog.Intents.DemoRequest)) return (nameof(CustomerIntent.DemoRequest), 0.9);
+        if (Has(SimulatorDataCatalog.Intents.Negotiation)) return (nameof(CustomerIntent.Negotiation), 0.85);
+        if (Has(SimulatorDataCatalog.Intents.Support)) return (nameof(CustomerIntent.Support), 0.7);
+        if (Has(SimulatorDataCatalog.Intents.PriceEnquiry)) return (nameof(CustomerIntent.PriceEnquiry), 0.85);
+        if (Has(SimulatorDataCatalog.Intents.Information)) return (nameof(CustomerIntent.Information), 0.85);
 
         // Unrecognized phrasing - stay cautious rather than guess, so it escalates against the default
         // AiOptions.ConfidenceThreshold (0.6) instead of confidently auto-replying with a canned guess.

@@ -290,6 +290,8 @@ public interface IApplicationDbContext
 
     DbSet<FaqEntry> FaqEntries { get; }
 
+    DbSet<SimulatorDummyRecord> SimulatorDummyRecords { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Starts an explicit database transaction, for work that must commit or roll back as one unit
