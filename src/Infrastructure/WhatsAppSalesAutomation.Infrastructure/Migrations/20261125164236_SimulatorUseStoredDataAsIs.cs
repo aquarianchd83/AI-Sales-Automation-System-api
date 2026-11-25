@@ -21,7 +21,7 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("UPDATE [SimulatorDummyRecords] SET [Value] = N'true' WHERE [Category] = N'Setting' AND [Name] = N'DndDigitSumRule' AND [Value] = N'false';");
+            // DndDigitSumRule is deliberately left as it is: Up cannot be told apart from an admin's own "false", so reverting it could undo their choice.
             migrationBuilder.Sql("IF NOT EXISTS (SELECT 1 FROM [SimulatorDummyRecords] WHERE [Category] = N'Setting' AND [Name] = N'UniquePerRun') INSERT INTO [SimulatorDummyRecords] ([Id], [Category], [Name], [Value], [IsActive], [DisplayOrder], [CreatedAt]) VALUES (NEWID(), N'Setting', N'UniquePerRun', N'true', 1, 1000, SYSUTCDATETIME());");
         }
     }

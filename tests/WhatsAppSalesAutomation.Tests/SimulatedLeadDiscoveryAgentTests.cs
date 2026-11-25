@@ -101,6 +101,19 @@ public sealed class SimulatedLeadDiscoveryAgentTests
     }
 
     [Fact]
+    public async Task The_same_name_in_another_city_is_a_different_branch_and_is_still_returned()
+    {
+        var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance);
+
+        // The run is for Chandigarh; the tenant has this business in Ludhiana only.
+        var result = await agent.DiscoverAsync(Ask(50, "Sharma Dental Care, Ludhiana"));
+
+        Assert.Equal(Stored, result.Candidates.Count);
+        var inChandigarh = await agent.DiscoverAsync(Ask(50, "Sharma Dental Care, Chandigarh"));
+        Assert.Equal(Stored - 1, inChandigarh.Candidates.Count);
+    }
+
+    [Fact]
     public async Task The_kind_of_business_asked_for_comes_first()
     {
         var agent = new SimulatedLeadDiscoveryAgent(NullLogger<SimulatedLeadDiscoveryAgent>.Instance);

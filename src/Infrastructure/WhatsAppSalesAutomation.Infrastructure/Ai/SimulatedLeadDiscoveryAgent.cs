@@ -46,7 +46,7 @@ public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
         var city = location.Split(',')[0].Trim();
 
         // Businesses this tenant already has are left out, so stored rows are not handed back as duplicates run after run.
-        var available = data.Businesses.Where(b => !IsKnown(b, request.KnownBusinesses)).ToList();
+        var available = data.Businesses.Where(b => !IsKnown(b, city, request.KnownBusinesses)).ToList();
 
         // The kind of business asked for comes first; the others follow, so a run is never empty just because no row has that kind.
         var ordered = available.OrderBy(b => Matches(b, request.TargetBusinessType) ? 0 : 1).ToList();
@@ -79,10 +79,18 @@ public class SimulatedLeadDiscoveryAgent : ILeadDiscoveryAgent
             Model: ModelName);
     }
 
-    /// <summary>KnownBusinesses lists "Name" or "Name, City".</summary>
-    private static bool IsKnown(SimulatorLeadBusiness business, IReadOnlyList<string> known) =>
-        known.Any(k => string.Equals(k.Trim(), business.Name, StringComparison.OrdinalIgnoreCase)
-                       || k.Trim().StartsWith(business.Name + ",", StringComparison.OrdinalIgnoreCase));
+    /// <summary>KnownBusinesses lists "Name" or "Name, City" (the run service's name-and-city identity). The same name in another city is a different
+    /// branch and is not known.</summary>
+    private static bool IsKnown(SimulatorLeadBusiness business, string requestCity, IReadOnlyList<string> known)
+    {
+        var city = string.IsNullOrWhiteSpace(business.City) ? requestCity : business.City!.Trim();
+        return known.Any(k =>
+        {
+            var entry = k.Trim();
+            return string.Equals(entry, business.Name, StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(entry, $"{business.Name}, {city}", StringComparison.OrdinalIgnoreCase);
+        });
+    }
 
     private static bool Matches(SimulatorLeadBusiness business, string target) =>
         !string.IsNullOrWhiteSpace(business.BusinessType) && !string.IsNullOrWhiteSpace(target)
