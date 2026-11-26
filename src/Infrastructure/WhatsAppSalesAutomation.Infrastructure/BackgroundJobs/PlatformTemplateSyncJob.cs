@@ -29,8 +29,8 @@ public class PlatformTemplateSyncJob
                 _logger.LogWarning("Platform template push failed: {Failure}", failure);
 
             _logger.LogInformation(
-                "Platform templates synced: created={Created} updated={Updated} failed={Failed} remote={Remote} statusChanged={Changed}",
-                result.Created, result.Updated, result.Failures.Count, result.RemoteCount, result.StatusUpdated);
+                "Platform templates synced: created={Created} updated={Updated} failed={Failed} remote={Remote} statusChanged={Changed} missingOnMeta={Missing}",
+                result.Created, result.Updated, result.Failures.Count, result.RemoteCount, result.StatusUpdated, result.MissingOnMeta);
         }
         catch (Exception ex)
         {

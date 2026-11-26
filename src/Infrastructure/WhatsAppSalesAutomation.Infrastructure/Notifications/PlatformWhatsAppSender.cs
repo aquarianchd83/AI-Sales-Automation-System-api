@@ -83,10 +83,22 @@ public class PlatformWhatsAppSender : IPlatformWhatsAppSender, IPlatformWhatsApp
         }
     }
 
-    public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default)
+    public async Task<PlatformRemoteTemplates> GetTemplatesAsync(CancellationToken cancellationToken = default)
     {
         var credentials = Credentials();
-        return credentials is null ? Array.Empty<WhatsAppRemoteTemplate>() : await _meta.GetMessageTemplatesAsync(credentials, cancellationToken);
+        if (credentials is null)
+            return PlatformRemoteTemplates.Failed("The platform WhatsApp number is not configured.");
+
+        try
+        {
+            var (templates, error) = await _meta.TryGetMessageTemplatesAsync(credentials, cancellationToken);
+            return new PlatformRemoteTemplates(templates, error);
+        }
+        catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException) && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Reading the platform's templates from Meta failed");
+            return PlatformRemoteTemplates.Failed($"Request to WhatsApp API failed: {ex.Message}");
+        }
     }
 
     public async Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)

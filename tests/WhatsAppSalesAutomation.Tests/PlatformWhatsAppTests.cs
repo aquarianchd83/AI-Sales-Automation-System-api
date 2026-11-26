@@ -466,6 +466,55 @@ public sealed class PlatformWhatsAppTests : IDisposable
     }
 
     [Fact]
+    public async Task A_template_meta_no_longer_has_is_created_again_instead_of_keeping_its_old_id_and_status()
+    {
+        // Pushed and approved on the old WhatsApp Business Account ...
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_quota_low_20"] = "APPROVED";
+        await Templates().SyncAsync();
+        var before = await TemplateAsync(TenantNotificationKind.QuotaLow20);
+        Assert.Equal(WhatsAppTemplateStatus.Approved, before.WhatsAppTemplateStatus);
+        var oldId = before.MetaTemplateId;
+
+        // ... then the platform number is moved to a new account that has none of them.
+        _admin.SwitchAccount();
+        _admin.Statuses.Clear();
+        _admin.Created.Clear();
+
+        var one = await Templates().SyncOneAsync(before.Id);
+
+        Assert.Equal("tenant_alert_quota_low_20", _admin.Created.Single().Name);
+        Assert.NotEqual(oldId, one.MetaTemplateId);
+        Assert.Equal("Pending", one.Status);
+
+        // The bulk run picks up every other active template the same way.
+        _admin.Created.Clear();
+        var all = await Templates().SyncAsync();
+        Assert.Equal(PlatformTemplateCatalog.All.Count - 1, all.Created);
+        Assert.Equal(PlatformTemplateCatalog.All.Count - 1, all.MissingOnMeta);
+        Assert.Empty(all.Failures);
+    }
+
+    [Fact]
+    public async Task A_template_list_meta_refuses_to_give_is_a_failure_not_an_empty_account()
+    {
+        await SeedAsync();
+        await Templates().SyncAsync();
+        _admin.Created.Clear();
+        _admin.ListError = "Error validating access token: The session is invalid because the user logged out.";
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Contains("user logged out", Assert.Single(result.Failures));
+        Assert.Empty(_admin.Created);
+        Assert.NotNull((await TemplateAsync(TenantNotificationKind.QuotaLow5)).MetaTemplateId);
+
+        var t = await TemplateAsync(TenantNotificationKind.QuotaLow5);
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => Templates().SyncOneAsync(t.Id));
+        Assert.Contains("user logged out", ex.Message);
+    }
+
+    [Fact]
     public async Task A_test_send_needs_an_approved_template_and_a_proper_number()
     {
         await SeedAsync();
@@ -678,10 +727,18 @@ public sealed class PlatformWhatsAppTests : IDisposable
 
         public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(Configured);
 
-        public Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<WhatsAppRemoteTemplate>>(_remote
-                .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category))
-                .ToList());
+        /// <summary>Set to make reading Meta's template list fail, the way a logged-out token does.</summary>
+        public string? ListError { get; set; }
+
+        /// <summary>The platform number moved to another WhatsApp Business Account: none of the templates pushed so far are there.</summary>
+        public void SwitchAccount() => _remote.Clear();
+
+        public Task<PlatformRemoteTemplates> GetTemplatesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ListError is not null
+                ? PlatformRemoteTemplates.Failed(ListError)
+                : new PlatformRemoteTemplates(_remote
+                    .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category))
+                    .ToList(), null));
 
         public Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
         {
@@ -689,7 +746,7 @@ public sealed class PlatformWhatsAppTests : IDisposable
                 return Task.FromResult(new WhatsAppTemplateSubmitResult(false, null, null, "Meta said no."));
 
             Created.Add(submission);
-            var id = "meta-" + submission.Name;
+            var id = $"meta-{Created.Count}-{submission.Name}";
             _remote[submission.Name] = (id, submission.Language, submission.Category.ToUpperInvariant());
             return Task.FromResult(new WhatsAppTemplateSubmitResult(true, id, "PENDING", null));
         }

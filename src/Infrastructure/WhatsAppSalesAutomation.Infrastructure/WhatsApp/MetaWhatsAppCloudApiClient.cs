@@ -180,12 +180,18 @@ public class MetaWhatsAppCloudApiClient
     }
 
     public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(
+        TenantWhatsAppCredentials credentials, CancellationToken cancellationToken) =>
+        (await TryGetMessageTemplatesAsync(credentials, cancellationToken)).Templates;
+
+    /// <summary>Like <see cref="GetMessageTemplatesAsync"/>, but says why the list could not be read (bad token, wrong WABA id) instead of
+    /// answering an empty list - a caller that decides "this template is not on Meta" from the list must not decide it from a failed read.</summary>
+    public async Task<(IReadOnlyList<WhatsAppRemoteTemplate> Templates, string? Error)> TryGetMessageTemplatesAsync(
         TenantWhatsAppCredentials credentials, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(credentials.WhatsAppBusinessAccountId))
         {
             _logger.LogWarning("WhatsApp template sync skipped: WhatsAppBusinessAccountId is not configured.");
-            return Array.Empty<WhatsAppRemoteTemplate>();
+            return (Array.Empty<WhatsAppRemoteTemplate>(), "The WhatsApp Business Account ID is not set, so the templates on Meta cannot be read.");
         }
 
         var results = new List<WhatsAppRemoteTemplate>();
@@ -202,11 +208,12 @@ public class MetaWhatsAppCloudApiClient
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions);
+                MetaErrorResponse? error = null;
+                try { error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions); } catch (JsonException) { }
                 _logger.LogWarning(
                     "Meta template list fetch failed: {Error} (code={Code}, fbtrace_id={FbtraceId}). Raw: {Body}",
                     error?.Error?.Message, error?.Error?.Code, error?.Error?.FbtraceId, body);
-                break;
+                return (results, $"Meta did not return the template list: {error?.Error?.Message ?? $"HTTP {(int)response.StatusCode}"}");
             }
 
             var parsed = JsonSerializer.Deserialize<MetaTemplateListResponse>(body, JsonOptions);
@@ -221,7 +228,7 @@ public class MetaWhatsAppCloudApiClient
             nextUri = parsed?.Paging?.Next is { } next ? new Uri(next) : null;
         }
 
-        return results;
+        return (results, null);
     }
 
     public async Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(
