@@ -44,4 +44,10 @@ public class PlatformMessageTemplate : BaseEntity
 
     /// <summary>True once the template was created on Meta WITH an image header; Meta fixes that at creation.</summary>
     public bool HeaderOnMeta { get; set; }
+
+    /// <summary>Meta's code for why it rejected the template (e.g. INVALID_FORMAT), from the last sync. Null unless Rejected.</summary>
+    public string? RejectionReason { get; set; }
+
+    /// <summary>What Meta answered when the last sync tried to create or edit this template and failed. Null once a push succeeds.</summary>
+    public string? LastSyncError { get; set; }
 }

@@ -199,7 +199,7 @@ public class MetaWhatsAppCloudApiClient
         // Meta paginates at 100/page by default for this endpoint; following paging.next until it's
         // absent is the documented way to get the full list rather than assuming one page is everything -
         // a WABA with more templates than that would otherwise silently look fully synced when it isn't.
-        Uri? nextUri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category&limit=100");
+        Uri? nextUri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category,rejected_reason&limit=100");
 
         while (nextUri is not null)
         {
@@ -221,7 +221,7 @@ public class MetaWhatsAppCloudApiClient
             {
                 results.AddRange(parsed.Data
                     .Where(t => t.Id is not null && t.Name is not null && t.Language is not null && t.Status is not null && t.Category is not null)
-                    .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!)));
+                    .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!, t.RejectedReason)));
             }
 
             // paging.next is already a full, absolute Meta URL from the second page onward.
@@ -491,6 +491,9 @@ public class MetaWhatsAppCloudApiClient
 
         [JsonPropertyName("category")]
         public string? Category { get; set; }
+
+        [JsonPropertyName("rejected_reason")]
+        public string? RejectedReason { get; set; }
     }
 
     private class MetaPaging

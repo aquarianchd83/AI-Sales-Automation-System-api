@@ -530,6 +530,54 @@ public sealed class PlatformWhatsAppTests : IDisposable
     }
 
     [Fact]
+    public async Task A_rejection_shows_metas_reason_with_a_fix_and_clears_once_approved()
+    {
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_whatsapp_disconnected"] = "REJECTED";
+        _admin.RejectedReasons["tenant_alert_whatsapp_disconnected"] = "TAG_CONTENT_MISMATCH";
+
+        await Templates().SyncAsync();
+
+        var dto = (await Templates().GetAllAsync()).Single(t => t.WhatsAppTemplateName == "tenant_alert_whatsapp_disconnected");
+        Assert.Equal("Rejected", dto.Status);
+        Assert.Equal("TAG_CONTENT_MISMATCH", dto.RejectionReason);
+        Assert.Equal("Wording does not match category or language", dto.RejectionTitle);
+        Assert.Contains("English", dto.RejectionTip);
+
+        _admin.Statuses["tenant_alert_whatsapp_disconnected"] = "APPROVED";
+        _admin.RejectedReasons.Clear();
+        await Templates().SyncAsync();
+
+        dto = (await Templates().GetAllAsync()).Single(t => t.WhatsAppTemplateName == "tenant_alert_whatsapp_disconnected");
+        Assert.Null(dto.RejectionReason);
+        Assert.Null(dto.RejectionTip);
+    }
+
+    [Fact]
+    public async Task A_rejection_without_a_code_still_explains_where_to_look()
+    {
+        var explained = MetaRejectionReasons.Explain("NONE");
+        Assert.Equal("Rejected by Meta", explained.Title);
+        Assert.Contains("WhatsApp Manager", explained.Tip);
+        Assert.Equal("Format problem", MetaRejectionReasons.Explain("invalid_format").Title);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_failed_create_is_kept_on_the_template_until_a_push_succeeds()
+    {
+        await SeedAsync();
+        _admin.FailFor = "tenant_alert_refund_rejected";
+        await Templates().SyncAsync();
+
+        Assert.Equal("Meta said no.", (await TemplateAsync(TenantNotificationKind.RefundRejected)).LastSyncError);
+
+        _admin.FailFor = null;
+        await Templates().SyncAsync();
+        Assert.Null((await TemplateAsync(TenantNotificationKind.RefundRejected)).LastSyncError);
+    }
+
+    [Fact]
     public async Task A_template_list_meta_refuses_to_give_is_a_failure_not_an_empty_account()
     {
         await SeedAsync();
@@ -754,6 +802,7 @@ public sealed class PlatformWhatsAppTests : IDisposable
     {
         public bool Configured { get; set; } = true;
         public Dictionary<string, string> Statuses { get; } = new();
+        public Dictionary<string, string> RejectedReasons { get; } = new();
         public string? FailFor { get; set; }
         public List<WhatsAppTemplateSubmission> Created { get; } = new();
         public List<WhatsAppTemplateSubmission> Updated { get; } = new();
@@ -775,7 +824,8 @@ public sealed class PlatformWhatsAppTests : IDisposable
             Task.FromResult(ListError is not null && (ListReadsBeforeError is null || ListReadsBeforeError-- <= 0)
                 ? PlatformRemoteTemplates.Failed(ListError)
                 : new PlatformRemoteTemplates(_remote
-                    .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category))
+                    .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category,
+                        RejectedReasons.GetValueOrDefault(r.Key, "NONE")))
                     .ToList(), null));
 
         public Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)

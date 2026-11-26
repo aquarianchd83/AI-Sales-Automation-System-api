@@ -29,7 +29,11 @@ public record PlatformMessageTemplateDto(
     string? HeaderUrl,
     string? HeaderPreviewUrl,
     DateTime CreatedAt,
-    DateTime? UpdatedAt);
+    DateTime? UpdatedAt,
+    string? RejectionReason = null,
+    string? RejectionTitle = null,
+    string? RejectionTip = null,
+    string? LastSyncError = null);
 
 /// <param name="HeaderMediaAssetId">null keeps the current image; <paramref name="RemoveHeaderImage"/> clears it.</param>
 public record UpdatePlatformMessageTemplateRequest(string Name, string BodyText, bool IsActive, Guid? HeaderMediaAssetId, bool RemoveHeaderImage);
@@ -280,6 +284,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             template.LastPushedBodyText = null;
             template.HeaderOnMeta = false;
             template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
+            template.RejectionReason = null;
             if (counts(template))
                 missing++;
         }
@@ -308,6 +313,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             if (imageError is not null)
             {
                 failures.Add($"{template.WhatsAppTemplateName}: {imageError}");
+                template.LastSyncError = Truncate(imageError);
                 continue;
             }
 
@@ -322,9 +328,11 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             if (!result.Success)
             {
                 failures.Add($"{template.WhatsAppTemplateName}: {result.ErrorMessage ?? "Unknown error."}");
+                template.LastSyncError = Truncate(result.ErrorMessage ?? "Meta did not accept the template.");
                 continue;
             }
 
+            template.LastSyncError = null;
             template.MetaTemplateId = result.MetaTemplateId;
             template.LastPushedBodyText = template.BodyText;
 
@@ -365,6 +373,14 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             var status = MapRemoteStatus(r.Status);
             var changed = template.WhatsAppTemplateStatus != status;
             template.WhatsAppTemplateStatus = status;
+
+            // Only a rejection carries a reason; Meta answers "NONE" for everything else.
+            var reason = status == WhatsAppTemplateStatus.Rejected ? MetaRejectionReasons.Normalize(r.RejectedReason) ?? r.Status.ToUpperInvariant() : null;
+            if (template.RejectionReason != reason)
+            {
+                template.RejectionReason = reason;
+                changed = true;
+            }
 
             // Meta may reclassify on review; the category it holds is the one it bills.
             var category = MapRemoteCategory(r.Category);
@@ -471,12 +487,16 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             }
 
             var definition = PlatformTemplateCatalog.For(t.EventKey);
+            var rejection = t.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Rejected ? MetaRejectionReasons.Explain(t.RejectionReason) : null;
             return new PlatformMessageTemplateDto(
                 t.Id, t.EventKey, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName, t.WhatsAppTemplateStatus.ToString(),
                 t.BodyText, definition?.Body ?? t.BodyText, definition?.SampleMessage ?? string.Empty, t.IsActive, t.MetaTemplateId,
-                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url, preview, t.CreatedAt, t.UpdatedAt);
+                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url, preview, t.CreatedAt, t.UpdatedAt,
+                t.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Rejected ? t.RejectionReason : null, rejection?.Title, rejection?.Tip, t.LastSyncError);
         }).ToList();
     }
+
+    private static string Truncate(string text) => text.Length <= 1000 ? text : text[..1000];
 
     private static ValidationException Problem(string property, string message) =>
         new(new[] { new FluentValidation.Results.ValidationFailure(property, message) });
