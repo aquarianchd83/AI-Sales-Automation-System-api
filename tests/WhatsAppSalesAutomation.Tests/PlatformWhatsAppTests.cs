@@ -758,6 +758,7 @@ public sealed class PlatformWhatsAppTests : IDisposable
         public List<WhatsAppTemplateSubmission> Created { get; } = new();
         public List<WhatsAppTemplateSubmission> Updated { get; } = new();
         private readonly Dictionary<string, (string Id, string Language, string Category)> _remote = new();
+        private int _creates; // never reset, so a re-create gets a new id even after a test clears Created
 
         public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(Configured);
 
@@ -783,7 +784,7 @@ public sealed class PlatformWhatsAppTests : IDisposable
                 return Task.FromResult(new WhatsAppTemplateSubmitResult(false, null, null, "Meta said no."));
 
             Created.Add(submission);
-            var id = $"meta-{Created.Count}-{submission.Name}";
+            var id = $"meta-{++_creates}-{submission.Name}";
             _remote[submission.Name] = (id, submission.Language, submission.Category.ToUpperInvariant());
             return Task.FromResult(new WhatsAppTemplateSubmitResult(true, id, "PENDING", null));
         }
