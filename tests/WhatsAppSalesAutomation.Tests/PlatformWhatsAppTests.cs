@@ -466,6 +466,137 @@ public sealed class PlatformWhatsAppTests : IDisposable
     }
 
     [Fact]
+    public async Task A_template_meta_no_longer_has_is_created_again_instead_of_keeping_its_old_id_and_status()
+    {
+        // Pushed and approved on the old WhatsApp Business Account ...
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_quota_low_20"] = "APPROVED";
+        await Templates().SyncAsync();
+        var before = await TemplateAsync(TenantNotificationKind.QuotaLow20);
+        Assert.Equal(WhatsAppTemplateStatus.Approved, before.WhatsAppTemplateStatus);
+        var oldId = before.MetaTemplateId;
+
+        // ... then the platform number is moved to a new account that has none of them.
+        _admin.SwitchAccount();
+        _admin.Statuses.Clear();
+        _admin.Created.Clear();
+
+        var one = await Templates().SyncOneAsync(before.Id);
+
+        Assert.Equal("tenant_alert_quota_low_20", _admin.Created.Single().Name);
+        Assert.NotEqual(oldId, one.MetaTemplateId);
+        Assert.Equal("Pending", one.Status);
+
+        // The bulk run picks up every other active template the same way.
+        _admin.Created.Clear();
+        var all = await Templates().SyncAsync();
+        Assert.Equal(PlatformTemplateCatalog.All.Count - 1, all.Created);
+        Assert.Equal(PlatformTemplateCatalog.All.Count - 1, all.MissingOnMeta);
+        Assert.Empty(all.Failures);
+    }
+
+    [Fact]
+    public async Task An_edited_template_stays_in_review_when_the_status_cannot_be_read_back()
+    {
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_quota_exhausted"] = "APPROVED";
+        await Templates().SyncAsync();
+        var t = await TemplateAsync(TenantNotificationKind.QuotaExhausted);
+        await Templates().UpdateAsync(t.Id, Edit(t, body: "Hi {{TenantName}}, new wording that is long enough. {{Message}} Thank you."));
+        _admin.ListError = "Meta is down.";
+        _admin.ListReadsBeforeError = 1;
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Equal(1, result.Updated);
+        Assert.Contains("Meta is down.", Assert.Single(result.Failures));
+        Assert.Equal(WhatsAppTemplateStatus.Pending, (await TemplateAsync(TenantNotificationKind.QuotaExhausted)).WhatsAppTemplateStatus);
+    }
+
+    [Fact]
+    public async Task A_switched_off_template_missing_on_meta_is_reset_but_not_counted_as_sent_again()
+    {
+        await SeedAsync();
+        await Templates().SyncAsync();
+        var off = await TemplateAsync(TenantNotificationKind.RefundExpired);
+        off.IsActive = false;
+        await _db.SaveChangesAsync();
+        _admin.SwitchAccount();
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Equal(result.Created, result.MissingOnMeta);
+        Assert.Null((await TemplateAsync(TenantNotificationKind.RefundExpired)).MetaTemplateId);
+    }
+
+    [Fact]
+    public async Task A_rejection_shows_metas_reason_with_a_fix_and_clears_once_approved()
+    {
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_whatsapp_disconnected"] = "REJECTED";
+        _admin.RejectedReasons["tenant_alert_whatsapp_disconnected"] = "TAG_CONTENT_MISMATCH";
+
+        await Templates().SyncAsync();
+
+        var dto = (await Templates().GetAllAsync()).Single(t => t.WhatsAppTemplateName == "tenant_alert_whatsapp_disconnected");
+        Assert.Equal("Rejected", dto.Status);
+        Assert.Equal("TAG_CONTENT_MISMATCH", dto.RejectionReason);
+        Assert.Equal("Wording does not match category or language", dto.RejectionTitle);
+        Assert.Contains("English", dto.RejectionTip);
+
+        _admin.Statuses["tenant_alert_whatsapp_disconnected"] = "APPROVED";
+        _admin.RejectedReasons.Clear();
+        await Templates().SyncAsync();
+
+        dto = (await Templates().GetAllAsync()).Single(t => t.WhatsAppTemplateName == "tenant_alert_whatsapp_disconnected");
+        Assert.Null(dto.RejectionReason);
+        Assert.Null(dto.RejectionTip);
+    }
+
+    [Fact]
+    public async Task A_rejection_without_a_code_still_explains_where_to_look()
+    {
+        var explained = MetaRejectionReasons.Explain("NONE");
+        Assert.Equal("Rejected by Meta", explained.Title);
+        Assert.Contains("WhatsApp Manager", explained.Tip);
+        Assert.Equal("Format problem", MetaRejectionReasons.Explain("invalid_format").Title);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_failed_create_is_kept_on_the_template_until_a_push_succeeds()
+    {
+        await SeedAsync();
+        _admin.FailFor = "tenant_alert_refund_rejected";
+        await Templates().SyncAsync();
+
+        Assert.Equal("Meta said no.", (await TemplateAsync(TenantNotificationKind.RefundRejected)).LastSyncError);
+
+        _admin.FailFor = null;
+        await Templates().SyncAsync();
+        Assert.Null((await TemplateAsync(TenantNotificationKind.RefundRejected)).LastSyncError);
+    }
+
+    [Fact]
+    public async Task A_template_list_meta_refuses_to_give_is_a_failure_not_an_empty_account()
+    {
+        await SeedAsync();
+        await Templates().SyncAsync();
+        _admin.Created.Clear();
+        _admin.ListError = "Error validating access token: The session is invalid because the user logged out.";
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Contains("user logged out", Assert.Single(result.Failures));
+        Assert.Empty(_admin.Created);
+        Assert.NotNull((await TemplateAsync(TenantNotificationKind.QuotaLow5)).MetaTemplateId);
+
+        var t = await TemplateAsync(TenantNotificationKind.QuotaLow5);
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => Templates().SyncOneAsync(t.Id));
+        Assert.Contains("user logged out", ex.Message);
+    }
+
+    [Fact]
     public async Task A_test_send_needs_an_approved_template_and_a_proper_number()
     {
         await SeedAsync();
@@ -671,17 +802,31 @@ public sealed class PlatformWhatsAppTests : IDisposable
     {
         public bool Configured { get; set; } = true;
         public Dictionary<string, string> Statuses { get; } = new();
+        public Dictionary<string, string> RejectedReasons { get; } = new();
         public string? FailFor { get; set; }
         public List<WhatsAppTemplateSubmission> Created { get; } = new();
         public List<WhatsAppTemplateSubmission> Updated { get; } = new();
         private readonly Dictionary<string, (string Id, string Language, string Category)> _remote = new();
+        private int _creates; // never reset, so a re-create gets a new id even after a test clears Created
 
         public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(Configured);
 
-        public Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<WhatsAppRemoteTemplate>>(_remote
-                .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category))
-                .ToList());
+        /// <summary>Set to make reading Meta's template list fail, the way a logged-out token does.</summary>
+        public string? ListError { get; set; }
+
+        /// <summary>The platform number moved to another WhatsApp Business Account: none of the templates pushed so far are there.</summary>
+        public void SwitchAccount() => _remote.Clear();
+
+        /// <summary>Lets this many list reads succeed, then fails every later one with <see cref="ListError"/>.</summary>
+        public int? ListReadsBeforeError { get; set; }
+
+        public Task<PlatformRemoteTemplates> GetTemplatesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ListError is not null && (ListReadsBeforeError is null || ListReadsBeforeError-- <= 0)
+                ? PlatformRemoteTemplates.Failed(ListError)
+                : new PlatformRemoteTemplates(_remote
+                    .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category,
+                        RejectedReasons.GetValueOrDefault(r.Key, "NONE")))
+                    .ToList(), null));
 
         public Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default)
         {
@@ -689,7 +834,7 @@ public sealed class PlatformWhatsAppTests : IDisposable
                 return Task.FromResult(new WhatsAppTemplateSubmitResult(false, null, null, "Meta said no."));
 
             Created.Add(submission);
-            var id = "meta-" + submission.Name;
+            var id = $"meta-{++_creates}-{submission.Name}";
             _remote[submission.Name] = (id, submission.Language, submission.Category.ToUpperInvariant());
             return Task.FromResult(new WhatsAppTemplateSubmitResult(true, id, "PENDING", null));
         }

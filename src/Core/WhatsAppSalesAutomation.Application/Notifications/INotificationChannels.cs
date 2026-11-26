@@ -47,9 +47,17 @@ public interface IPlatformWhatsAppTemplateAdmin
     /// <summary>True when the platform number has credentials and has not been switched off.</summary>
     Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetTemplatesAsync(CancellationToken cancellationToken = default);
+    /// <summary>Every template on the platform's WhatsApp Business Account. A failed read comes back with <see cref="PlatformRemoteTemplates.Error"/>
+    /// set rather than as an empty list, so "Meta has none of these" and "Meta could not be asked" are never confused.</summary>
+    Task<PlatformRemoteTemplates> GetTemplatesAsync(CancellationToken cancellationToken = default);
 
     Task<WhatsAppTemplateSubmitResult> CreateTemplateAsync(WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default);
 
     Task<WhatsAppTemplateSubmitResult> UpdateTemplateAsync(string metaTemplateId, WhatsAppTemplateSubmission submission, CancellationToken cancellationToken = default);
+}
+
+/// <summary>What Meta holds for the platform's WhatsApp Business Account, or why it could not be read.</summary>
+public record PlatformRemoteTemplates(IReadOnlyList<WhatsAppRemoteTemplate> Templates, string? Error)
+{
+    public static PlatformRemoteTemplates Failed(string error) => new(Array.Empty<WhatsAppRemoteTemplate>(), error);
 }

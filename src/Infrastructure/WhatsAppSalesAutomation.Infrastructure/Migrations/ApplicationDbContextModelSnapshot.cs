@@ -6899,6 +6899,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("LastSyncError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("MetaTemplateId")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -6907,6 +6911,10 @@ namespace WhatsAppSalesAutomation.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");

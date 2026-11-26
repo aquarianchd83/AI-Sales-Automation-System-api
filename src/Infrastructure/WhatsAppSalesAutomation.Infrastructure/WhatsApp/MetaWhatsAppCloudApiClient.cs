@@ -180,12 +180,18 @@ public class MetaWhatsAppCloudApiClient
     }
 
     public async Task<IReadOnlyList<WhatsAppRemoteTemplate>> GetMessageTemplatesAsync(
+        TenantWhatsAppCredentials credentials, CancellationToken cancellationToken) =>
+        (await TryGetMessageTemplatesAsync(credentials, cancellationToken)).Templates;
+
+    /// <summary>Like <see cref="GetMessageTemplatesAsync"/>, but says why the list could not be read (bad token, wrong WABA id) instead of
+    /// answering an empty list - a caller that decides "this template is not on Meta" from the list must not decide it from a failed read.</summary>
+    public async Task<(IReadOnlyList<WhatsAppRemoteTemplate> Templates, string? Error)> TryGetMessageTemplatesAsync(
         TenantWhatsAppCredentials credentials, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(credentials.WhatsAppBusinessAccountId))
         {
             _logger.LogWarning("WhatsApp template sync skipped: WhatsAppBusinessAccountId is not configured.");
-            return Array.Empty<WhatsAppRemoteTemplate>();
+            return (Array.Empty<WhatsAppRemoteTemplate>(), "The WhatsApp Business Account ID is not set, so the templates on Meta cannot be read.");
         }
 
         var results = new List<WhatsAppRemoteTemplate>();
@@ -193,7 +199,7 @@ public class MetaWhatsAppCloudApiClient
         // Meta paginates at 100/page by default for this endpoint; following paging.next until it's
         // absent is the documented way to get the full list rather than assuming one page is everything -
         // a WABA with more templates than that would otherwise silently look fully synced when it isn't.
-        Uri? nextUri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category&limit=100");
+        Uri? nextUri = BuildUri(credentials, $"{credentials.WhatsAppBusinessAccountId}/message_templates?fields=id,name,language,status,category,rejected_reason&limit=100");
 
         while (nextUri is not null)
         {
@@ -202,11 +208,12 @@ public class MetaWhatsAppCloudApiClient
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions);
+                MetaErrorResponse? error = null;
+                try { error = JsonSerializer.Deserialize<MetaErrorResponse>(body, JsonOptions); } catch (JsonException) { }
                 _logger.LogWarning(
                     "Meta template list fetch failed: {Error} (code={Code}, fbtrace_id={FbtraceId}). Raw: {Body}",
                     error?.Error?.Message, error?.Error?.Code, error?.Error?.FbtraceId, body);
-                break;
+                return (results, $"Meta did not return the template list: {error?.Error?.Message ?? $"HTTP {(int)response.StatusCode}"}");
             }
 
             var parsed = JsonSerializer.Deserialize<MetaTemplateListResponse>(body, JsonOptions);
@@ -214,14 +221,14 @@ public class MetaWhatsAppCloudApiClient
             {
                 results.AddRange(parsed.Data
                     .Where(t => t.Id is not null && t.Name is not null && t.Language is not null && t.Status is not null && t.Category is not null)
-                    .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!)));
+                    .Select(t => new WhatsAppRemoteTemplate(t.Id!, t.Name!, t.Language!, t.Status!, t.Category!, t.RejectedReason)));
             }
 
             // paging.next is already a full, absolute Meta URL from the second page onward.
             nextUri = parsed?.Paging?.Next is { } next ? new Uri(next) : null;
         }
 
-        return results;
+        return (results, null);
     }
 
     public async Task<WhatsAppTemplateSubmitResult> CreateMessageTemplateAsync(
@@ -484,6 +491,9 @@ public class MetaWhatsAppCloudApiClient
 
         [JsonPropertyName("category")]
         public string? Category { get; set; }
+
+        [JsonPropertyName("rejected_reason")]
+        public string? RejectedReason { get; set; }
     }
 
     private class MetaPaging

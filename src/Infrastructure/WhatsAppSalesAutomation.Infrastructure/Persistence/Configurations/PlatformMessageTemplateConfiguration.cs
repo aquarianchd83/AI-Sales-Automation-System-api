@@ -20,6 +20,8 @@ public class PlatformMessageTemplateConfiguration : IEntityTypeConfiguration<Pla
         builder.Property(t => t.WhatsAppTemplateStatus).HasConversion<string>().HasMaxLength(20);
         builder.Property(t => t.MetaTemplateId).HasMaxLength(100);
         builder.Property(t => t.LastPushedBodyText).HasMaxLength(2000);
+        builder.Property(t => t.RejectionReason).HasMaxLength(50);
+        builder.Property(t => t.LastSyncError).HasMaxLength(1000);
 
         // Restrict: deleting an image a template still shows is refused by PlatformMediaService before it gets here.
         builder.HasOne<PlatformMediaAsset>()

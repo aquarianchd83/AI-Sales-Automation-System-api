@@ -81,7 +81,9 @@ public record WhatsAppSendResult(bool Success, string? WhatsAppMessageId, string
 /// that already existed on Meta before ever being pushed (found live: Meta's own "hello_world" sample
 /// template) is recognized as already-created instead of the next push attempting - and failing - to
 /// create it again.</summary>
-public record WhatsAppRemoteTemplate(string Id, string Name, string Language, string Status, string Category);
+/// <param name="RejectedReason">Meta's code for why a REJECTED template was turned down (INVALID_FORMAT, TAG_CONTENT_MISMATCH, ...); null or
+/// "NONE" otherwise.</param>
+public record WhatsAppRemoteTemplate(string Id, string Name, string Language, string Status, string Category, string? RejectedReason = null);
 
 /// <summary>What CreateMessageTemplateAsync/UpdateMessageTemplateAsync send to Meta.
 /// <paramref name="MetaBodyText"/>/<paramref name="ExampleValues"/> already have named placeholders

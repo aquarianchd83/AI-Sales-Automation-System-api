@@ -29,13 +29,19 @@ public record PlatformMessageTemplateDto(
     string? HeaderUrl,
     string? HeaderPreviewUrl,
     DateTime CreatedAt,
-    DateTime? UpdatedAt);
+    DateTime? UpdatedAt,
+    string? RejectionReason = null,
+    string? RejectionTitle = null,
+    string? RejectionTip = null,
+    string? LastSyncError = null);
 
 /// <param name="HeaderMediaAssetId">null keeps the current image; <paramref name="RemoveHeaderImage"/> clears it.</param>
 public record UpdatePlatformMessageTemplateRequest(string Name, string BodyText, bool IsActive, Guid? HeaderMediaAssetId, bool RemoveHeaderImage);
 
 public record SendPlatformTemplateTestRequest(string To);
 
+/// <param name="MissingOnMeta">Templates this system thought were on Meta (they had a Meta id) but the WhatsApp Business Account does not hold -
+/// deleted there, or the platform number was moved to another account. They are created again in the same run.</param>
 public record PlatformTemplateSyncResultDto(
     bool Configured,
     string? Note,
@@ -43,7 +49,8 @@ public record PlatformTemplateSyncResultDto(
     int Updated,
     IReadOnlyList<string> Failures,
     int RemoteCount,
-    int StatusUpdated);
+    int StatusUpdated,
+    int MissingOnMeta = 0);
 
 public interface IPlatformMessageTemplateService
 {
@@ -55,7 +62,8 @@ public interface IPlatformMessageTemplateService
     /// <summary>Puts the seeded wording back. Counts as an edit: an approved template goes back to review.</summary>
     Task<PlatformMessageTemplateDto> RestoreDefaultAsync(Guid id, CancellationToken cancellationToken = default);
 
-    /// <summary>Pushes new and edited templates to Meta, then pulls Meta's review status for all of them. Never throws on a Meta error.</summary>
+    /// <summary>Reads what Meta holds, creates every template that is not there (new, deleted on Meta, or the number moved to another WhatsApp
+    /// Business Account), sends edited wording, then pulls Meta's review status. Never throws on a Meta error - it is in the result's failures.</summary>
     Task<PlatformTemplateSyncResultDto> SyncAsync(CancellationToken cancellationToken = default);
 
     Task<PlatformMessageTemplateDto> SyncOneAsync(Guid id, CancellationToken cancellationToken = default);
@@ -184,14 +192,104 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
         return (await ToDtosAsync(new[] { refreshed }, cancellationToken))[0];
     }
 
+    /// <summary>
+    /// One sync, in three steps:
+    /// 1. Read Meta's list and reconcile it with ours. A template Meta already has under the same name and language is adopted; one we hold a Meta
+    ///    id for but Meta does not have any more is reset to "not on Meta" - otherwise it would keep its old id and old Approved status for ever,
+    ///    the push below would skip it as already created, and Sync would silently do nothing (what happened after the platform number was moved
+    ///    to a new WhatsApp Business Account: every template still carried the old account's ids).
+    /// 2. Push: create what is not on Meta, send edited wording for what is.
+    /// 3. Read Meta's list again (only if step 2 changed something) and take its review status and category.
+    /// A list that cannot be read stops the run with Meta's reason as the failure, rather than being taken for "Meta has none of these".
+    /// </summary>
     private async Task<PlatformTemplateSyncResultDto> SyncCoreAsync(Guid? onlyId, CancellationToken cancellationToken)
     {
         if (!await _admin.IsConfiguredAsync(cancellationToken))
             return new PlatformTemplateSyncResultDto(false, "The platform WhatsApp number is not set up (or is switched off), so nothing was sent to Meta.", 0, 0, Array.Empty<string>(), 0, 0);
 
+        var remote = await _admin.GetTemplatesAsync(cancellationToken);
+        if (remote.Error is not null)
+            return new PlatformTemplateSyncResultDto(true, null, 0, 0, new[] { $"Could not read the templates on Meta: {remote.Error}" }, 0, 0);
+
+        var local = await ScopeAsync(onlyId, cancellationToken);
+        // Inactive templates are reset too (their old Meta id is just as wrong), but only the ones this run will push count as "sent again".
+        var missing = Reconcile(local, remote.Templates, t => onlyId is not null || t.IsActive);
+        await _context.SaveChangesAsync(cancellationToken);
+
         var (created, updated, failures) = await PushAsync(onlyId, cancellationToken);
-        var (remoteCount, statusUpdated) = await PullAsync(onlyId, cancellationToken);
-        return new PlatformTemplateSyncResultDto(true, null, created, updated, failures, remoteCount, statusUpdated);
+
+        var statusUpdated = 0;
+        if (created + updated > 0)
+        {
+            // The list read before the push is stale for what was just sent (an edited Approved template is back in review), so if the fresh
+            // read fails, apply no status at all rather than the old one - the next sync or the hourly job picks it up.
+            var after = await _admin.GetTemplatesAsync(cancellationToken);
+            if (after.Error is null)
+            {
+                remote = after;
+                statusUpdated = ApplyRemoteStatus(local, remote.Templates);
+            }
+            else
+            {
+                failures = failures.Append($"Sent to Meta, but its review status could not be read back: {after.Error}").ToList();
+            }
+        }
+        else
+        {
+            statusUpdated = ApplyRemoteStatus(local, remote.Templates);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return new PlatformTemplateSyncResultDto(true, null, created, updated, failures, remote.Templates.Count, statusUpdated, missing);
+    }
+
+    private async Task<List<PlatformMessageTemplate>> ScopeAsync(Guid? onlyId, CancellationToken cancellationToken)
+    {
+        var query = _context.PlatformMessageTemplates.AsQueryable();
+        if (onlyId is { } id)
+            query = query.Where(t => t.Id == id);
+        return await query.ToListAsync(cancellationToken);
+    }
+
+    private static WhatsAppRemoteTemplate? FindRemote(PlatformMessageTemplate template, IReadOnlyList<WhatsAppRemoteTemplate> remote) =>
+        remote.FirstOrDefault(r => string.Equals(template.WhatsAppTemplateName, r.Name, StringComparison.OrdinalIgnoreCase)
+                                   && string.Equals(template.Language, r.Language, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Step 1 of a sync. Returns how many templates had a Meta id that Meta no longer knows.</summary>
+    private static int Reconcile(IReadOnlyList<PlatformMessageTemplate> local, IReadOnlyList<WhatsAppRemoteTemplate> remote, Func<PlatformMessageTemplate, bool> counts)
+    {
+        var missing = 0;
+        foreach (var template in local)
+        {
+            var match = FindRemote(template, remote);
+            if (match is not null)
+            {
+                // Already on Meta before this system pushed it (entered by hand there, or pushed from another install): adopt it so the next
+                // push edits it instead of failing to create a name that is taken.
+                if (template.MetaTemplateId != match.Id)
+                {
+                    if (template.MetaTemplateId is null)
+                        template.LastPushedBodyText = template.BodyText;
+                    template.MetaTemplateId = match.Id;
+                }
+                continue;
+            }
+
+            if (template.MetaTemplateId is null)
+                continue;
+
+            // We hold an id Meta does not have: the template was deleted there, or the platform number now points at another WhatsApp Business
+            // Account. Whatever status we had is not Meta's any more - start over as a new template.
+            template.MetaTemplateId = null;
+            template.LastPushedBodyText = null;
+            template.HeaderOnMeta = false;
+            template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
+            template.RejectionReason = null;
+            if (counts(template))
+                missing++;
+        }
+
+        return missing;
     }
 
     /// <summary>New templates are created on Meta and edited ones updated. Active templates only for the bulk run - a switched-off one has no
@@ -215,6 +313,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             if (imageError is not null)
             {
                 failures.Add($"{template.WhatsAppTemplateName}: {imageError}");
+                template.LastSyncError = Truncate(imageError);
                 continue;
             }
 
@@ -229,9 +328,11 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             if (!result.Success)
             {
                 failures.Add($"{template.WhatsAppTemplateName}: {result.ErrorMessage ?? "Unknown error."}");
+                template.LastSyncError = Truncate(result.ErrorMessage ?? "Meta did not accept the template.");
                 continue;
             }
 
+            template.LastSyncError = null;
             template.MetaTemplateId = result.MetaTemplateId;
             template.LastPushedBodyText = template.BodyText;
 
@@ -239,8 +340,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             {
                 created++;
                 template.HeaderOnMeta = image is not null;
-                if (result.Status is not null)
-                    template.WhatsAppTemplateStatus = MapRemoteStatus(result.Status);
+                template.WhatsAppTemplateStatus = result.Status is not null ? MapRemoteStatus(result.Status) : WhatsAppTemplateStatus.Pending;
             }
             else
             {
@@ -254,42 +354,39 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
         return (created, updated, failures);
     }
 
-    private async Task<(int RemoteCount, int StatusUpdated)> PullAsync(Guid? onlyId, CancellationToken cancellationToken)
+    /// <summary>Step 3 of a sync: Meta's review status and category onto every template it holds. Returns how many changed.</summary>
+    private static int ApplyRemoteStatus(IReadOnlyList<PlatformMessageTemplate> local, IReadOnlyList<WhatsAppRemoteTemplate> remote)
     {
-        var remote = await _admin.GetTemplatesAsync(cancellationToken);
-        if (remote.Count == 0)
-            return (0, 0);
-
-        var query = _context.PlatformMessageTemplates.AsQueryable();
-        if (onlyId is { } id)
-            query = query.Where(t => t.Id == id);
-        var local = await query.ToListAsync(cancellationToken);
-
         var statusUpdated = 0;
-        foreach (var r in remote)
+        foreach (var template in local)
         {
-            var match = local.FirstOrDefault(t =>
-                string.Equals(t.WhatsAppTemplateName, r.Name, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(t.Language, r.Language, StringComparison.OrdinalIgnoreCase));
-            if (match is null)
+            var r = FindRemote(template, remote);
+            if (r is null)
                 continue;
 
-            // Already on Meta before this system pushed it (or entered by hand there): adopt it so the next push edits it instead of failing to create it.
-            if (match.MetaTemplateId is null)
+            if (template.MetaTemplateId is null)
             {
-                match.MetaTemplateId = r.Id;
-                match.LastPushedBodyText = match.BodyText;
+                template.MetaTemplateId = r.Id;
+                template.LastPushedBodyText = template.BodyText;
             }
 
             var status = MapRemoteStatus(r.Status);
-            var changed = match.WhatsAppTemplateStatus != status;
-            match.WhatsAppTemplateStatus = status;
+            var changed = template.WhatsAppTemplateStatus != status;
+            template.WhatsAppTemplateStatus = status;
+
+            // Only a rejection carries a reason; Meta answers "NONE" for everything else.
+            var reason = status == WhatsAppTemplateStatus.Rejected ? MetaRejectionReasons.Normalize(r.RejectedReason) ?? r.Status.ToUpperInvariant() : null;
+            if (template.RejectionReason != reason)
+            {
+                template.RejectionReason = reason;
+                changed = true;
+            }
 
             // Meta may reclassify on review; the category it holds is the one it bills.
             var category = MapRemoteCategory(r.Category);
-            if (category is { } c && match.Category != c)
+            if (category is { } c && template.Category != c)
             {
-                match.Category = c;
+                template.Category = c;
                 changed = true;
             }
 
@@ -297,8 +394,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
                 statusUpdated++;
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
-        return (remote.Count, statusUpdated);
+        return statusUpdated;
     }
 
     private async Task<(WhatsAppTemplateHeaderImage? Image, string? Error)> LoadHeaderImageAsync(PlatformMessageTemplate template, CancellationToken cancellationToken)
@@ -391,12 +487,16 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             }
 
             var definition = PlatformTemplateCatalog.For(t.EventKey);
+            var rejection = t.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Rejected ? MetaRejectionReasons.Explain(t.RejectionReason) : null;
             return new PlatformMessageTemplateDto(
                 t.Id, t.EventKey, t.Name, t.Language, t.Category.ToString(), t.WhatsAppTemplateName, t.WhatsAppTemplateStatus.ToString(),
                 t.BodyText, definition?.Body ?? t.BodyText, definition?.SampleMessage ?? string.Empty, t.IsActive, t.MetaTemplateId,
-                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url, preview, t.CreatedAt, t.UpdatedAt);
+                t.HeaderMediaAssetId, t.HeaderOnMeta, fileName, url, preview, t.CreatedAt, t.UpdatedAt,
+                t.WhatsAppTemplateStatus == WhatsAppTemplateStatus.Rejected ? t.RejectionReason : null, rejection?.Title, rejection?.Tip, t.LastSyncError);
         }).ToList();
     }
+
+    private static string Truncate(string text) => text.Length <= 1000 ? text : text[..1000];
 
     private static ValidationException Problem(string property, string message) =>
         new(new[] { new FluentValidation.Results.ValidationFailure(property, message) });
