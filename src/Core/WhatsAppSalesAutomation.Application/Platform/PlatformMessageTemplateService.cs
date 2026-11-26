@@ -208,21 +208,33 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             return new PlatformTemplateSyncResultDto(true, null, 0, 0, new[] { $"Could not read the templates on Meta: {remote.Error}" }, 0, 0);
 
         var local = await ScopeAsync(onlyId, cancellationToken);
-        var missing = Reconcile(local, remote.Templates);
+        // Inactive templates are reset too (their old Meta id is just as wrong), but only the ones this run will push count as "sent again".
+        var missing = Reconcile(local, remote.Templates, t => onlyId is not null || t.IsActive);
         await _context.SaveChangesAsync(cancellationToken);
 
         var (created, updated, failures) = await PushAsync(onlyId, cancellationToken);
 
+        var statusUpdated = 0;
         if (created + updated > 0)
         {
+            // The list read before the push is stale for what was just sent (an edited Approved template is back in review), so if the fresh
+            // read fails, apply no status at all rather than the old one - the next sync or the hourly job picks it up.
             var after = await _admin.GetTemplatesAsync(cancellationToken);
             if (after.Error is null)
+            {
                 remote = after;
+                statusUpdated = ApplyRemoteStatus(local, remote.Templates);
+            }
             else
+            {
                 failures = failures.Append($"Sent to Meta, but its review status could not be read back: {after.Error}").ToList();
+            }
+        }
+        else
+        {
+            statusUpdated = ApplyRemoteStatus(local, remote.Templates);
         }
 
-        var statusUpdated = ApplyRemoteStatus(local, remote.Templates);
         await _context.SaveChangesAsync(cancellationToken);
         return new PlatformTemplateSyncResultDto(true, null, created, updated, failures, remote.Templates.Count, statusUpdated, missing);
     }
@@ -240,7 +252,7 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
                                    && string.Equals(template.Language, r.Language, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Step 1 of a sync. Returns how many templates had a Meta id that Meta no longer knows.</summary>
-    private static int Reconcile(IReadOnlyList<PlatformMessageTemplate> local, IReadOnlyList<WhatsAppRemoteTemplate> remote)
+    private static int Reconcile(IReadOnlyList<PlatformMessageTemplate> local, IReadOnlyList<WhatsAppRemoteTemplate> remote, Func<PlatformMessageTemplate, bool> counts)
     {
         var missing = 0;
         foreach (var template in local)
@@ -268,7 +280,8 @@ public class PlatformMessageTemplateService : IPlatformMessageTemplateService
             template.LastPushedBodyText = null;
             template.HeaderOnMeta = false;
             template.WhatsAppTemplateStatus = WhatsAppTemplateStatus.Pending;
-            missing++;
+            if (counts(template))
+                missing++;
         }
 
         return missing;

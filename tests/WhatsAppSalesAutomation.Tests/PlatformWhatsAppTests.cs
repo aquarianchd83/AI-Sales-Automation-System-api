@@ -496,6 +496,40 @@ public sealed class PlatformWhatsAppTests : IDisposable
     }
 
     [Fact]
+    public async Task An_edited_template_stays_in_review_when_the_status_cannot_be_read_back()
+    {
+        await SeedAsync();
+        _admin.Statuses["tenant_alert_quota_exhausted"] = "APPROVED";
+        await Templates().SyncAsync();
+        var t = await TemplateAsync(TenantNotificationKind.QuotaExhausted);
+        await Templates().UpdateAsync(t.Id, Edit(t, body: "Hi {{TenantName}}, new wording that is long enough. {{Message}} Thank you."));
+        _admin.ListError = "Meta is down.";
+        _admin.ListReadsBeforeError = 1;
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Equal(1, result.Updated);
+        Assert.Contains("Meta is down.", Assert.Single(result.Failures));
+        Assert.Equal(WhatsAppTemplateStatus.Pending, (await TemplateAsync(TenantNotificationKind.QuotaExhausted)).WhatsAppTemplateStatus);
+    }
+
+    [Fact]
+    public async Task A_switched_off_template_missing_on_meta_is_reset_but_not_counted_as_sent_again()
+    {
+        await SeedAsync();
+        await Templates().SyncAsync();
+        var off = await TemplateAsync(TenantNotificationKind.RefundExpired);
+        off.IsActive = false;
+        await _db.SaveChangesAsync();
+        _admin.SwitchAccount();
+
+        var result = await Templates().SyncAsync();
+
+        Assert.Equal(result.Created, result.MissingOnMeta);
+        Assert.Null((await TemplateAsync(TenantNotificationKind.RefundExpired)).MetaTemplateId);
+    }
+
+    [Fact]
     public async Task A_template_list_meta_refuses_to_give_is_a_failure_not_an_empty_account()
     {
         await SeedAsync();
@@ -733,8 +767,11 @@ public sealed class PlatformWhatsAppTests : IDisposable
         /// <summary>The platform number moved to another WhatsApp Business Account: none of the templates pushed so far are there.</summary>
         public void SwitchAccount() => _remote.Clear();
 
+        /// <summary>Lets this many list reads succeed, then fails every later one with <see cref="ListError"/>.</summary>
+        public int? ListReadsBeforeError { get; set; }
+
         public Task<PlatformRemoteTemplates> GetTemplatesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(ListError is not null
+            Task.FromResult(ListError is not null && (ListReadsBeforeError is null || ListReadsBeforeError-- <= 0)
                 ? PlatformRemoteTemplates.Failed(ListError)
                 : new PlatformRemoteTemplates(_remote
                     .Select(r => new WhatsAppRemoteTemplate(r.Value.Id, r.Key, r.Value.Language, Statuses.GetValueOrDefault(r.Key, "PENDING"), r.Value.Category))
