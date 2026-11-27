@@ -811,7 +811,9 @@ public class CampaignService : ICampaignService
             var stillDue = a.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.WaitingForContent or CampaignCustomerStatus.AwaitingResponse
                 && a.CurrentStepNumber < stepNumber;
 
-            if (stillDue && category is { } templateCategory && NextActiveStep(a.CurrentStepNumber) == stepNumber)
+            // A follow-up whose delay has not elapsed is simply Upcoming; the consent gate only matters once it is due.
+            if (stillDue && category is { } templateCategory && NextActiveStep(a.CurrentStepNumber) == stepNumber
+                && (a.NextFollowUpDueAt is null || a.NextFollowUpDueAt <= _dateTime.UtcNow))
             {
                 var gate = TemplateSendGate.Evaluate(new Customer
                 {
