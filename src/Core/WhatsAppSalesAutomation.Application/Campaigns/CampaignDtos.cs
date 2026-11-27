@@ -136,7 +136,7 @@ public record CampaignMessageHistoryEntryDto(
 
 /// <summary>Delivery outcome of one campaign step across the whole audience - who has it, who is
 /// still due it, who never will. <see cref="Recipients"/> is the audience size; every other count
-/// is a slice of it, so Queued+Sent+Delivered+Read+Failed+Upcoming+WillNotReceive == Recipients.</summary>
+/// is a slice of it, so Queued+Sent+Delivered+Read+Failed+Upcoming+Blocked+WillNotReceive == Recipients.</summary>
 public record CampaignStepDeliverySummaryDto(
     int StepNumber,
     string StepType,
@@ -149,7 +149,8 @@ public record CampaignStepDeliverySummaryDto(
     int Read,
     int Failed,
     int Upcoming,
-    int WillNotReceive);
+    int WillNotReceive,
+    int Blocked = 0);
 
 /// <summary>Query for GET campaigns/{id}/steps/{stepNumber}/recipients. <see cref="Outcome"/> is one of
 /// the <see cref="CampaignStepOutcome"/> names.</summary>
@@ -161,7 +162,7 @@ public record CampaignStepRecipientQuery : PagedRequest
 /// <summary>One audience member's outcome for one step. <see cref="MessageId"/> is set once a message
 /// exists for the step (the id to resend when <see cref="Outcome"/> is Failed).
 /// <see cref="DueAt"/> is when an Upcoming step becomes eligible (null = next send run).
-/// <see cref="Note"/> says why a WillNotReceive recipient will not get it.</summary>
+/// <see cref="Note"/> says why a WillNotReceive recipient will not get it, or why a Blocked one is being held back.</summary>
 public record CampaignStepRecipientDto(
     Guid CustomerId,
     string PhoneNumberE164,
@@ -185,7 +186,21 @@ public static class CampaignStepOutcome
     public const string Failed = "Failed";
     public const string Upcoming = "Upcoming";
     public const string WillNotReceive = "WillNotReceive";
+
+    /// <summary>Due this step now, but the consent gate holds it back (no consent, incomplete record, or consent that does not
+    /// cover a promotional template). Sends on its own once the customer's consent is fixed.</summary>
+    public const string Blocked = "Blocked";
 }
+
+/// <summary>Who in the audience the campaign's first message cannot reach because of consent, so the tenant learns it before
+/// pressing Start rather than from a campaign that silently sends nothing. <see cref="BlockedRecipients"/> is capped; <see cref="Blocked"/> is the full count.</summary>
+public record CampaignConsentCheckDto(
+    int StepNumber,
+    string? TemplateName,
+    string? TemplateCategory,
+    int Recipients,
+    int Blocked,
+    IReadOnlyList<CampaignStepRecipientDto> BlockedRecipients);
 
 /// <summary>One labelled fact inside a journey step.</summary>
 public record CampaignJourneyDetailDto(string Label, string Value);

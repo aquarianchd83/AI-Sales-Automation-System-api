@@ -107,6 +107,11 @@ public class CampaignsController : ControllerBase
     public async Task<ActionResult<PagedResult<CampaignMessageHistoryEntryDto>>> GetHistory(Guid id, [FromQuery] CampaignHistoryQuery query, CancellationToken cancellationToken)
         => Ok(await _campaignService.GetHistoryAsync(id, query, cancellationToken));
 
+    /// <summary>Who the first message cannot reach because of consent. Meant for the Start confirmation.</summary>
+    [HttpGet("{id:guid}/consent-check")]
+    public async Task<ActionResult<CampaignConsentCheckDto>> GetConsentCheck(Guid id, CancellationToken cancellationToken)
+        => Ok(await _campaignService.GetConsentCheckAsync(id, cancellationToken));
+
     /// <summary>Per-step delivery breakdown across the audience.</summary>
     [HttpGet("{id:guid}/steps/delivery")]
     public async Task<ActionResult<IReadOnlyList<CampaignStepDeliverySummaryDto>>> GetStepDelivery(Guid id, CancellationToken cancellationToken)

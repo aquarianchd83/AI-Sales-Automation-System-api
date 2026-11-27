@@ -86,6 +86,24 @@ public sealed class CustomerConsentSettingTests : IDisposable
     }
 
     [Fact]
+    public async Task Opting_in_again_with_a_wider_scope_upgrades_the_consent_and_keeps_the_old_one_in_history()
+    {
+        var customer = await _service.CreateAsync(Request("+919800000006"));
+        await _service.OptInAsync(customer.Id, new OptInCustomerRequest("Call", null, "call-1", "Transactional"));
+
+        // Same scope again is a no-op.
+        var same = await _service.OptInAsync(customer.Id, new OptInCustomerRequest("Call", null, "call-2", "Transactional"));
+        Assert.Equal("call-1", same.OptInProof);
+
+        var upgraded = await _service.OptInAsync(customer.Id, new OptInCustomerRequest("Call", null, "call-3", "Marketing"));
+        Assert.Equal("Marketing", upgraded.OptInScope);
+        Assert.Equal("call-3", upgraded.OptInProof);
+
+        var history = await _service.GetHistoryAsync(customer.Id);
+        Assert.Contains(history, e => e.EventType == "ConsentRecorded" && (e.Reason ?? "").Contains("call-1"));
+    }
+
+    [Fact]
     public async Task The_history_reads_discovered_then_submitted_then_the_outcome_even_when_they_share_a_timestamp()
     {
         var customer = await _service.CreateAsync(Request("+919800000005"));

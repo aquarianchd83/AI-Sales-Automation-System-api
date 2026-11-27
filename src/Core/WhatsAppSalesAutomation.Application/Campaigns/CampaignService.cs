@@ -6,8 +6,10 @@ using WhatsAppSalesAutomation.Application.Billing;
 using WhatsAppSalesAutomation.Application.Common.Exceptions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Common.Models;
+using WhatsAppSalesAutomation.Application.Compliance;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Campaigns;
+using WhatsAppSalesAutomation.Domain.Entities.Customers;
 using WhatsAppSalesAutomation.Domain.Enums;
 
 namespace WhatsAppSalesAutomation.Application.Campaigns;
@@ -669,7 +671,8 @@ public class CampaignService : ICampaignService
                 Count(CampaignStepOutcome.Read),
                 Count(CampaignStepOutcome.Failed),
                 Count(CampaignStepOutcome.Upcoming),
-                Count(CampaignStepOutcome.WillNotReceive)));
+                Count(CampaignStepOutcome.WillNotReceive),
+                Count(CampaignStepOutcome.Blocked)));
         }
 
         return summaries;
@@ -701,15 +704,40 @@ public class CampaignService : ICampaignService
         return new PagedResult<CampaignStepRecipientDto>(items, rows.Count, query.Page, query.PageSize);
     }
 
+    public async Task<CampaignConsentCheckDto> GetConsentCheckAsync(Guid campaignId, CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadCampaignAsync(campaignId, cancellationToken);
+        var first = campaign.Steps.Where(s => s.IsActive).OrderBy(s => s.StepNumber).FirstOrDefault();
+        if (first is null)
+            return new CampaignConsentCheckDto(0, null, null, 0, 0, Array.Empty<CampaignStepRecipientDto>());
+
+        var template = first.MessageTemplateId is { } templateId
+            ? await _context.MessageTemplates.AsNoTracking().Where(t => t.Id == templateId)
+                .Select(t => new { t.Name, t.Category }).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var rows = await LoadStepRecipientsAsync(campaignId, first.StepNumber, null, cancellationToken);
+        var blocked = rows.Where(r => r.Outcome == CampaignStepOutcome.Blocked)
+            .OrderBy(r => r.FirstName).ThenBy(r => r.PhoneNumberE164).ToList();
+
+        return new CampaignConsentCheckDto(
+            first.StepNumber, template?.Name, template?.Category.ToString(), rows.Count, blocked.Count,
+            blocked.Take(MaxConsentCheckRows).ToList());
+    }
+
+    /// <summary>How many blocked customers the pre-start check lists by name; the count is always complete.</summary>
+    private const int MaxConsentCheckRows = 20;
+
     private static int OutcomeRank(string outcome) => outcome switch
     {
         CampaignStepOutcome.Failed => 0,
-        CampaignStepOutcome.Queued => 1,
-        CampaignStepOutcome.Upcoming => 2,
-        CampaignStepOutcome.Sent => 3,
-        CampaignStepOutcome.Delivered => 4,
-        CampaignStepOutcome.Read => 5,
-        _ => 6,
+        CampaignStepOutcome.Blocked => 1,
+        CampaignStepOutcome.Queued => 2,
+        CampaignStepOutcome.Upcoming => 3,
+        CampaignStepOutcome.Sent => 4,
+        CampaignStepOutcome.Delivered => 5,
+        CampaignStepOutcome.Read => 6,
+        _ => 7,
     };
 
     /// <summary>The whole audience's outcome for one step. Built in memory from two narrow queries: a
@@ -743,8 +771,25 @@ public class CampaignService : ICampaignService
                 x.c.PhoneNumberE164,
                 x.c.FirstName,
                 x.c.LastName,
+                x.c.OptInStatus,
+                x.c.OptInTimestamp,
+                x.c.OptInSource,
+                x.c.OptInProof,
+                x.c.OptInScope,
             })
             .ToListAsync(cancellationToken);
+
+        // What the send job's consent gate will say about this step, so a held-back customer shows why instead of a
+        // silent "Upcoming" that never moves. Only for whoever this step is the very next active one.
+        var activeSteps = await _context.CampaignSteps
+            .Where(s => s.CampaignId == campaignId && s.IsActive)
+            .Select(s => new { s.StepNumber, s.MessageTemplateId })
+            .ToListAsync(cancellationToken);
+        var thisStep = activeSteps.FirstOrDefault(s => s.StepNumber == stepNumber);
+        TemplateCategory? category = thisStep?.MessageTemplateId is { } templateId
+            ? await _context.MessageTemplates.Where(t => t.Id == templateId).Select(t => (TemplateCategory?)t.Category).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        int? NextActiveStep(int current) => activeSteps.Where(s => s.StepNumber > current).OrderBy(s => s.StepNumber).Select(s => (int?)s.StepNumber).FirstOrDefault();
 
         var campaignCustomerIds = _context.CampaignCustomers.Where(cc => cc.CampaignId == campaignId).Select(cc => cc.Id);
         var messages = (await _context.Messages
@@ -765,6 +810,24 @@ public class CampaignService : ICampaignService
 
             var stillDue = a.Status is CampaignCustomerStatus.Pending or CampaignCustomerStatus.WaitingForContent or CampaignCustomerStatus.AwaitingResponse
                 && a.CurrentStepNumber < stepNumber;
+
+            if (stillDue && category is { } templateCategory && NextActiveStep(a.CurrentStepNumber) == stepNumber)
+            {
+                var gate = TemplateSendGate.Evaluate(new Customer
+                {
+                    OptInStatus = a.OptInStatus,
+                    OptInTimestamp = a.OptInTimestamp,
+                    OptInSource = a.OptInSource,
+                    OptInProof = a.OptInProof,
+                    OptInScope = a.OptInScope,
+                }, templateCategory);
+                if (!gate.Allowed)
+                {
+                    return new CampaignStepRecipientDto(
+                        a.CustomerId, a.PhoneNumberE164, a.FirstName, a.LastName,
+                        CampaignStepOutcome.Blocked, null, null, null, null, null, null, gate.Reason);
+                }
+            }
 
             return stillDue
                 ? new CampaignStepRecipientDto(

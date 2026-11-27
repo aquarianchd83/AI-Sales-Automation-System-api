@@ -86,5 +86,8 @@ public interface ICampaignService
 
     /// <summary>Every audience member's outcome for one step, including those not sent it yet
     /// (Upcoming) or never will be (WillNotReceive). Throws NotFoundException for an unknown step.</summary>
+    /// <summary>Who in the audience the first active step cannot reach because of consent - shown before Start.</summary>
+    Task<CampaignConsentCheckDto> GetConsentCheckAsync(Guid campaignId, CancellationToken cancellationToken = default);
+
     Task<PagedResult<CampaignStepRecipientDto>> GetStepRecipientsAsync(Guid campaignId, int stepNumber, CampaignStepRecipientQuery query, CancellationToken cancellationToken = default);
 }

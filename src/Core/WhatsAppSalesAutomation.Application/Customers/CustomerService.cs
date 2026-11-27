@@ -351,6 +351,38 @@ public class CustomerService : ICustomerService
 
             await _context.SaveChangesAsync(cancellationToken);
         }
+        else if (ImportConsentResolver.TryParseScope(request.Scope, out var newScope) && customer.OptInScope != newScope)
+        {
+            // Already opted in, but the customer has now agreed to something different - typically a "service messages only"
+            // customer who agrees to promotions as well. That is a new consent, so it replaces the record with its own
+            // when/how/proof, and the old one stays readable in the customer's history. A repeat call with the same scope is
+            // still a no-op, so the first record of a given consent is never overwritten by a later click.
+            var previousScope = customer.OptInScope;
+            var previousSource = customer.OptInSource;
+            var previousProof = customer.OptInProof;
+            var previousAt = customer.OptInTimestamp;
+
+            customer.OptInTimestamp = request.CapturedAt ?? _dateTime.UtcNow;
+            customer.OptInSource = request.Source.Trim();
+            customer.OptInProof = request.Proof!.Trim();
+            customer.OptInScope = newScope;
+
+            _context.CustomerHistoryEvents.Add(new CustomerHistoryEvent
+            {
+                TenantId = customer.TenantId,
+                CustomerId = customer.Id,
+                EventType = CustomerHistoryEventTypes.ConsentRecorded,
+                OccurredAtUtc = customer.OptInTimestamp.Value,
+                PreviousStatus = previousScope?.ToString(),
+                NewStatus = newScope.ToString(),
+                Reason = $"Consent scope changed from {DescribeScope(previousScope)} to {DescribeScope(newScope)}. " +
+                         $"New evidence: source {customer.OptInSource}, proof {customer.OptInProof}. " +
+                         $"Previous evidence: source {previousSource ?? "-"}, proof {previousProof ?? "-"}" +
+                         (previousAt is { } at ? $", recorded {at:yyyy-MM-dd HH:mm} UTC." : ".")
+            });
+
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
         return customer.ToDto();
     }
@@ -541,4 +573,11 @@ public class CustomerService : ICustomerService
 
         return existing;
     }
+
+    private static string DescribeScope(ConsentScope? scope) => scope switch
+    {
+        ConsentScope.Marketing => "promotions and service messages",
+        ConsentScope.Transactional => "service messages only",
+        _ => "not recorded"
+    };
 }
