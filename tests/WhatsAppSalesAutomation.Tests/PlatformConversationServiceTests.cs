@@ -140,4 +140,23 @@ public sealed class PlatformConversationServiceTests : IDisposable
         Assert.Equal(MessageStatus.Failed, sent.Status);
         Assert.Contains("24-hour window", sent.ErrorMessage);
     }
+
+    [Fact]
+    public async Task Paging_never_splits_messages_that_share_a_timestamp()
+    {
+        var chat = await Service().StartAsync(new StartPlatformConversationRequest(_tenant, null));
+        var at = _h.Clock.UtcNow.AddMinutes(-10);
+        for (var i = 0; i < 3; i++)
+            await Service().RecordWebhookAsync(Reply("919820098200", "same second " + i, at, "wamid.s" + i));
+        await Service().RecordWebhookAsync(Reply("919820098200", "older", at.AddMinutes(-1), "wamid.o"));
+        await Service().RecordWebhookAsync(Reply("919820098200", "newest", at.AddMinutes(1), "wamid.n"));
+
+        var first = await Service().GetAsync(chat.Id, null, 2);
+        Assert.Equal(4, first.Messages.Count); // "newest" + the whole same-second group
+        Assert.True(first.HasOlder);
+
+        var older = await Service().GetAsync(chat.Id, first.Messages[0].SentAtUtc, 2);
+        Assert.Equal("older", Assert.Single(older.Messages).Body);
+        Assert.False(older.HasOlder);
+    }
 }

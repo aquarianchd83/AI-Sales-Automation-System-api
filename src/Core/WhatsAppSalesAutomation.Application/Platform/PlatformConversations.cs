@@ -151,7 +151,19 @@ public class PlatformConversationService : IPlatformConversationService
 
         var page = await query.OrderByDescending(m => m.SentAtUtc).Take(take + 1).ToListAsync(cancellationToken);
         var hasOlder = page.Count > take;
-        var messages = page.Take(take).OrderBy(m => m.SentAtUtc).Select(ToDto).ToList();
+        var kept = page.Take(take).ToList();
+
+        // The next page asks for messages strictly older than the oldest one here, so a page must never end partway through a group of
+        // messages with the same time (Meta stamps whole seconds): take the whole group, and only then say whether anything older remains.
+        if (hasOlder && page[take].SentAtUtc == kept[^1].SentAtUtc)
+        {
+            var boundary = kept[^1].SentAtUtc;
+            var keptIds = kept.Select(m => m.Id).ToHashSet();
+            kept.AddRange((await query.Where(m => m.SentAtUtc == boundary).ToListAsync(cancellationToken)).Where(m => !keptIds.Contains(m.Id)));
+            hasOlder = await query.AnyAsync(m => m.SentAtUtc < boundary, cancellationToken);
+        }
+
+        var messages = kept.OrderBy(m => m.SentAtUtc).ThenBy(m => m.CreatedAt).Select(ToDto).ToList();
 
         if (beforeUtc is null && conversation.UnreadCount != 0)
         {
