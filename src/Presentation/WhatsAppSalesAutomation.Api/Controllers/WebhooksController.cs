@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using WhatsAppSalesAutomation.Api.Extensions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
 using WhatsAppSalesAutomation.Application.Compliance;
+using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Application.Webhooks;
 using WhatsAppSalesAutomation.Infrastructure.BackgroundJobs;
 using WhatsAppSalesAutomation.Infrastructure.WhatsApp;
@@ -38,6 +39,8 @@ public class WebhooksController : ControllerBase
     private readonly IWebhookSignatureValidator _signatureValidator;
     private readonly ITenantWhatsAppConfigProvider _tenantConfigProvider;
     private readonly WhatsAppSettings _settings;
+    private readonly IOptionsSnapshot<PlatformWhatsAppOptions> _platformOptions;
+    private readonly IServiceProvider _services;
     private readonly IBackgroundJobClient _backgroundJobClient;
     private readonly ILogger<WebhooksController> _logger;
 
@@ -49,7 +52,9 @@ public class WebhooksController : ControllerBase
         ITenantWhatsAppConfigProvider tenantConfigProvider,
         IOptionsSnapshot<WhatsAppSettings> settings,
         IBackgroundJobClient backgroundJobClient,
-        ILogger<WebhooksController> logger)
+        ILogger<WebhooksController> logger,
+        IOptionsSnapshot<PlatformWhatsAppOptions> platformOptions,
+        IServiceProvider services)
     {
         _processor = processor;
         _parser = parser;
@@ -57,6 +62,8 @@ public class WebhooksController : ControllerBase
         _signatureValidator = signatureValidator;
         _tenantConfigProvider = tenantConfigProvider;
         _settings = settings.Value;
+        _platformOptions = platformOptions;
+        _services = services;
         _backgroundJobClient = backgroundJobClient;
         _logger = logger;
     }
@@ -105,6 +112,12 @@ public class WebhooksController : ControllerBase
             return Ok(); // Not this system's problem to retry - Meta will not resend a payload it reshapes.
         }
 
+        // The PLATFORM's own number (the one tenant notices and the Tenant conversations page use) is no tenant's: its deliveries are
+        // replies from tenants to the platform admin, recorded on that page.
+        var platformPhoneId = _platformOptions.Value.PhoneNumberId?.Trim();
+        if (!string.IsNullOrEmpty(platformPhoneId) && parsed.PhoneNumberId == platformPhoneId)
+            return await ReceivePlatformAsync(rawBody, parsed, cancellationToken);
+
         var lookup = await _tenantConfigProvider.GetByPhoneNumberIdAsync(parsed.PhoneNumberId, cancellationToken);
         if (lookup is null)
         {
@@ -133,6 +146,40 @@ public class WebhooksController : ControllerBase
         // Meta is waiting on. tenantId is threaded through explicitly - this job gets its own DI scope
         // with no ambient tenant to inherit.
         _backgroundJobClient.Enqueue<InboundWebhookProcessingJob>(job => job.RunAsync(lookup.TenantId, webhookEventId));
+
+        return Ok();
+    }
+
+    /// <summary>A delivery to the platform's own number. Signed with the platform number's Meta App Secret (PlatformWhatsApp:AppSecret, else
+    /// the platform Meta App's WhatsApp:AppSecret). Recorded inline - it is a handful of rows, and the page shows it the moment it lands.</summary>
+    private async Task<IActionResult> ReceivePlatformAsync(string rawBody, WhatsAppWebhookParseResult parsed, CancellationToken cancellationToken)
+    {
+        var secret = _platformOptions.Value.AppSecret?.Trim();
+        if (string.IsNullOrEmpty(secret))
+            secret = _settings.AppSecret?.Trim();
+        if (string.IsNullOrEmpty(secret))
+        {
+            _logger.LogWarning("Rejected WhatsApp webhook POST for the platform number: no App Secret is set (PlatformWhatsApp:AppSecret or WhatsApp:AppSecret)");
+            return Unauthorized();
+        }
+
+        var signatureHeader = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
+        if (!_signatureValidator.IsValid(Encoding.UTF8.GetBytes(rawBody), signatureHeader, secret))
+        {
+            _logger.LogWarning("Rejected WhatsApp webhook POST: signature verification failed for the platform number");
+            return Unauthorized();
+        }
+
+        try
+        {
+            await _services.GetRequiredService<IPlatformConversationService>().RecordWebhookAsync(parsed, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 500 so Meta redelivers; a redelivered message is skipped by its wamid.
+            _logger.LogError(ex, "Could not record a delivery to the platform WhatsApp number");
+            return StatusCode(StatusCodes.Status500InternalServerError);
+        }
 
         return Ok();
     }

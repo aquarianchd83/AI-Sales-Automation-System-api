@@ -101,6 +101,11 @@ public static class PlatformTemplateCatalog
             "Namaste {{TenantName}} ji, {{Message}} Dobara connect karne ke liye AiSaarthi dashboard mein Settings > WhatsApp Connection kholkar naya QR scan karein.",
             "Aapka WhatsApp number (+91 98000 00001) AiSaarthi se disconnect ho gaya hai, isliye follow-up messages ruke hue hain."),
 
+        // The Tenant conversations page: a platform admin writes to a tenant outside the 24-hour window. Their reply opens the window for free text.
+        Define(TenantNotificationKind.AdminConversation, "Message from the AiSaarthi team (Tenant conversations)", "platform_admin_message",
+            "Hi {{TenantName}}, the AiSaarthi team has a message about your account. {{Message}} You can reply to this message to continue the conversation with us.",
+            "We noticed your campaign is paused. Can we help you set it up again?"),
+
         // Goes to the product owner, not the tenant: {{TenantName}} is the company that ran into the problem.
         Define(TenantNotificationKind.PlatformSetupNeeded, "Platform setup needed (to product owner)", "platform_alert_setup_needed",
             "Urgent: {{TenantName}} ran into a platform setting that only you can change. {{Message}} An urgent ticket has been raised - open the Tickets page in the Platform Admin Console to see it and fix the setting.",

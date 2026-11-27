@@ -295,6 +295,7 @@ public static class AppSettingCatalog
         new("PlatformWhatsApp:PhoneNumberId", "PlatformWhatsApp", IsSecret: false, Description: "Meta's id of the platform's WhatsApp number."),
         new("PlatformWhatsApp:WhatsAppBusinessAccountId", "PlatformWhatsApp", IsSecret: false, Description: "The platform's WhatsApp Business Account id (where its templates live)."),
         new("PlatformWhatsApp:AccessToken", "PlatformWhatsApp", IsSecret: true, Description: "Access token for the platform's number - a permanent System User token."),
+        new("PlatformWhatsApp:AppSecret", "PlatformWhatsApp", IsSecret: true, Description: "Meta App Secret that signs the platform number's webhooks (replies on the Tenant conversations page). Empty uses WhatsApp:AppSecret."),
         new("PlatformWhatsApp:ApiVersion", "PlatformWhatsApp", IsSecret: false),
         new("PlatformWhatsApp:ApiBaseUrl", "PlatformWhatsApp", IsSecret: false),
 

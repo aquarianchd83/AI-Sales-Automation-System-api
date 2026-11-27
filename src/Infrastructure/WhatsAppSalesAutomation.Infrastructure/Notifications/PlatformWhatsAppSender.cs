@@ -53,7 +53,7 @@ public class PlatformWhatsAppSender : IPlatformWhatsAppSender, IPlatformWhatsApp
         try
         {
             var result = await _meta.SendTemplateMessageAsync(credentials, toPhoneE164, templateName, languageCode, parameters, mediaUrl, cancellationToken);
-            return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage);
+            return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage, MessageId: result.WhatsAppMessageId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -74,7 +74,7 @@ public class PlatformWhatsAppSender : IPlatformWhatsAppSender, IPlatformWhatsApp
         try
         {
             var result = await _meta.SendTextMessageAsync(credentials, toPhoneE164, text, cancellationToken);
-            return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage);
+            return new DeliveryResult(result.Success, result.Success ? null : result.ErrorMessage, MessageId: result.WhatsAppMessageId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

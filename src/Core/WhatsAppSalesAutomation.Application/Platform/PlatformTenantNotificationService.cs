@@ -156,7 +156,7 @@ public class PlatformTenantNotificationService : IPlatformTenantNotificationServ
         return new PagedResult<PlatformTenantNotificationDto>(items, total, query.Page, query.PageSize);
     }
 
-    public IReadOnlyList<string> GetKinds() => Enum.GetNames<TenantNotificationKind>();
+    public IReadOnlyList<string> GetKinds() => Enum.GetNames<TenantNotificationKind>().Where(n => n != nameof(TenantNotificationKind.AdminConversation)).ToList();
 
     /// <summary>One channel of one notification, the shape the three channels are brought to so they can be listed together.</summary>
     private sealed class Flat
