@@ -104,6 +104,36 @@ public sealed class CampaignStepDeliveryTests : IDisposable
     }
 
     [Fact]
+    public async Task A_promotional_step_shows_service_only_customers_as_blocked_by_consent_and_the_check_counts_them()
+    {
+        var template = new MessageTemplate
+        {
+            Name = "offer", WhatsAppTemplateName = "offer", Category = TemplateCategory.Marketing, BodyText = "Offer",
+            WhatsAppTemplateStatus = WhatsAppTemplateStatus.Approved, IsActive = true
+        };
+        _db.MessageTemplates.Add(template);
+        _db.SaveChanges();
+        _campaign.Steps.Single(s => s.StepNumber == 0).MessageTemplateId = template.Id;
+        _customers["waiting"].OptInScope = ConsentScope.Transactional;
+        _db.SaveChanges();
+
+        var page = await _service.GetStepRecipientsAsync(_campaign.Id, 0, new CampaignStepRecipientQuery());
+        var blocked = page.Items.Single(r => r.FirstName == "waiting");
+        Assert.Equal(CampaignStepOutcome.Blocked, blocked.Outcome);
+        Assert.Contains("promotional", blocked.Note);
+
+        var check = await _service.GetConsentCheckAsync(_campaign.Id);
+        Assert.Equal(1, check.Blocked);
+        Assert.Equal("Marketing", check.TemplateCategory);
+        Assert.Equal("waiting", check.BlockedRecipients.Single().FirstName);
+
+        // Widening the consent unblocks them: they are simply due again.
+        _customers["waiting"].OptInScope = ConsentScope.Marketing;
+        _db.SaveChanges();
+        Assert.Equal(0, (await _service.GetConsentCheckAsync(_campaign.Id)).Blocked);
+    }
+
+    [Fact]
     public async Task Step_summary_splits_the_audience_into_received_failed_upcoming_and_never()
     {
         var summary = await _service.GetStepDeliverySummaryAsync(_campaign.Id);
