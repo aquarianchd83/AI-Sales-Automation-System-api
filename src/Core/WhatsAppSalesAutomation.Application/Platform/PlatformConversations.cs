@@ -61,7 +61,7 @@ public record SendPlatformConversationMessageRequest(string? Text, Guid? Templat
 /// platform number (with a ready "Hi" text) and the tenant's email to send it to. Either may be null when it is not known.</summary>
 /// <param name="EmailSubject">The invite email's subject.</param>
 /// <param name="EmailBody">The invite email exactly as it goes, with no note; an admin's note goes in as its own paragraph after the greeting.
-/// Null when there is no link to put in it.</param>
+/// Until the platform number is saved, the number and link are placeholders.</param>
 public record PlatformConversationInviteDto(
     string? PlatformNumber, string? WhatsAppLink, string? Email, string? EmailSource, string PrefilledText, string EmailSubject = "", string? EmailBody = null);
 
@@ -405,7 +405,8 @@ public class PlatformConversationService : IPlatformConversationService
         var tenantName = conversation.TenantId is { } tid
             ? await _context.Tenants.IgnoreQueryFilters().Where(t => t.Id == tid).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken)
             : null;
-        var body = link is null ? null : InviteEmailBody(tenantName ?? conversation.ContactName, null, number!, link);
+        // Shown even before the platform number is saved, with placeholders, so the admin can read what will go; sending still needs the number.
+        var body = InviteEmailBody(tenantName ?? conversation.ContactName, null, number ?? "[platform WhatsApp number]", link ?? "[WhatsApp link - appears once the platform number is saved]");
         return new PlatformConversationInviteDto(number, link, email, source, InviteText, InviteSubject, body);
     }
 
