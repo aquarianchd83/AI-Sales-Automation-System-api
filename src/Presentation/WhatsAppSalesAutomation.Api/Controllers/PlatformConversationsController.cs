@@ -49,4 +49,13 @@ public class PlatformConversationsController : ControllerBase
     [HttpPost("{id:guid}/messages")]
     public async Task<ActionResult<PlatformConversationMessageDto>> Send(Guid id, [FromBody] SendPlatformConversationMessageRequest request, CancellationToken cancellationToken)
         => Ok(await _conversations.SendAsync(id, request, _currentUser.UserId, _currentUser.Email, cancellationToken));
+
+    /// <summary>The wa.me link to the platform number and the tenant's email - how to get the tenant to write first, so free text works.</summary>
+    [HttpGet("{id:guid}/invite")]
+    public async Task<ActionResult<PlatformConversationInviteDto>> Invite(Guid id, CancellationToken cancellationToken)
+        => Ok(await _conversations.GetInviteAsync(id, cancellationToken));
+
+    [HttpPost("{id:guid}/invite/email")]
+    public async Task<ActionResult<PlatformConversationMessageDto>> EmailInvite(Guid id, [FromBody] SendPlatformConversationInviteRequest request, CancellationToken cancellationToken)
+        => Ok(await _conversations.SendInviteEmailAsync(id, request, _currentUser.UserId, _currentUser.Email, cancellationToken));
 }

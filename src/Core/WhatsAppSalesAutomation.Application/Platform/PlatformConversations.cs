@@ -57,6 +57,13 @@ public record StartPlatformConversationRequest(Guid? TenantId, string? Phone);
 /// <summary>Free text (<paramref name="Text"/>) or a template (<paramref name="TemplateId"/> with <paramref name="Title"/>/<paramref name="Message"/> for its values).</summary>
 public record SendPlatformConversationMessageRequest(string? Text, Guid? TemplateId, string? Title, string? Message);
 
+/// <summary>How to get a tenant to write first, so the 24-hour window opens and free text works without a template: a wa.me link to the
+/// platform number (with a ready "Hi" text) and the tenant's email to send it to. Either may be null when it is not known.</summary>
+public record PlatformConversationInviteDto(string? PlatformNumber, string? WhatsAppLink, string? Email, string? EmailSource, string PrefilledText);
+
+/// <param name="Note">An optional line from the admin, put at the top of the email.</param>
+public record SendPlatformConversationInviteRequest(string? Note);
+
 /// <summary>Pushes "this chat changed" to every open Platform Admin Console, so the conversations page refreshes without polling. Never throws.</summary>
 public interface IPlatformConversationBroadcaster
 {
@@ -85,6 +92,11 @@ public interface IPlatformConversationService
     /// <summary>Sends from the platform number. A message WhatsApp refused is still returned (status Failed, with the reason) so the admin sees it.</summary>
     Task<PlatformConversationMessageDto> SendAsync(Guid id, SendPlatformConversationMessageRequest request, Guid? userId, string? userEmail, CancellationToken cancellationToken = default);
 
+    Task<PlatformConversationInviteDto> GetInviteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Emails the tenant the wa.me link, asking them to message the platform number. Recorded in the chat as an "email" message.</summary>
+    Task<PlatformConversationMessageDto> SendInviteEmailAsync(Guid id, SendPlatformConversationInviteRequest request, Guid? userId, string? userEmail, CancellationToken cancellationToken = default);
+
     /// <summary>Records what Meta delivered to the platform number: replies become inbound messages, statuses update the admin's sent messages.</summary>
     Task RecordWebhookAsync(WhatsAppWebhookParseResult parsed, CancellationToken cancellationToken = default);
 }
@@ -103,6 +115,10 @@ public class PlatformConversationService : IPlatformConversationService
     private readonly ILogger<PlatformConversationService> _logger;
     private readonly IPlatformConversationBroadcaster? _broadcaster;
     private readonly IMediaStorageService? _storage;
+    private readonly IEmailSender? _email;
+    private readonly IAppSettingsStore? _settings;
+
+    public const string InviteText = "Hi AiSaarthi team";
 
     public PlatformConversationService(
         IApplicationDbContext context,
@@ -111,7 +127,9 @@ public class PlatformConversationService : IPlatformConversationService
         IDateTimeProvider dateTime,
         ILogger<PlatformConversationService> logger,
         IPlatformConversationBroadcaster? broadcaster = null,
-        IMediaStorageService? storage = null)
+        IMediaStorageService? storage = null,
+        IEmailSender? email = null,
+        IAppSettingsStore? settings = null)
     {
         _context = context;
         _userManager = userManager;
@@ -120,6 +138,8 @@ public class PlatformConversationService : IPlatformConversationService
         _logger = logger;
         _broadcaster = broadcaster;
         _storage = storage;
+        _email = email;
+        _settings = settings;
     }
 
     public async Task<IReadOnlyList<PlatformConversationDto>> ListAsync(string? search, CancellationToken cancellationToken = default)
@@ -361,6 +381,100 @@ public class PlatformConversationService : IPlatformConversationService
             await _broadcaster.ConversationUpdatedAsync(conversation.Id, cancellationToken);
 
         return ToDto(message);
+    }
+
+    public async Task<PlatformConversationInviteDto> GetInviteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var conversation = await _context.PlatformConversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            ?? throw new NotFoundException(nameof(PlatformConversation), id);
+
+        string? number = null;
+        if (_settings is not null)
+        {
+            var stored = await _settings.GetAllAsync(cancellationToken);
+            if (stored.TryGetValue(PlatformWhatsAppSettingsService.DisplayPhoneNumberKey, out var raw) && PhoneNumberNormalizer.TryNormalize(raw, out var n))
+                number = n;
+        }
+
+        var link = number is null ? null : $"https://wa.me/{new string(number.Where(char.IsDigit).ToArray())}?text={Uri.EscapeDataString(InviteText)}";
+        var (email, source) = await TenantEmailAsync(conversation.TenantId, cancellationToken);
+        return new PlatformConversationInviteDto(number, link, email, source, InviteText);
+    }
+
+    public async Task<PlatformConversationMessageDto> SendInviteEmailAsync(
+        Guid id, SendPlatformConversationInviteRequest request, Guid? userId, string? userEmail, CancellationToken cancellationToken = default)
+    {
+        var invite = await GetInviteAsync(id, cancellationToken);
+        if (invite.WhatsAppLink is null)
+            throw Invalid("Link", "The platform's WhatsApp number isn't saved yet. Open Platform WhatsApp and press Verify (or type the number) first.");
+        if (invite.Email is null)
+            throw Invalid("Email", "This tenant has no email on file.");
+        if (_email is null)
+            throw new InvalidOperationException("No email sender is registered.");
+
+        var conversation = await _context.PlatformConversations.FirstAsync(c => c.Id == id, cancellationToken);
+        var tenantName = conversation.TenantId is { } tid
+            ? await _context.Tenants.IgnoreQueryFilters().Where(t => t.Id == tid).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        var note = request.Note?.Trim();
+        if (note is { Length: > 1000 })
+            throw Invalid(nameof(request.Note), "Keep the note under 1000 characters.");
+
+        const string subject = "The AiSaarthi team would like to chat with you on WhatsApp";
+        var body =
+            $"Hi {tenantName ?? conversation.ContactName ?? "there"},\n\n" +
+            (string.IsNullOrEmpty(note) ? string.Empty : note + "\n\n") +
+            $"The AiSaarthi team would like to talk to you on WhatsApp. Please send us a message on {invite.PlatformNumber} - tap this link and press Send:\n\n" +
+            $"{invite.WhatsAppLink}\n\n" +
+            "Once you message us, we can reply to you directly there.\n\nThanks,\nTeam AiSaarthi";
+
+        var now = _dateTime.UtcNow;
+        var sent = await _email.SendAsync(invite.Email, subject, body, cancellationToken);
+        var message = new PlatformConversationMessage
+        {
+            ConversationId = id,
+            Direction = MessageDirection.Outbound,
+            MessageType = "email",
+            Body = Truncate($"Email to {invite.Email}: asked to message {invite.PlatformNumber} on WhatsApp ({invite.WhatsAppLink})" + (string.IsNullOrEmpty(note) ? string.Empty : $"\n\n{note}"), 4096),
+            Status = sent.Success ? MessageStatus.Sent : MessageStatus.Failed,
+            ErrorMessage = sent.Success ? null : Truncate(sent.Skipped ? "Email isn't set up on this platform (SMTP/SMS Settings)." : sent.Note ?? "The email could not be sent.", 1000),
+            SentByUserId = userId,
+            SentByEmail = userEmail,
+            SentAtUtc = now
+        };
+        _context.PlatformConversationMessages.Add(message);
+        conversation.LastMessageAtUtc = now;
+        conversation.LastMessagePreview = Truncate($"Email invite to {invite.Email}", 200);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (_broadcaster is not null)
+            await _broadcaster.ConversationUpdatedAsync(id, cancellationToken);
+
+        return ToDto(message);
+    }
+
+    /// <summary>Where to email a tenant: its billing alert email, else the owner's login email, else its support email.</summary>
+    private async Task<(string? Email, string? Source)> TenantEmailAsync(Guid? tenantId, CancellationToken cancellationToken)
+    {
+        if (tenantId is not { } tid)
+            return (null, null);
+
+        var tenant = await _context.Tenants.IgnoreQueryFilters().AsNoTracking()
+            .Where(t => t.Id == tid).Select(t => new { t.BillingAlertEmail, t.SupportEmail, t.OwnerUserId }).FirstOrDefaultAsync(cancellationToken);
+        if (tenant is null)
+            return (null, null);
+        if (!string.IsNullOrWhiteSpace(tenant.BillingAlertEmail))
+            return (tenant.BillingAlertEmail.Trim(), "Billing alerts");
+
+        if (tenant.OwnerUserId is { } owner)
+        {
+            var ownerEmail = await _userManager.Users.IgnoreQueryFilters().Where(u => u.Id == owner).Select(u => u.Email).FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(ownerEmail))
+                return (ownerEmail.Trim(), "Owner");
+        }
+
+        return string.IsNullOrWhiteSpace(tenant.SupportEmail) ? (null, null) : (tenant.SupportEmail.Trim(), "Support");
     }
 
     public async Task RecordWebhookAsync(WhatsAppWebhookParseResult parsed, CancellationToken cancellationToken = default)

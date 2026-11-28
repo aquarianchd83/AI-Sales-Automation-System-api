@@ -54,6 +54,12 @@ public class PlatformWhatsAppVerifier : IPlatformWhatsAppVerifier
             // The call succeeded; only the display details are missing.
         }
 
+        // Remember the number itself, for the "message us first" link on Tenant conversations.
+        if (!string.IsNullOrWhiteSpace(number?.DisplayPhoneNumber)
+            && WhatsAppSalesAutomation.Application.Common.PhoneNumberNormalizer.TryNormalize("+" + new string(number.DisplayPhoneNumber.Where(char.IsDigit).ToArray()), out var display)
+            && Get(stored, PlatformWhatsAppSettingsService.DisplayPhoneNumberKey) != display)
+            await _store.UpsertAsync(new Dictionary<string, string?> { [PlatformWhatsAppSettingsService.DisplayPhoneNumberKey] = display }, null, cancellationToken);
+
         var summary = string.IsNullOrWhiteSpace(number?.DisplayPhoneNumber)
             ? "The access token works for the phone number id."
             : $"Connected to {number.DisplayPhoneNumber}{(string.IsNullOrWhiteSpace(number.VerifiedName) ? string.Empty : $" ({number.VerifiedName})")}.";

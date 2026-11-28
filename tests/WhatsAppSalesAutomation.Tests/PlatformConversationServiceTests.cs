@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using WhatsAppSalesAutomation.Application.Common.Interfaces;
+using WhatsAppSalesAutomation.Application.Notifications;
 using WhatsAppSalesAutomation.Application.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Platform;
 using WhatsAppSalesAutomation.Domain.Entities.Tenancy;
@@ -158,5 +159,37 @@ public sealed class PlatformConversationServiceTests : IDisposable
         var older = await Service().GetAsync(chat.Id, first.Messages[0].SentAtUtc, 2);
         Assert.Equal("older", Assert.Single(older.Messages).Body);
         Assert.False(older.HasOlder);
+    }
+
+    [Fact]
+    public async Task The_invite_gives_a_wa_me_link_to_the_platform_number_and_emails_it_to_the_tenant()
+    {
+        var owner = await _h.AddUserAsync("owner@acme.in", tenantId: _tenant);
+        var tenant = await _h.Db.Tenants.SingleAsync(t => t.Id == _tenant);
+        tenant.OwnerUserId = owner.Id;
+        await _h.Db.SaveChangesAsync();
+
+        var mails = new List<(string To, string Body)>();
+        var email = Fake.Of<IEmailSender>((_, a) => { mails.Add(((string)a![0]!, (string)a[2]!)); return Task.FromResult(new DeliveryResult(true)); });
+        var store = Fake.Of<IAppSettingsStore>((m, _) => m.Name == nameof(IAppSettingsStore.GetAllAsync)
+            ? Task.FromResult<IReadOnlyDictionary<string, string?>>(new Dictionary<string, string?> { [PlatformWhatsAppSettingsService.DisplayPhoneNumberKey] = "+91 98000 11111" })
+            : throw new NotImplementedException(m.Name));
+        var service = new PlatformConversationService(_h.Db, _h.Users, _sender, _h.Clock, NullLogger<PlatformConversationService>.Instance, email: email, settings: store);
+
+        var chat = await service.StartAsync(new StartPlatformConversationRequest(_tenant, null));
+        var invite = await service.GetInviteAsync(chat.Id);
+
+        Assert.Equal("+919800011111", invite.PlatformNumber);
+        Assert.Equal("https://wa.me/919800011111?text=Hi%20AiSaarthi%20team", invite.WhatsAppLink);
+        Assert.Equal("owner@acme.in", invite.Email);
+
+        var sent = await service.SendInviteEmailAsync(chat.Id, new SendPlatformConversationInviteRequest("Aapka campaign paused hai."), null, "admin@x.com");
+        Assert.Equal(MessageStatus.Sent, sent.Status);
+        Assert.Equal("email", sent.MessageType);
+        var (to, body) = Assert.Single(mails);
+        Assert.Equal("owner@acme.in", to);
+        Assert.Contains(invite.WhatsAppLink, body);
+        Assert.Contains("Aapka campaign paused hai.", body);
+        Assert.Empty(_sender.Texts); // nothing went on WhatsApp
     }
 }
