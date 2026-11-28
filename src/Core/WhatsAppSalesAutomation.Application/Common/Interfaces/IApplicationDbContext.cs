@@ -242,6 +242,10 @@ public interface IApplicationDbContext
 
     DbSet<PlatformTicket> PlatformTickets { get; }
 
+    DbSet<PlatformConversation> PlatformConversations { get; }
+
+    DbSet<PlatformConversationMessage> PlatformConversationMessages { get; }
+
     DbSet<TenantJobSchedule> TenantJobSchedules { get; }
 
     DbSet<StudioActivity> StudioActivities { get; }

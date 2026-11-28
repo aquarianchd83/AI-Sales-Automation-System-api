@@ -64,5 +64,8 @@ public enum TenantNotificationKind
     AutoPayPaused = 29,
     // The tenant's WhatsApp QR session dropped (phone unlinked, logged out, or the connection failed), so every send is paused until they scan a new QR.
     // Raised by the twice-daily session check, once per disconnect, through the platform's own WhatsApp number and email account.
-    WhatsAppSessionDisconnected = 30
+    WhatsAppSessionDisconnected = 30,
+    // Not a notice: the template a platform admin starts (or re-opens) a WhatsApp chat with a tenant on the Tenant conversations page, when the
+    // 24-hour window is closed and free text would not be delivered. Never raised as a TenantNotification.
+    AdminConversation = 31
 }

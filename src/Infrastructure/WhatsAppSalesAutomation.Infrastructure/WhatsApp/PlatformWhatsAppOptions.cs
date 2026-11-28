@@ -14,6 +14,9 @@ public class PlatformWhatsAppOptions
 
     public string AccessToken { get; set; } = string.Empty;
 
+    /// <summary>The Meta App Secret that signs webhooks for this number. Empty falls back to WhatsApp:AppSecret (the platform's Meta App).</summary>
+    public string AppSecret { get; set; } = string.Empty;
+
     public string ApiVersion { get; set; } = "v19.0";
 
     public string ApiBaseUrl { get; set; } = "https://graph.facebook.com/";

@@ -243,6 +243,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
     public DbSet<PlatformTicket> PlatformTickets => Set<PlatformTicket>();
 
+    public DbSet<PlatformConversation> PlatformConversations => Set<PlatformConversation>();
+
+    public DbSet<PlatformConversationMessage> PlatformConversationMessages => Set<PlatformConversationMessage>();
+
     public DbSet<DatabaseCleanupLog> DatabaseCleanupLogs => Set<DatabaseCleanupLog>();
 
     public DbSet<TenantJobSchedule> TenantJobSchedules => Set<TenantJobSchedule>();

@@ -16,16 +16,25 @@ public record PlatformWhatsAppSettingsDto(
     string ApiVersion,
     string ApiBaseUrl,
     bool IsConfigured,
-    bool CanManageTemplates);
+    bool CanManageTemplates,
+    bool HasAppSecret = false,
+    string? AppSecretHint = null,
+    string DisplayPhoneNumber = "");
 
 /// <param name="AccessToken">null keeps the stored token, "" clears it, anything else replaces it.</param>
+/// <param name="AppSecret">The Meta App Secret of the app the platform number's webhooks come through - what proves a reply on the Tenant
+/// conversations page really came from Meta. Same rules as the token: null keeps it, "" clears it (then WhatsApp:AppSecret is used).</param>
+/// <param name="DisplayPhoneNumber">The number itself, as tenants dial it (+91...) - what the "message us first" link on Tenant conversations opens. null keeps it.
+/// Verify fills it in from Meta.</param>
 public record UpdatePlatformWhatsAppSettingsRequest(
     bool Enabled,
     string PhoneNumberId,
     string WhatsAppBusinessAccountId,
     string? AccessToken,
     string ApiVersion,
-    string ApiBaseUrl);
+    string ApiBaseUrl,
+    string? AppSecret = null,
+    string? DisplayPhoneNumber = null);
 
 public record SendPlatformWhatsAppTestRequest(string To);
 
@@ -50,6 +59,8 @@ public class PlatformWhatsAppSettingsService : IPlatformWhatsAppSettingsService
     public const string PhoneNumberIdKey = "PlatformWhatsApp:PhoneNumberId";
     public const string BusinessAccountIdKey = "PlatformWhatsApp:WhatsAppBusinessAccountId";
     public const string AccessTokenKey = "PlatformWhatsApp:AccessToken";
+    public const string AppSecretKey = "PlatformWhatsApp:AppSecret";
+    public const string DisplayPhoneNumberKey = "PlatformWhatsApp:DisplayPhoneNumber";
     public const string ApiVersionKey = "PlatformWhatsApp:ApiVersion";
     public const string ApiBaseUrlKey = "PlatformWhatsApp:ApiBaseUrl";
 
@@ -96,6 +107,10 @@ public class PlatformWhatsAppSettingsService : IPlatformWhatsAppSettingsService
         // Only touch the secret when the caller said something about it.
         if (request.AccessToken is not null)
             values[AccessTokenKey] = token;
+        if (request.AppSecret is not null)
+            values[AppSecretKey] = request.AppSecret.Trim();
+        if (request.DisplayPhoneNumber is not null)
+            values[DisplayPhoneNumberKey] = request.DisplayPhoneNumber.Trim();
 
         await _store.UpsertAsync(values, updatedByUserId, cancellationToken);
         return await GetAsync(cancellationToken);
@@ -138,7 +153,8 @@ public class PlatformWhatsAppSettingsService : IPlatformWhatsAppSettingsService
             enabled, phoneId, waba, token.Length > 0, Mask(token),
             version.Length > 0 ? version : DefaultApiVersion,
             baseUrl.Length > 0 ? baseUrl : DefaultApiBaseUrl,
-            configured, configured && waba.Length > 0);
+            configured, configured && waba.Length > 0,
+            Get(stored, AppSecretKey).Length > 0, Mask(Get(stored, AppSecretKey)), Get(stored, DisplayPhoneNumberKey));
     }
 
     private static string? Mask(string value) =>
@@ -159,6 +175,9 @@ public class UpdatePlatformWhatsAppSettingsRequestValidator : AbstractValidator<
             .WithMessage("The WhatsApp Business Account id is the numeric id from Meta's WhatsApp Manager.");
 
         RuleFor(x => x.AccessToken).MaximumLength(1000);
+        RuleFor(x => x.AppSecret).MaximumLength(200);
+        RuleFor(x => x.DisplayPhoneNumber).Must(v => string.IsNullOrWhiteSpace(v) || Common.PhoneNumberNormalizer.TryNormalize(v, out _))
+            .WithMessage("Enter the platform's WhatsApp number with the country code, for example +919876543210.");
 
         RuleFor(x => x.ApiVersion).NotNull().Must(v => v is not null && (v.Trim().Length == 0 || Version.IsMatch(v.Trim())))
             .WithMessage("API version looks like v19.0.");

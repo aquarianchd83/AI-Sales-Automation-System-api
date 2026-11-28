@@ -3,8 +3,8 @@ using WhatsAppSalesAutomation.Application.Common.Interfaces;
 namespace WhatsAppSalesAutomation.Application.Notifications;
 
 /// <summary><paramref name="Skipped"/> means the channel isn't set up on this platform (no SMTP host, no platform
-/// WhatsApp credentials) - not that a delivery failed.</summary>
-public record DeliveryResult(bool Success, string? Note = null, bool Skipped = false);
+/// WhatsApp credentials) - not that a delivery failed. <paramref name="MessageId"/> is the provider's id for a sent message (Meta's wamid), when it gave one.</summary>
+public record DeliveryResult(bool Success, string? Note = null, bool Skipped = false, string? MessageId = null);
 
 /// <summary>Sends one email. The implementation decides how (SMTP when configured, otherwise a log line) -
 /// callers only learn whether it went.</summary>
