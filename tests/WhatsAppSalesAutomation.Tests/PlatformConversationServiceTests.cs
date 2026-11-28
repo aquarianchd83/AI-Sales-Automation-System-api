@@ -182,6 +182,8 @@ public sealed class PlatformConversationServiceTests : IDisposable
         Assert.Equal("+919800011111", invite.PlatformNumber);
         Assert.Equal("https://wa.me/919800011111?text=Hi%20AiSaarthi%20team", invite.WhatsAppLink);
         Assert.Equal("owner@acme.in", invite.Email);
+        Assert.Contains("Hi Acme Traders,", invite.EmailBody);
+        Assert.Contains("+919800011111", invite.EmailBody);
 
         var sent = await service.SendInviteEmailAsync(chat.Id, new SendPlatformConversationInviteRequest("Aapka campaign paused hai."), null, "admin@x.com");
         Assert.Equal(MessageStatus.Sent, sent.Status);
@@ -190,6 +192,7 @@ public sealed class PlatformConversationServiceTests : IDisposable
         Assert.Equal("owner@acme.in", to);
         Assert.Contains(invite.WhatsAppLink, body);
         Assert.Contains("Aapka campaign paused hai.", body);
+        Assert.Equal(invite.EmailBody!.Replace("Hi Acme Traders,\n\n", "Hi Acme Traders,\n\nAapka campaign paused hai.\n\n"), body);
         Assert.Empty(_sender.Texts); // nothing went on WhatsApp
     }
 }

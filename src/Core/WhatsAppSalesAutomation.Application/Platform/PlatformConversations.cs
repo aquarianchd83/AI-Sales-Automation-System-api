@@ -59,7 +59,11 @@ public record SendPlatformConversationMessageRequest(string? Text, Guid? Templat
 
 /// <summary>How to get a tenant to write first, so the 24-hour window opens and free text works without a template: a wa.me link to the
 /// platform number (with a ready "Hi" text) and the tenant's email to send it to. Either may be null when it is not known.</summary>
-public record PlatformConversationInviteDto(string? PlatformNumber, string? WhatsAppLink, string? Email, string? EmailSource, string PrefilledText);
+/// <param name="EmailSubject">The invite email's subject.</param>
+/// <param name="EmailBody">The invite email exactly as it goes, with no note; an admin's note goes in as its own paragraph after the greeting.
+/// Null when there is no link to put in it.</param>
+public record PlatformConversationInviteDto(
+    string? PlatformNumber, string? WhatsAppLink, string? Email, string? EmailSource, string PrefilledText, string EmailSubject = "", string? EmailBody = null);
 
 /// <param name="Note">An optional line from the admin, put at the top of the email.</param>
 public record SendPlatformConversationInviteRequest(string? Note);
@@ -398,7 +402,11 @@ public class PlatformConversationService : IPlatformConversationService
 
         var link = number is null ? null : $"https://wa.me/{new string(number.Where(char.IsDigit).ToArray())}?text={Uri.EscapeDataString(InviteText)}";
         var (email, source) = await TenantEmailAsync(conversation.TenantId, cancellationToken);
-        return new PlatformConversationInviteDto(number, link, email, source, InviteText);
+        var tenantName = conversation.TenantId is { } tid
+            ? await _context.Tenants.IgnoreQueryFilters().Where(t => t.Id == tid).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var body = link is null ? null : InviteEmailBody(tenantName ?? conversation.ContactName, null, number!, link);
+        return new PlatformConversationInviteDto(number, link, email, source, InviteText, InviteSubject, body);
     }
 
     public async Task<PlatformConversationMessageDto> SendInviteEmailAsync(
@@ -421,13 +429,8 @@ public class PlatformConversationService : IPlatformConversationService
         if (note is { Length: > 1000 })
             throw Invalid(nameof(request.Note), "Keep the note under 1000 characters.");
 
-        const string subject = "The AiSaarthi team would like to chat with you on WhatsApp";
-        var body =
-            $"Hi {tenantName ?? conversation.ContactName ?? "there"},\n\n" +
-            (string.IsNullOrEmpty(note) ? string.Empty : note + "\n\n") +
-            $"The AiSaarthi team would like to talk to you on WhatsApp. Please send us a message on {invite.PlatformNumber} - tap this link and press Send:\n\n" +
-            $"{invite.WhatsAppLink}\n\n" +
-            "Once you message us, we can reply to you directly there.\n\nThanks,\nTeam AiSaarthi";
+        const string subject = InviteSubject;
+        var body = InviteEmailBody(tenantName ?? conversation.ContactName, note, invite.PlatformNumber!, invite.WhatsAppLink);
 
         var now = _dateTime.UtcNow;
         var sent = await _email.SendAsync(invite.Email, subject, body, cancellationToken);
@@ -453,6 +456,16 @@ public class PlatformConversationService : IPlatformConversationService
 
         return ToDto(message);
     }
+
+    public const string InviteSubject = "The AiSaarthi team would like to chat with you on WhatsApp";
+
+    /// <summary>The invite email's text - one place, so the preview on the page is exactly what goes.</summary>
+    public static string InviteEmailBody(string? name, string? note, string platformNumber, string link) =>
+        $"Hi {(string.IsNullOrWhiteSpace(name) ? "there" : name)},\n\n" +
+        (string.IsNullOrWhiteSpace(note) ? string.Empty : note.Trim() + "\n\n") +
+        $"The AiSaarthi team would like to talk to you on WhatsApp. Please send us a message on {platformNumber} - tap this link and press Send:\n\n" +
+        $"{link}\n\n" +
+        "Once you message us, we can reply to you directly there.\n\nThanks,\nTeam AiSaarthi";
 
     /// <summary>Where to email a tenant: its billing alert email, else the owner's login email, else its support email.</summary>
     private async Task<(string? Email, string? Source)> TenantEmailAsync(Guid? tenantId, CancellationToken cancellationToken)
